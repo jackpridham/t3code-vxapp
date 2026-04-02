@@ -214,6 +214,10 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.diffWordWrap = legacySettings.diffWordWrap;
   }
 
+  if (Predicate.isBoolean(legacySettings.showGitignoredFilesInMentions)) {
+    patch.showGitignoredFilesInMentions = legacySettings.showGitignoredFilesInMentions;
+  }
+
   if (Schema.is(SidebarProjectSortOrder)(legacySettings.sidebarProjectSortOrder)) {
     patch.sidebarProjectSortOrder = legacySettings.sidebarProjectSortOrder;
   }

@@ -21,6 +21,7 @@ import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
+  ChevronDownIcon,
   CheckIcon,
   CircleAlertIcon,
   EyeIcon,
@@ -34,6 +35,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { clamp } from "effect/Number";
 import { estimateTimelineMessageHeight } from "../timelineHeight";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -819,6 +821,15 @@ function workEntryPreview(
     : `${firstPath} +${workEntry.changedFiles!.length - 1} more`;
 }
 
+function hasExpandableWorkEntryContent(workEntry: TimelineWorkEntry): boolean {
+  return (
+    Boolean(workEntry.command) ||
+    Boolean(workEntry.detail) ||
+    Boolean(workEntry.rawPayload) ||
+    (workEntry.changedFiles?.length ?? 0) > 0
+  );
+}
+
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
   if (workEntry.requestKind === "command") return TerminalIcon;
   if (workEntry.requestKind === "file-read") return EyeIcon;
@@ -863,6 +874,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
 }) {
   const { workEntry } = props;
+  const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -870,49 +882,126 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const showExpandToggle = hasExpandableWorkEntryContent(workEntry);
 
   return (
-    <div className="rounded-lg px-1 py-1">
-      <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
-        <span
-          className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}
-        >
-          <EntryIcon className="size-3" />
-        </span>
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <p
+    <Collapsible open={expanded} onOpenChange={setExpanded}>
+      <div className="rounded-lg px-1 py-1">
+        <div className="flex items-start gap-2 transition-[opacity,translate] duration-200">
+          <span
             className={cn(
-              "truncate text-[11px] leading-5",
-              workToneClass(workEntry.tone),
-              preview ? "text-muted-foreground/70" : "",
+              "flex size-5 shrink-0 items-center justify-center pt-0.5",
+              iconConfig.className,
             )}
-            title={displayText}
           >
-            <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-              {heading}
-            </span>
-            {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
-          </p>
-        </div>
-      </div>
-      {hasChangedFiles && !previewIsChangedFiles && (
-        <div className="mt-1 flex flex-wrap gap-1 pl-6">
-          {workEntry.changedFiles?.slice(0, 4).map((filePath) => (
-            <span
-              key={`${workEntry.id}:${filePath}`}
-              className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
-              title={filePath}
+            <EntryIcon className="size-3" />
+          </span>
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <p
+              className={cn(
+                "truncate text-[11px] leading-5",
+                workToneClass(workEntry.tone),
+                preview ? "text-muted-foreground/70" : "",
+              )}
+              title={displayText}
             >
-              {filePath}
-            </span>
-          ))}
-          {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/55">
-              +{(workEntry.changedFiles?.length ?? 0) - 4}
-            </span>
-          )}
+              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
+                {heading}
+              </span>
+              {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
+            </p>
+          </div>
+          {showExpandToggle ? (
+            <CollapsibleTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 shrink-0 px-1.5 text-[10px] text-muted-foreground/70"
+                />
+              }
+              aria-label={expanded ? "Hide work entry details" : "Show work entry details"}
+            >
+              <ChevronDownIcon
+                className={cn("size-3 transition-transform", expanded && "rotate-180")}
+              />
+              <span>{expanded ? "Hide" : "Show"}</span>
+            </CollapsibleTrigger>
+          ) : null}
         </div>
-      )}
-    </div>
+        {hasChangedFiles && !previewIsChangedFiles && !expanded && (
+          <div className="mt-1 flex flex-wrap gap-1 pl-6">
+            {workEntry.changedFiles?.slice(0, 4).map((filePath) => (
+              <span
+                key={`${workEntry.id}:${filePath}`}
+                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                title={filePath}
+              >
+                {filePath}
+              </span>
+            ))}
+            {(workEntry.changedFiles?.length ?? 0) > 4 && (
+              <span className="px-1 text-[10px] text-muted-foreground/55">
+                +{(workEntry.changedFiles?.length ?? 0) - 4}
+              </span>
+            )}
+          </div>
+        )}
+        {showExpandToggle ? (
+          <CollapsibleContent>
+            <div className="mt-2 space-y-2 pl-6">
+              {workEntry.command ? (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                    Command
+                  </p>
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-border/55 bg-background/75 px-2 py-1.5 font-mono text-[11px] leading-5 text-foreground/85">
+                    {workEntry.command}
+                  </pre>
+                </div>
+              ) : null}
+              {workEntry.detail ? (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                    Detail
+                  </p>
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-border/55 bg-background/75 px-2 py-1.5 font-mono text-[11px] leading-5 text-foreground/85">
+                    {workEntry.detail}
+                  </pre>
+                </div>
+              ) : null}
+              {hasChangedFiles ? (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                    Changed files
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {workEntry.changedFiles?.map((filePath) => (
+                      <span
+                        key={`${workEntry.id}:expanded:${filePath}`}
+                        className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                        title={filePath}
+                      >
+                        {filePath}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {workEntry.rawPayload ? (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                    Raw payload
+                  </p>
+                  <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/55 bg-background/75 px-2 py-1.5 font-mono text-[11px] leading-5 text-foreground/85">
+                    {workEntry.rawPayload}
+                  </pre>
+                </div>
+              ) : null}
+            </div>
+          </CollapsibleContent>
+        ) : null}
+      </div>
+    </Collapsible>
   );
 });

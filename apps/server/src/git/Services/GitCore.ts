@@ -101,6 +101,10 @@ export interface GitListWorkspaceFilesResult {
   readonly truncated: boolean;
 }
 
+export interface GitListWorkspaceFilesOptions {
+  readonly includeIgnored?: boolean;
+}
+
 export interface GitRenameBranchInput {
   cwd: string;
   oldBranch: string;
@@ -208,6 +212,7 @@ export interface GitCoreShape {
    */
   readonly listWorkspaceFiles: (
     cwd: string,
+    options?: GitListWorkspaceFilesOptions,
   ) => Effect.Effect<GitListWorkspaceFilesResult, GitCommandError>;
 
   /**

@@ -4,8 +4,8 @@ import { ensureNativeApi } from "~/nativeApi";
 
 export const projectQueryKeys = {
   all: ["projects"] as const,
-  searchEntries: (cwd: string | null, query: string, limit: number) =>
-    ["projects", "search-entries", cwd, query, limit] as const,
+  searchEntries: (cwd: string | null, query: string, limit: number, includeIgnored: boolean) =>
+    ["projects", "search-entries", cwd, query, limit, includeIgnored] as const,
 };
 
 const DEFAULT_SEARCH_ENTRIES_LIMIT = 80;
@@ -18,13 +18,15 @@ const EMPTY_SEARCH_ENTRIES_RESULT: ProjectSearchEntriesResult = {
 export function projectSearchEntriesQueryOptions(input: {
   cwd: string | null;
   query: string;
+  includeIgnored?: boolean;
   enabled?: boolean;
   limit?: number;
   staleTime?: number;
 }) {
   const limit = input.limit ?? DEFAULT_SEARCH_ENTRIES_LIMIT;
+  const includeIgnored = input.includeIgnored ?? false;
   return queryOptions({
-    queryKey: projectQueryKeys.searchEntries(input.cwd, input.query, limit),
+    queryKey: projectQueryKeys.searchEntries(input.cwd, input.query, limit, includeIgnored),
     queryFn: async () => {
       const api = ensureNativeApi();
       if (!input.cwd) {
@@ -34,6 +36,7 @@ export function projectSearchEntriesQueryOptions(input: {
         cwd: input.cwd,
         query: input.query,
         limit,
+        includeIgnored,
       });
     },
     enabled: (input.enabled ?? true) && input.cwd !== null && input.query.length > 0,

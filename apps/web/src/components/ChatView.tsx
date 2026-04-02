@@ -1208,6 +1208,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     projectSearchEntriesQueryOptions({
       cwd: gitCwd,
       query: effectivePathQuery,
+      includeIgnored: settings.showGitignoredFilesInMentions,
       enabled: isPathTrigger,
       limit: 80,
     }),
@@ -3836,8 +3837,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   ) : null}
                   <div
                     className={cn(
-                      "relative px-3 pb-2 sm:px-4",
-                      hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+                      "relative px-3 sm:px-4",
+                      showScrollToBottom
+                        ? "pt-2 pb-1.5"
+                        : cn("pb-2", hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4"),
                     )}
                   >
                     {composerMenuOpen && !isComposerApprovalState && (
@@ -3955,6 +3958,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 : "Ask anything, @tag files/folders, or use / to show available commands"
                       }
                       disabled={isConnecting || isComposerApprovalState}
+                      {...(showScrollToBottom ? { className: "min-h-8" } : {})}
                     />
                   </div>
 

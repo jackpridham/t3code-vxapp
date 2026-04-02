@@ -60,10 +60,18 @@ const git = (cwd: string, args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv) 
     return result.stdout.trim();
   });
 
-const searchWorkspaceEntries = (input: { cwd: string; query: string; limit: number }) =>
+const searchWorkspaceEntries = (input: {
+  cwd: string;
+  query: string;
+  limit: number;
+  includeIgnored?: boolean;
+}) =>
   Effect.gen(function* () {
     const workspaceEntries = yield* WorkspaceEntries;
-    return yield* workspaceEntries.search(input);
+    return yield* workspaceEntries.search({
+      ...input,
+      includeIgnored: input.includeIgnored ?? false,
+    });
   });
 
 it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
@@ -177,6 +185,35 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
 
         expect(paths).toContain("src");
         expect(paths).toContain("src/keep.ts");
+        expect(paths.some((entryPath) => entryPath.startsWith(".convex/"))).toBe(false);
+      }),
+    );
+
+    it.effect("includes gitignored files when requested but still hides blocked directories", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({
+          prefix: "t3code-workspace-include-gitignore-",
+          git: true,
+        });
+        yield* writeTextFile(cwd, ".gitignore", ".convex/\nignored.txt\nnested/\n");
+        yield* writeTextFile(cwd, "src/keep.ts", "export {};");
+        yield* writeTextFile(cwd, "ignored.txt", "ignore me");
+        yield* writeTextFile(cwd, "nested/file.ts", "export const nested = true;");
+        yield* writeTextFile(cwd, ".convex/local-storage/data.json", "{}");
+
+        const result = yield* searchWorkspaceEntries({
+          cwd,
+          query: "",
+          limit: 100,
+          includeIgnored: true,
+        });
+        const paths = result.entries.map((entry) => entry.path);
+
+        expect(paths).toContain("src");
+        expect(paths).toContain("src/keep.ts");
+        expect(paths).toContain("ignored.txt");
+        expect(paths).toContain("nested");
+        expect(paths).toContain("nested/file.ts");
         expect(paths.some((entryPath) => entryPath.startsWith(".convex/"))).toBe(false);
       }),
     );

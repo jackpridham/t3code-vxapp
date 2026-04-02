@@ -213,6 +213,21 @@ function directoryAncestorsOf(relativePath: string): string[] {
   return directories;
 }
 
+function parseWorkspaceIndexKey(cacheKey: string): { cwd: string; includeIgnored: boolean } {
+  const separatorIndex = cacheKey.lastIndexOf("\0");
+  if (separatorIndex === -1) {
+    return { cwd: cacheKey, includeIgnored: false };
+  }
+  return {
+    cwd: cacheKey.slice(0, separatorIndex),
+    includeIgnored: cacheKey.slice(separatorIndex + 1) === "1",
+  };
+}
+
+function makeWorkspaceIndexKey(cwd: string, includeIgnored: boolean): string {
+  return `${cwd}\0${includeIgnored ? "1" : "0"}`;
+}
+
 const processErrorDetail = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
@@ -240,7 +255,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     });
 
   const buildWorkspaceIndexFromGit = Effect.fn("WorkspaceEntries.buildWorkspaceIndexFromGit")(
-    function* (cwd: string) {
+    function* (cwd: string, includeIgnored: boolean) {
       if (Option.isNone(gitOption)) {
         return null;
       }
@@ -249,7 +264,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       }
 
       const listedFiles = yield* gitOption.value
-        .listWorkspaceFiles(cwd)
+        .listWorkspaceFiles(cwd, { includeIgnored })
         .pipe(Effect.catch(() => Effect.succeed(null)));
 
       if (!listedFiles) {
@@ -259,7 +274,9 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const listedPaths = [...listedFiles.paths]
         .map((entry) => toPosixPath(entry))
         .filter((entry) => entry.length > 0 && !isPathInIgnoredDirectory(entry));
-      const filePaths = yield* filterGitIgnoredPaths(cwd, listedPaths);
+      const filePaths = includeIgnored
+        ? listedPaths
+        : yield* filterGitIgnoredPaths(cwd, listedPaths);
 
       const directorySet = new Set<string>();
       for (const filePath of filePaths) {
@@ -330,7 +347,10 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
   const buildWorkspaceIndexFromFilesystem = Effect.fn(
     "WorkspaceEntries.buildWorkspaceIndexFromFilesystem",
-  )(function* (cwd: string): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
+  )(function* (
+    cwd: string,
+    includeIgnored: boolean,
+  ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
     const shouldFilterWithGitIgnore = yield* isInsideGitWorkTree(cwd);
 
     let pendingDirectories: string[] = [""];
@@ -378,9 +398,10 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const candidatePaths = candidateEntriesByDirectory.flatMap((candidateEntries) =>
         candidateEntries.map((entry) => entry.relativePath),
       );
-      const allowedPathSet = shouldFilterWithGitIgnore
-        ? new Set(yield* filterGitIgnoredPaths(cwd, candidatePaths))
-        : null;
+      const allowedPathSet =
+        shouldFilterWithGitIgnore && !includeIgnored
+          ? new Set(yield* filterGitIgnoredPaths(cwd, candidatePaths))
+          : null;
 
       for (const candidateEntries of candidateEntriesByDirectory) {
         for (const candidate of candidateEntries) {
@@ -419,13 +440,14 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   });
 
   const buildWorkspaceIndex = Effect.fn("WorkspaceEntries.buildWorkspaceIndex")(function* (
-    cwd: string,
+    cacheKey: string,
   ): Effect.fn.Return<WorkspaceIndex, WorkspaceEntriesError> {
-    const gitIndexed = yield* buildWorkspaceIndexFromGit(cwd);
+    const { cwd, includeIgnored } = parseWorkspaceIndexKey(cacheKey);
+    const gitIndexed = yield* buildWorkspaceIndexFromGit(cwd, includeIgnored);
     if (gitIndexed) {
       return gitIndexed;
     }
-    return yield* buildWorkspaceIndexFromFilesystem(cwd);
+    return yield* buildWorkspaceIndexFromFilesystem(cwd, includeIgnored);
   });
 
   const workspaceIndexCache = yield* Cache.makeWith<string, WorkspaceIndex, WorkspaceEntriesError>({
@@ -437,13 +459,17 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
   const invalidate: WorkspaceEntriesShape["invalidate"] = Effect.fn("WorkspaceEntries.invalidate")(
     function* (cwd) {
-      return yield* Cache.invalidate(workspaceIndexCache, cwd);
+      yield* Cache.invalidate(workspaceIndexCache, makeWorkspaceIndexKey(cwd, false));
+      return yield* Cache.invalidate(workspaceIndexCache, makeWorkspaceIndexKey(cwd, true));
     },
   );
 
   const search: WorkspaceEntriesShape["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
-      return yield* Cache.get(workspaceIndexCache, input.cwd).pipe(
+      return yield* Cache.get(
+        workspaceIndexCache,
+        makeWorkspaceIndexKey(input.cwd, input.includeIgnored),
+      ).pipe(
         Effect.map((index) => {
           const normalizedQuery = normalizeQuery(input.query);
           const limit = Math.max(0, Math.floor(input.limit));

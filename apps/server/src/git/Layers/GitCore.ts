@@ -1486,34 +1486,46 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       maxOutputBytes: 4_096,
     }).pipe(Effect.map((result) => result.code === 0 && result.stdout.trim() === "true"));
 
-  const listWorkspaceFiles: GitCoreShape["listWorkspaceFiles"] = (cwd) =>
-    executeGit(
-      "GitCore.listWorkspaceFiles",
-      cwd,
-      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-      {
+  const listWorkspaceFiles: GitCoreShape["listWorkspaceFiles"] = (cwd, options) => {
+    const includeIgnored = options?.includeIgnored ?? false;
+    const baseArgs = ["ls-files", "--cached", "--others", "--exclude-standard", "-z"] as const;
+    const ignoredArgs = ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"] as const;
+
+    const runListWorkspaceFiles = (args: ReadonlyArray<string>) =>
+      executeGit("GitCore.listWorkspaceFiles", cwd, args, {
         allowNonZeroExit: true,
         timeoutMs: 20_000,
         maxOutputBytes: WORKSPACE_FILES_MAX_OUTPUT_BYTES,
         truncateOutputAtMaxBytes: true,
-      },
-    ).pipe(
-      Effect.flatMap((result) =>
-        result.code === 0
-          ? Effect.succeed({
-              paths: splitNullSeparatedPaths(result.stdout, result.stdoutTruncated),
-              truncated: result.stdoutTruncated,
-            })
-          : Effect.fail(
-              createGitCommandError(
-                "GitCore.listWorkspaceFiles",
-                cwd,
-                ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-                result.stderr.trim().length > 0 ? result.stderr.trim() : "git ls-files failed",
+      }).pipe(
+        Effect.flatMap((result) =>
+          result.code === 0
+            ? Effect.succeed({
+                paths: splitNullSeparatedPaths(result.stdout, result.stdoutTruncated),
+                truncated: result.stdoutTruncated,
+              })
+            : Effect.fail(
+                createGitCommandError(
+                  "GitCore.listWorkspaceFiles",
+                  cwd,
+                  args,
+                  result.stderr.trim().length > 0 ? result.stderr.trim() : "git ls-files failed",
+                ),
               ),
-            ),
-      ),
+        ),
+      );
+
+    if (!includeIgnored) {
+      return runListWorkspaceFiles(baseArgs);
+    }
+
+    return Effect.all([runListWorkspaceFiles(baseArgs), runListWorkspaceFiles(ignoredArgs)]).pipe(
+      Effect.map(([baseResult, ignoredResult]) => ({
+        paths: [...new Set([...baseResult.paths, ...ignoredResult.paths])],
+        truncated: baseResult.truncated || ignoredResult.truncated,
+      })),
     );
+  };
 
   const filterIgnoredPaths: GitCoreShape["filterIgnoredPaths"] = (cwd, relativePaths) =>
     Effect.gen(function* () {

@@ -81,6 +81,7 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           cwd,
           query: "rpc",
           limit: 10,
+          includeIgnored: false,
         });
         expect(beforeWrite).toEqual({
           entries: [],
@@ -97,6 +98,7 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           cwd,
           query: "rpc",
           limit: 10,
+          includeIgnored: false,
         });
         expect(afterWrite.entries).toEqual(
           expect.arrayContaining([expect.objectContaining({ path: "plans/effect-rpc.md" })]),

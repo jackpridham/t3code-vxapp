@@ -7,10 +7,12 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       buildLegacyClientSettingsMigrationPatch({
         confirmThreadArchive: true,
         confirmThreadDelete: false,
+        showGitignoredFilesInMentions: true,
       }),
     ).toEqual({
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      showGitignoredFilesInMentions: true,
     });
   });
 });

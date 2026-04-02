@@ -463,6 +463,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
+      ...(settings.showGitignoredFilesInMentions !==
+      DEFAULT_UNIFIED_SETTINGS.showGitignoredFilesInMentions
+        ? ["Mention ignored files"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -486,6 +490,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.showGitignoredFilesInMentions,
       settings.timestampFormat,
       theme,
     ],
@@ -834,6 +839,34 @@ export function GeneralSettingsPanel() {
               checked={settings.diffWordWrap}
               onCheckedChange={(checked) => updateSettings({ diffWordWrap: Boolean(checked) })}
               aria-label="Wrap diff lines by default"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Mention ignored files"
+          description="Include gitignored files in the @ file picker. Hard-blocked directories like .git, node_modules, dist, build, .next, .turbo, .convex, out, and .cache stay hidden."
+          resetAction={
+            settings.showGitignoredFilesInMentions !==
+            DEFAULT_UNIFIED_SETTINGS.showGitignoredFilesInMentions ? (
+              <SettingResetButton
+                label="mention ignored files"
+                onClick={() =>
+                  updateSettings({
+                    showGitignoredFilesInMentions:
+                      DEFAULT_UNIFIED_SETTINGS.showGitignoredFilesInMentions,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showGitignoredFilesInMentions}
+              onCheckedChange={(checked) =>
+                updateSettings({ showGitignoredFilesInMentions: Boolean(checked) })
+              }
+              aria-label="Include gitignored files in @ file picker"
             />
           }
         />

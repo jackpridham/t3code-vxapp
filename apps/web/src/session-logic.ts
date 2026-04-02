@@ -39,6 +39,7 @@ export interface WorkLogEntry {
   detail?: string;
   command?: string;
   changedFiles?: ReadonlyArray<string>;
+  rawPayload?: string;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
@@ -513,6 +514,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
   }
+  const rawPayload = formatWorkLogPayload(payload);
+  if (rawPayload) {
+    entry.rawPayload = rawPayload;
+  }
   if (title) {
     entry.toolTitle = title;
   }
@@ -567,6 +572,7 @@ function mergeDerivedWorkLogEntries(
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
+  const rawPayload = next.rawPayload ?? previous.rawPayload;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
@@ -577,6 +583,7 @@ function mergeDerivedWorkLogEntries(
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
+    ...(rawPayload ? { rawPayload } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
@@ -666,6 +673,18 @@ function extractToolCommand(payload: Record<string, unknown> | null): string | n
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
   return asTrimmedString(payload?.title);
+}
+
+function formatWorkLogPayload(payload: Record<string, unknown> | null): string | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  try {
+    const serialized = JSON.stringify(payload, null, 2);
+    return serialized.length > 0 ? serialized : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function stripTrailingExitCode(value: string): {
