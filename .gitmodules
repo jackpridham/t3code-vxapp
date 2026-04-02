@@ -1,0 +1,4 @@
+[submodule "@Docs"]
+	path = @Docs
+	url = git@github.com:jackpridham/kb-vxapp.git
+	branch = main
