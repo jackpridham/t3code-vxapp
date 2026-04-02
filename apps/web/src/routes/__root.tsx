@@ -30,9 +30,11 @@ import { onServerConfigUpdated, onServerProvidersUpdated, onServerWelcome } from
 import { migrateLocalSettingsToServer } from "../hooks/useSettings";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
+import { skillQueryKeys } from "../lib/skillReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { isSidebarWindowPath } from "../lib/sidebarWindow";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -45,6 +47,9 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const isSidebarWindowRoute = isSidebarWindowPath(pathname);
+
   if (!readNativeApi()) {
     return (
       <div className="flex h-screen flex-col bg-background text-foreground">
@@ -62,9 +67,13 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
-        <AppSidebarLayout>
+        {isSidebarWindowRoute ? (
           <Outlet />
-        </AppSidebarLayout>
+        ) : (
+          <AppSidebarLayout>
+            <Outlet />
+          </AppSidebarLayout>
+        )}
       </AnchoredToastProvider>
     </ToastProvider>
   );
@@ -195,9 +204,10 @@ function EventRouter() {
         }
         needsProviderInvalidation = false;
         void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
-        // Invalidate workspace entry queries so the @-mention file picker
-        // reflects files created, deleted, or restored during this turn.
+        // Invalidate workspace and skill reference queries so the composer
+        // pickers reflect files created, deleted, or restored during this turn.
         void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
+        void queryClient.invalidateQueries({ queryKey: skillQueryKeys.all });
       },
       {
         wait: 100,

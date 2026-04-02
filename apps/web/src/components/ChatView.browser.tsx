@@ -437,6 +437,18 @@ function withProjectScripts(
   };
 }
 
+function withThreadMessages(
+  snapshot: OrchestrationReadModel,
+  messages: OrchestrationReadModel["threads"][number]["messages"],
+): OrchestrationReadModel {
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID ? { ...thread, messages: Array.from(messages) } : thread,
+    ),
+  };
+}
+
 function setDraftThreadWithoutWorktree(): void {
   useComposerDraftStore.setState({
     draftThreadsByThreadId: {
@@ -1740,6 +1752,149 @@ describe("ChatView timeline estimator parity (full app)", () => {
         { timeout: 8_000, interval: 16 },
       );
     } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("sends the selected skill reference as the absolute SKILL.md path", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-skill-send-test" as MessageId,
+        targetText: "skill send target",
+      }),
+      resolveRpc: (body) => {
+        if (
+          body._tag === WS_METHODS.projectsSearchEntries &&
+          body.cwd === "/repo/project/.claude/skills"
+        ) {
+          return {
+            entries: [{ path: "find-skills", kind: "directory" }],
+            truncated: false,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const composerEditor = page.getByTestId("composer-editor");
+      await expect.element(composerEditor).toBeInTheDocument();
+      await composerEditor.click();
+      await composerEditor.fill("//find");
+
+      const skillItem = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-composer-item-id="skill:find-skills"]'),
+        "Unable to find the skill picker item.",
+      );
+      skillItem.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.body.textContent).toContain("find-skills");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find((request) => {
+            if (request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+              return false;
+            }
+            const command = request.command;
+            return (
+              typeof command === "object" &&
+              command !== null &&
+              "type" in command &&
+              command.type === "thread.turn.start"
+            );
+          });
+
+          expect(dispatchRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            command: {
+              type: "thread.turn.start",
+              threadId: THREAD_ID,
+              message: {
+                text: expect.stringContaining("@/repo/project/.claude/skills/find-skills/SKILL.md"),
+              },
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("copies the original absolute skill path while showing only the skill name", async () => {
+    const targetMessageId = "msg-user-copy-skill-test" as MessageId;
+    const writeText = vi.fn<Navigator["clipboard"]["writeText"]>().mockResolvedValue(undefined);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withThreadMessages(
+        createSnapshotForTargetUser({
+          targetMessageId,
+          targetText: "copy skill target",
+        }),
+        [
+          createUserMessage({
+            id: targetMessageId,
+            text: "Use @/repo/project/.claude/skills/find-skills/SKILL.md before continuing",
+            offsetSeconds: 0,
+          }),
+        ],
+      ),
+    });
+
+    try {
+      const messageRow = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            `[data-message-id="${targetMessageId}"][data-message-role="user"]`,
+          ),
+        "Unable to find the skill reference message row.",
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(messageRow.textContent).toContain("find-skills");
+          expect(messageRow.textContent).not.toContain(".claude/skills/find-skills/SKILL.md");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const copyButton = messageRow.querySelector<HTMLButtonElement>(
+        'button[title="Copy message"]',
+      );
+      expect(copyButton).toBeTruthy();
+      copyButton?.click();
+
+      await vi.waitFor(
+        () => {
+          expect(writeText).toHaveBeenCalledWith(
+            "Use @/repo/project/.claude/skills/find-skills/SKILL.md before continuing",
+          );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
       await mounted.cleanup();
     }
   });

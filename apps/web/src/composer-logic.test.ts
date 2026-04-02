@@ -24,6 +24,50 @@ describe("detectComposerTrigger", () => {
     });
   });
 
+  it("detects //skill trigger at cursor", () => {
+    const text = "Use //find";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "skill",
+      query: "find",
+      rangeStart: "Use ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("detects an empty //skill trigger before any query is typed", () => {
+    const text = "Use //";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "skill",
+      query: "",
+      rangeStart: "Use ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("detects //skill trigger at the start of the line with no preceding text", () => {
+    const text = "//search";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "skill",
+      query: "search",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("does not treat // as a slash command — single slash is a command, double slash is a skill", () => {
+    const singleSlash = detectComposerTrigger("/plan", 5);
+    expect(singleSlash?.kind).toBe("slash-command");
+
+    const doubleSlash = detectComposerTrigger("//plan", 6);
+    expect(doubleSlash?.kind).toBe("skill");
+  });
+
   it("detects slash command token while typing command name", () => {
     const text = "/mo";
     const trigger = detectComposerTrigger(text, text.length);

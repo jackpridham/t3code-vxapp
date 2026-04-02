@@ -31,6 +31,8 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
+import { projectSkillEntriesQueryOptions } from "~/lib/skillReactQuery";
+import type { ProjectSkillEntry } from "~/lib/skillReferences";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -198,6 +200,7 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
+const EMPTY_SKILL_ENTRIES: ProjectSkillEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
@@ -499,6 +502,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
+  const [isComposerInputFocused, setIsComposerInputFocused] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -935,6 +939,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   // content in the input we keep the full toolbar visible so the user can adjust
   // model/mode before sending without having to scroll back down first.
   const isComposerCollapsed = showScrollToBottom && !composerSendState.hasSendableContent;
+  // Hide the submit button and context meter on desktop when fully collapsed and idle.
+  // Always keep them visible when: the agent is running (stop button), there are
+  // pending user-input responses to submit, a send is in progress, or the user has
+  // focused the composer input (so the send button is right there as they start typing).
+  const shouldHideComposerActions =
+    isComposerCollapsed &&
+    !isComposerInputFocused &&
+    phase !== "running" &&
+    activePendingProgress === null &&
+    !isSendBusy;
   const lastSyncedPendingInputRef = useRef<{
     requestId: string | null;
     questionId: string | null;
@@ -1167,14 +1181,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
       })
     : null;
   const composerTriggerKind = composerTrigger?.kind ?? null;
-  const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
+  const referenceTriggerQuery =
+    composerTrigger?.kind === "path" || composerTrigger?.kind === "skill"
+      ? composerTrigger.query
+      : "";
   const isPathTrigger = composerTriggerKind === "path";
-  const [debouncedPathQuery, composerPathQueryDebouncer] = useDebouncedValue(
-    pathTriggerQuery,
+  const isSkillTrigger = composerTriggerKind === "skill";
+  const [debouncedReferenceQuery, composerReferenceQueryDebouncer] = useDebouncedValue(
+    referenceTriggerQuery,
     { wait: COMPOSER_PATH_QUERY_DEBOUNCE_MS },
     (debouncerState) => ({ isPending: debouncerState.isPending }),
   );
-  const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
+  const effectiveReferenceQuery = referenceTriggerQuery.length > 0 ? debouncedReferenceQuery : "";
   const branchesQuery = useQuery(gitBranchesQueryOptions(gitCwd));
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
@@ -1212,13 +1230,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
       cwd: gitCwd,
-      query: effectivePathQuery,
+      query: effectiveReferenceQuery,
       includeIgnored: settings.showGitignoredFilesInMentions,
       enabled: isPathTrigger,
       limit: 80,
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  const skillEntriesQuery = useQuery(
+    projectSkillEntriesQueryOptions({
+      projectCwd: gitCwd,
+      query: effectiveReferenceQuery,
+      enabled: isSkillTrigger,
+      limit: 40,
+    }),
+  );
+  const skillEntries = skillEntriesQuery.data?.entries ?? EMPTY_SKILL_ENTRIES;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -1229,6 +1256,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
         pathKind: entry.kind,
         label: basenameOfPath(entry.path),
         description: entry.parentPath ?? "",
+      }));
+    }
+
+    if (composerTrigger.kind === "skill") {
+      return skillEntries.map((entry) => ({
+        id: `skill:${entry.name}`,
+        type: "skill",
+        skillName: entry.name,
+        skillMarkdownPath: entry.skillMarkdownPath,
+        label: entry.name,
+        description: entry.skillMarkdownPath,
       }));
     }
 
@@ -1281,7 +1319,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [composerTrigger, searchableModelOptions, skillEntries, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -3484,6 +3522,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
         return;
       }
+      if (item.type === "skill") {
+        const replacement = `@${item.skillMarkdownPath} `;
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
       if (item.type === "slash-command") {
         if (item.command === "model") {
           const replacement = "/model ";
@@ -3549,10 +3605,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [composerHighlightedItemId, composerMenuItems],
   );
   const isComposerMenuLoading =
-    composerTriggerKind === "path" &&
-    ((pathTriggerQuery.length > 0 && composerPathQueryDebouncer.state.isPending) ||
-      workspaceEntriesQuery.isLoading ||
-      workspaceEntriesQuery.isFetching);
+    (composerTriggerKind === "path" || composerTriggerKind === "skill") &&
+    ((referenceTriggerQuery.length > 0 && composerReferenceQueryDebouncer.state.isPending) ||
+      (composerTriggerKind === "path" &&
+        (workspaceEntriesQuery.isLoading || workspaceEntriesQuery.isFetching)) ||
+      (composerTriggerKind === "skill" &&
+        (skillEntriesQuery.isLoading || skillEntriesQuery.isFetching)));
 
   const onPromptChange = useCallback(
     (
@@ -3808,6 +3866,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
             <form
               ref={composerFormRef}
               onSubmit={onSend}
+              onFocus={() => setIsComposerInputFocused(true)}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  setIsComposerInputFocused(false);
+                }
+              }}
               className="mx-auto w-full min-w-0 max-w-3xl"
               data-chat-composer-form="true"
             >
@@ -3974,7 +4038,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               ? "Add feedback to refine the plan, or leave this blank to implement it"
                               : phase === "disconnected"
                                 ? "Ask for follow-up changes or attach images"
-                                : "Ask anything, @tag files/folders, or use / to show available commands"
+                                : "Ask anything, @tag files/folders, use // for skills, or / for commands"
                       }
                       disabled={isConnecting || isComposerApprovalState}
                       {...(isComposerCollapsed ? { className: "sm:min-h-8" } : {})}
@@ -4146,7 +4210,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       {/* Right side: send / stop button */}
                       <div
                         data-chat-composer-actions="right"
-                        className="flex shrink-0 items-center gap-2"
+                        className={cn(
+                          "flex shrink-0 items-center gap-2",
+                          shouldHideComposerActions && "sm:hidden",
+                        )}
                       >
                         {activeContextWindow ? (
                           <ContextWindowMeter usage={activeContextWindow} />

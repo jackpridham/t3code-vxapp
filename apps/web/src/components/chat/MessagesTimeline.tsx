@@ -34,6 +34,11 @@ import {
   WrenchIcon,
   ZapIcon,
 } from "lucide-react";
+import {
+  COMPOSER_INLINE_CHIP_CLASS_NAME,
+  COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
+  COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
+} from "../composerInlineChip";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { clamp } from "effect/Number";
@@ -44,6 +49,7 @@ import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { computeMessageDurationStart, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
+import { SkillIcon } from "./SkillIcon";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import {
   deriveDisplayedUserMessageState,
@@ -52,6 +58,7 @@ import {
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
+import { splitTextIntoSkillReferenceSegments } from "~/lib/skillReferences";
 import {
   buildInlineTerminalContextText,
   formatInlineTerminalContextLabel,
@@ -704,9 +711,10 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
         if (matchIndex > cursor) {
           inlineNodes.push(
-            <span key={`user-terminal-context-inline-before:${context.header}:${cursor}`}>
-              {props.text.slice(cursor, matchIndex)}
-            </span>,
+            ...renderUserMessageTextWithSkillReferences(
+              props.text.slice(cursor, matchIndex),
+              `user-terminal-context-inline-before:${context.header}:${cursor}`,
+            ),
           );
         }
         inlineNodes.push(
@@ -721,9 +729,10 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       if (inlineNodes.length > 0) {
         if (cursor < props.text.length) {
           inlineNodes.push(
-            <span key={`user-message-terminal-context-inline-rest:${cursor}`}>
-              {props.text.slice(cursor)}
-            </span>,
+            ...renderUserMessageTextWithSkillReferences(
+              props.text.slice(cursor),
+              `user-message-terminal-context-inline-rest:${cursor}`,
+            ),
           );
         }
 
@@ -750,7 +759,12 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     if (props.text.length > 0) {
-      inlineNodes.push(<span key="user-message-terminal-context-inline-text">{props.text}</span>);
+      inlineNodes.push(
+        ...renderUserMessageTextWithSkillReferences(
+          props.text,
+          "user-message-terminal-context-inline-text",
+        ),
+      );
     } else if (inlinePrefix.length === 0) {
       return null;
     }
@@ -768,10 +782,39 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 
   return (
     <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
-      {props.text}
+      {renderUserMessageTextWithSkillReferences(props.text, "user-message")}
     </pre>
   );
 });
+
+function UserMessageSkillInlineLabel(props: { skillName: string }) {
+  return (
+    <span className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, "mx-px align-baseline")}>
+      <SkillIcon className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME} />
+      <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{props.skillName}</span>
+    </span>
+  );
+}
+
+function renderUserMessageTextWithSkillReferences(text: string, keyPrefix: string): ReactNode[] {
+  let offset = 0;
+
+  return splitTextIntoSkillReferenceSegments(text).map((segment) => {
+    const segmentOffset = offset;
+    if (segment.type === "skill") {
+      offset += segment.skillMarkdownPath.length + 1;
+      return (
+        <UserMessageSkillInlineLabel
+          key={`${keyPrefix}:skill:${segmentOffset}:${segment.skillMarkdownPath}`}
+          skillName={segment.skillName}
+        />
+      );
+    }
+
+    offset += segment.text.length;
+    return <span key={`${keyPrefix}:text:${segmentOffset}`}>{segment.text}</span>;
+  });
+}
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
   icon: LucideIcon;

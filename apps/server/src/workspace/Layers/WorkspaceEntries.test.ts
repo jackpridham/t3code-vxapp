@@ -233,6 +233,78 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect("indexes @-prefixed directories as directories with searchable contents", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-at-dir-fs-" });
+        yield* writeTextFile(cwd, "@Docs/README.md", "# Docs");
+        yield* writeTextFile(cwd, "@Docs/@Workflows/ci.yml", "steps:");
+        yield* writeTextFile(cwd, "src/index.ts", "export {};");
+
+        const result = yield* searchWorkspaceEntries({ cwd, query: "", limit: 100 });
+        const entries = result.entries;
+        const paths = entries.map((e) => e.path);
+
+        // @Docs must appear as a directory (kind matters for the picker icon)
+        const docsEntry = entries.find((e) => e.path === "@Docs");
+        expect(docsEntry).toBeDefined();
+        expect(docsEntry?.kind).toBe("directory");
+
+        // Nested @-prefixed subdirectory is also a directory
+        const workflowsEntry = entries.find((e) => e.path === "@Docs/@Workflows");
+        expect(workflowsEntry?.kind).toBe("directory");
+
+        // Contents are fully searchable
+        expect(paths).toContain("@Docs/README.md");
+        expect(paths).toContain("@Docs/@Workflows/ci.yml");
+      }),
+    );
+
+    it.effect("indexes git submodule as directory with searchable contents", () =>
+      Effect.gen(function* () {
+        // Build a local git repo to use as the submodule source
+        const submoduleSrc = yield* makeTempDir({
+          prefix: "t3code-workspace-submod-src-",
+          git: true,
+        });
+        yield* git(submoduleSrc, ["config", "user.email", "test@test.com"]);
+        yield* git(submoduleSrc, ["config", "user.name", "Test"]);
+        yield* writeTextFile(submoduleSrc, "README.md", "# Submodule");
+        yield* writeTextFile(submoduleSrc, "@Workflows/ci.yml", "steps:");
+        yield* git(submoduleSrc, ["add", "."]);
+        yield* git(submoduleSrc, ["commit", "-m", "init"]);
+
+        // Build parent repo and add the submodule at @Docs
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-submod-parent-", git: true });
+        yield* git(cwd, [
+          "-c",
+          "protocol.file.allow=always",
+          "submodule",
+          "add",
+          submoduleSrc,
+          "@Docs",
+        ]);
+
+        const result = yield* searchWorkspaceEntries({ cwd, query: "", limit: 100 });
+        const entries = result.entries;
+        const paths = entries.map((e) => e.path);
+
+        // git ls-files lists the submodule as a gitlink; the fix must reclassify it as a directory
+        const docsEntry = entries.find((e) => e.path === "@Docs");
+        expect(docsEntry?.kind).toBe("directory");
+
+        // Files inside the submodule must be reachable in the index
+        expect(paths).toContain("@Docs/README.md");
+        expect(paths).toContain("@Docs/@Workflows");
+        expect(paths).toContain("@Docs/@Workflows/ci.yml");
+
+        // @-prefix scoring must surface the submodule directory near the top
+        // when searching by name without the @ prefix (the normal picker flow)
+        const queryResult = yield* searchWorkspaceEntries({ cwd, query: "Docs", limit: 10 });
+        const queryPaths = queryResult.entries.map((e) => e.path);
+        expect(queryPaths[0]).toBe("@Docs");
+      }),
+    );
+
     it.effect("returns @-prefixed directories when searching without @ prefix", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-at-prefix-" });

@@ -1,5 +1,5 @@
 import { DEFAULT_RUNTIME_MODE, type ProjectId, ThreadId } from "@t3tools/contracts";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -9,6 +9,7 @@ import {
 } from "../composerDraftStore";
 import { newThreadId } from "../lib/utils";
 import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
+import { resolveThreadRouteTarget } from "../lib/sidebarWindow";
 import { useStore } from "../store";
 import { useThreadById } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
@@ -17,6 +18,7 @@ export function useHandleNewThread() {
   const projectIds = useStore(useShallow((store) => store.projects.map((project) => project.id)));
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
@@ -70,10 +72,7 @@ export function useHandleNewThread() {
           if (routeThreadId === storedDraftThread.threadId) {
             return;
           }
-          await navigate({
-            to: "/$threadId",
-            params: { threadId: storedDraftThread.threadId },
-          });
+          await navigate(resolveThreadRouteTarget(pathname, storedDraftThread.threadId));
         })();
       }
 
@@ -107,13 +106,10 @@ export function useHandleNewThread() {
         });
         applyStickyState(threadId);
 
-        await navigate({
-          to: "/$threadId",
-          params: { threadId },
-        });
+        await navigate(resolveThreadRouteTarget(pathname, threadId));
       })();
     },
-    [navigate, routeThreadId],
+    [navigate, pathname, routeThreadId],
   );
 
   return {

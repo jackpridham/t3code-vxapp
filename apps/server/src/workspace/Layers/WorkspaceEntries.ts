@@ -277,9 +277,63 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
       const listedPaths = [...listedFiles.paths]
         .map((entry) => toPosixPath(entry))
         .filter((entry) => entry.length > 0 && !isPathInIgnoredDirectory(entry));
-      const filePaths = includeIgnored
+      const filteredPaths = includeIgnored
         ? listedPaths
         : yield* filterGitIgnoredPaths(cwd, listedPaths);
+
+      // git ls-files lists submodule gitlinks as single path entries that are
+      // indistinguishable from regular file paths in its text output. Detect them
+      // by stating each candidate path: submodule gitlinks appear as directories
+      // on the filesystem. For each submodule found, run git ls-files inside it so
+      // its full contents are included in the parent repo's workspace index.
+      //
+      // Optimisation: submodule gitlinks never have file extensions. Skip lstat
+      // for paths whose basename contains a dot — they are always regular files.
+      const submoduleCheck = filteredPaths.filter((p) => {
+        const name = p.slice(p.lastIndexOf("/") + 1);
+        return !name.includes(".");
+      });
+      const definiteFiles = filteredPaths.filter((p) => {
+        const name = p.slice(p.lastIndexOf("/") + 1);
+        return name.includes(".");
+      });
+
+      const pathKinds = yield* Effect.forEach(
+        submoduleCheck,
+        (filePath) =>
+          Effect.promise(async () => {
+            try {
+              const stat = await fsPromises.lstat(path.join(cwd, filePath));
+              return { filePath, isDirectory: stat.isDirectory() };
+            } catch {
+              return { filePath, isDirectory: false };
+            }
+          }),
+        { concurrency: WORKSPACE_SCAN_READDIR_CONCURRENCY },
+      );
+      const submodulePaths = pathKinds.filter((k) => k.isDirectory).map((k) => k.filePath);
+      const resolvedFilePaths = [
+        ...pathKinds.filter((k) => !k.isDirectory).map((k) => k.filePath),
+        ...definiteFiles,
+      ];
+
+      const submoduleFilePaths = yield* Effect.forEach(
+        submodulePaths,
+        (submodulePath) =>
+          gitOption.value
+            .listWorkspaceFiles(path.join(cwd, submodulePath), { includeIgnored })
+            .pipe(
+              Effect.map((result) =>
+                [...result.paths]
+                  .map((p) => toPosixPath(`${submodulePath}/${p}`))
+                  .filter((p) => p.length > 0 && !isPathInIgnoredDirectory(p)),
+              ),
+              Effect.orElseSucceed(() => [] as string[]),
+            ),
+        { concurrency: 4 },
+      );
+
+      const filePaths = [...resolvedFilePaths, ...submoduleFilePaths.flat()];
 
       const directorySet = new Set<string>();
       for (const filePath of filePaths) {
