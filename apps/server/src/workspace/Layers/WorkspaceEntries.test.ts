@@ -233,6 +233,59 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect("returns @-prefixed directories when searching without @ prefix", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-at-prefix-" });
+        yield* writeTextFile(cwd, "@my-org/plugin-a/index.ts");
+        yield* writeTextFile(cwd, "@my-org/plugin-b/index.ts");
+        yield* writeTextFile(cwd, "src/index.ts");
+
+        // User types "@my-org" in composer; client strips trigger @ and sends "my-org"
+        const result = yield* searchWorkspaceEntries({ cwd, query: "my-org", limit: 20 });
+        const paths = result.entries.map((entry) => entry.path);
+
+        expect(paths).toContain("@my-org");
+        expect(paths).toContain("@my-org/plugin-a");
+        expect(paths).toContain("@my-org/plugin-b");
+        // @my-org should rank before unrelated entries that merely contain "my-org" as a substring
+        const atOrgIndex = paths.indexOf("@my-org");
+        expect(atOrgIndex).toBeGreaterThanOrEqual(0);
+        expect(atOrgIndex).toBeLessThan(3);
+      }),
+    );
+
+    it.effect("ranks @-prefixed directory as exact match when query includes @", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-at-exact-" });
+        yield* writeTextFile(cwd, "@scope/utils.ts");
+        yield* writeTextFile(cwd, "scope-utils/helpers.ts");
+
+        // User types "@@scope" in composer; client strips trigger @ and sends "@scope"
+        // normalizeQuery must NOT strip this @, so "@scope" matches exactly
+        const result = yield* searchWorkspaceEntries({ cwd, query: "@scope", limit: 20 });
+        const paths = result.entries.map((entry) => entry.path);
+
+        expect(paths).toContain("@scope");
+        // @scope must rank first — it is an exact name match for query "@scope"
+        expect(paths[0]).toBe("@scope");
+      }),
+    );
+
+    it.effect("returns files inside @-prefixed directories by path query", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-at-files-" });
+        yield* writeTextFile(cwd, "packages/@my-org/utils/index.ts");
+        yield* writeTextFile(cwd, "packages/other/index.ts");
+
+        const result = yield* searchWorkspaceEntries({ cwd, query: "my-org", limit: 20 });
+        const paths = result.entries.map((entry) => entry.path);
+
+        expect(paths).toContain("packages/@my-org");
+        expect(paths).toContain("packages/@my-org/utils");
+        expect(paths).toContain("packages/@my-org/utils/index.ts");
+      }),
+    );
+
     it.effect("deduplicates concurrent index builds for the same cwd", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-concurrent-build-" });

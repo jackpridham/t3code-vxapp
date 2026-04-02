@@ -507,6 +507,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     if (detail) {
       entry.detail = detail;
     }
+  } else if (activity.kind === "runtime.warning" || activity.kind === "runtime.error") {
+    const detail = formatRuntimeDiagnosticDetail(payload?.detail);
+    if (detail) {
+      entry.detail = detail;
+    }
   }
   if (command) {
     entry.command = command;
@@ -532,6 +537,120 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     entry.collapseKey = collapseKey;
   }
   return entry;
+}
+
+function formatRuntimeDiagnosticDetail(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const message = firstRuntimeDiagnosticString(
+    value,
+    ["error", "message"],
+    ["message"],
+    ["reason"],
+  );
+  const additionalDetails = firstRuntimeDiagnosticString(
+    value,
+    ["error", "additionalDetails"],
+    ["additionalDetails"],
+  );
+  const statusCode = firstRuntimeDiagnosticNumber(
+    value,
+    ["error", "codexErrorInfo", "responseStreamDisconnected", "httpStatusCode"],
+    ["codexErrorInfo", "responseStreamDisconnected", "httpStatusCode"],
+    ["httpStatusCode"],
+    ["statusCode"],
+  );
+  const upstreamUrl = firstRuntimeDiagnosticString(
+    value,
+    ["error", "codexErrorInfo", "responseStreamDisconnected", "url"],
+    ["codexErrorInfo", "responseStreamDisconnected", "url"],
+    ["url"],
+  );
+  const cfRay = firstRuntimeDiagnosticString(
+    value,
+    ["error", "codexErrorInfo", "responseStreamDisconnected", "cf-ray"],
+    ["codexErrorInfo", "responseStreamDisconnected", "cf-ray"],
+    ["cf-ray"],
+  );
+
+  const parts: string[] = [];
+  if (message) {
+    parts.push(statusCode ? `${message} (HTTP ${statusCode})` : message);
+  } else if (statusCode) {
+    parts.push(`HTTP ${statusCode}`);
+  }
+  if (additionalDetails) {
+    parts.push(additionalDetails);
+  }
+  const transportParts: string[] = [];
+  if (upstreamUrl) {
+    transportParts.push(`url: ${upstreamUrl}`);
+  }
+  if (cfRay) {
+    transportParts.push(`cf-ray: ${cfRay}`);
+  }
+  if (transportParts.length > 0) {
+    parts.push(transportParts.join(", "));
+  }
+
+  if (parts.length > 0) {
+    return parts.join(" - ");
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized && serialized.length > 0 ? serialized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function firstRuntimeDiagnosticString(
+  value: unknown,
+  ...pathCandidates: ReadonlyArray<ReadonlyArray<string>>
+): string | undefined {
+  for (const path of pathCandidates) {
+    const found = findNestedRuntimeDiagnosticValue(value, path);
+    if (typeof found !== "string") {
+      continue;
+    }
+    const trimmed = found.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function firstRuntimeDiagnosticNumber(
+  value: unknown,
+  ...pathCandidates: ReadonlyArray<ReadonlyArray<string>>
+): number | undefined {
+  for (const path of pathCandidates) {
+    const found = findNestedRuntimeDiagnosticValue(value, path);
+    if (typeof found === "number" && Number.isFinite(found)) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function findNestedRuntimeDiagnosticValue(value: unknown, path: ReadonlyArray<string>): unknown {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
 }
 
 function collapseDerivedWorkLogEntries(

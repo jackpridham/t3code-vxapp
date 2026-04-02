@@ -742,6 +742,44 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("surfaces structured runtime warning diagnostics as a concise detail summary", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "runtime-warning",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: {
+          message: "Reconnecting... 5/5",
+          detail: {
+            error: {
+              message: "Reconnecting... 5/5",
+              codexErrorInfo: {
+                responseStreamDisconnected: {
+                  httpStatusCode: 503,
+                  url: "wss://chatgpt.com/backend-api/codex/responses",
+                },
+              },
+              additionalDetails:
+                "unexpected status 503 Service Unavailable: upstream connect error or disconnect/reset before headers.",
+            },
+            willRetry: true,
+            threadId: "thread-1",
+            turnId: "turn-1",
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      detail:
+        "Reconnecting... 5/5 (HTTP 503) - unexpected status 503 Service Unavailable: upstream connect error or disconnect/reset before headers. - url: wss://chatgpt.com/backend-api/codex/responses",
+    });
+    expect(entry?.rawPayload).toContain('"httpStatusCode": 503');
+    expect(entry?.rawPayload).toContain('"willRetry": true');
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

@@ -76,7 +76,7 @@ function toSearchableWorkspaceEntry(entry: ProjectEntry): SearchableWorkspaceEnt
 function normalizeQuery(input: string): string {
   return input
     .trim()
-    .replace(/^[@./]+/, "")
+    .replace(/^[./]+/, "")
     .toLowerCase();
 }
 
@@ -122,8 +122,11 @@ function scoreEntry(entry: SearchableWorkspaceEntry, query: string): number | nu
   if (normalizedName === query) return 0;
   if (normalizedPath === query) return 1;
   if (normalizedName.startsWith(query)) return 2;
+  if (normalizedName === `@${query}`) return 2;
   if (normalizedPath.startsWith(query)) return 3;
+  if (normalizedName.startsWith(`@${query}`)) return 3;
   if (normalizedPath.includes(`/${query}`)) return 4;
+  if (normalizedPath.startsWith(`@${query}`) || normalizedPath.includes(`/@${query}`)) return 4;
   if (normalizedName.includes(query)) return 5;
   if (normalizedPath.includes(query)) return 6;
 

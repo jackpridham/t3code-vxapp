@@ -930,6 +930,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
+  // Collapse the composer toolbar (hide agentic controls) only when the user has
+  // scrolled away from the bottom AND the composer is empty. If there is already
+  // content in the input we keep the full toolbar visible so the user can adjust
+  // model/mode before sending without having to scroll back down first.
+  const isComposerCollapsed = showScrollToBottom && !composerSendState.hasSendableContent;
   const lastSyncedPendingInputRef = useRef<{
     requestId: string | null;
     questionId: string | null;
@@ -1960,8 +1965,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const isNearBottom = isScrollContainerNearBottom(scrollContainer);
 
     if (!shouldAutoScrollRef.current && isNearBottom) {
-      shouldAutoScrollRef.current = true;
-      pendingUserScrollUpIntentRef.current = false;
+      // Only re-engage auto-scroll when the scroll position actually moved downward
+      // (user scrolled back to the bottom). A layout change that grows the scroll
+      // container (e.g. the composer toolbar collapsing) can clamp scrollTop to a
+      // smaller maximum, generating a spurious scroll event where scrollTop decreased
+      // even though the user is now "near bottom". Ignore those events so the user
+      // isn't fought back to the bottom mid-scroll.
+      const didScrollDown = currentScrollTop >= lastKnownScrollTopRef.current - 0.5;
+      if (didScrollDown) {
+        shouldAutoScrollRef.current = true;
+        pendingUserScrollUpIntentRef.current = false;
+      }
     } else if (shouldAutoScrollRef.current && pendingUserScrollUpIntentRef.current) {
       const scrolledUp = currentScrollTop < lastKnownScrollTopRef.current - 1;
       if (scrolledUp) {
@@ -3583,7 +3597,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const onComposerCommandKey = (
-    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
+    key: "ArrowDown" | "ArrowUp" | "Enter" | "Escape" | "Tab",
     event: KeyboardEvent,
   ) => {
     if (key === "Tab" && event.shiftKey) {
@@ -3595,6 +3609,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const menuIsActive = composerMenuOpenRef.current || trigger !== null;
 
     if (menuIsActive) {
+      if (key === "Escape") {
+        setComposerTrigger(null);
+        return true;
+      }
+
       const currentItems = composerMenuItemsRef.current;
       if (key === "ArrowDown" && currentItems.length > 0) {
         nudgeComposerMenuHighlight("ArrowDown");
@@ -3838,7 +3857,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   <div
                     className={cn(
                       "relative px-3 sm:px-4",
-                      showScrollToBottom
+                      isComposerCollapsed
                         ? "pt-2 pb-1.5"
                         : cn("pb-2", hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4"),
                     )}
@@ -3958,7 +3977,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 : "Ask anything, @tag files/folders, or use / to show available commands"
                       }
                       disabled={isConnecting || isComposerApprovalState}
-                      {...(showScrollToBottom ? { className: "min-h-8" } : {})}
+                      {...(isComposerCollapsed ? { className: "sm:min-h-8" } : {})}
                     />
                   </div>
 
@@ -3977,15 +3996,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     <div
                       data-chat-composer-footer="true"
                       className={cn(
-                        "flex items-center justify-between px-2.5 pb-2.5 sm:px-3 sm:pb-3",
-                        isComposerFooterCompact
-                          ? "gap-1.5"
-                          : "flex-wrap gap-2 sm:flex-nowrap sm:gap-0",
+                        "flex items-center px-2.5 pb-2.5 sm:px-3 sm:pb-3",
+                        isComposerCollapsed
+                          ? cn(
+                              "justify-between sm:justify-end",
+                              isComposerFooterCompact ? "gap-1.5" : "gap-2",
+                            )
+                          : cn(
+                              "justify-between",
+                              isComposerFooterCompact
+                                ? "gap-1.5"
+                                : "flex-wrap gap-2 sm:flex-nowrap sm:gap-0",
+                            ),
                       )}
                     >
                       <div
                         className={cn(
                           "flex min-w-0 flex-1 items-center",
+                          isComposerCollapsed && "sm:hidden",
                           isComposerFooterCompact
                             ? "gap-1 overflow-hidden"
                             : "gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible",
