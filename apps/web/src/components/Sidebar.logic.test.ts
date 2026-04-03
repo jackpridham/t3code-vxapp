@@ -7,6 +7,7 @@ import {
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
+  groupThreadsByLineage,
   hasUnseenCompletion,
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
@@ -20,6 +21,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
+  threadHasLineage,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import { OrchestrationLatestTurn, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -1140,5 +1142,106 @@ describe("sortProjectsForSidebar", () => {
     );
 
     expect(timestamp).toBe(Date.parse("2026-03-09T10:10:00.000Z"));
+  });
+});
+
+describe("groupThreadsByLineage", () => {
+  it("groups worker threads under their parent", () => {
+    const parent = makeThread({
+      id: ThreadId.makeUnsafe("parent-1"),
+      spawnRole: "orchestrator",
+    });
+    const worker1 = makeThread({
+      id: ThreadId.makeUnsafe("worker-1"),
+      spawnRole: "worker",
+      parentThreadId: "parent-1",
+      createdAt: "2026-03-09T10:02:00.000Z",
+    });
+    const worker2 = makeThread({
+      id: ThreadId.makeUnsafe("worker-2"),
+      spawnRole: "worker",
+      parentThreadId: "parent-1",
+      createdAt: "2026-03-09T10:01:00.000Z",
+    });
+
+    const { groups, ungrouped } = groupThreadsByLineage([parent, worker1, worker2]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.parentThreadId).toBe("parent-1");
+    expect(groups[0]?.parentThread?.id).toBe(ThreadId.makeUnsafe("parent-1"));
+    expect(groups[0]?.workers.map((w) => w.id)).toEqual([
+      ThreadId.makeUnsafe("worker-1"),
+      ThreadId.makeUnsafe("worker-2"),
+    ]);
+    expect(ungrouped).toHaveLength(0);
+  });
+
+  it("handles external parent (not in thread list)", () => {
+    const worker = makeThread({
+      id: ThreadId.makeUnsafe("worker-1"),
+      spawnRole: "worker",
+      parentThreadId: "external-parent",
+    });
+
+    const { groups, ungrouped } = groupThreadsByLineage([worker]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.parentThreadId).toBe("external-parent");
+    expect(groups[0]?.parentThread).toBeNull();
+    expect(groups[0]?.workers.map((w) => w.id)).toEqual([ThreadId.makeUnsafe("worker-1")]);
+    expect(ungrouped).toHaveLength(0);
+  });
+
+  it("returns all threads as ungrouped when no lineage", () => {
+    const thread1 = makeThread({ id: ThreadId.makeUnsafe("thread-1") });
+    const thread2 = makeThread({ id: ThreadId.makeUnsafe("thread-2") });
+
+    const { groups, ungrouped } = groupThreadsByLineage([thread1, thread2]);
+
+    expect(groups).toHaveLength(0);
+    expect(ungrouped.map((t) => t.id)).toEqual([
+      ThreadId.makeUnsafe("thread-1"),
+      ThreadId.makeUnsafe("thread-2"),
+    ]);
+  });
+
+  it("sorts workers by creation time descending within group", () => {
+    const parent = makeThread({ id: ThreadId.makeUnsafe("parent-1") });
+    const workerOld = makeThread({
+      id: ThreadId.makeUnsafe("worker-old"),
+      spawnRole: "worker",
+      parentThreadId: "parent-1",
+      createdAt: "2026-03-09T10:00:00.000Z",
+    });
+    const workerNew = makeThread({
+      id: ThreadId.makeUnsafe("worker-new"),
+      spawnRole: "worker",
+      parentThreadId: "parent-1",
+      createdAt: "2026-03-09T10:05:00.000Z",
+    });
+
+    const { groups } = groupThreadsByLineage([parent, workerOld, workerNew]);
+
+    expect(groups[0]?.workers.map((w) => w.id)).toEqual([
+      ThreadId.makeUnsafe("worker-new"),
+      ThreadId.makeUnsafe("worker-old"),
+    ]);
+  });
+});
+
+describe("threadHasLineage", () => {
+  it("returns true for threads with orchestratorThreadId", () => {
+    const thread = makeThread({ orchestratorThreadId: "orch-1" });
+    expect(threadHasLineage(thread)).toBe(true);
+  });
+
+  it("returns true for threads with spawnRole", () => {
+    const thread = makeThread({ spawnRole: "worker" });
+    expect(threadHasLineage(thread)).toBe(true);
+  });
+
+  it("returns false for threads with no lineage fields", () => {
+    const thread = makeThread();
+    expect(threadHasLineage(thread)).toBe(false);
   });
 });

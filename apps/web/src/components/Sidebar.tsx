@@ -6,6 +6,7 @@ import {
   FolderIcon,
   GitPullRequestIcon,
   ListFilterIcon,
+  NetworkIcon,
   PlusIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -15,6 +16,7 @@ import {
 import { ProjectFavicon } from "./ProjectFavicon";
 import { autoAnimate } from "@formkit/auto-animate";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -126,6 +128,7 @@ import {
   getUniqueLabelsFromThreads,
   getVisibleSidebarThreadIds,
   getVisibleThreadsForProject,
+  groupThreadsByLineage,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
@@ -164,11 +167,17 @@ type SidebarThreadSnapshot = Pick<
   | "interactionMode"
   | "latestTurn"
   | "labels"
+  | "orchestratorProjectId"
+  | "orchestratorThreadId"
+  | "parentThreadId"
   | "projectId"
   | "proposedPlans"
   | "session"
+  | "spawnRole"
+  | "spawnedBy"
   | "title"
   | "updatedAt"
+  | "workflowId"
   | "worktreePath"
 > & {
   lastVisitedAt?: string | undefined;
@@ -225,6 +234,12 @@ function toSidebarThreadSnapshot(
     activities: thread.activities,
     proposedPlans: thread.proposedPlans,
     latestUserMessageAt: getLatestUserMessageAt(thread),
+    orchestratorProjectId: thread.orchestratorProjectId,
+    orchestratorThreadId: thread.orchestratorThreadId,
+    parentThreadId: thread.parentThreadId,
+    spawnRole: thread.spawnRole,
+    spawnedBy: thread.spawnedBy,
+    workflowId: thread.workflowId,
   };
   sidebarThreadSnapshotCache.set(thread, { lastVisitedAt, snapshot });
   return snapshot;
@@ -1376,18 +1391,22 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
           ? [pinnedCollapsedThread]
           : visibleProjectThreads;
         const showEmptyThreadState = project.expanded && filteredProjectThreads.length === 0;
+        const { groups: lineageGroups, ungrouped: ungroupedThreads } =
+          groupThreadsByLineage(renderedThreads);
 
         return {
           availableProjectLabels,
           activeProjectLabelFilters: activeProjectLabelFilters ?? null,
           hasHiddenThreads,
           hiddenThreadStatus,
+          lineageGroups,
           orderedProjectThreadIds,
           project,
           projectStatus,
           projectThreads,
           threadStatuses,
           renderedThreads,
+          ungroupedThreads,
           showEmptyThreadState,
           shouldShowThreadPanel,
           isThreadListExpanded,
@@ -1559,12 +1578,14 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       activeProjectLabelFilters,
       hasHiddenThreads,
       hiddenThreadStatus,
+      lineageGroups,
       orderedProjectThreadIds,
       project,
       projectStatus,
       projectThreads,
       threadStatuses,
       renderedThreads,
+      ungroupedThreads,
       showEmptyThreadState,
       shouldShowThreadPanel,
       isThreadListExpanded,
@@ -1712,6 +1733,19 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                       ))}
                     </div>
                   ) : null}
+                  {thread.spawnRole && (
+                    <Badge
+                      className={`h-4 shrink-0 border-0 px-1 text-[9px] font-medium leading-none ${
+                        thread.spawnRole === "worker"
+                          ? "bg-blue-500/10 text-blue-500"
+                          : thread.spawnRole === "orchestrator"
+                            ? "bg-fuchsia-500/10 text-fuchsia-500"
+                            : "bg-amber-500/10 text-amber-500"
+                      }`}
+                    >
+                      {thread.spawnRole}
+                    </Badge>
+                  )}
                 </>
               )}
             </div>
@@ -1979,7 +2013,36 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
               </div>
             </SidebarMenuSubItem>
           ) : null}
-          {shouldShowThreadPanel && renderedThreads.map((thread) => renderThreadRow(thread))}
+          {shouldShowThreadPanel && (
+            <>
+              {lineageGroups.map((group) => (
+                <Fragment key={group.parentThreadId}>
+                  {group.parentThread ? (
+                    renderThreadRow(group.parentThread)
+                  ) : (
+                    <SidebarMenuSubItem
+                      className="w-full"
+                      data-thread-selection-safe
+                    >
+                      <div
+                        data-thread-selection-safe
+                        className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted-foreground/60"
+                      >
+                        <NetworkIcon className="size-3 shrink-0" />
+                        <span className="truncate" title={group.parentThreadId}>
+                          {group.parentThreadId}
+                        </span>
+                      </div>
+                    </SidebarMenuSubItem>
+                  )}
+                  <div className="ml-3 border-l border-border/50 pl-1">
+                    {group.workers.map((worker) => renderThreadRow(worker))}
+                  </div>
+                </Fragment>
+              ))}
+              {ungroupedThreads.map((thread) => renderThreadRow(thread))}
+            </>
+          )}
 
           {project.expanded && hasHiddenThreads && !isThreadListExpanded && (
             <SidebarMenuSubItem className="w-full">

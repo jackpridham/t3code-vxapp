@@ -605,6 +605,80 @@ export function getFallbackThreadIdAfterDelete<
   );
 }
 
+/** Minimal shape needed for lineage grouping — works with Thread and SidebarThreadSnapshot. */
+type LineageGroupable = Pick<
+  Thread,
+  | "id"
+  | "createdAt"
+  | "orchestratorThreadId"
+  | "parentThreadId"
+  | "spawnRole"
+  | "workflowId"
+>;
+
+export interface ThreadLineageGroup<T extends LineageGroupable = Thread> {
+  parentThread: T | null;
+  parentThreadId: string;
+  workers: T[];
+  workflowId: string | undefined;
+}
+
+export function groupThreadsByLineage<T extends LineageGroupable>(
+  threads: readonly T[],
+): {
+  groups: ThreadLineageGroup<T>[];
+  ungrouped: T[];
+} {
+  const workersByParent = new Map<string, T[]>();
+  const threadById = new Map<string, T>();
+  const groupedThreadIds = new Set<string>();
+
+  for (const thread of threads) {
+    threadById.set(thread.id, thread);
+  }
+
+  for (const thread of threads) {
+    const parentId = thread.parentThreadId ?? thread.orchestratorThreadId;
+    if (parentId && thread.spawnRole === "worker") {
+      const existing = workersByParent.get(parentId) ?? [];
+      existing.push(thread);
+      workersByParent.set(parentId, existing);
+      groupedThreadIds.add(thread.id);
+    }
+  }
+
+  const groups: ThreadLineageGroup<T>[] = [];
+  for (const [parentId, workers] of workersByParent) {
+    const parentThread = threadById.get(parentId) ?? null;
+    if (parentThread) {
+      groupedThreadIds.add(parentThread.id);
+    }
+    groups.push({
+      parentThread,
+      parentThreadId: parentId,
+      workers: workers.toSorted(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+      workflowId: workers[0]?.workflowId,
+    });
+  }
+
+  const ungrouped = threads.filter((t) => !groupedThreadIds.has(t.id));
+  return { groups, ungrouped };
+}
+
+export function threadHasLineage(
+  thread: Pick<Thread, "orchestratorProjectId" | "orchestratorThreadId" | "parentThreadId" | "spawnRole" | "workflowId">,
+): boolean {
+  return !!(
+    thread.orchestratorProjectId ||
+    thread.orchestratorThreadId ||
+    thread.parentThreadId ||
+    thread.spawnRole ||
+    thread.workflowId
+  );
+}
+
 export function getProjectSortTimestamp(
   project: SidebarProject,
   projectThreads: readonly SidebarThreadSortInput[],
