@@ -1333,8 +1333,12 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
   const renderedProjects = useMemo(
     () =>
       sortedProjects.map((project) => {
+        // Orchestrator projects keep archived threads visible; regular projects do not.
+        const isOrchestratorProject =
+          resolveSidebarProjectKind({ project, orchestratorProjectCwds }) === "orchestrator";
+        const sourceThreads = isOrchestratorProject ? threads : visibleThreads;
         const projectThreads = sortThreadsForSidebar(
-          visibleThreads.filter((thread) => thread.projectId === project.id),
+          sourceThreads.filter((thread) => thread.projectId === project.id),
           appSettings.sidebarThreadSortOrder,
         );
         const threadStatuses = new Map(
@@ -1418,8 +1422,10 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       appSettings.sidebarThreadSortOrder,
       expandedThreadListsByProject,
       labelFiltersByProject,
+      orchestratorProjectCwds,
       routeThreadId,
       sortedProjects,
+      threads,
       visibleThreads,
     ],
   );
@@ -1614,7 +1620,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       return (
         <SidebarMenuSubItem
           key={thread.id}
-          className="w-full"
+          className={`w-full${thread.archivedAt !== null ? " opacity-50" : ""}`}
           data-thread-item
           onMouseLeave={() => {
             setConfirmingArchiveThreadId((current) => (current === thread.id ? null : current));
