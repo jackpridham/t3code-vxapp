@@ -410,6 +410,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const toggleProjectLabelFilter = useUiStateStore((store) => store.toggleProjectLabelFilter);
   const activeThreadLastVisitedAt = useUiStateStore(
     (store) => store.threadLastVisitedAtById[threadId],
   );
@@ -3319,6 +3320,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
         branch: activeThread.branch,
         worktreePath: activeThread.worktreePath,
         createdAt,
+        // Lineage: plan implementation thread is a worker spawned from current thread
+        parentThreadId: activeThread.id,
+        spawnRole: "worker" as const,
+        spawnedBy: "t3code-web",
+        orchestratorProjectId: (activeThread.orchestratorProjectId ?? activeProject.id) as ProjectId,
+        orchestratorThreadId: (activeThread.orchestratorThreadId ?? activeThread.id) as ThreadId,
       })
       .then(() => {
         return api.orchestration.dispatchCommand({
@@ -3834,6 +3841,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onLabelClick={(label) => {
+            if (activeProject) {
+              toggleProjectLabelFilter(activeProject.id, label);
+            }
+          }}
         />
       </header>
 
