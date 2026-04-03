@@ -43,6 +43,7 @@ interface ChatHeaderProps {
   onDeleteProjectHook: (hookId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
+  onLabelClick?: (label: string) => void;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -72,6 +73,7 @@ export const ChatHeader = memo(function ChatHeader({
   onDeleteProjectHook,
   onToggleTerminal,
   onToggleDiff,
+  onLabelClick,
 }: ChatHeaderProps) {
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -99,8 +101,9 @@ export const ChatHeader = memo(function ChatHeader({
               <Badge
                 key={label}
                 variant="outline"
-                title={label}
-                className="h-5 min-w-0 max-w-24 shrink-0 px-1.5 text-[10px] font-medium text-muted-foreground/70"
+                title={`Click to filter by "${label}"`}
+                className="h-5 min-w-0 max-w-24 shrink-0 cursor-pointer px-1.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-foreground"
+                onClick={() => onLabelClick?.(label)}
               >
                 <span className="truncate">{label}</span>
               </Badge>

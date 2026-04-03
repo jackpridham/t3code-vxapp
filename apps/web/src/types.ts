@@ -116,6 +116,13 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  // Lineage metadata — set when thread is spawned by an orchestrator
+  orchestratorProjectId?: string | undefined;
+  orchestratorThreadId?: string | undefined;
+  parentThreadId?: string | undefined;
+  spawnRole?: "orchestrator" | "worker" | "supervisor" | undefined;
+  spawnedBy?: string | undefined;
+  workflowId?: string | undefined;
 }
 
 export interface ThreadSession {

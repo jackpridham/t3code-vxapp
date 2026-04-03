@@ -13,7 +13,6 @@ import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
 
 import {
   buildServerProvider,
-  DEFAULT_TIMEOUT_MS,
   detailFromResult,
   extractAuthBoolean,
   isCommandMissingCause,
@@ -379,6 +378,16 @@ export function adjustModelsForSubscription(
   });
 }
 
+// ── Probe timeouts ──────────────────────────────────────────────────
+//
+// `claude --version` and `claude auth status` both pay Claude's full
+// Node.js startup cost (~3–10 s depending on machine).  Using the
+// shared 4 s DEFAULT_TIMEOUT_MS causes false-positive "Timed out"
+// banners on slower hosts even when the CLI is perfectly healthy.
+// These timeouts are intentionally higher than the shared default and
+// apply only to Claude probe commands.
+const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
+
 // ── SDK capability probe ────────────────────────────────────────────
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
@@ -469,7 +478,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   const versionProbe = yield* runClaudeCommand(["--version"]).pipe(
-    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.timeoutOption(CLAUDE_PROBE_TIMEOUT_MS),
     Effect.result,
   );
 
@@ -533,7 +542,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   // ── Auth check + subscription detection ────────────────────────────
 
   const authProbe = yield* runClaudeCommand(["auth", "status"]).pipe(
-    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.timeoutOption(CLAUDE_PROBE_TIMEOUT_MS),
     Effect.result,
   );
 

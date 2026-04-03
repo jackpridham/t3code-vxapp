@@ -2,12 +2,15 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  clearProjectLabelFilters,
   clearThreadUi,
   markThreadUnread,
   reorderProjects,
   setProjectExpanded,
+  setProjectLabelFilter,
   syncProjects,
   syncThreads,
+  toggleProjectLabelFilter,
   type UiState,
 } from "./uiStateStore";
 
@@ -17,6 +20,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectOrder: [],
     orchestratorProjectCwds: [],
     threadLastVisitedAtById: {},
+    labelFiltersByProject: {},
     ...overrides,
   };
 }
@@ -189,5 +193,77 @@ describe("uiStateStore pure functions", () => {
     const next = clearThreadUi(initialState, thread1);
 
     expect(next.threadLastVisitedAtById).toEqual({});
+  });
+
+  it("toggleProjectLabelFilter adds a label when not present", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState();
+
+    const next = toggleProjectLabelFilter(initialState, projectId, "worker");
+
+    expect(next.labelFiltersByProject[projectId]).toEqual(["worker"]);
+  });
+
+  it("toggleProjectLabelFilter removes a label when already active", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState({
+      labelFiltersByProject: { [projectId]: ["worker"] },
+    });
+
+    const next = toggleProjectLabelFilter(initialState, projectId, "worker");
+
+    expect(next.labelFiltersByProject[projectId]).toEqual([]);
+  });
+
+  it("clearProjectLabelFilters removes all filters for a project", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState({
+      labelFiltersByProject: { [projectId]: ["worker", "model:sonnet"] },
+    });
+
+    const next = clearProjectLabelFilters(initialState, projectId);
+
+    expect(next.labelFiltersByProject[projectId]).toBeUndefined();
+  });
+
+  it("clearProjectLabelFilters returns same state if project has no filters", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState();
+
+    const next = clearProjectLabelFilters(initialState, projectId);
+
+    expect(next).toBe(initialState);
+  });
+
+  it("setProjectLabelFilter replaces existing filters", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState({
+      labelFiltersByProject: { [projectId]: ["old"] },
+    });
+
+    const next = setProjectLabelFilter(initialState, projectId, ["new"]);
+
+    expect(next.labelFiltersByProject[projectId]).toEqual(["new"]);
+  });
+
+  it("filter state persists in store reference (not lost across reads)", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState();
+
+    const afterToggle = toggleProjectLabelFilter(initialState, projectId, "worker");
+    const afterRead = afterToggle.labelFiltersByProject[projectId];
+
+    expect(afterRead).toEqual(["worker"]);
+  });
+
+  it("filter state is per-project (project A filters do not affect project B)", () => {
+    const projectA = ProjectId.makeUnsafe("project-a");
+    const projectB = ProjectId.makeUnsafe("project-b");
+    const initialState = makeUiState();
+
+    const next = setProjectLabelFilter(initialState, projectA, ["worker"]);
+
+    expect(next.labelFiltersByProject[projectA]).toEqual(["worker"]);
+    expect(next.labelFiltersByProject[projectB]).toBeUndefined();
   });
 });

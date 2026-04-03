@@ -184,7 +184,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          orchestrator_project_id AS "orchestratorProjectId",
+          orchestrator_thread_id AS "orchestratorThreadId",
+          parent_thread_id AS "parentThreadId",
+          spawn_role AS "spawnRole",
+          spawned_by AS "spawnedBy",
+          workflow_id AS "workflowId"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
       `,
@@ -580,6 +586,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             activities: activitiesByThread.get(row.threadId) ?? [],
             checkpoints: checkpointsByThread.get(row.threadId) ?? [],
             session: sessionsByThread.get(row.threadId) ?? null,
+            ...(row.orchestratorProjectId !== null
+              ? { orchestratorProjectId: row.orchestratorProjectId }
+              : {}),
+            ...(row.orchestratorThreadId !== null
+              ? { orchestratorThreadId: row.orchestratorThreadId }
+              : {}),
+            ...(row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : {}),
+            ...(row.spawnRole !== null ? { spawnRole: row.spawnRole } : {}),
+            ...(row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : {}),
+            ...(row.workflowId !== null ? { workflowId: row.workflowId } : {}),
           }));
 
           const snapshot = {

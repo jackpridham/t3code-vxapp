@@ -191,6 +191,13 @@ function mapThread(thread: OrchestrationThreadWithLabels): Thread {
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    // Lineage metadata
+    orchestratorProjectId: thread.orchestratorProjectId,
+    orchestratorThreadId: thread.orchestratorThreadId,
+    parentThreadId: thread.parentThreadId,
+    spawnRole: thread.spawnRole,
+    spawnedBy: thread.spawnedBy,
+    workflowId: thread.workflowId,
   };
 }
 
@@ -568,6 +575,18 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         ...(event.payload.worktreePath !== undefined
           ? { worktreePath: event.payload.worktreePath }
           : {}),
+        ...(event.payload.orchestratorProjectId !== undefined
+          ? { orchestratorProjectId: event.payload.orchestratorProjectId }
+          : {}),
+        ...(event.payload.orchestratorThreadId !== undefined
+          ? { orchestratorThreadId: event.payload.orchestratorThreadId }
+          : {}),
+        ...(event.payload.parentThreadId !== undefined
+          ? { parentThreadId: event.payload.parentThreadId }
+          : {}),
+        ...(event.payload.spawnRole !== undefined ? { spawnRole: event.payload.spawnRole } : {}),
+        ...(event.payload.spawnedBy !== undefined ? { spawnedBy: event.payload.spawnedBy } : {}),
+        ...(event.payload.workflowId !== undefined ? { workflowId: event.payload.workflowId } : {}),
         updatedAt: event.payload.updatedAt,
       }));
       return threads === state.threads ? state : { ...state, threads };

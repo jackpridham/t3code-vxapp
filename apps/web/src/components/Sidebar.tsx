@@ -148,7 +148,7 @@ import type { Project, Thread } from "../types";
 import { resolveThreadRouteTarget } from "../lib/sidebarWindow";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
-const EMPTY_LABEL_SET: ReadonlySet<string> = new Set();
+const EMPTY_LABEL_ARRAY: readonly string[] = [];
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
@@ -422,12 +422,12 @@ function LabelFilterMenu({
   onClearLabels,
 }: {
   availableLabels: readonly string[];
-  selectedLabels: ReadonlySet<string>;
+  selectedLabels: readonly string[];
   onToggleLabel: (label: string) => void;
   onClearLabels: () => void;
 }) {
   if (availableLabels.length === 0) return null;
-  const hasActive = selectedLabels.size > 0;
+  const hasActive = selectedLabels.length > 0;
   return (
     <Menu>
       <Tooltip>
@@ -440,7 +440,7 @@ function LabelFilterMenu({
                   data-thread-selection-safe
                   aria-label={
                     hasActive
-                      ? `Filter by label (${selectedLabels.size} active)`
+                      ? `Filter by label (${selectedLabels.length} active)`
                       : "Filter threads by label"
                   }
                   className={`absolute top-1 right-7 inline-flex size-5 cursor-pointer items-center justify-center rounded-md p-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
@@ -463,7 +463,7 @@ function LabelFilterMenu({
           {availableLabels.map((label) => (
             <MenuCheckboxItem
               key={label}
-              checked={selectedLabels.has(label)}
+              checked={selectedLabels.includes(label)}
               onCheckedChange={() => onToggleLabel(label)}
               className="min-h-7 py-1 sm:text-xs"
             >
@@ -528,17 +528,21 @@ function SortableProjectItem({
 export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
   const projects = useStore((store) => store.projects);
   const serverThreads = useStore((store) => store.threads);
-  const { projectExpandedById, projectOrder, threadLastVisitedAtById } = useUiStateStore(
-    useShallow((store) => ({
-      projectExpandedById: store.projectExpandedById,
-      projectOrder: store.projectOrder,
-      threadLastVisitedAtById: store.threadLastVisitedAtById,
-    })),
-  );
+  const { projectExpandedById, projectOrder, threadLastVisitedAtById, labelFiltersByProject } =
+    useUiStateStore(
+      useShallow((store) => ({
+        projectExpandedById: store.projectExpandedById,
+        projectOrder: store.projectOrder,
+        threadLastVisitedAtById: store.threadLastVisitedAtById,
+        labelFiltersByProject: store.labelFiltersByProject,
+      })),
+    );
   const markThreadUnread = useUiStateStore((store) => store.markThreadUnread);
   const markProjectOrchestratorCwd = useUiStateStore((store) => store.markProjectOrchestratorCwd);
   const toggleProject = useUiStateStore((store) => store.toggleProject);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
+  const toggleProjectLabelFilter = useUiStateStore((store) => store.toggleProjectLabelFilter);
+  const clearProjectLabelFilters = useUiStateStore((store) => store.clearProjectLabelFilters);
   const orchestratorProjectCwds = useUiStateStore((store) => store.orchestratorProjectCwds);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const getDraftThreadByProjectId = useComposerDraftStore(
@@ -577,9 +581,6 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
-  const [labelFiltersByProject, setLabelFiltersByProject] = useState<
-    ReadonlyMap<ProjectId, ReadonlySet<string>>
-  >(() => new Map());
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
@@ -894,7 +895,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       void handlePickFolder(projectKind);
       return;
     }
-    setAddingProject((current) => (current && newProjectKind === projectKind ? false : true));
+    setAddingProject((current) => !(current && newProjectKind === projectKind));
   };
 
   const cancelRename = useCallback(() => {
@@ -1336,13 +1337,12 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         );
         const activeThreadId = routeThreadId ?? undefined;
         const availableProjectLabels = getUniqueLabelsFromThreads(projectThreads);
-        const activeProjectLabelFilters = labelFiltersByProject.get(project.id);
+        const activeProjectLabelFilters = labelFiltersByProject[project.id];
         // Apply label filters, always keeping the active thread visible even if filtered out.
         const filteredProjectThreads =
-          activeProjectLabelFilters && activeProjectLabelFilters.size > 0
+          activeProjectLabelFilters && activeProjectLabelFilters.length > 0
             ? (() => {
-                const labelSelected = [...activeProjectLabelFilters];
-                const matched = filterThreadsByLabels(projectThreads, labelSelected);
+                const matched = filterThreadsByLabels(projectThreads, activeProjectLabelFilters);
                 // Ensure the currently active thread is always shown even when filtered out.
                 if (activeThreadId !== undefined && !matched.some((t) => t.id === activeThreadId)) {
                   const pinned = projectThreads.find((t) => t.id === activeThreadId);
@@ -1569,7 +1569,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       shouldShowThreadPanel,
       isThreadListExpanded,
     } = renderedProject;
-    const selectedLabels = activeProjectLabelFilters ?? EMPTY_LABEL_SET;
+    const selectedLabels = activeProjectLabelFilters ?? EMPTY_LABEL_ARRAY;
     const renderThreadRow = (thread: (typeof projectThreads)[number]) => {
       const isActive = routeThreadId === thread.id;
       const isSelected = selectedThreadIds.has(thread.id);
@@ -1942,13 +1942,13 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
           ref={attachThreadListAutoAnimateRef}
           className="mx-1 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1.5 py-0"
         >
-          {selectedLabels.size > 0 && project.expanded && (
+          {selectedLabels.length > 0 && project.expanded && (
             <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
               <div
                 data-thread-selection-safe
                 className="flex flex-wrap items-center gap-1 px-2 py-0.5"
               >
-                {[...selectedLabels].map((label) => (
+                {selectedLabels.map((label) => (
                   <button
                     key={label}
                     type="button"
@@ -1972,7 +1972,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                 className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
               >
                 <span>
-                  {selectedLabels.size > 0
+                  {selectedLabels.length > 0
                     ? "No threads match the active filters"
                     : "No threads yet"}
                 </span>
@@ -2200,33 +2200,19 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     });
   }, []);
 
-  const toggleLabelFilter = useCallback((projectId: ProjectId, label: string) => {
-    setLabelFiltersByProject((current) => {
-      const projectLabels = current.get(projectId) ?? new Set<string>();
-      const nextProjectLabels = new Set(projectLabels);
-      if (nextProjectLabels.has(label)) {
-        nextProjectLabels.delete(label);
-      } else {
-        nextProjectLabels.add(label);
-      }
-      const next = new Map(current);
-      if (nextProjectLabels.size === 0) {
-        next.delete(projectId);
-      } else {
-        next.set(projectId, nextProjectLabels);
-      }
-      return next;
-    });
-  }, []);
+  const toggleLabelFilter = useCallback(
+    (projectId: ProjectId, label: string) => {
+      toggleProjectLabelFilter(projectId, label);
+    },
+    [toggleProjectLabelFilter],
+  );
 
-  const clearLabelFilters = useCallback((projectId: ProjectId) => {
-    setLabelFiltersByProject((current) => {
-      if (!current.has(projectId)) return current;
-      const next = new Map(current);
-      next.delete(projectId);
-      return next;
-    });
-  }, []);
+  const clearLabelFilters = useCallback(
+    (projectId: ProjectId) => {
+      clearProjectLabelFilters(projectId);
+    },
+    [clearProjectLabelFilters],
+  );
 
   const wordmark = (
     <div className="flex items-center gap-2">

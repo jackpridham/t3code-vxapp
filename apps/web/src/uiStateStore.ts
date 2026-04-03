@@ -20,12 +20,14 @@ interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   orchestratorProjectCwds?: string[];
+  labelFiltersByProject?: Record<string, string[]>;
 }
 
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: ProjectId[];
   orchestratorProjectCwds: string[];
+  labelFiltersByProject: Record<string, string[]>;
 }
 
 export interface UiThreadState {
@@ -49,11 +51,13 @@ const initialState: UiState = {
   projectOrder: [],
   orchestratorProjectCwds: [],
   threadLastVisitedAtById: {},
+  labelFiltersByProject: {},
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 const persistedOrchestratorProjectCwds = new Set<string>();
+let persistedLabelFiltersByProject: Record<string, string[]> = {};
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
 
@@ -73,17 +77,20 @@ function readPersistedState(): UiState {
         return {
           ...initialState,
           orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+          labelFiltersByProject: persistedLabelFiltersByProject,
         };
       }
       return {
         ...initialState,
         orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+        labelFiltersByProject: persistedLabelFiltersByProject,
       };
     }
     hydratePersistedProjectState(JSON.parse(raw) as PersistedUiState);
     return {
       ...initialState,
       orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+      labelFiltersByProject: persistedLabelFiltersByProject,
     };
   } catch {
     return initialState;
@@ -94,6 +101,7 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
   persistedExpandedProjectCwds.clear();
   persistedProjectOrderCwds.length = 0;
   persistedOrchestratorProjectCwds.clear();
+  persistedLabelFiltersByProject = {};
   for (const cwd of parsed.expandedProjectCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0) {
       persistedExpandedProjectCwds.add(cwd);
@@ -107,6 +115,18 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
   for (const cwd of parsed.orchestratorProjectCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0) {
       persistedOrchestratorProjectCwds.add(cwd);
+    }
+  }
+  const labelFilters = parsed.labelFiltersByProject;
+  if (labelFilters && typeof labelFilters === "object" && !Array.isArray(labelFilters)) {
+    for (const [projectId, labels] of Object.entries(labelFilters)) {
+      if (
+        typeof projectId === "string" &&
+        Array.isArray(labels) &&
+        labels.every((l) => typeof l === "string")
+      ) {
+        persistedLabelFiltersByProject[projectId] = labels as string[];
+      }
     }
   }
 }
@@ -132,6 +152,7 @@ function persistState(state: UiState): void {
         expandedProjectCwds,
         projectOrderCwds,
         orchestratorProjectCwds: state.orchestratorProjectCwds,
+        labelFiltersByProject: state.labelFiltersByProject,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -350,6 +371,48 @@ export function markProjectOrchestratorCwd(state: UiState, cwd: string): UiState
   };
 }
 
+export function toggleProjectLabelFilter(
+  state: UiState,
+  projectId: string,
+  label: string,
+): UiState {
+  const current = state.labelFiltersByProject[projectId] ?? [];
+  const isActive = current.includes(label);
+  const updated = isActive ? current.filter((l) => l !== label) : [...current, label];
+  return {
+    ...state,
+    labelFiltersByProject: {
+      ...state.labelFiltersByProject,
+      [projectId]: updated,
+    },
+  };
+}
+
+export function clearProjectLabelFilters(state: UiState, projectId: string): UiState {
+  if (!(projectId in state.labelFiltersByProject)) {
+    return state;
+  }
+  const { [projectId]: _, ...rest } = state.labelFiltersByProject;
+  return {
+    ...state,
+    labelFiltersByProject: rest,
+  };
+}
+
+export function setProjectLabelFilter(
+  state: UiState,
+  projectId: string,
+  labels: string[],
+): UiState {
+  return {
+    ...state,
+    labelFiltersByProject: {
+      ...state.labelFiltersByProject,
+      [projectId]: labels,
+    },
+  };
+}
+
 export function clearThreadUi(state: UiState, threadId: ThreadId): UiState {
   if (!(threadId in state.threadLastVisitedAtById)) {
     return state;
@@ -425,6 +488,9 @@ interface UiStateStore extends UiState {
   toggleProject: (projectId: ProjectId) => void;
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
+  toggleProjectLabelFilter: (projectId: string, label: string) => void;
+  clearProjectLabelFilters: (projectId: string) => void;
+  setProjectLabelFilter: (projectId: string, labels: string[]) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -442,6 +508,12 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setProjectExpanded(state, projectId, expanded)),
   reorderProjects: (draggedProjectId, targetProjectId) =>
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
+  toggleProjectLabelFilter: (projectId, label) =>
+    set((state) => toggleProjectLabelFilter(state, projectId, label)),
+  clearProjectLabelFilters: (projectId) =>
+    set((state) => clearProjectLabelFilters(state, projectId)),
+  setProjectLabelFilter: (projectId, labels) =>
+    set((state) => setProjectLabelFilter(state, projectId, labels)),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

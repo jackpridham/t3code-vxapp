@@ -352,6 +352,106 @@ describe("store read model sync", () => {
   });
 });
 
+describe("lineage metadata mapping", () => {
+  it("maps all 6 lineage fields from OrchestrationThread to Thread via syncServerReadModel", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        orchestratorProjectId: ProjectId.makeUnsafe("proj-orchestrator"),
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-orchestrator"),
+        parentThreadId: ThreadId.makeUnsafe("thread-parent"),
+        spawnRole: "worker",
+        spawnedBy: "jasper",
+        workflowId: "wf-2026-04-03",
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.orchestratorProjectId).toBe("proj-orchestrator");
+    expect(next.threads[0]?.orchestratorThreadId).toBe("thread-orchestrator");
+    expect(next.threads[0]?.parentThreadId).toBe("thread-parent");
+    expect(next.threads[0]?.spawnRole).toBe("worker");
+    expect(next.threads[0]?.spawnedBy).toBe("jasper");
+    expect(next.threads[0]?.workflowId).toBe("wf-2026-04-03");
+  });
+
+  it("maps thread with no lineage fields as undefined", () => {
+    const initialState = makeState(makeThread());
+    const next = syncServerReadModel(initialState, makeReadModel(makeReadModelThread({})));
+
+    expect(next.threads[0]?.orchestratorProjectId).toBeUndefined();
+    expect(next.threads[0]?.orchestratorThreadId).toBeUndefined();
+    expect(next.threads[0]?.parentThreadId).toBeUndefined();
+    expect(next.threads[0]?.spawnRole).toBeUndefined();
+    expect(next.threads[0]?.spawnedBy).toBeUndefined();
+    expect(next.threads[0]?.workflowId).toBeUndefined();
+  });
+
+  it("maps partial lineage — only provided fields are set, rest are undefined", () => {
+    const initialState = makeState(makeThread());
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          spawnRole: "supervisor",
+          parentThreadId: ThreadId.makeUnsafe("thread-parent"),
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.spawnRole).toBe("supervisor");
+    expect(next.threads[0]?.parentThreadId).toBe("thread-parent");
+    expect(next.threads[0]?.orchestratorProjectId).toBeUndefined();
+    expect(next.threads[0]?.orchestratorThreadId).toBeUndefined();
+    expect(next.threads[0]?.spawnedBy).toBeUndefined();
+    expect(next.threads[0]?.workflowId).toBeUndefined();
+  });
+
+  it("thread.meta-updated preserves existing lineage when event omits lineage fields", () => {
+    const thread = makeThread({
+      orchestratorProjectId: "proj-orch",
+      orchestratorThreadId: "thread-orch",
+      parentThreadId: "thread-parent",
+      spawnRole: "worker",
+      spawnedBy: "jasper",
+      workflowId: "wf-abc",
+    });
+
+    const next = applyOrchestrationEvent(
+      makeState(thread),
+      makeEvent("thread.meta-updated", {
+        threadId: thread.id,
+        title: "New Title",
+        updatedAt: "2026-04-03T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.orchestratorProjectId).toBe("proj-orch");
+    expect(next.threads[0]?.orchestratorThreadId).toBe("thread-orch");
+    expect(next.threads[0]?.parentThreadId).toBe("thread-parent");
+    expect(next.threads[0]?.spawnRole).toBe("worker");
+    expect(next.threads[0]?.spawnedBy).toBe("jasper");
+    expect(next.threads[0]?.workflowId).toBe("wf-abc");
+  });
+
+  it("thread.meta-updated can set lineage fields on a thread that had none", () => {
+    const thread = makeThread({});
+
+    const next = applyOrchestrationEvent(
+      makeState(thread),
+      makeEvent("thread.meta-updated", {
+        threadId: thread.id,
+        spawnRole: "worker",
+        updatedAt: "2026-04-03T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.spawnRole).toBe("worker");
+    expect(next.threads[0]?.orchestratorProjectId).toBeUndefined();
+  });
+});
+
 describe("incremental orchestration updates", () => {
   it("does not mark bootstrap complete for incremental events", () => {
     const state: AppState = {
