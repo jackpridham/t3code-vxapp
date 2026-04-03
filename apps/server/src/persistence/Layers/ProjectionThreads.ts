@@ -11,10 +11,11 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection } from "@t3tools/contracts";
+import { ModelSelection, ThreadLabels } from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
+    labels: Schema.fromJsonString(ThreadLabels),
     modelSelection: Schema.fromJsonString(ModelSelection),
   }),
 );
@@ -31,6 +32,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           thread_id,
           project_id,
           title,
+          labels_json,
           model_selection_json,
           runtime_mode,
           interaction_mode,
@@ -40,12 +42,19 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           created_at,
           updated_at,
           archived_at,
-          deleted_at
+          deleted_at,
+          orchestrator_project_id,
+          orchestrator_thread_id,
+          parent_thread_id,
+          spawn_role,
+          spawned_by,
+          workflow_id
         )
         VALUES (
           ${row.threadId},
           ${row.projectId},
           ${row.title},
+          ${JSON.stringify(row.labels)},
           ${JSON.stringify(row.modelSelection)},
           ${row.runtimeMode},
           ${row.interactionMode},
@@ -55,12 +64,19 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt},
-          ${row.deletedAt}
+          ${row.deletedAt},
+          ${row.orchestratorProjectId},
+          ${row.orchestratorThreadId},
+          ${row.parentThreadId},
+          ${row.spawnRole},
+          ${row.spawnedBy},
+          ${row.workflowId}
         )
         ON CONFLICT (thread_id)
         DO UPDATE SET
           project_id = excluded.project_id,
           title = excluded.title,
+          labels_json = excluded.labels_json,
           model_selection_json = excluded.model_selection_json,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
@@ -70,7 +86,13 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at,
-          deleted_at = excluded.deleted_at
+          deleted_at = excluded.deleted_at,
+          orchestrator_project_id = excluded.orchestrator_project_id,
+          orchestrator_thread_id = excluded.orchestrator_thread_id,
+          parent_thread_id = excluded.parent_thread_id,
+          spawn_role = excluded.spawn_role,
+          spawned_by = excluded.spawned_by,
+          workflow_id = excluded.workflow_id
       `,
   });
 
@@ -83,6 +105,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           thread_id AS "threadId",
           project_id AS "projectId",
           title,
+          labels_json AS "labels",
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
@@ -92,7 +115,13 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          orchestrator_project_id AS "orchestratorProjectId",
+          orchestrator_thread_id AS "orchestratorThreadId",
+          parent_thread_id AS "parentThreadId",
+          spawn_role AS "spawnRole",
+          spawned_by AS "spawnedBy",
+          workflow_id AS "workflowId"
         FROM projection_threads
         WHERE thread_id = ${threadId}
       `,
@@ -107,6 +136,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           thread_id AS "threadId",
           project_id AS "projectId",
           title,
+          labels_json AS "labels",
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
@@ -116,7 +146,13 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
-          deleted_at AS "deletedAt"
+          deleted_at AS "deletedAt",
+          orchestrator_project_id AS "orchestratorProjectId",
+          orchestrator_thread_id AS "orchestratorThreadId",
+          parent_thread_id AS "parentThreadId",
+          spawn_role AS "spawnRole",
+          spawned_by AS "spawnedBy",
+          workflow_id AS "workflowId"
         FROM projection_threads
         WHERE project_id = ${projectId}
         ORDER BY created_at ASC, thread_id ASC

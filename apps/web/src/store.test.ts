@@ -25,6 +25,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     codexThreadId: null,
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    labels: [],
     modelSelection: {
       provider: "codex",
       model: "gpt-5-codex",
@@ -46,6 +47,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
+type ReadModelThreadWithLabels = OrchestrationReadModel["threads"][number] & {
+  labels?: readonly string[] | undefined;
+};
+
 function makeState(thread: Thread): AppState {
   return {
     projects: [
@@ -58,6 +63,7 @@ function makeState(thread: Thread): AppState {
           model: "gpt-5-codex",
         },
         scripts: [],
+        hooks: [],
       },
     ],
     threads: [thread],
@@ -92,11 +98,12 @@ function makeEvent<T extends OrchestrationEvent["type"]>(
   } as Extract<OrchestrationEvent, { type: T }>;
 }
 
-function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"][number]>) {
+function makeReadModelThread(overrides: Partial<ReadModelThreadWithLabels> = {}) {
   return {
     id: ThreadId.makeUnsafe("thread-1"),
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    labels: [],
     modelSelection: {
       provider: "codex",
       model: "gpt-5.3-codex",
@@ -116,7 +123,7 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     checkpoints: [],
     session: null,
     ...overrides,
-  } satisfies OrchestrationReadModel["threads"][number];
+  } satisfies ReadModelThreadWithLabels;
 }
 
 function makeReadModel(thread: OrchestrationReadModel["threads"][number]): OrchestrationReadModel {
@@ -136,6 +143,7 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
         updatedAt: "2026-02-27T00:00:00.000Z",
         deletedAt: null,
         scripts: [],
+        hooks: [],
       },
     ],
     threads: [thread],
@@ -157,6 +165,7 @@ function makeReadModelProject(
     updatedAt: "2026-02-27T00:00:00.000Z",
     deletedAt: null,
     scripts: [],
+    hooks: [],
     ...overrides,
   };
 }
@@ -228,6 +237,31 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.updatedAt).toBe("2026-02-27T00:05:00.000Z");
   });
 
+  it("maps thread labels from the read model", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        labels: ["alpha", "beta"],
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.labels).toEqual(["alpha", "beta"]);
+  });
+
+  it("maps project kind from the read model", () => {
+    const initialState = makeState(makeThread());
+    const readModel = {
+      ...makeReadModel(makeReadModelThread({})),
+      projects: [makeReadModelProject({ kind: "orchestrator" })],
+    };
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.projects[0]?.kind).toBe("orchestrator");
+  });
+
   it("maps archivedAt from the read model", () => {
     const initialState = makeState(makeThread());
     const archivedAt = "2026-02-28T00:00:00.000Z";
@@ -241,6 +275,20 @@ describe("store read model sync", () => {
     );
 
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
+  });
+
+  it("maps thread labels from the read model", () => {
+    const initialState = makeState(makeThread());
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          labels: ["orchestrator", "jasper"],
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.labels).toEqual(["orchestrator", "jasper"]);
   });
 
   it("replaces projects using snapshot order during recovery", () => {
@@ -258,6 +306,7 @@ describe("store read model sync", () => {
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
           },
           scripts: [],
+          hooks: [],
         },
         {
           id: project1,
@@ -268,6 +317,7 @@ describe("store read model sync", () => {
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
           },
           scripts: [],
+          hooks: [],
         },
       ],
       threads: [],
@@ -358,6 +408,7 @@ describe("incremental orchestration updates", () => {
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
           },
           scripts: [],
+          hooks: [],
         },
       ],
       threads: [],
@@ -370,11 +421,13 @@ describe("incremental orchestration updates", () => {
         projectId: recreatedProjectId,
         title: "Project Recreated",
         workspaceRoot: "/tmp/project",
+        kind: "orchestrator",
         defaultModelSelection: {
           provider: "codex",
           model: DEFAULT_MODEL_BY_PROVIDER.codex,
         },
         scripts: [],
+        hooks: [],
         createdAt: "2026-02-27T00:00:01.000Z",
         updatedAt: "2026-02-27T00:00:01.000Z",
       }),
@@ -384,6 +437,51 @@ describe("incremental orchestration updates", () => {
     expect(next.projects[0]?.id).toBe(recreatedProjectId);
     expect(next.projects[0]?.cwd).toBe("/tmp/project");
     expect(next.projects[0]?.name).toBe("Project Recreated");
+    expect(next.projects[0]?.kind).toBe("orchestrator");
+  });
+
+  it("updates project kind when project.meta-updated arrives", () => {
+    const state: AppState = {
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project",
+          cwd: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
+          scripts: [],
+          hooks: [],
+        },
+      ],
+      threads: [],
+      bootstrapComplete: true,
+    };
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("project.meta-updated", {
+        projectId: ProjectId.makeUnsafe("project-1"),
+        kind: "orchestrator",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.projects[0]?.kind).toBe("orchestrator");
+  });
+
+  it("updates thread labels when thread.meta-updated arrives", () => {
+    const next = applyOrchestrationEvent(
+      makeState(makeThread()),
+      makeEvent("thread.meta-updated", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        labels: ["worker", "codex"],
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.labels).toEqual(["worker", "codex"]);
   });
 
   it("updates only the affected thread for message events", () => {

@@ -1,9 +1,11 @@
 import {
+  BotIcon,
   ArchiveIcon,
   ArrowUpDownIcon,
   ChevronRightIcon,
   FolderIcon,
   GitPullRequestIcon,
+  ListFilterIcon,
   PlusIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -89,7 +91,17 @@ import {
 } from "./desktopUpdate.logic";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
-import { Menu, MenuGroup, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
@@ -106,22 +118,28 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "./ui/sidebar";
+import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  filterThreadsByLabels,
+  getUniqueLabelsFromThreads,
   getVisibleSidebarThreadIds,
   getVisibleThreadsForProject,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
+  resolveSidebarProjectKind,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  getSidebarThreadLabels,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
   useThreadJumpHintVisibility,
+  type SidebarProjectKind,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -130,7 +148,7 @@ import type { Project, Thread } from "../types";
 import { resolveThreadRouteTarget } from "../lib/sidebarWindow";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
-const THREAD_PREVIEW_LIMIT = 6;
+const EMPTY_LABEL_SET: ReadonlySet<string> = new Set();
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
@@ -145,6 +163,7 @@ type SidebarThreadSnapshot = Pick<
   | "id"
   | "interactionMode"
   | "latestTurn"
+  | "labels"
   | "projectId"
   | "proposedPlans"
   | "session"
@@ -199,6 +218,7 @@ function toSidebarThreadSnapshot(
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
     latestTurn: thread.latestTurn,
+    labels: thread.labels,
     lastVisitedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
@@ -395,6 +415,79 @@ function ProjectSortMenu({
   );
 }
 
+function LabelFilterMenu({
+  availableLabels,
+  selectedLabels,
+  onToggleLabel,
+  onClearLabels,
+}: {
+  availableLabels: readonly string[];
+  selectedLabels: ReadonlySet<string>;
+  onToggleLabel: (label: string) => void;
+  onClearLabels: () => void;
+}) {
+  if (availableLabels.length === 0) return null;
+  const hasActive = selectedLabels.size > 0;
+  return (
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              render={
+                <button
+                  type="button"
+                  data-thread-selection-safe
+                  aria-label={
+                    hasActive
+                      ? `Filter by label (${selectedLabels.size} active)`
+                      : "Filter threads by label"
+                  }
+                  className={`absolute top-1 right-7 inline-flex size-5 cursor-pointer items-center justify-center rounded-md p-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+                    hasActive
+                      ? "pointer-events-auto text-primary opacity-100"
+                      : "pointer-events-none text-muted-foreground/70 opacity-0 hover:bg-secondary hover:text-foreground group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100 group-focus-within/menu-item:pointer-events-auto group-focus-within/menu-item:opacity-100"
+                  }`}
+                />
+              }
+            />
+          }
+        >
+          <ListFilterIcon className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">Filter by label</TooltipPopup>
+      </Tooltip>
+      <MenuPopup align="end" side="bottom" className="min-w-44">
+        <MenuGroup>
+          <MenuGroupLabel>Filter by label</MenuGroupLabel>
+          {availableLabels.map((label) => (
+            <MenuCheckboxItem
+              key={label}
+              checked={selectedLabels.has(label)}
+              onCheckedChange={() => onToggleLabel(label)}
+              className="min-h-7 py-1 sm:text-xs"
+            >
+              <span className="truncate">{label}</span>
+            </MenuCheckboxItem>
+          ))}
+          {hasActive && (
+            <>
+              <MenuSeparator />
+              <MenuCheckboxItem
+                checked={false}
+                onCheckedChange={onClearLabels}
+                className="min-h-7 py-1 sm:text-xs text-muted-foreground"
+              >
+                Clear filters
+              </MenuCheckboxItem>
+            </>
+          )}
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
 function SortableProjectItem({
   projectId,
   disabled = false,
@@ -443,8 +536,10 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     })),
   );
   const markThreadUnread = useUiStateStore((store) => store.markThreadUnread);
+  const markProjectOrchestratorCwd = useUiStateStore((store) => store.markProjectOrchestratorCwd);
   const toggleProject = useUiStateStore((store) => store.toggleProject);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
+  const orchestratorProjectCwds = useUiStateStore((store) => store.orchestratorProjectCwds);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const getDraftThreadByProjectId = useComposerDraftStore(
     (store) => store.getDraftThreadByProjectId,
@@ -470,6 +565,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     select: (config) => config.keybindings,
   });
   const [addingProject, setAddingProject] = useState(false);
+  const [newProjectKind, setNewProjectKind] = useState<SidebarProjectKind>("project");
   const [newCwd, setNewCwd] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
@@ -481,6 +577,9 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
+  const [labelFiltersByProject, setLabelFiltersByProject] = useState<
+    ReadonlyMap<ProjectId, ReadonlySet<string>>
+  >(() => new Map());
   const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
@@ -637,7 +736,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
   );
 
   const addProjectFromPath = useCallback(
-    async (rawCwd: string) => {
+    async (rawCwd: string, projectKind: SidebarProjectKind) => {
       const cwd = rawCwd.trim();
       if (!cwd || isAddingProject) return;
       const api = readNativeApi();
@@ -649,10 +748,22 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         setNewCwd("");
         setAddProjectError(null);
         setAddingProject(false);
+        setNewProjectKind("project");
       };
 
       const existing = projects.find((project) => project.cwd === cwd);
       if (existing) {
+        if (projectKind === "orchestrator") {
+          markProjectOrchestratorCwd(cwd);
+          void api.orchestration
+            .dispatchCommand({
+              type: "project.meta.update",
+              commandId: newCommandId(),
+              projectId: existing.id,
+              kind: "orchestrator",
+            } as never)
+            .catch(() => undefined);
+        }
         focusMostRecentThreadForProject(existing.id);
         finishAddingProject();
         return;
@@ -662,7 +773,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       const createdAt = new Date().toISOString();
       const title = cwd.split(/[/\\]/).findLast(isNonEmptyString) ?? cwd;
       try {
-        await api.orchestration.dispatchCommand({
+        const createCommand = {
           type: "project.create",
           commandId: newCommandId(),
           projectId,
@@ -673,11 +784,55 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
           },
           createdAt,
-        });
+        };
+        await api.orchestration.dispatchCommand(
+          (projectKind === "orchestrator"
+            ? { ...createCommand, kind: "orchestrator" }
+            : createCommand) as never,
+        );
         await handleNewThread(projectId, {
           envMode: appSettings.defaultThreadEnvMode,
         }).catch(() => undefined);
       } catch (error) {
+        if (projectKind === "orchestrator") {
+          try {
+            await api.orchestration.dispatchCommand({
+              type: "project.create",
+              commandId: newCommandId(),
+              projectId,
+              title,
+              workspaceRoot: cwd,
+              defaultModelSelection: {
+                provider: "codex",
+                model: DEFAULT_MODEL_BY_PROVIDER.codex,
+              },
+              createdAt,
+            } as never);
+            await handleNewThread(projectId, {
+              envMode: appSettings.defaultThreadEnvMode,
+            }).catch(() => undefined);
+            markProjectOrchestratorCwd(cwd);
+            finishAddingProject();
+            return;
+          } catch (retryError) {
+            const description =
+              retryError instanceof Error
+                ? retryError.message
+                : "An error occurred while adding the orchestrator.";
+            setIsAddingProject(false);
+            if (shouldBrowseForProjectImmediately) {
+              toastManager.add({
+                type: "error",
+                title: "Failed to add orchestrator",
+                description,
+              });
+            } else {
+              setAddProjectError(description);
+            }
+            return;
+          }
+        }
+
         const description =
           error instanceof Error ? error.message : "An error occurred while adding the project.";
         setIsAddingProject(false);
@@ -692,25 +847,29 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         }
         return;
       }
+      if (projectKind === "orchestrator") {
+        markProjectOrchestratorCwd(cwd);
+      }
       finishAddingProject();
     },
     [
+      appSettings.defaultThreadEnvMode,
       focusMostRecentThreadForProject,
       handleNewThread,
       isAddingProject,
+      markProjectOrchestratorCwd,
       projects,
       shouldBrowseForProjectImmediately,
-      appSettings.defaultThreadEnvMode,
     ],
   );
 
-  const handleAddProject = () => {
-    void addProjectFromPath(newCwd);
+  const handleAddProject = (projectKind: SidebarProjectKind) => {
+    void addProjectFromPath(newCwd, projectKind);
   };
 
   const canAddProject = newCwd.trim().length > 0 && !isAddingProject;
 
-  const handlePickFolder = async () => {
+  const handlePickFolder = async (projectKind: SidebarProjectKind) => {
     const api = readNativeApi();
     if (!api || isPickingFolder) return;
     setIsPickingFolder(true);
@@ -721,20 +880,21 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       // Ignore picker failures and leave the current thread selection unchanged.
     }
     if (pickedPath) {
-      await addProjectFromPath(pickedPath);
+      await addProjectFromPath(pickedPath, projectKind);
     } else if (!shouldBrowseForProjectImmediately) {
       addProjectInputRef.current?.focus();
     }
     setIsPickingFolder(false);
   };
 
-  const handleStartAddProject = () => {
+  const handleStartAddProject = (projectKind: SidebarProjectKind) => {
     setAddProjectError(null);
+    setNewProjectKind(projectKind);
     if (shouldBrowseForProjectImmediately) {
-      void handlePickFolder();
+      void handlePickFolder(projectKind);
       return;
     }
-    setAddingProject((prev) => !prev);
+    setAddingProject((current) => (current && newProjectKind === projectKind ? false : true));
   };
 
   const cancelRename = useCallback(() => {
@@ -1175,6 +1335,22 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
           projectThreads.map((thread) => threadStatuses.get(thread.id) ?? null),
         );
         const activeThreadId = routeThreadId ?? undefined;
+        const availableProjectLabels = getUniqueLabelsFromThreads(projectThreads);
+        const activeProjectLabelFilters = labelFiltersByProject.get(project.id);
+        // Apply label filters, always keeping the active thread visible even if filtered out.
+        const filteredProjectThreads =
+          activeProjectLabelFilters && activeProjectLabelFilters.size > 0
+            ? (() => {
+                const labelSelected = [...activeProjectLabelFilters];
+                const matched = filterThreadsByLabels(projectThreads, labelSelected);
+                // Ensure the currently active thread is always shown even when filtered out.
+                if (activeThreadId !== undefined && !matched.some((t) => t.id === activeThreadId)) {
+                  const pinned = projectThreads.find((t) => t.id === activeThreadId);
+                  return pinned ? [...matched, pinned] : matched;
+                }
+                return matched;
+              })()
+            : projectThreads;
         const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
         const pinnedCollapsedThread =
           !project.expanded && activeThreadId
@@ -1186,21 +1362,24 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
           hiddenThreads,
           visibleThreads: visibleProjectThreads,
         } = getVisibleThreadsForProject({
-          threads: projectThreads,
+          threads: filteredProjectThreads,
           activeThreadId,
+          allowActiveThreadsInFold: appSettings.allowActiveThreadsInFold,
           isThreadListExpanded,
-          previewLimit: THREAD_PREVIEW_LIMIT,
+          previewLimit: appSettings.maxProjectThreadsBeforeFolding,
         });
         const hiddenThreadStatus = resolveProjectStatusIndicator(
           hiddenThreads.map((thread) => threadStatuses.get(thread.id) ?? null),
         );
-        const orderedProjectThreadIds = projectThreads.map((thread) => thread.id);
+        const orderedProjectThreadIds = filteredProjectThreads.map((thread) => thread.id);
         const renderedThreads = pinnedCollapsedThread
           ? [pinnedCollapsedThread]
           : visibleProjectThreads;
-        const showEmptyThreadState = project.expanded && projectThreads.length === 0;
+        const showEmptyThreadState = project.expanded && filteredProjectThreads.length === 0;
 
         return {
+          availableProjectLabels,
+          activeProjectLabelFilters: activeProjectLabelFilters ?? null,
           hasHiddenThreads,
           hiddenThreadStatus,
           orderedProjectThreadIds,
@@ -1215,16 +1394,45 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         };
       }),
     [
+      appSettings.allowActiveThreadsInFold,
+      appSettings.maxProjectThreadsBeforeFolding,
       appSettings.sidebarThreadSortOrder,
       expandedThreadListsByProject,
+      labelFiltersByProject,
       routeThreadId,
       sortedProjects,
       visibleThreads,
     ],
   );
+  const orchestratorRenderedProjects = useMemo(
+    () =>
+      renderedProjects.filter(
+        (renderedProject) =>
+          resolveSidebarProjectKind({
+            project: renderedProject.project,
+            orchestratorProjectCwds,
+          }) === "orchestrator",
+      ),
+    [orchestratorProjectCwds, renderedProjects],
+  );
+  const regularRenderedProjects = useMemo(
+    () =>
+      renderedProjects.filter(
+        (renderedProject) =>
+          resolveSidebarProjectKind({
+            project: renderedProject.project,
+            orchestratorProjectCwds,
+          }) === "project",
+      ),
+    [orchestratorProjectCwds, renderedProjects],
+  );
+  const orderedRenderedProjects = useMemo(
+    () => [...orchestratorRenderedProjects, ...regularRenderedProjects],
+    [orchestratorRenderedProjects, regularRenderedProjects],
+  );
   const visibleSidebarThreadIds = useMemo(
-    () => getVisibleSidebarThreadIds(renderedProjects),
-    [renderedProjects],
+    () => getVisibleSidebarThreadIds(orderedRenderedProjects),
+    [orderedRenderedProjects],
   );
   const threadJumpCommandById = useMemo(() => {
     const mapping = new Map<ThreadId, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
@@ -1343,9 +1551,12 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
 
   function renderProjectItem(
     renderedProject: (typeof renderedProjects)[number],
+    projectKind: SidebarProjectKind,
     dragHandleProps: SortableProjectHandleProps | null,
   ) {
     const {
+      availableProjectLabels,
+      activeProjectLabelFilters,
       hasHiddenThreads,
       hiddenThreadStatus,
       orderedProjectThreadIds,
@@ -1358,10 +1569,12 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       shouldShowThreadPanel,
       isThreadListExpanded,
     } = renderedProject;
+    const selectedLabels = activeProjectLabelFilters ?? EMPTY_LABEL_SET;
     const renderThreadRow = (thread: (typeof projectThreads)[number]) => {
       const isActive = routeThreadId === thread.id;
       const isSelected = selectedThreadIds.has(thread.id);
       const isHighlighted = isActive || isSelected;
+      const threadLabels = getSidebarThreadLabels(thread.labels);
       const jumpLabel = threadJumpLabelById.get(thread.id) ?? null;
       const isThreadRunning =
         thread.session?.status === "running" && thread.session.activeTurnId != null;
@@ -1483,7 +1696,23 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
+                <>
+                  <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
+                  {threadLabels.length > 0 ? (
+                    <div className="flex shrink-0 items-center gap-1 overflow-hidden">
+                      {threadLabels.map((label) => (
+                        <Badge
+                          key={label}
+                          variant="outline"
+                          title={label}
+                          className="h-4 min-w-0 max-w-20 px-1 text-[9px] font-medium leading-none text-muted-foreground/80"
+                        >
+                          <span className="truncate">{label}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
             <div className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -1607,6 +1836,14 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         </SidebarMenuSubItem>
       );
     };
+    const projectIcon =
+      projectKind === "orchestrator" ? (
+        <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
+          <BotIcon className="size-3" />
+        </span>
+      ) : (
+        <ProjectFavicon cwd={project.cwd} />
+      );
 
     return (
       <>
@@ -1653,11 +1890,21 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                 }`}
               />
             )}
-            <ProjectFavicon cwd={project.cwd} />
-            <span className="flex-1 truncate text-xs font-medium text-foreground/90">
+            {projectIcon}
+            <span
+              className={`flex-1 truncate text-xs font-medium ${
+                projectKind === "orchestrator" ? "text-foreground/95" : "text-foreground/90"
+              }`}
+            >
               {project.name}
             </span>
           </SidebarMenuButton>
+          <LabelFilterMenu
+            availableLabels={availableProjectLabels}
+            selectedLabels={selectedLabels}
+            onToggleLabel={(label) => toggleLabelFilter(project.id, label)}
+            onClearLabels={() => clearLabelFilters(project.id)}
+          />
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1695,13 +1942,40 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
           ref={attachThreadListAutoAnimateRef}
           className="mx-1 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1.5 py-0"
         >
+          {selectedLabels.size > 0 && project.expanded && (
+            <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
+              <div
+                data-thread-selection-safe
+                className="flex flex-wrap items-center gap-1 px-2 py-0.5"
+              >
+                {[...selectedLabels].map((label) => (
+                  <button
+                    key={label}
+                    type="button"
+                    data-thread-selection-safe
+                    onClick={() => toggleLabelFilter(project.id, label)}
+                    className="inline-flex h-4 items-center gap-0.5 rounded-full border border-primary/40 bg-primary/8 px-1.5 text-[9px] font-medium text-primary transition-colors hover:bg-primary/16 cursor-pointer"
+                  >
+                    <span>{label}</span>
+                    <span aria-hidden="true" className="leading-none">
+                      ×
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </SidebarMenuSubItem>
+          )}
           {shouldShowThreadPanel && showEmptyThreadState ? (
             <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
               <div
                 data-thread-selection-safe
                 className="flex h-6 w-full translate-x-0 items-center px-2 text-left text-[10px] text-muted-foreground/60"
               >
-                <span>No threads yet</span>
+                <span>
+                  {selectedLabels.size > 0
+                    ? "No threads match the active filters"
+                    : "No threads yet"}
+                </span>
               </div>
             </SidebarMenuSubItem>
           ) : null}
@@ -1926,6 +2200,34 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     });
   }, []);
 
+  const toggleLabelFilter = useCallback((projectId: ProjectId, label: string) => {
+    setLabelFiltersByProject((current) => {
+      const projectLabels = current.get(projectId) ?? new Set<string>();
+      const nextProjectLabels = new Set(projectLabels);
+      if (nextProjectLabels.has(label)) {
+        nextProjectLabels.delete(label);
+      } else {
+        nextProjectLabels.add(label);
+      }
+      const next = new Map(current);
+      if (nextProjectLabels.size === 0) {
+        next.delete(projectId);
+      } else {
+        next.set(projectId, nextProjectLabels);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearLabelFilters = useCallback((projectId: ProjectId) => {
+    setLabelFiltersByProject((current) => {
+      if (!current.has(projectId)) return current;
+      const next = new Map(current);
+      next.delete(projectId);
+      return next;
+    });
+  }, []);
+
   const wordmark = (
     <div className="flex items-center gap-2">
       {!isStandaloneWindow ? <SidebarTrigger className="shrink-0 md:hidden" /> : null}
@@ -1991,9 +2293,9 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
               </SidebarGroup>
             ) : null}
             <SidebarGroup className="px-2 py-2">
-              <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
+              <div className="mb-2 flex items-center justify-between pl-2 pr-1.5">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                  Projects
+                  Workspace
                 </span>
                 <div className="flex items-center gap-1">
                   <ProjectSortMenu
@@ -2012,22 +2314,62 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                         <button
                           type="button"
                           aria-label={
-                            shouldShowProjectPathEntry ? "Cancel add project" : "Add project"
+                            shouldShowProjectPathEntry && newProjectKind === "project"
+                              ? "Cancel add project"
+                              : "Add project"
                           }
-                          aria-pressed={shouldShowProjectPathEntry}
-                          className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
-                          onClick={handleStartAddProject}
-                        />
+                          aria-pressed={shouldShowProjectPathEntry && newProjectKind === "project"}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => handleStartAddProject("project")}
+                        >
+                          <PlusIcon
+                            className={`size-3.5 transition-transform duration-150 ${
+                              shouldShowProjectPathEntry && newProjectKind === "project"
+                                ? "rotate-45"
+                                : "rotate-0"
+                            }`}
+                          />
+                          <span className="text-[11px] font-medium">Project</span>
+                        </button>
                       }
-                    >
-                      <PlusIcon
-                        className={`size-3.5 transition-transform duration-150 ${
-                          shouldShowProjectPathEntry ? "rotate-45" : "rotate-0"
-                        }`}
-                      />
-                    </TooltipTrigger>
+                    />
                     <TooltipPopup side="right">
-                      {shouldShowProjectPathEntry ? "Cancel add project" : "Add project"}
+                      {shouldShowProjectPathEntry && newProjectKind === "project"
+                        ? "Cancel add project"
+                        : "Add project"}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={
+                            shouldShowProjectPathEntry && newProjectKind === "orchestrator"
+                              ? "Cancel add orchestrator"
+                              : "Add orchestrator"
+                          }
+                          aria-pressed={
+                            shouldShowProjectPathEntry && newProjectKind === "orchestrator"
+                          }
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => handleStartAddProject("orchestrator")}
+                        >
+                          <BotIcon
+                            className={`size-3.5 transition-transform duration-150 ${
+                              shouldShowProjectPathEntry && newProjectKind === "orchestrator"
+                                ? "scale-110"
+                                : "scale-100"
+                            }`}
+                          />
+                          <span className="text-[11px] font-medium">Orchestrator</span>
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="right">
+                      {shouldShowProjectPathEntry && newProjectKind === "orchestrator"
+                        ? "Cancel add orchestrator"
+                        : "Add orchestrator"}
                     </TooltipPopup>
                   </Tooltip>
                 </div>
@@ -2038,7 +2380,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                     <button
                       type="button"
                       className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-secondary py-1.5 text-xs text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={() => void handlePickFolder()}
+                      onClick={() => void handlePickFolder(newProjectKind)}
                       disabled={isPickingFolder || isAddingProject}
                     >
                       <FolderIcon className="size-3.5" />
@@ -2053,14 +2395,18 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                           ? "border-red-500/70 focus:border-red-500"
                           : "border-border focus:border-ring"
                       }`}
-                      placeholder="/path/to/project"
+                      placeholder={
+                        newProjectKind === "orchestrator"
+                          ? "/path/to/orchestrator"
+                          : "/path/to/project"
+                      }
                       value={newCwd}
                       onChange={(event) => {
                         setNewCwd(event.target.value);
                         setAddProjectError(null);
                       }}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter") handleAddProject();
+                        if (event.key === "Enter") handleAddProject(newProjectKind);
                         if (event.key === "Escape") {
                           setAddingProject(false);
                           setAddProjectError(null);
@@ -2071,10 +2417,14 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                     <button
                       type="button"
                       className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors duration-150 hover:bg-primary/90 disabled:opacity-60"
-                      onClick={handleAddProject}
+                      onClick={() => handleAddProject(newProjectKind)}
                       disabled={!canAddProject}
                     >
-                      {isAddingProject ? "Adding..." : "Add"}
+                      {isAddingProject
+                        ? "Adding..."
+                        : newProjectKind === "orchestrator"
+                          ? "Add orchestrator"
+                          : "Add project"}
                     </button>
                   </div>
                   {addProjectError && (
@@ -2084,7 +2434,15 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                   )}
                 </div>
               )}
+            </SidebarGroup>
 
+            <SidebarGroup className="px-2 py-2">
+              <div className="mb-1 flex items-center gap-1.5 pl-2 pr-1.5">
+                <BotIcon className="size-3.5 text-fuchsia-500/85 dark:text-fuchsia-300/80" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                  Orchestrators
+                </span>
+              </div>
               {isManualProjectSorting ? (
                 <DndContext
                   sensors={projectDnDSensors}
@@ -2096,15 +2454,19 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                 >
                   <SidebarMenu>
                     <SortableContext
-                      items={renderedProjects.map((renderedProject) => renderedProject.project.id)}
+                      items={orchestratorRenderedProjects.map(
+                        (renderedProject) => renderedProject.project.id,
+                      )}
                       strategy={verticalListSortingStrategy}
                     >
-                      {renderedProjects.map((renderedProject) => (
+                      {orchestratorRenderedProjects.map((renderedProject) => (
                         <SortableProjectItem
                           key={renderedProject.project.id}
                           projectId={renderedProject.project.id}
                         >
-                          {(dragHandleProps) => renderProjectItem(renderedProject, dragHandleProps)}
+                          {(dragHandleProps) =>
+                            renderProjectItem(renderedProject, "orchestrator", dragHandleProps)
+                          }
                         </SortableProjectItem>
                       ))}
                     </SortableContext>
@@ -2112,15 +2474,67 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                 </DndContext>
               ) : (
                 <SidebarMenu ref={attachProjectListAutoAnimateRef}>
-                  {renderedProjects.map((renderedProject) => (
+                  {orchestratorRenderedProjects.map((renderedProject) => (
                     <SidebarMenuItem key={renderedProject.project.id} className="rounded-md">
-                      {renderProjectItem(renderedProject, null)}
+                      {renderProjectItem(renderedProject, "orchestrator", null)}
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              )}
+              {orchestratorRenderedProjects.length === 0 && !shouldShowProjectPathEntry && (
+                <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
+                  No orchestrators yet
+                </div>
+              )}
+            </SidebarGroup>
+
+            <SidebarGroup className="px-2 py-2 pt-0">
+              <div className="mb-1 flex items-center gap-1.5 pl-2 pr-1.5">
+                <FolderIcon className="size-3.5 text-muted-foreground/70" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                  Projects
+                </span>
+              </div>
+              {isManualProjectSorting ? (
+                <DndContext
+                  sensors={projectDnDSensors}
+                  collisionDetection={projectCollisionDetection}
+                  modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                  onDragStart={handleProjectDragStart}
+                  onDragEnd={handleProjectDragEnd}
+                  onDragCancel={handleProjectDragCancel}
+                >
+                  <SidebarMenu>
+                    <SortableContext
+                      items={regularRenderedProjects.map(
+                        (renderedProject) => renderedProject.project.id,
+                      )}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {regularRenderedProjects.map((renderedProject) => (
+                        <SortableProjectItem
+                          key={renderedProject.project.id}
+                          projectId={renderedProject.project.id}
+                        >
+                          {(dragHandleProps) =>
+                            renderProjectItem(renderedProject, "project", dragHandleProps)
+                          }
+                        </SortableProjectItem>
+                      ))}
+                    </SortableContext>
+                  </SidebarMenu>
+                </DndContext>
+              ) : (
+                <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+                  {regularRenderedProjects.map((renderedProject) => (
+                    <SidebarMenuItem key={renderedProject.project.id} className="rounded-md">
+                      {renderProjectItem(renderedProject, "project", null)}
                     </SidebarMenuItem>
                   ))}
                 </SidebarMenu>
               )}
 
-              {projects.length === 0 && !shouldShowProjectPathEntry && (
+              {regularRenderedProjects.length === 0 && !shouldShowProjectPathEntry && (
                 <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
                   No projects yet
                 </div>

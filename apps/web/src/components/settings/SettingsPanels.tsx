@@ -464,8 +464,15 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.maxProjectThreadsBeforeFolding !==
+      DEFAULT_UNIFIED_SETTINGS.maxProjectThreadsBeforeFolding
+        ? ["Project thread fold limit"]
+        : []),
       ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
         ? ["Project sidebar order"]
+        : []),
+      ...(settings.allowActiveThreadsInFold !== DEFAULT_UNIFIED_SETTINGS.allowActiveThreadsInFold
+        ? ["Active threads in fold"]
         : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
@@ -492,11 +499,13 @@ export function useSettingsRestore(onRestored?: () => void) {
     [
       areProviderSettingsDirty,
       isGitWritingModelDirty,
+      settings.allowActiveThreadsInFold,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.maxProjectThreadsBeforeFolding,
       settings.sidebarProjectSortOrder,
       settings.showGitignoredFilesInMentions,
       settings.timestampFormat,
@@ -550,6 +559,9 @@ export function GeneralSettingsPanel() {
     codex: "",
     claudeAgent: "",
   });
+  const [maxProjectThreadsBeforeFoldingInput, setMaxProjectThreadsBeforeFoldingInput] = useState(
+    String(settings.maxProjectThreadsBeforeFolding),
+  );
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
   >({});
@@ -557,6 +569,26 @@ export function GeneralSettingsPanel() {
   const refreshingRef = useRef(false);
   const queryClient = useQueryClient();
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
+
+  useEffect(() => {
+    setMaxProjectThreadsBeforeFoldingInput(String(settings.maxProjectThreadsBeforeFolding));
+  }, [settings.maxProjectThreadsBeforeFolding]);
+
+  const commitMaxProjectThreadsBeforeFolding = useCallback(() => {
+    const parsedValue = Number.parseInt(maxProjectThreadsBeforeFoldingInput, 10);
+    const nextValue = Number.isFinite(parsedValue)
+      ? Math.max(0, parsedValue)
+      : settings.maxProjectThreadsBeforeFolding;
+    setMaxProjectThreadsBeforeFoldingInput(String(nextValue));
+    if (nextValue !== settings.maxProjectThreadsBeforeFolding) {
+      updateSettings({ maxProjectThreadsBeforeFolding: nextValue });
+    }
+  }, [
+    maxProjectThreadsBeforeFoldingInput,
+    settings.maxProjectThreadsBeforeFolding,
+    updateSettings,
+  ]);
+
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -828,6 +860,43 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Max project threads before folding"
+          description="How many threads to show per project before the sidebar collapses behind Show more."
+          resetAction={
+            settings.maxProjectThreadsBeforeFolding !==
+            DEFAULT_UNIFIED_SETTINGS.maxProjectThreadsBeforeFolding ? (
+              <SettingResetButton
+                label="max project threads before folding"
+                onClick={() =>
+                  updateSettings({
+                    maxProjectThreadsBeforeFolding:
+                      DEFAULT_UNIFIED_SETTINGS.maxProjectThreadsBeforeFolding,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={1}
+              className="w-full sm:w-28"
+              value={maxProjectThreadsBeforeFoldingInput}
+              onChange={(event) => setMaxProjectThreadsBeforeFoldingInput(event.target.value)}
+              onBlur={commitMaxProjectThreadsBeforeFolding}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.currentTarget.blur();
+                }
+              }}
+              aria-label="Max project threads before folding"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Project sidebar order"
           description="Manual keeps projects sticky in their current order instead of moving the most recently messaged project to the top. When manual is selected, drag projects in the sidebar to rearrange them."
           resetAction={
@@ -869,6 +938,33 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Active threads allowed in fold"
+          description="Keep running and connecting threads visible even when they exceed the project fold limit."
+          resetAction={
+            settings.allowActiveThreadsInFold !==
+            DEFAULT_UNIFIED_SETTINGS.allowActiveThreadsInFold ? (
+              <SettingResetButton
+                label="active threads allowed in fold"
+                onClick={() =>
+                  updateSettings({
+                    allowActiveThreadsInFold: DEFAULT_UNIFIED_SETTINGS.allowActiveThreadsInFold,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.allowActiveThreadsInFold}
+              onCheckedChange={(checked) =>
+                updateSettings({ allowActiveThreadsInFold: Boolean(checked) })
+              }
+              aria-label="Keep active threads visible in folded projects"
+            />
           }
         />
 

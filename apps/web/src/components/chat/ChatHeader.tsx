@@ -1,5 +1,6 @@
 import {
   type EditorId,
+  type ProjectHook,
   type ProjectScript,
   type ResolvedKeybindingsConfig,
   type ThreadId,
@@ -10,6 +11,7 @@ import { DiffIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
+import ProjectHooksControl, { type NewProjectHookInput } from "../ProjectHooksControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
@@ -17,9 +19,11 @@ import { OpenInPicker } from "./OpenInPicker";
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
   activeThreadTitle: string;
+  activeThreadLabels?: string[] | undefined;
   activeProjectName: string | undefined;
   isGitRepo: boolean;
   openInCwd: string | null;
+  activeProjectHooks: ProjectHook[] | undefined;
   activeProjectScripts: ProjectScript[] | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -34,6 +38,9 @@ interface ChatHeaderProps {
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  onAddProjectHook: (input: NewProjectHookInput) => Promise<void>;
+  onUpdateProjectHook: (hookId: string, input: NewProjectHookInput) => Promise<void>;
+  onDeleteProjectHook: (hookId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
 }
@@ -41,9 +48,11 @@ interface ChatHeaderProps {
 export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   activeThreadTitle,
+  activeThreadLabels,
   activeProjectName,
   isGitRepo,
   openInCwd,
+  activeProjectHooks,
   activeProjectScripts,
   preferredScriptId,
   keybindings,
@@ -58,6 +67,9 @@ export const ChatHeader = memo(function ChatHeader({
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  onAddProjectHook,
+  onUpdateProjectHook,
+  onDeleteProjectHook,
   onToggleTerminal,
   onToggleDiff,
 }: ChatHeaderProps) {
@@ -81,6 +93,20 @@ export const ChatHeader = memo(function ChatHeader({
             No Git
           </Badge>
         )}
+        {activeThreadLabels && activeThreadLabels.length > 0 && (
+          <div className="hidden items-center gap-1 overflow-hidden sm:flex">
+            {activeThreadLabels.map((label) => (
+              <Badge
+                key={label}
+                variant="outline"
+                title={label}
+                className="h-5 min-w-0 max-w-24 shrink-0 px-1.5 text-[10px] font-medium text-muted-foreground/70"
+              >
+                <span className="truncate">{label}</span>
+              </Badge>
+            ))}
+          </div>
+        )}
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {activeProjectScripts && (
@@ -92,6 +118,14 @@ export const ChatHeader = memo(function ChatHeader({
             onAddScript={onAddProjectScript}
             onUpdateScript={onUpdateProjectScript}
             onDeleteScript={onDeleteProjectScript}
+          />
+        )}
+        {activeProjectHooks && (
+          <ProjectHooksControl
+            hooks={activeProjectHooks}
+            onAddHook={onAddProjectHook}
+            onUpdateHook={onUpdateProjectHook}
+            onDeleteHook={onDeleteProjectHook}
           />
         )}
         {activeProjectName && (

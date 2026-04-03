@@ -6,7 +6,10 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
+  ThreadLabels,
+  ProjectHooks,
   ProjectScript,
+  OrchestrationProjectKind,
   ThreadId,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -46,8 +49,10 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
+    kind: Schema.optional(OrchestrationProjectKind),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    hooks: Schema.fromJsonString(ProjectHooks),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -59,6 +64,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
+    labels: Schema.fromJsonString(ThreadLabels),
     modelSelection: Schema.fromJsonString(ModelSelection),
   }),
 );
@@ -147,8 +153,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          kind,
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
+          hooks_json AS "hooks",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -166,6 +174,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           project_id AS "projectId",
           title,
+          labels_json AS "labels",
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
@@ -542,8 +551,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             id: row.projectId,
             title: row.title,
             workspaceRoot: row.workspaceRoot,
+            kind: row.kind ?? "project",
             defaultModelSelection: row.defaultModelSelection,
             scripts: row.scripts,
+            hooks: row.hooks,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             deletedAt: row.deletedAt,
@@ -553,6 +564,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             id: row.threadId,
             projectId: row.projectId,
             title: row.title,
+            labels: row.labels,
             modelSelection: row.modelSelection,
             runtimeMode: row.runtimeMode,
             interactionMode: row.interactionMode,

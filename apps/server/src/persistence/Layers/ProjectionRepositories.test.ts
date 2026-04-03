@@ -27,20 +27,25 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         projectId: ProjectId.makeUnsafe("project-null-options"),
         title: "Null options project",
         workspaceRoot: "/tmp/project-null-options",
+        kind: "orchestrator",
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5.4",
         },
         scripts: [],
+        hooks: [],
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
         deletedAt: null,
       });
 
       const rows = yield* sql<{
+        readonly kind: string;
         readonly defaultModelSelection: string | null;
       }>`
-        SELECT default_model_selection_json AS "defaultModelSelection"
+        SELECT
+          kind,
+          default_model_selection_json AS "defaultModelSelection"
         FROM projection_projects
         WHERE project_id = 'project-null-options'
       `;
@@ -56,10 +61,12 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           model: "gpt-5.4",
         }),
       );
+      assert.strictEqual(row.kind, "orchestrator");
 
       const persisted = yield* projects.getById({
         projectId: ProjectId.makeUnsafe("project-null-options"),
       });
+      assert.strictEqual(Option.getOrNull(persisted)?.kind, "orchestrator");
       assert.deepStrictEqual(Option.getOrNull(persisted)?.defaultModelSelection, {
         provider: "codex",
         model: "gpt-5.4",
@@ -76,6 +83,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         threadId: ThreadId.makeUnsafe("thread-null-options"),
         projectId: ProjectId.makeUnsafe("project-null-options"),
         title: "Null options thread",
+        labels: [],
         modelSelection: {
           provider: "claudeAgent",
           model: "claude-opus-4-6",
@@ -89,6 +97,12 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         updatedAt: "2026-03-24T00:00:00.000Z",
         archivedAt: null,
         deletedAt: null,
+        orchestratorProjectId: null,
+        orchestratorThreadId: null,
+        parentThreadId: null,
+        spawnRole: null,
+        spawnedBy: null,
+        workflowId: null,
       });
 
       const rows = yield* sql<{

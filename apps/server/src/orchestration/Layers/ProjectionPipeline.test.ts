@@ -70,6 +70,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           workspaceRoot: "/tmp/project-1",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -342,6 +343,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             workspaceRoot: "/tmp/project-clear-attachments",
             defaultModelSelection: null,
             scripts: [],
+            hooks: [],
             createdAt: now,
             updatedAt: now,
           },
@@ -470,6 +472,7 @@ it.layer(
           workspaceRoot: "/tmp/project-overwrite",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -618,6 +621,7 @@ it.layer(
           workspaceRoot: "/tmp/project-rollback",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -747,6 +751,7 @@ it.layer(
           workspaceRoot: "/tmp/project-revert-files",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -955,6 +960,7 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-atta
             workspaceRoot: "/tmp/project-delete-files",
             defaultModelSelection: null,
             scripts: [],
+            hooks: [],
             createdAt: now,
             updatedAt: now,
           },
@@ -1118,6 +1124,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           workspaceRoot: "/tmp/project-a",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -1245,6 +1252,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           workspaceRoot: "/tmp/project-empty",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -1385,6 +1393,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             workspaceRoot: "/tmp/project-conflict",
             defaultModelSelection: null,
             scripts: [],
+            hooks: [],
             createdAt: "2026-02-26T13:00:00.000Z",
             updatedAt: "2026-02-26T13:00:00.000Z",
           },
@@ -1529,6 +1538,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           workspaceRoot: "/tmp/project-revert",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: "2026-02-26T12:00:00.000Z",
           updatedAt: "2026-02-26T12:00:00.000Z",
         },
@@ -1890,6 +1900,44 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         WHERE projector = 'projection.projects'
       `;
       assert.deepEqual(projectorRows, [{ lastAppliedSequence: 1 }]);
+    }),
+  );
+
+  it.effect("projects persist orchestrator kind from project create and update", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = new Date().toISOString();
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-orchestrator-project-create"),
+        projectId: ProjectId.makeUnsafe("project-orchestrator"),
+        title: "Jasper",
+        workspaceRoot: "/tmp/jasper",
+        kind: "orchestrator",
+        defaultModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+        },
+        createdAt,
+      });
+
+      yield* engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-orchestrator-project-update"),
+        projectId: ProjectId.makeUnsafe("project-orchestrator"),
+        kind: "project",
+      });
+
+      const projectRows = yield* sql<{
+        readonly kind: string;
+      }>`
+        SELECT kind
+        FROM projection_projects
+        WHERE project_id = 'project-orchestrator'
+      `;
+      assert.deepEqual(projectRows, [{ kind: "project" }]);
     }),
   );
 

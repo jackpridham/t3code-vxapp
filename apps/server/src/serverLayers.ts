@@ -38,6 +38,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { ProjectHooksLive } from "./projectHooks/Layers/ProjectHooks.ts";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -109,12 +110,16 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(checkpointStoreLayer),
   );
 
-  const runtimeServicesLayer = Layer.mergeAll(
+  const runtimeServicesBaseLayer = Layer.mergeAll(
     orchestrationLayer,
     OrchestrationProjectionSnapshotQueryLive,
     checkpointStoreLayer,
     checkpointDiffQueryLayer,
     RuntimeReceiptBusLive,
+  );
+  const runtimeServicesLayer = Layer.mergeAll(
+    runtimeServicesBaseLayer,
+    ProjectHooksLive.pipe(Layer.provideMerge(runtimeServicesBaseLayer)),
   );
   const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),

@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import type { Thread } from "../types";
+import type { Project, Thread } from "../types";
 import { cn } from "../lib/utils";
 import {
   findLatestProposedPlan,
@@ -11,9 +11,8 @@ import {
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
-type SidebarProject = {
-  id: string;
-  name: string;
+export type SidebarProjectKind = "project" | "orchestrator";
+type SidebarProject = Pick<Project, "id" | "name" | "cwd" | "kind"> & {
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
 };
@@ -159,6 +158,66 @@ export function resolveSidebarNewThreadEnvMode(input: {
   defaultEnvMode: SidebarNewThreadEnvMode;
 }): SidebarNewThreadEnvMode {
   return input.requestedEnvMode ?? input.defaultEnvMode;
+}
+
+function toNormalizedCwdSegments(cwd: string): string[] {
+  return cwd
+    .split(/[/\\]+/)
+    .map((segment) => segment.trim().toLowerCase())
+    .filter((segment) => segment.length > 0);
+}
+
+export function resolveSidebarProjectKind(input: {
+  project: SidebarProject;
+  orchestratorProjectCwds?: ReadonlySet<string> | readonly string[];
+}): SidebarProjectKind {
+  const { project } = input;
+  if (project.kind === "orchestrator" || project.kind === "project") {
+    return project.kind;
+  }
+
+  const orchestratorProjectCwds =
+    input.orchestratorProjectCwds instanceof Set
+      ? input.orchestratorProjectCwds
+      : new Set(input.orchestratorProjectCwds ?? []);
+  if (orchestratorProjectCwds.has(project.cwd)) {
+    return "orchestrator";
+  }
+
+  const normalizedName = project.name.trim().toLowerCase();
+  const normalizedSegments = toNormalizedCwdSegments(project.cwd);
+  if (normalizedName.includes("jasper") || normalizedSegments.includes("jasper")) {
+    return "orchestrator";
+  }
+
+  return "project";
+}
+
+export function partitionProjectsForSidebar<TProject extends SidebarProject>(input: {
+  projects: readonly TProject[];
+  orchestratorProjectCwds?: ReadonlySet<string> | readonly string[];
+}): {
+  orchestratorProjects: TProject[];
+  regularProjects: TProject[];
+} {
+  const orchestratorProjects: TProject[] = [];
+  const regularProjects: TProject[] = [];
+  for (const project of input.projects) {
+    const projectKind = resolveSidebarProjectKind(
+      input.orchestratorProjectCwds === undefined
+        ? { project }
+        : {
+            project,
+            orchestratorProjectCwds: input.orchestratorProjectCwds,
+          },
+    );
+    if (projectKind === "orchestrator") {
+      orchestratorProjects.push(project);
+    } else {
+      regularProjects.push(project);
+    }
+  }
+  return { orchestratorProjects, regularProjects };
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {
@@ -342,6 +401,28 @@ export function resolveThreadStatusPill(input: {
   return null;
 }
 
+export function getSidebarThreadLabels(
+  labels: Thread["labels"] | null | undefined,
+  maxLabels = 2,
+): string[] {
+  const resolvedLabels: string[] = [];
+  const seenLabels = new Set<string>();
+
+  for (const label of labels ?? []) {
+    const trimmedLabel = label.trim();
+    if (trimmedLabel.length === 0 || seenLabels.has(trimmedLabel)) {
+      continue;
+    }
+    seenLabels.add(trimmedLabel);
+    resolvedLabels.push(trimmedLabel);
+    if (resolvedLabels.length >= maxLabels) {
+      break;
+    }
+  }
+
+  return resolvedLabels;
+}
+
 export function resolveProjectStatusIndicator(
   statuses: ReadonlyArray<ThreadStatusPill | null>,
 ): ThreadStatusPill | null {
@@ -360,9 +441,37 @@ export function resolveProjectStatusIndicator(
   return highestPriorityStatus;
 }
 
-export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input: {
+export function isThreadActiveForFold(thread: Pick<Thread, "session">): boolean {
+  return thread.session?.status === "running" || thread.session?.status === "connecting";
+}
+
+export function filterThreadsByLabels<T extends Pick<Thread, "labels">>(
+  threads: readonly T[],
+  selectedLabels: readonly string[],
+): T[] {
+  if (selectedLabels.length === 0) return [...threads];
+  return threads.filter((thread) =>
+    selectedLabels.every((label) => (thread.labels ?? []).includes(label)),
+  );
+}
+
+export function getUniqueLabelsFromThreads(
+  threads: ReadonlyArray<Pick<Thread, "labels">>,
+): string[] {
+  const seen = new Set<string>();
+  for (const thread of threads) {
+    for (const label of thread.labels ?? []) {
+      const trimmed = label.trim();
+      if (trimmed.length > 0) seen.add(trimmed);
+    }
+  }
+  return [...seen].toSorted();
+}
+
+export function getVisibleThreadsForProject<T extends Pick<Thread, "id" | "session">>(input: {
   threads: readonly T[];
   activeThreadId: T["id"] | undefined;
+  allowActiveThreadsInFold: boolean;
   isThreadListExpanded: boolean;
   previewLimit: number;
 }): {
@@ -370,40 +479,48 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
   visibleThreads: T[];
   hiddenThreads: T[];
 } {
-  const { activeThreadId, isThreadListExpanded, previewLimit, threads } = input;
-  const hasHiddenThreads = threads.length > previewLimit;
+  const { activeThreadId, allowActiveThreadsInFold, isThreadListExpanded, previewLimit, threads } =
+    input;
+  const normalizedPreviewLimit = Math.max(0, previewLimit);
+  const visibleThreadIds = new Set(
+    threads.slice(0, normalizedPreviewLimit).map((thread) => thread.id),
+  );
 
-  if (!hasHiddenThreads || isThreadListExpanded) {
+  if (activeThreadId) {
+    const activeThread = threads.find((thread) => thread.id === activeThreadId);
+    if (activeThread) {
+      visibleThreadIds.add(activeThread.id);
+    }
+  }
+
+  if (allowActiveThreadsInFold) {
+    for (const thread of threads) {
+      if (isThreadActiveForFold(thread)) {
+        visibleThreadIds.add(thread.id);
+      }
+    }
+  }
+
+  const hiddenThreads = threads.filter((thread) => !visibleThreadIds.has(thread.id));
+  if (hiddenThreads.length === 0) {
     return {
-      hasHiddenThreads,
+      hasHiddenThreads: false,
       hiddenThreads: [],
       visibleThreads: [...threads],
     };
   }
 
-  const previewThreads = threads.slice(0, previewLimit);
-  if (!activeThreadId || previewThreads.some((thread) => thread.id === activeThreadId)) {
+  if (isThreadListExpanded) {
     return {
       hasHiddenThreads: true,
-      hiddenThreads: threads.slice(previewLimit),
-      visibleThreads: previewThreads,
+      hiddenThreads: [],
+      visibleThreads: [...threads],
     };
   }
-
-  const activeThread = threads.find((thread) => thread.id === activeThreadId);
-  if (!activeThread) {
-    return {
-      hasHiddenThreads: true,
-      hiddenThreads: threads.slice(previewLimit),
-      visibleThreads: previewThreads,
-    };
-  }
-
-  const visibleThreadIds = new Set([...previewThreads, activeThread].map((thread) => thread.id));
 
   return {
     hasHiddenThreads: true,
-    hiddenThreads: threads.filter((thread) => !visibleThreadIds.has(thread.id)),
+    hiddenThreads,
     visibleThreads: threads.filter((thread) => visibleThreadIds.has(thread.id)),
   };
 }

@@ -277,6 +277,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
               },
             },
             scripts: [],
+            hooks: [],
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           });
@@ -293,6 +294,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
               },
             },
             scripts: [],
+            hooks: [],
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           });
@@ -303,6 +305,7 @@ layer("016_CanonicalizeModelSelections", (it) => {
             workspaceRoot: "/tmp/project-3",
             defaultModelSelection: null,
             scripts: [],
+            hooks: [],
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           });

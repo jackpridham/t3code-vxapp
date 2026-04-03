@@ -303,8 +303,15 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         (filePath) =>
           Effect.promise(async () => {
             try {
-              const stat = await fsPromises.lstat(path.join(cwd, filePath));
-              return { filePath, isDirectory: stat.isDirectory() };
+              const lstat = await fsPromises.lstat(path.join(cwd, filePath));
+              if (lstat.isDirectory()) return { filePath, isDirectory: true };
+              if (lstat.isSymbolicLink()) {
+                // Follow the symlink — it may point to a directory (e.g. a skill linked
+                // from an external @Docs repo that is gitignored in the parent repo).
+                const resolved = await fsPromises.stat(path.join(cwd, filePath));
+                return { filePath, isDirectory: resolved.isDirectory() };
+              }
+              return { filePath, isDirectory: false };
             } catch {
               return { filePath, isDirectory: false };
             }
@@ -319,17 +326,56 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
 
       const submoduleFilePaths = yield* Effect.forEach(
         submodulePaths,
-        (submodulePath) =>
-          gitOption.value
-            .listWorkspaceFiles(path.join(cwd, submodulePath), { includeIgnored })
-            .pipe(
-              Effect.map((result) =>
-                [...result.paths]
-                  .map((p) => toPosixPath(`${submodulePath}/${p}`))
-                  .filter((p) => p.length > 0 && !isPathInIgnoredDirectory(p)),
-              ),
-              Effect.orElseSucceed(() => [] as string[]),
+        (submodulePath) => {
+          const submoduleCwd = path.join(cwd, submodulePath);
+          return gitOption.value.listWorkspaceFiles(submoduleCwd, { includeIgnored }).pipe(
+            Effect.map((result) =>
+              [...result.paths]
+                .map((p) => toPosixPath(`${submodulePath}/${p}`))
+                .filter((p) => p.length > 0 && !isPathInIgnoredDirectory(p)),
             ),
+            Effect.orElseSucceed(() => [] as string[]),
+            Effect.flatMap((gitFiles) => {
+              if (gitFiles.length > 0) return Effect.succeed(gitFiles);
+              // Non-git target (e.g. a symlink to an external directory that is not a git
+              // repo): fall back to a recursive filesystem walk so we can still index its
+              // contents and surface the directory entry itself.
+              return Effect.promise(async () => {
+                const results: string[] = [];
+                const pending: string[] = [""];
+                while (pending.length > 0) {
+                  const relDir = pending.pop()!;
+                  try {
+                    const absDir = relDir ? path.join(submoduleCwd, relDir) : submoduleCwd;
+                    const dirents = await fsPromises.readdir(absDir, { withFileTypes: true });
+                    for (const dirent of dirents) {
+                      if (!dirent.name || dirent.name === "." || dirent.name === "..") continue;
+                      const relPath = toPosixPath(
+                        relDir ? `${relDir}/${dirent.name}` : dirent.name,
+                      );
+                      const fullRelPath = toPosixPath(`${submodulePath}/${relPath}`);
+                      if (isPathInIgnoredDirectory(fullRelPath)) continue;
+                      results.push(fullRelPath);
+                      let isDir = dirent.isDirectory();
+                      if (!isDir && dirent.isSymbolicLink()) {
+                        const s = await fsPromises
+                          .stat(path.join(submoduleCwd, relPath))
+                          .catch(() => null);
+                        isDir = s?.isDirectory() ?? false;
+                      }
+                      if (isDir && !IGNORED_DIRECTORY_NAMES.has(dirent.name)) {
+                        pending.push(relPath);
+                      }
+                    }
+                  } catch {
+                    // skip unreadable directories
+                  }
+                }
+                return results;
+              });
+            }),
+          );
+        },
         { concurrency: 4 },
       );
 
@@ -341,6 +387,14 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           if (!isPathInIgnoredDirectory(directoryPath)) {
             directorySet.add(directoryPath);
           }
+        }
+      }
+
+      // Always register submodule / symlink-to-directory entries as directory nodes,
+      // even when their contents are empty or couldn't be listed.
+      for (const submodulePath of submodulePaths) {
+        if (!isPathInIgnoredDirectory(submodulePath)) {
+          directorySet.add(submodulePath);
         }
       }
 
@@ -437,7 +491,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           if (dirent.isDirectory() && IGNORED_DIRECTORY_NAMES.has(dirent.name)) {
             continue;
           }
-          if (!dirent.isDirectory() && !dirent.isFile()) {
+          if (!dirent.isDirectory() && !dirent.isFile() && !dirent.isSymbolicLink()) {
             continue;
           }
 
@@ -460,20 +514,46 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           ? new Set(yield* filterGitIgnoredPaths(cwd, candidatePaths))
           : null;
 
+      // Resolve symlink targets so they can be classified as directory or file.
+      // Node's readdir withFileTypes reports symlinks with isSymbolicLink() = true
+      // and isDirectory() = false regardless of what the link points to; we need
+      // stat (not lstat) to learn the actual target kind.
+      const symlinkCandidates = candidateEntriesByDirectory
+        .flat()
+        .filter(({ dirent }) => dirent.isSymbolicLink());
+      const symlinkResolutions = yield* Effect.forEach(
+        symlinkCandidates,
+        ({ relativePath }) =>
+          Effect.promise(async () => {
+            try {
+              const stat = await fsPromises.stat(path.join(cwd, relativePath));
+              return { relativePath, isDirectory: stat.isDirectory() };
+            } catch {
+              return { relativePath, isDirectory: false };
+            }
+          }),
+        { concurrency: WORKSPACE_SCAN_READDIR_CONCURRENCY },
+      );
+      const symlinkDirectoryPaths = new Set(
+        symlinkResolutions.filter((r) => r.isDirectory).map((r) => r.relativePath),
+      );
+
       for (const candidateEntries of candidateEntriesByDirectory) {
         for (const candidate of candidateEntries) {
           if (allowedPathSet && !allowedPathSet.has(candidate.relativePath)) {
             continue;
           }
 
+          const isDirectory =
+            candidate.dirent.isDirectory() || symlinkDirectoryPaths.has(candidate.relativePath);
           const entry = toSearchableWorkspaceEntry({
             path: candidate.relativePath,
-            kind: candidate.dirent.isDirectory() ? "directory" : "file",
+            kind: isDirectory ? "directory" : "file",
             parentPath: parentPathOf(candidate.relativePath),
           });
           entries.push(entry);
 
-          if (candidate.dirent.isDirectory()) {
+          if (isDirectory) {
             pendingDirectories.push(candidate.relativePath);
           }
 

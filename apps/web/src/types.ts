@@ -4,6 +4,7 @@ import type {
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
+  ProjectHook as ContractProjectHook,
   ProjectScript as ContractProjectScript,
   ThreadId,
   ProjectId,
@@ -22,6 +23,7 @@ export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280;
 export const DEFAULT_THREAD_TERMINAL_ID = "default";
 export const MAX_TERMINALS_PER_GROUP = 4;
+export type ProjectHook = ContractProjectHook;
 export type ProjectScript = ContractProjectScript;
 
 export interface ThreadTerminalGroup {
@@ -78,14 +80,18 @@ export interface TurnDiffSummary {
   checkpointTurnCount?: number | undefined;
 }
 
+export type ProjectKind = "project" | "orchestrator";
+
 export interface Project {
   id: ProjectId;
   name: string;
   cwd: string;
+  kind?: ProjectKind | undefined;
   defaultModelSelection: ModelSelection | null;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];
+  hooks: ProjectHook[];
 }
 
 export interface Thread {
@@ -93,6 +99,7 @@ export interface Thread {
   codexThreadId: string | null;
   projectId: ProjectId;
   title: string;
+  labels?: string[] | undefined;
   modelSelection: ModelSelection;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;

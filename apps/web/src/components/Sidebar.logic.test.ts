@@ -10,7 +10,10 @@ import {
   hasUnseenCompletion,
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
+  partitionProjectsForSidebar,
   resolveProjectStatusIndicator,
+  getSidebarThreadLabels,
+  resolveSidebarProjectKind,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -161,6 +164,53 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
+  });
+});
+
+describe("resolveSidebarProjectKind", () => {
+  it("prefers the persisted project kind when present", () => {
+    expect(
+      resolveSidebarProjectKind({
+        project: makeProject({ kind: "orchestrator" }),
+      }),
+    ).toBe("orchestrator");
+  });
+
+  it("falls back to remembered orchestrator cwd state", () => {
+    expect(
+      resolveSidebarProjectKind({
+        project: makeProject({ kind: undefined, cwd: "/home/gizmo/agents-vxapp/Jasper" }),
+        orchestratorProjectCwds: ["/home/gizmo/agents-vxapp/Jasper"],
+      }),
+    ).toBe("orchestrator");
+  });
+});
+
+describe("partitionProjectsForSidebar", () => {
+  it("splits orchestrators from regular projects while preserving relative order", () => {
+    const jasper = makeProject({
+      id: ProjectId.makeUnsafe("project-jasper"),
+      name: "Jasper",
+      cwd: "/home/gizmo/agents-vxapp/Jasper",
+      kind: "orchestrator",
+    });
+    const app = makeProject({
+      id: ProjectId.makeUnsafe("project-app"),
+      name: "t3code-vxapp",
+      cwd: "/home/gizmo/t3code-vxapp",
+    });
+    const docs = makeProject({
+      id: ProjectId.makeUnsafe("project-docs"),
+      name: "Docs",
+      cwd: "/home/gizmo/docs",
+    });
+
+    const result = partitionProjectsForSidebar({
+      projects: [app, jasper, docs],
+    });
+
+    expect(result.orchestratorProjects.map((project) => project.id)).toEqual([jasper.id]);
+    expect(result.regularProjects.map((project) => project.id)).toEqual([app.id, docs.id]);
   });
 });
 
@@ -545,6 +595,7 @@ describe("getVisibleThreadsForProject", () => {
     const result = getVisibleThreadsForProject({
       threads,
       activeThreadId: ThreadId.makeUnsafe("thread-8"),
+      allowActiveThreadsInFold: false,
       isThreadListExpanded: false,
       previewLimit: 6,
     });
@@ -574,11 +625,104 @@ describe("getVisibleThreadsForProject", () => {
     const result = getVisibleThreadsForProject({
       threads,
       activeThreadId: ThreadId.makeUnsafe("thread-8"),
+      allowActiveThreadsInFold: false,
       isThreadListExpanded: true,
       previewLimit: 6,
     });
 
     expect(result.hasHiddenThreads).toBe(true);
+    expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
+      threads.map((thread) => thread.id),
+    );
+    expect(result.hiddenThreads).toEqual([]);
+  });
+
+  it("keeps running and connecting threads visible when enabled", () => {
+    const threads = [
+      makeThread({ id: ThreadId.makeUnsafe("thread-1") }),
+      makeThread({ id: ThreadId.makeUnsafe("thread-2") }),
+      makeThread({ id: ThreadId.makeUnsafe("thread-3") }),
+      makeThread({
+        id: ThreadId.makeUnsafe("thread-4"),
+        session: {
+          provider: "codex",
+          status: "running",
+          activeTurnId: "turn-4" as never,
+          createdAt: "2026-03-09T10:03:00.000Z",
+          updatedAt: "2026-03-09T10:03:00.000Z",
+          orchestrationStatus: "running",
+        },
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("thread-5"),
+        session: {
+          provider: "codex",
+          status: "connecting",
+          createdAt: "2026-03-09T10:04:00.000Z",
+          updatedAt: "2026-03-09T10:04:00.000Z",
+          orchestrationStatus: "starting",
+        },
+      }),
+      makeThread({ id: ThreadId.makeUnsafe("thread-6") }),
+    ];
+
+    const result = getVisibleThreadsForProject({
+      threads,
+      activeThreadId: undefined,
+      allowActiveThreadsInFold: true,
+      isThreadListExpanded: false,
+      previewLimit: 3,
+    });
+
+    expect(result.hasHiddenThreads).toBe(true);
+    expect(result.visibleThreads.map((thread) => thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-1"),
+      ThreadId.makeUnsafe("thread-2"),
+      ThreadId.makeUnsafe("thread-3"),
+      ThreadId.makeUnsafe("thread-4"),
+      ThreadId.makeUnsafe("thread-5"),
+    ]);
+    expect(result.hiddenThreads.map((thread) => thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-6"),
+    ]);
+  });
+
+  it("shows all threads when every folded thread is active", () => {
+    const threads = [
+      makeThread({ id: ThreadId.makeUnsafe("thread-1") }),
+      makeThread({ id: ThreadId.makeUnsafe("thread-2") }),
+      makeThread({
+        id: ThreadId.makeUnsafe("thread-3"),
+        session: {
+          provider: "codex",
+          status: "running",
+          activeTurnId: "turn-3" as never,
+          createdAt: "2026-03-09T10:03:00.000Z",
+          updatedAt: "2026-03-09T10:03:00.000Z",
+          orchestrationStatus: "running",
+        },
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("thread-4"),
+        session: {
+          provider: "codex",
+          status: "connecting",
+          createdAt: "2026-03-09T10:04:00.000Z",
+          updatedAt: "2026-03-09T10:04:00.000Z",
+          orchestrationStatus: "starting",
+        },
+      }),
+    ];
+
+    const result = getVisibleThreadsForProject({
+      threads,
+      activeThreadId: undefined,
+      allowActiveThreadsInFold: true,
+      isThreadListExpanded: false,
+      previewLimit: 2,
+    });
+
+    expect(result.hasHiddenThreads).toBe(false);
     expect(result.visibleThreads.map((thread) => thread.id)).toEqual(
       threads.map((thread) => thread.id),
     );
@@ -600,6 +744,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     createdAt: "2026-03-09T10:00:00.000Z",
     updatedAt: "2026-03-09T10:00:00.000Z",
     scripts: [],
+    hooks: [],
     ...rest,
   };
 }
@@ -610,6 +755,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     codexThreadId: null,
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    labels: [],
     modelSelection: {
       provider: "codex",
       model: "gpt-5.4",
@@ -632,6 +778,15 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     ...overrides,
   };
 }
+
+describe("getSidebarThreadLabels", () => {
+  it("normalizes labels and limits the sidebar preview", () => {
+    expect(getSidebarThreadLabels(["  alpha ", "", "beta", "alpha", "gamma", "delta"], 2)).toEqual([
+      "alpha",
+      "beta",
+    ]);
+  });
+});
 
 describe("sortThreadsForSidebar", () => {
   it("sorts threads by the latest user message in recency mode", () => {

@@ -19,11 +19,13 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
+  orchestratorProjectCwds?: string[];
 }
 
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: ProjectId[];
+  orchestratorProjectCwds: string[];
 }
 
 export interface UiThreadState {
@@ -45,11 +47,13 @@ export interface SyncThreadInput {
 const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
+  orchestratorProjectCwds: [],
   threadLastVisitedAtById: {},
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
+const persistedOrchestratorProjectCwds = new Set<string>();
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
 
@@ -66,12 +70,21 @@ function readPersistedState(): UiState {
           continue;
         }
         hydratePersistedProjectState(JSON.parse(legacyRaw) as PersistedUiState);
-        return initialState;
+        return {
+          ...initialState,
+          orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+        };
       }
-      return initialState;
+      return {
+        ...initialState,
+        orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+      };
     }
     hydratePersistedProjectState(JSON.parse(raw) as PersistedUiState);
-    return initialState;
+    return {
+      ...initialState,
+      orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+    };
   } catch {
     return initialState;
   }
@@ -80,6 +93,7 @@ function readPersistedState(): UiState {
 function hydratePersistedProjectState(parsed: PersistedUiState): void {
   persistedExpandedProjectCwds.clear();
   persistedProjectOrderCwds.length = 0;
+  persistedOrchestratorProjectCwds.clear();
   for (const cwd of parsed.expandedProjectCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0) {
       persistedExpandedProjectCwds.add(cwd);
@@ -88,6 +102,11 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
   for (const cwd of parsed.projectOrderCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0 && !persistedProjectOrderCwds.includes(cwd)) {
       persistedProjectOrderCwds.push(cwd);
+    }
+  }
+  for (const cwd of parsed.orchestratorProjectCwds ?? []) {
+    if (typeof cwd === "string" && cwd.length > 0) {
+      persistedOrchestratorProjectCwds.add(cwd);
     }
   }
 }
@@ -112,6 +131,7 @@ function persistState(state: UiState): void {
       JSON.stringify({
         expandedProjectCwds,
         projectOrderCwds,
+        orchestratorProjectCwds: state.orchestratorProjectCwds,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -316,6 +336,20 @@ export function markThreadUnread(
   };
 }
 
+export function markProjectOrchestratorCwd(state: UiState, cwd: string): UiState {
+  const normalizedCwd = cwd.trim();
+  if (!normalizedCwd) {
+    return state;
+  }
+  if (state.orchestratorProjectCwds.includes(normalizedCwd)) {
+    return state;
+  }
+  return {
+    ...state,
+    orchestratorProjectCwds: [...state.orchestratorProjectCwds, normalizedCwd],
+  };
+}
+
 export function clearThreadUi(state: UiState, threadId: ThreadId): UiState {
   if (!(threadId in state.threadLastVisitedAtById)) {
     return state;
@@ -386,6 +420,7 @@ interface UiStateStore extends UiState {
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
   markThreadVisited: (threadId: ThreadId, visitedAt?: string) => void;
   markThreadUnread: (threadId: ThreadId, latestTurnCompletedAt: string | null | undefined) => void;
+  markProjectOrchestratorCwd: (cwd: string) => void;
   clearThreadUi: (threadId: ThreadId) => void;
   toggleProject: (projectId: ProjectId) => void;
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
@@ -400,6 +435,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => markThreadVisited(state, threadId, visitedAt)),
   markThreadUnread: (threadId, latestTurnCompletedAt) =>
     set((state) => markThreadUnread(state, threadId, latestTurnCompletedAt)),
+  markProjectOrchestratorCwd: (cwd) => set((state) => markProjectOrchestratorCwd(state, cwd)),
   clearThreadUi: (threadId) => set((state) => clearThreadUi(state, threadId)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>

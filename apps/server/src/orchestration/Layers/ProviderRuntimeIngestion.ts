@@ -27,6 +27,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -507,6 +508,7 @@ const make = Effect.fn("make")(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const projectHooksService = yield* ProjectHooksService;
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -991,6 +993,18 @@ const make = Effect.fn("make")(function* () {
           },
           createdAt: now,
         });
+
+        if (event.type === "turn.completed") {
+          yield* projectHooksService.handleTurnCompleted(event).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("provider runtime ingestion failed to run project hooks", {
+                eventId: event.eventId,
+                threadId: event.threadId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        }
       }
     }
 

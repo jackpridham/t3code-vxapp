@@ -81,6 +81,7 @@ import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolve
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
+import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -182,6 +183,7 @@ export type ServerRuntimeServices =
   | WorkspaceEntries
   | WorkspaceFileSystem
   | WorkspacePaths
+  | ProjectHooksService
   | Open
   | AnalyticsService;
 
@@ -230,6 +232,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const workspaceEntries = yield* WorkspaceEntries;
   const workspaceFileSystem = yield* WorkspaceFileSystem;
   const workspacePaths = yield* WorkspacePaths;
+  const projectHooksService = yield* ProjectHooksService;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -367,13 +370,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       { concurrency: 1 },
     );
 
-    return {
+    return yield* projectHooksService.prepareTurnStartCommand({
       ...turnStartCommand,
       message: {
         ...turnStartCommand.message,
         attachments: normalizedAttachments,
       },
-    } satisfies OrchestrationCommand;
+    });
   });
 
   // HTTP server — serves static files or redirects to Vite dev server

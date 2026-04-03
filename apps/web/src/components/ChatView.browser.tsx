@@ -242,6 +242,7 @@ function createSnapshotForTargetUser(options: {
           model: "gpt-5",
         },
         scripts: [],
+        hooks: [],
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         deletedAt: null,
@@ -252,6 +253,7 @@ function createSnapshotForTargetUser(options: {
         id: THREAD_ID,
         projectId: PROJECT_ID,
         title: "Browser test thread",
+        labels: [],
         modelSelection: {
           provider: "codex",
           model: "gpt-5",
@@ -310,6 +312,7 @@ function addThreadToSnapshot(
         id: threadId,
         projectId: PROJECT_ID,
         title: "New thread",
+        labels: [],
         modelSelection: {
           provider: "codex",
           model: "gpt-5",
@@ -357,6 +360,7 @@ function createThreadCreatedEvent(threadId: ThreadId, sequence: number): Orchest
       threadId,
       projectId: PROJECT_ID,
       title: "New thread",
+      labels: [],
       modelSelection: {
         provider: "codex",
         model: "gpt-5",

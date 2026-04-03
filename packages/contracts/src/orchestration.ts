@@ -1,5 +1,6 @@
 import { Option, Schema, SchemaIssue, Struct } from "effect";
 import { ClaudeModelOptions, CodexModelOptions } from "./model";
+import { ProjectHooks } from "./projectHooks";
 import {
   ApprovalRequestId,
   CheckpointRef,
@@ -141,12 +142,27 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+const THREAD_LABEL_MAX_LENGTH = 64;
+const THREAD_LABEL_MAX_COUNT = 16;
+
+export const ThreadLabel = TrimmedNonEmptyString.check(Schema.isMaxLength(THREAD_LABEL_MAX_LENGTH));
+export type ThreadLabel = typeof ThreadLabel.Type;
+export const ThreadLabels = Schema.Array(ThreadLabel).check(
+  Schema.isMaxLength(THREAD_LABEL_MAX_COUNT),
+);
+export type ThreadLabels = typeof ThreadLabels.Type;
+
+export const OrchestrationProjectKind = Schema.Literals(["project", "orchestrator"]);
+export type OrchestrationProjectKind = typeof OrchestrationProjectKind.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  kind: Schema.optional(OrchestrationProjectKind),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  hooks: ProjectHooks,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -274,6 +290,7 @@ export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  labels: ThreadLabels.pipe(Schema.withDecodingDefault(() => [])),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
@@ -291,6 +308,20 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  orchestratorProjectId: Schema.optional(ProjectId).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  orchestratorThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  parentThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  spawnedBy: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -308,6 +339,7 @@ export const ProjectCreateCommand = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  kind: Schema.optional(OrchestrationProjectKind),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   createdAt: IsoDateTime,
 });
@@ -318,8 +350,10 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  kind: Schema.optional(OrchestrationProjectKind),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  hooks: Schema.optional(ProjectHooks),
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -334,6 +368,7 @@ const ThreadCreateCommand = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  labels: Schema.optional(ThreadLabels),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
@@ -341,6 +376,12 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  orchestratorProjectId: Schema.optional(ProjectId),
+  orchestratorThreadId: Schema.optional(ThreadId),
+  parentThreadId: Schema.optional(ThreadId),
+  spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])),
+  spawnedBy: Schema.optional(TrimmedNonEmptyString),
+  workflowId: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
@@ -367,9 +408,16 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   title: Schema.optional(TrimmedNonEmptyString),
+  labels: Schema.optional(ThreadLabels),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  orchestratorProjectId: Schema.optional(ProjectId),
+  orchestratorThreadId: Schema.optional(ThreadId),
+  parentThreadId: Schema.optional(ThreadId),
+  spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])),
+  spawnedBy: Schema.optional(TrimmedNonEmptyString),
+  workflowId: Schema.optional(TrimmedNonEmptyString),
 });
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
@@ -407,6 +455,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
+export type ThreadTurnStartCommand = typeof ThreadTurnStartCommand.Type;
 
 const ClientThreadTurnStartCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.start"),
@@ -624,8 +673,10 @@ export const ProjectCreatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
+  kind: Schema.optional(OrchestrationProjectKind),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  hooks: ProjectHooks,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -634,8 +685,10 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
+  kind: Schema.optional(OrchestrationProjectKind),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  hooks: Schema.optional(ProjectHooks),
   updatedAt: IsoDateTime,
 });
 
@@ -648,6 +701,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  labels: ThreadLabels.pipe(Schema.withDecodingDefault(() => [])),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
   interactionMode: ProviderInteractionMode.pipe(
@@ -655,6 +709,20 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  orchestratorProjectId: Schema.optional(ProjectId).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  orchestratorThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  parentThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  spawnedBy: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -678,9 +746,16 @@ export const ThreadUnarchivedPayload = Schema.Struct({
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
   title: Schema.optional(TrimmedNonEmptyString),
+  labels: Schema.optional(ThreadLabels),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  orchestratorProjectId: Schema.optional(ProjectId),
+  orchestratorThreadId: Schema.optional(ThreadId),
+  parentThreadId: Schema.optional(ThreadId),
+  spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])),
+  spawnedBy: Schema.optional(TrimmedNonEmptyString),
+  workflowId: Schema.optional(TrimmedNonEmptyString),
   updatedAt: IsoDateTime,
 });
 

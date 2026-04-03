@@ -183,8 +183,10 @@ export function projectEvent(
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
+            kind: payload.kind ?? "project",
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
+            hooks: payload.hooks,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -213,10 +215,12 @@ export function projectEvent(
                   ...(payload.workspaceRoot !== undefined
                     ? { workspaceRoot: payload.workspaceRoot }
                     : {}),
+                  ...(payload.kind !== undefined ? { kind: payload.kind } : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
+                  ...(payload.hooks !== undefined ? { hooks: payload.hooks } : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
@@ -254,6 +258,7 @@ export function projectEvent(
             id: payload.threadId,
             projectId: payload.projectId,
             title: payload.title,
+            labels: payload.labels,
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
@@ -268,6 +273,12 @@ export function projectEvent(
             activities: [],
             checkpoints: [],
             session: null,
+            orchestratorProjectId: payload.orchestratorProjectId,
+            orchestratorThreadId: payload.orchestratorThreadId,
+            parentThreadId: payload.parentThreadId,
+            spawnRole: payload.spawnRole,
+            spawnedBy: payload.spawnedBy,
+            workflowId: payload.workflowId,
           },
           event.type,
           "thread",
@@ -320,11 +331,24 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.labels !== undefined ? { labels: payload.labels } : {}),
             ...(payload.modelSelection !== undefined
               ? { modelSelection: payload.modelSelection }
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.orchestratorProjectId !== undefined
+              ? { orchestratorProjectId: payload.orchestratorProjectId }
+              : {}),
+            ...(payload.orchestratorThreadId !== undefined
+              ? { orchestratorThreadId: payload.orchestratorThreadId }
+              : {}),
+            ...(payload.parentThreadId !== undefined
+              ? { parentThreadId: payload.parentThreadId }
+              : {}),
+            ...(payload.spawnRole !== undefined ? { spawnRole: payload.spawnRole } : {}),
+            ...(payload.spawnedBy !== undefined ? { spawnedBy: payload.spawnedBy } : {}),
+            ...(payload.workflowId !== undefined ? { workflowId: payload.workflowId } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

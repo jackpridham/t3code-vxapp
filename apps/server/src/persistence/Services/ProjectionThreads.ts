@@ -12,6 +12,7 @@ import {
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
+  ThreadLabels,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -24,6 +25,7 @@ export const ProjectionThread = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
+  labels: ThreadLabels,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -34,6 +36,12 @@ export const ProjectionThread = Schema.Struct({
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
   deletedAt: Schema.NullOr(IsoDateTime),
+  orchestratorProjectId: Schema.NullOr(ProjectId),
+  orchestratorThreadId: Schema.NullOr(ThreadId),
+  parentThreadId: Schema.NullOr(ThreadId),
+  spawnRole: Schema.NullOr(Schema.Literals(["orchestrator", "worker", "supervisor"])),
+  spawnedBy: Schema.NullOr(Schema.String),
+  workflowId: Schema.NullOr(Schema.String),
 });
 export type ProjectionThread = typeof ProjectionThread.Type;
 

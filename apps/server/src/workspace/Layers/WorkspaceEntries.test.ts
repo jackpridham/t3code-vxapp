@@ -233,6 +233,74 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect(
+      "indexes symlinked directories as directories with searchable contents (non-git)",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+
+          // Simulate a global skill directory living outside the workspace
+          const externalSkillDir = yield* makeTempDir({
+            prefix: "t3code-workspace-symlink-target-",
+          });
+          yield* writeTextFile(externalSkillDir, "find-skills/SKILL.md", "# Find skills");
+          yield* writeTextFile(externalSkillDir, "find-skills/helpers.ts", "export {};");
+
+          // Workspace with a symlink pointing to the external skill directory
+          const cwd = yield* makeTempDir({ prefix: "t3code-workspace-symlink-src-" });
+          const symlinkPath = path.join(cwd, "find-skills");
+          const targetPath = path.join(externalSkillDir, "find-skills");
+          yield* Effect.promise(() => fsPromises.symlink(targetPath, symlinkPath));
+
+          const result = yield* searchWorkspaceEntries({ cwd, query: "", limit: 100 });
+          const entries = result.entries;
+          const paths = entries.map((e) => e.path);
+
+          // The symlink itself must be indexed as a directory (not a file)
+          const skillEntry = entries.find((e) => e.path === "find-skills");
+          expect(skillEntry).toBeDefined();
+          expect(skillEntry?.kind).toBe("directory");
+
+          // Contents reachable through the symlink must be indexed
+          expect(paths).toContain("find-skills/SKILL.md");
+          expect(paths).toContain("find-skills/helpers.ts");
+        }),
+    );
+
+    it.effect("indexes gitignored symlinked directories when includeIgnored is true (git)", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+
+        // External directory acting as the global skill source
+        const externalSkillDir = yield* makeTempDir({
+          prefix: "t3code-workspace-symlink-gi-target-",
+        });
+        yield* writeTextFile(externalSkillDir, "SKILL.md", "# My skill");
+
+        // Git workspace with a gitignored symlink pointing to the external skill
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-symlink-gi-src-", git: true });
+        yield* writeTextFile(cwd, ".gitignore", "my-skill\n");
+        yield* writeTextFile(cwd, "src/index.ts", "export {};");
+        const symlinkPath = path.join(cwd, "my-skill");
+        yield* Effect.promise(() => fsPromises.symlink(externalSkillDir, symlinkPath));
+
+        // Without includeIgnored the symlink is excluded
+        const excluded = yield* searchWorkspaceEntries({ cwd, query: "", limit: 100 });
+        expect(excluded.entries.map((e) => e.path)).not.toContain("my-skill");
+
+        // With includeIgnored the symlink must appear as a directory
+        const included = yield* searchWorkspaceEntries({
+          cwd,
+          query: "",
+          limit: 100,
+          includeIgnored: true,
+        });
+        const skillEntry = included.entries.find((e) => e.path === "my-skill");
+        expect(skillEntry?.kind).toBe("directory");
+        expect(included.entries.map((e) => e.path)).toContain("my-skill/SKILL.md");
+      }),
+    );
+
     it.effect("indexes @-prefixed directories as directories with searchable contents", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-at-dir-fs-" });

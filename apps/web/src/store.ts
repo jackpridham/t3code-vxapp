@@ -81,6 +81,33 @@ function mapProjectScripts(scripts: ReadonlyArray<Project["scripts"][number]>): 
   return scripts.map((script) => ({ ...script }));
 }
 
+function mapProjectHooks(hooks: ReadonlyArray<Project["hooks"][number]>): Project["hooks"] {
+  return hooks.map((hook) => ({
+    ...hook,
+    selectors: {
+      providers: [...hook.selectors.providers],
+      interactionModes: [...hook.selectors.interactionModes],
+      runtimeModes: [...hook.selectors.runtimeModes],
+      turnStates: [...hook.selectors.turnStates],
+    },
+    ...("output" in hook
+      ? {
+          output: {
+            ...hook.output,
+          },
+        }
+      : {}),
+  }));
+}
+
+type OrchestrationThreadWithLabels = OrchestrationThread & {
+  labels?: readonly string[] | undefined;
+};
+
+function mapThreadLabels(labels?: readonly string[] | null): string[] {
+  return [...(labels ?? [])];
+}
+
 function mapSession(session: OrchestrationSession): Thread["session"] {
   return {
     provider: toLegacyProvider(session.providerName),
@@ -141,12 +168,13 @@ function mapTurnDiffSummary(
   };
 }
 
-function mapThread(thread: OrchestrationThread): Thread {
+function mapThread(thread: OrchestrationThreadWithLabels): Thread {
   return {
     id: thread.id,
     codexThreadId: null,
     projectId: thread.projectId,
     title: thread.title,
+    labels: mapThreadLabels(thread.labels),
     modelSelection: normalizeModelSelection(thread.modelSelection),
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
@@ -171,12 +199,14 @@ function mapProject(project: OrchestrationReadModel["projects"][number]): Projec
     id: project.id,
     name: project.title,
     cwd: project.workspaceRoot,
+    kind: project.kind,
     defaultModelSelection: project.defaultModelSelection
       ? normalizeModelSelection(project.defaultModelSelection)
       : null,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
+    hooks: mapProjectHooks(project.hooks),
   };
 }
 
@@ -404,7 +434,9 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
   const projects = readModel.projects
     .filter((project) => project.deletedAt === null)
     .map(mapProject);
-  const threads = readModel.threads.filter((thread) => thread.deletedAt === null).map(mapThread);
+  const threads = readModel.threads
+    .filter((thread) => thread.deletedAt === null)
+    .map((thread) => mapThread(thread as OrchestrationThreadWithLabels));
   return {
     ...state,
     projects,
@@ -424,8 +456,10 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         id: event.payload.projectId,
         title: event.payload.title,
         workspaceRoot: event.payload.workspaceRoot,
+        kind: event.payload.kind,
         defaultModelSelection: event.payload.defaultModelSelection,
         scripts: event.payload.scripts,
+        hooks: event.payload.hooks,
         createdAt: event.payload.createdAt,
         updatedAt: event.payload.updatedAt,
         deletedAt: null,
@@ -444,6 +478,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         ...project,
         ...(event.payload.title !== undefined ? { name: event.payload.title } : {}),
         ...(event.payload.workspaceRoot !== undefined ? { cwd: event.payload.workspaceRoot } : {}),
+        ...(event.payload.kind !== undefined ? { kind: event.payload.kind } : {}),
         ...(event.payload.defaultModelSelection !== undefined
           ? {
               defaultModelSelection: event.payload.defaultModelSelection
@@ -453,6 +488,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           : {}),
         ...(event.payload.scripts !== undefined
           ? { scripts: mapProjectScripts(event.payload.scripts) }
+          : {}),
+        ...(event.payload.hooks !== undefined
+          ? { hooks: mapProjectHooks(event.payload.hooks) }
           : {}),
         updatedAt: event.payload.updatedAt,
       }));
@@ -466,10 +504,12 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
 
     case "thread.created": {
       const existing = state.threads.find((thread) => thread.id === event.payload.threadId);
+      const threadLabels = (event.payload as { labels?: readonly string[] | undefined }).labels;
       const nextThread = mapThread({
         id: event.payload.threadId,
         projectId: event.payload.projectId,
         title: event.payload.title,
+        labels: mapThreadLabels(threadLabels ?? []),
         modelSelection: event.payload.modelSelection,
         runtimeMode: event.payload.runtimeMode,
         interactionMode: event.payload.interactionMode,
@@ -516,9 +556,11 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     }
 
     case "thread.meta-updated": {
+      const threadLabels = (event.payload as { labels?: readonly string[] | undefined }).labels;
       const threads = updateThread(state.threads, event.payload.threadId, (thread) => ({
         ...thread,
         ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+        ...(threadLabels !== undefined ? { labels: mapThreadLabels(threadLabels) } : {}),
         ...(event.payload.modelSelection !== undefined
           ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }
           : {}),

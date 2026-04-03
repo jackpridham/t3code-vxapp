@@ -33,6 +33,7 @@ function makeSnapshot(input: {
         workspaceRoot: input.workspaceRoot,
         defaultModelSelection: null,
         scripts: [],
+        hooks: [],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
         deletedAt: null,
@@ -43,6 +44,7 @@ function makeSnapshot(input: {
         id: input.threadId,
         projectId: input.projectId,
         title: "Thread",
+        labels: [],
         modelSelection: {
           provider: "codex",
           model: "gpt-5-codex",

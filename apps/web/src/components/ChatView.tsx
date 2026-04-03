@@ -4,6 +4,7 @@ import {
   type ClaudeCodeEffort,
   type MessageId,
   type ModelSelection,
+  type ProjectHook,
   type ProjectScript,
   type ProviderKind,
   type ProjectEntry,
@@ -114,6 +115,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
+import { type NewProjectHookInput } from "./ProjectHooksControl";
 import {
   commandForProjectScript,
   nextProjectScriptId,
@@ -122,6 +124,7 @@ import {
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
+import { nextProjectHookId } from "~/projectHooks";
 import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
@@ -1685,14 +1688,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
     pendingPullRequestSetupRequest,
     runProjectScript,
   ]);
-  const persistProjectScripts = useCallback(
+  const persistProjectMeta = useCallback(
     async (input: {
       projectId: ProjectId;
-      projectCwd: string;
-      previousScripts: ProjectScript[];
-      nextScripts: ProjectScript[];
+      scripts?: ProjectScript[];
+      hooks?: ProjectHook[];
       keybinding?: string | null;
-      keybindingCommand: KeybindingCommand;
+      keybindingCommand?: KeybindingCommand;
     }) => {
       const api = readNativeApi();
       if (!api) return;
@@ -1701,13 +1703,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
         type: "project.meta.update",
         commandId: newCommandId(),
         projectId: input.projectId,
-        scripts: input.nextScripts,
+        ...(input.scripts !== undefined ? { scripts: input.scripts } : {}),
+        ...(input.hooks !== undefined ? { hooks: input.hooks } : {}),
       });
 
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding: input.keybinding,
-        command: input.keybindingCommand,
-      });
+      const keybindingRule =
+        input.keybindingCommand === undefined
+          ? null
+          : decodeProjectScriptKeybindingRule({
+              keybinding: input.keybinding,
+              command: input.keybindingCommand,
+            });
 
       if (isElectron && keybindingRule) {
         await api.server.upsertKeybinding(keybindingRule);
@@ -1739,16 +1745,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ]
         : [...activeProject.scripts, nextScript];
 
-      await persistProjectScripts({
+      await persistProjectMeta({
         projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
+        scripts: nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(nextId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, persistProjectMeta],
   );
   const updateProjectScript = useCallback(
     async (scriptId: string, input: NewProjectScriptInput) => {
@@ -1773,16 +1777,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
             : script,
       );
 
-      await persistProjectScripts({
+      await persistProjectMeta({
         projectId: activeProject.id,
-        projectCwd: activeProject.cwd,
-        previousScripts: activeProject.scripts,
-        nextScripts,
+        scripts: nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(scriptId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, persistProjectMeta],
   );
   const deleteProjectScript = useCallback(
     async (scriptId: string) => {
@@ -1792,11 +1794,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
 
       try {
-        await persistProjectScripts({
+        await persistProjectMeta({
           projectId: activeProject.id,
-          projectCwd: activeProject.cwd,
-          previousScripts: activeProject.scripts,
-          nextScripts,
+          scripts: nextScripts,
           keybinding: null,
           keybindingCommand: commandForProjectScript(scriptId),
         });
@@ -1812,7 +1812,46 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       }
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, persistProjectMeta],
+  );
+  const saveProjectHook = useCallback(
+    async (input: NewProjectHookInput) => {
+      if (!activeProject) return;
+      const nextHook: ProjectHook = {
+        id: nextProjectHookId(
+          input.name,
+          activeProject.hooks.map((hook) => hook.id),
+        ),
+        ...input,
+      };
+      await persistProjectMeta({
+        projectId: activeProject.id,
+        hooks: [...activeProject.hooks, nextHook],
+      });
+    },
+    [activeProject, persistProjectMeta],
+  );
+  const updateProjectHook = useCallback(
+    async (hookId: string, input: NewProjectHookInput) => {
+      if (!activeProject) return;
+      await persistProjectMeta({
+        projectId: activeProject.id,
+        hooks: activeProject.hooks.map((hook) =>
+          hook.id === hookId ? { id: hookId, ...input } : hook,
+        ),
+      });
+    },
+    [activeProject, persistProjectMeta],
+  );
+  const deleteProjectHook = useCallback(
+    async (hookId: string) => {
+      if (!activeProject) return;
+      await persistProjectMeta({
+        projectId: activeProject.id,
+        hooks: activeProject.hooks.filter((hook) => hook.id !== hookId),
+      });
+    },
+    [activeProject, persistProjectMeta],
   );
 
   const handleRuntimeModeChange = useCallback(
@@ -3767,9 +3806,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         <ChatHeader
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}
+          activeThreadLabels={activeThread.labels}
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
+          activeProjectHooks={activeProject?.hooks}
           activeProjectScripts={activeProject?.scripts}
           preferredScriptId={
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
@@ -3788,6 +3829,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
+          onAddProjectHook={saveProjectHook}
+          onUpdateProjectHook={updateProjectHook}
+          onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />

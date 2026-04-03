@@ -383,8 +383,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             projectId: event.payload.projectId,
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
+            kind: event.payload.kind ?? "project",
             defaultModelSelection: event.payload.defaultModelSelection,
             scripts: event.payload.scripts,
+            hooks: event.payload.hooks,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -404,10 +406,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.workspaceRoot !== undefined
               ? { workspaceRoot: event.payload.workspaceRoot }
               : {}),
+            ...(event.payload.kind !== undefined ? { kind: event.payload.kind } : {}),
             ...(event.payload.defaultModelSelection !== undefined
               ? { defaultModelSelection: event.payload.defaultModelSelection }
               : {}),
             ...(event.payload.scripts !== undefined ? { scripts: event.payload.scripts } : {}),
+            ...(event.payload.hooks !== undefined ? { hooks: event.payload.hooks } : {}),
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -442,6 +446,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
             projectId: event.payload.projectId,
             title: event.payload.title,
+            labels: event.payload.labels,
             modelSelection: event.payload.modelSelection,
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
@@ -452,6 +457,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
             deletedAt: null,
+            orchestratorProjectId: event.payload.orchestratorProjectId ?? null,
+            orchestratorThreadId: event.payload.orchestratorThreadId ?? null,
+            parentThreadId: event.payload.parentThreadId ?? null,
+            spawnRole: event.payload.spawnRole ?? null,
+            spawnedBy: event.payload.spawnedBy ?? null,
+            workflowId: event.payload.workflowId ?? null,
           });
           return;
 
@@ -495,12 +506,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+            ...(event.payload.labels !== undefined ? { labels: event.payload.labels } : {}),
             ...(event.payload.modelSelection !== undefined
               ? { modelSelection: event.payload.modelSelection }
               : {}),
             ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
+              : {}),
+            ...(event.payload.orchestratorProjectId !== undefined
+              ? { orchestratorProjectId: event.payload.orchestratorProjectId }
+              : {}),
+            ...(event.payload.orchestratorThreadId !== undefined
+              ? { orchestratorThreadId: event.payload.orchestratorThreadId }
+              : {}),
+            ...(event.payload.parentThreadId !== undefined
+              ? { parentThreadId: event.payload.parentThreadId }
+              : {}),
+            ...(event.payload.spawnRole !== undefined
+              ? { spawnRole: event.payload.spawnRole }
+              : {}),
+            ...(event.payload.spawnedBy !== undefined
+              ? { spawnedBy: event.payload.spawnedBy }
+              : {}),
+            ...(event.payload.workflowId !== undefined
+              ? { workflowId: event.payload.workflowId }
               : {}),
             updatedAt: event.payload.updatedAt,
           });

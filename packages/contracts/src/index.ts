@@ -10,5 +10,6 @@ export * from "./server";
 export * from "./settings";
 export * from "./git";
 export * from "./orchestration";
+export * from "./projectHooks";
 export * from "./editor";
 export * from "./project";

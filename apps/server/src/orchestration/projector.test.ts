@@ -56,6 +56,7 @@ describe("orchestration projector", () => {
             threadId: "thread-1",
             projectId: "project-1",
             title: "demo",
+            labels: [" orchestrator ", "worker"],
             modelSelection: {
               provider: "codex",
               model: "gpt-5-codex",
@@ -76,6 +77,7 @@ describe("orchestration projector", () => {
         id: "thread-1",
         projectId: "project-1",
         title: "demo",
+        labels: ["orchestrator", "worker"],
         modelSelection: {
           provider: "codex",
           model: "gpt-5-codex",
@@ -96,6 +98,79 @@ describe("orchestration projector", () => {
         session: null,
       },
     ]);
+  });
+
+  it("applies thread.meta-updated labels and preserves them when omitted", async () => {
+    const now = new Date().toISOString();
+    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            labels: ["initial"],
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    const updated = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "thread.meta-updated",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: later,
+          commandId: "cmd-thread-update",
+          payload: {
+            threadId: "thread-1",
+            labels: ["worker", "orchestrator"],
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+    expect(updated.threads[0]?.labels).toEqual(["worker", "orchestrator"]);
+
+    const preserved = await Effect.runPromise(
+      projectEvent(
+        updated,
+        makeEvent({
+          sequence: 3,
+          type: "thread.meta-updated",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: later,
+          commandId: "cmd-thread-update-2",
+          payload: {
+            threadId: "thread-1",
+            title: "demo-2",
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+    expect(preserved.threads[0]?.labels).toEqual(["worker", "orchestrator"]);
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {

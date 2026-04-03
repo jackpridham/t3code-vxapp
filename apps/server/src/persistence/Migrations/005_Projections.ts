@@ -22,6 +22,7 @@ export default Effect.gen(function* () {
       thread_id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       title TEXT NOT NULL,
+      labels_json TEXT NOT NULL DEFAULT '[]',
       model TEXT NOT NULL,
       branch TEXT,
       worktree_path TEXT,

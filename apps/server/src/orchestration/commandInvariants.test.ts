@@ -33,6 +33,7 @@ const readModel: OrchestrationReadModel = {
         model: "gpt-5-codex",
       },
       scripts: [],
+      hooks: [],
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -46,6 +47,7 @@ const readModel: OrchestrationReadModel = {
         model: "gpt-5-codex",
       },
       scripts: [],
+      hooks: [],
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -56,6 +58,7 @@ const readModel: OrchestrationReadModel = {
       id: ThreadId.makeUnsafe("thread-1"),
       projectId: ProjectId.makeUnsafe("project-a"),
       title: "Thread A",
+      labels: [],
       modelSelection: {
         provider: "codex",
         model: "gpt-5-codex",
@@ -79,6 +82,7 @@ const readModel: OrchestrationReadModel = {
       id: ThreadId.makeUnsafe("thread-2"),
       projectId: ProjectId.makeUnsafe("project-b"),
       title: "Thread B",
+      labels: [],
       modelSelection: {
         provider: "codex",
         model: "gpt-5-codex",

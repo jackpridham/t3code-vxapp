@@ -9,6 +9,7 @@ import {
   OrchestrationEvent,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationThread,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
@@ -33,6 +34,7 @@ const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
 const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
+const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
@@ -99,6 +101,43 @@ it.effect("trims branded ids and command string fields at decode boundaries", ()
       provider: "codex",
       model: "gpt-5.2",
     });
+  }),
+);
+
+it.effect("decodes thread.create and thread.meta.update labels with trimming", () =>
+  Effect.gen(function* () {
+    const created = yield* decodeOrchestrationCommand({
+      type: "thread.create",
+      commandId: "cmd-thread-create",
+      threadId: "thread-1",
+      projectId: "project-1",
+      title: " Thread Title ",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      labels: [" orchestrator ", "worker"],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual((created as { labels: readonly string[] }).labels, [
+      "orchestrator",
+      "worker",
+    ]);
+
+    const updated = yield* decodeOrchestrationCommand({
+      type: "thread.meta.update",
+      commandId: "cmd-thread-update",
+      threadId: "thread-1",
+      labels: [" worker ", " orchestrator "],
+    });
+    assert.deepStrictEqual((updated as { labels: readonly string[] }).labels, [
+      "worker",
+      "orchestrator",
+    ]);
   }),
 );
 
@@ -214,6 +253,37 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.modelSelection.provider, "codex");
+    assert.deepStrictEqual(parsed.labels, []);
+  }),
+);
+
+it.effect("decodes thread snapshots with default labels", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationThread({
+      id: "thread-1",
+      projectId: "project-1",
+      title: "Thread title",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      messages: [],
+      activities: [],
+      checkpoints: [],
+      session: null,
+    });
+
+    assert.deepStrictEqual(parsed.labels, []);
+    assert.deepStrictEqual(parsed.proposedPlans, []);
   }),
 );
 
@@ -228,6 +298,34 @@ it.effect("decodes thread.meta-updated payloads with explicit provider", () =>
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.modelSelection?.provider, "claudeAgent");
+  }),
+);
+
+it.effect("decodes thread label payloads", () =>
+  Effect.gen(function* () {
+    const created = yield* decodeThreadCreatedPayload({
+      threadId: "thread-1",
+      projectId: "project-1",
+      title: "Thread title",
+      labels: [" orchestrator ", " jasper "],
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const updated = yield* decodeThreadMetaUpdatedPayload({
+      threadId: "thread-1",
+      labels: [" worker ", " codex "],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(created.labels, ["orchestrator", "jasper"]);
+    assert.deepStrictEqual(updated.labels, ["worker", "codex"]);
   }),
 );
 
@@ -473,5 +571,147 @@ it.effect("preserves proposed plan implementation metadata when present", () =>
     });
     assert.strictEqual(parsed.implementedAt, "2026-01-02T00:00:00.000Z");
     assert.strictEqual(parsed.implementationThreadId, "thread-2");
+  }),
+);
+
+it.effect("decodes thread.create command with lineage metadata", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.create",
+      commandId: "cmd-lineage-1",
+      threadId: "thread-worker-1",
+      projectId: "project-1",
+      title: "Worker Thread",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      orchestratorProjectId: "project-1",
+      orchestratorThreadId: "thread-orch-1",
+      parentThreadId: "thread-orch-1",
+      spawnRole: "worker",
+      spawnedBy: "jasper",
+      workflowId: "workflow-abc",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.type, "thread.create");
+    if (parsed.type !== "thread.create") return;
+    assert.strictEqual(parsed.orchestratorProjectId, "project-1");
+    assert.strictEqual(parsed.orchestratorThreadId, "thread-orch-1");
+    assert.strictEqual(parsed.parentThreadId, "thread-orch-1");
+    assert.strictEqual(parsed.spawnRole, "worker");
+    assert.strictEqual(parsed.spawnedBy, "jasper");
+    assert.strictEqual(parsed.workflowId, "workflow-abc");
+  }),
+);
+
+it.effect("decodes thread.meta.update command with lineage metadata", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.meta.update",
+      commandId: "cmd-lineage-meta-1",
+      threadId: "thread-worker-1",
+      orchestratorProjectId: "project-1",
+      orchestratorThreadId: "thread-orch-1",
+      parentThreadId: "thread-orch-1",
+      spawnRole: "supervisor",
+      spawnedBy: "jasper",
+      workflowId: "workflow-xyz",
+    });
+    assert.strictEqual(parsed.type, "thread.meta.update");
+    if (parsed.type !== "thread.meta.update") return;
+    assert.strictEqual(parsed.orchestratorProjectId, "project-1");
+    assert.strictEqual(parsed.orchestratorThreadId, "thread-orch-1");
+    assert.strictEqual(parsed.parentThreadId, "thread-orch-1");
+    assert.strictEqual(parsed.spawnRole, "supervisor");
+    assert.strictEqual(parsed.spawnedBy, "jasper");
+    assert.strictEqual(parsed.workflowId, "workflow-xyz");
+  }),
+);
+
+it.effect("defaults lineage fields to undefined when omitted from thread.created payload", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadCreatedPayload({
+      threadId: "thread-plain-1",
+      projectId: "project-1",
+      title: "Plain Thread",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.orchestratorProjectId, undefined);
+    assert.strictEqual(parsed.orchestratorThreadId, undefined);
+    assert.strictEqual(parsed.parentThreadId, undefined);
+    assert.strictEqual(parsed.spawnRole, undefined);
+    assert.strictEqual(parsed.spawnedBy, undefined);
+    assert.strictEqual(parsed.workflowId, undefined);
+  }),
+);
+
+it.effect("OrchestrationThread schema includes lineage fields with undefined defaults", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationThread({
+      id: "thread-legacy-1",
+      projectId: "project-1",
+      title: "Legacy Thread",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      messages: [],
+      activities: [],
+      checkpoints: [],
+      session: null,
+    });
+    // Legacy threads without lineage fields should decode with undefined defaults
+    assert.strictEqual(parsed.orchestratorProjectId, undefined);
+    assert.strictEqual(parsed.orchestratorThreadId, undefined);
+    assert.strictEqual(parsed.parentThreadId, undefined);
+    assert.strictEqual(parsed.spawnRole, undefined);
+    assert.strictEqual(parsed.spawnedBy, undefined);
+    assert.strictEqual(parsed.workflowId, undefined);
+
+    // Now decode a thread that carries full lineage
+    const withLineage = yield* decodeOrchestrationThread({
+      id: "thread-worker-2",
+      projectId: "project-1",
+      title: "Worker Thread",
+      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      messages: [],
+      activities: [],
+      checkpoints: [],
+      session: null,
+      orchestratorProjectId: "project-1",
+      orchestratorThreadId: "thread-orch-1",
+      parentThreadId: "thread-orch-1",
+      spawnRole: "worker",
+      spawnedBy: "jasper",
+      workflowId: "workflow-abc",
+    });
+    assert.strictEqual(withLineage.orchestratorProjectId, "project-1");
+    assert.strictEqual(withLineage.orchestratorThreadId, "thread-orch-1");
+    assert.strictEqual(withLineage.parentThreadId, "thread-orch-1");
+    assert.strictEqual(withLineage.spawnRole, "worker");
+    assert.strictEqual(withLineage.spawnedBy, "jasper");
+    assert.strictEqual(withLineage.workflowId, "workflow-abc");
   }),
 );

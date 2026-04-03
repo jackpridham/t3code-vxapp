@@ -43,6 +43,10 @@
     "./String": {
       "types": "./src/String.ts",
       "import": "./src/String.ts"
+    },
+    "./projectHooks": {
+      "types": "./src/projectHooks.ts",
+      "import": "./src/projectHooks.ts"
     }
   },
   "scripts": {

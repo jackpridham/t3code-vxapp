@@ -12,6 +12,7 @@
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  NonNegativeInt,
   ServerSettings,
   ServerSettingsPatch,
   ServerConfig,
@@ -202,6 +203,10 @@ export function buildLegacyClientSettingsMigrationPatch(
 ): Partial<DeepMutable<ClientSettings>> {
   const patch: Partial<DeepMutable<ClientSettings>> = {};
 
+  if (Predicate.isBoolean(legacySettings.allowActiveThreadsInFold)) {
+    patch.allowActiveThreadsInFold = legacySettings.allowActiveThreadsInFold;
+  }
+
   if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {
     patch.confirmThreadArchive = legacySettings.confirmThreadArchive;
   }
@@ -212,6 +217,10 @@ export function buildLegacyClientSettingsMigrationPatch(
 
   if (Predicate.isBoolean(legacySettings.diffWordWrap)) {
     patch.diffWordWrap = legacySettings.diffWordWrap;
+  }
+
+  if (Schema.is(NonNegativeInt)(legacySettings.maxProjectThreadsBeforeFolding)) {
+    patch.maxProjectThreadsBeforeFolding = legacySettings.maxProjectThreadsBeforeFolding;
   }
 
   if (Predicate.isBoolean(legacySettings.showGitignoredFilesInMentions)) {

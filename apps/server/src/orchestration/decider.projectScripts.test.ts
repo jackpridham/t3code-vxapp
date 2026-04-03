@@ -17,6 +17,29 @@ const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
 
 describe("decider project scripts", () => {
+  it("defaults project.create kind to project", async () => {
+    const now = new Date().toISOString();
+    const readModel = createEmptyReadModel(now);
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cmd-project-create-kind-default"),
+          projectId: asProjectId("project-kind-default"),
+          title: "Kind Default",
+          workspaceRoot: "/tmp/project-kind-default",
+          createdAt: now,
+        },
+        readModel,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("project.created");
+    expect((event.payload as { kind?: string }).kind).toBe("project");
+  });
+
   it("emits empty scripts on project.create", async () => {
     const now = new Date().toISOString();
     const readModel = createEmptyReadModel(now);
@@ -61,6 +84,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/scripts",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -94,6 +118,183 @@ describe("decider project scripts", () => {
     expect((event.payload as { scripts?: unknown[] }).scripts).toEqual(scripts);
   });
 
+  it("propagates orchestrator kind in project.meta.update payload", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const readModel = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-kind"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-kind"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-kind"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-kind"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-kind"),
+          title: "Kind",
+          workspaceRoot: "/tmp/project-kind",
+          kind: "project",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "project.meta.update",
+          commandId: CommandId.makeUnsafe("cmd-project-update-kind"),
+          projectId: asProjectId("project-kind"),
+          kind: "orchestrator",
+        },
+        readModel,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("project.meta-updated");
+    expect((event.payload as { kind?: string }).kind).toBe("orchestrator");
+  });
+
+  it("propagates thread.create labels into thread.created payload", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-labels"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-labels"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-labels"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-labels"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-labels"),
+          title: "Project",
+          workspaceRoot: "/tmp/project-labels",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("cmd-thread-create-labels"),
+          threadId: ThreadId.makeUnsafe("thread-labels"),
+          projectId: asProjectId("project-labels"),
+          title: "Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          labels: ["orchestrator", "worker"],
+          createdAt: now,
+        },
+        readModel: withProject,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("thread.created");
+    expect((event.payload as { labels?: string[] }).labels).toEqual(["orchestrator", "worker"]);
+  });
+
+  it("propagates thread.meta.update labels into thread.meta-updated payload", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-labels-update"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-labels-update"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-labels-update"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-labels-update"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-labels-update"),
+          title: "Project",
+          workspaceRoot: "/tmp/project-labels-update",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-labels-update"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-labels-update"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-create-labels-update"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-create-labels-update"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-labels-update"),
+          projectId: asProjectId("project-labels-update"),
+          title: "Thread",
+          labels: ["initial"],
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.meta.update",
+          commandId: CommandId.makeUnsafe("cmd-thread-update-labels"),
+          threadId: ThreadId.makeUnsafe("thread-labels-update"),
+          labels: ["worker", "orchestrator"],
+        },
+        readModel,
+      }),
+    );
+
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("thread.meta-updated");
+    expect((event.payload as { labels?: string[] }).labels).toEqual(["worker", "orchestrator"]);
+  });
+
   it("emits user message and turn-start-requested events for thread.turn.start", async () => {
     const now = new Date().toISOString();
     const initial = createEmptyReadModel(now);
@@ -115,6 +316,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -136,6 +338,7 @@ describe("decider project scripts", () => {
           threadId: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread",
+          labels: [],
           modelSelection: {
             provider: "codex",
             model: "gpt-5-codex",
@@ -224,6 +427,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -245,6 +449,7 @@ describe("decider project scripts", () => {
           threadId: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread",
+          labels: [],
           modelSelection: {
             provider: "codex",
             model: "gpt-5-codex",
@@ -306,6 +511,7 @@ describe("decider project scripts", () => {
           workspaceRoot: "/tmp/project",
           defaultModelSelection: null,
           scripts: [],
+          hooks: [],
           createdAt: now,
           updatedAt: now,
         },
@@ -327,6 +533,7 @@ describe("decider project scripts", () => {
           threadId: ThreadId.makeUnsafe("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread",
+          labels: [],
           modelSelection: {
             provider: "codex",
             model: "gpt-5-codex",
