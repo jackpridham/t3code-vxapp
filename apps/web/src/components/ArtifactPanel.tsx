@@ -14,6 +14,7 @@ import { readNativeApi } from "../nativeApi";
 import {
   discoverThreadArtifacts,
   readArtifactContent,
+  titleFromFilename,
   type DiscoveredArtifact,
 } from "../artifactDiscovery";
 import { useStore } from "../store";
@@ -80,7 +81,7 @@ export function ArtifactPanel() {
 
   // ── Content loading: load artifact when path changes ──────────────────────
   useEffect(() => {
-    if (!artifactPanelPath || !worktreePath) {
+    if (!artifactPanelPath) {
       setContentState({ status: "idle" });
       return;
     }
@@ -123,9 +124,15 @@ export function ArtifactPanel() {
       ? (artifactPanelArtifacts.find((a) => a.path === artifactPanelPath) ?? null)
       : null;
 
-  const panelTitle = activeArtifact?.title ?? "Artifact";
+  const panelTitle = activeArtifact?.title ??
+    (artifactPanelPath
+      ? titleFromFilename(artifactPanelPath.slice(artifactPanelPath.lastIndexOf("/") + 1))
+      : "Artifact");
   const activeCwd =
-    activeThread?.worktreePath ?? (activeThread ? undefined : undefined);
+    activeThread?.worktreePath ??
+    (artifactPanelPath
+      ? artifactPanelPath.slice(0, artifactPanelPath.lastIndexOf("/"))
+      : undefined);
 
   return (
     <Sheet open={artifactPanelOpen} onOpenChange={(open) => !open && closeArtifactPanel()}>

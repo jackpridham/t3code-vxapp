@@ -247,11 +247,8 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onArtifactLinkClick }: C
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
 
-        // Route @Docs/@Scratch/*.md links to the ArtifactPanel (if handler provided)
-        const isArtifactLink =
-          onArtifactLinkClick != null &&
-          targetPath.toLowerCase().endsWith(".md") &&
-          targetPath.includes("@Docs/@Scratch/");
+        // Route all resolved file links to the ArtifactPanel (if handler provided)
+        const isArtifactLink = onArtifactLinkClick != null;
 
         return (
           <a

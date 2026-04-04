@@ -33,7 +33,10 @@ import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { skillQueryKeys } from "../lib/skillReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
-import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
+import {
+  deriveOrchestrationBatchEffects,
+  processEventNotifications,
+} from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { isSidebarWindowPath } from "../lib/sidebarWindow";
 
@@ -177,6 +180,9 @@ function EventRouter() {
     let disposed = false;
     const recovery = createOrchestrationRecoveryCoordinator();
     let needsProviderInvalidation = false;
+    // Suppress notifications during initial hydration (snapshot + replay recovery).
+    // Only fire notifications for real-time domain events after bootstrap completes.
+    let notificationsReady = false;
 
     const reconcileSnapshotDerivedState = () => {
       const threads = useStore.getState().threads;
@@ -238,6 +244,12 @@ function EventRouter() {
       }
 
       applyOrchestrationEvents(nextEvents);
+
+      // Fire user notifications for real-time events only (skip during hydration)
+      if (notificationsReady) {
+        processEventNotifications(nextEvents);
+      }
+
       if (needsProjectUiSync) {
         const projects = useStore.getState().projects;
         syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
@@ -347,6 +359,9 @@ function EventRouter() {
         if (disposed) {
           return;
         }
+        // Enable notifications now that hydration is complete.
+        // Only real-time domain events from here forward will trigger toasts.
+        notificationsReady = true;
 
         if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
           return;

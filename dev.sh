@@ -87,6 +87,8 @@ sleep 3
 export NODE_ENV=development
 export PORT=$WEB_PORT
 export VITE_HMR_HOST="${HOST_IP}"
-export VITE_WS_URL="ws://${HOST_IP}:${SERVER_PORT}"
+# Proxy WS through Vite so browser only needs port 5733 (3773 is blocked by UFW)
+export VITE_WS_PROXY_PORT="${SERVER_PORT}"
+export VITE_WS_URL="ws://${HOST_IP}:${WEB_PORT}/ws"
 cd "${REPO_ROOT}/apps/web"
 exec npx vite --host 0.0.0.0

@@ -53,6 +53,19 @@ export default defineConfig({
       // Defaults to localhost for Electron BrowserWindow reliability.
       host: process.env.VITE_HMR_HOST ?? "localhost",
     },
+    // Proxy WebSocket upgrade requests so the browser only needs the Vite
+    // port (avoids firewall issues when the bun server port is blocked).
+    ...(process.env.VITE_WS_PROXY_PORT
+      ? {
+          proxy: {
+            "/ws": {
+              target: `http://localhost:${process.env.VITE_WS_PROXY_PORT}`,
+              ws: true,
+              rewriteWsOrigin: true,
+            },
+          },
+        }
+      : {}),
   },
   build: {
     outDir: "dist",

@@ -183,27 +183,42 @@ export async function discoverThreadArtifacts(
 // ── Content loading ───────────────────────────────────────────────────────────
 
 /**
- * Load the text content of an artifact given its absolute path.
- * Resolves it as a relative path within the worktree.
+ * Load the text content of a file given its absolute path.
+ *
+ * When `worktreePath` is provided and the file resides within it, the
+ * worktree root is used as `cwd` with a relative sub-path. Otherwise the
+ * file's parent directory is used as `cwd` with the basename as the
+ * relative path — this allows reading any file on the server filesystem
+ * without requiring a worktree context.
  */
 export async function readArtifactContent(
-  worktreePath: string,
+  worktreePath: string | null,
   absolutePath: string,
 ): Promise<string> {
   const api = readNativeApi();
   if (!api) throw new Error("Native API not available");
 
-  const normalizedWorktree = worktreePath.replace(/[/\\]+$/, "") + "/";
-  if (!absolutePath.startsWith(normalizedWorktree)) {
-    throw new Error(
-      `Artifact path "${absolutePath}" is not within worktree "${worktreePath}"`,
-    );
+  let cwd: string;
+  let relativePath: string;
+
+  if (worktreePath) {
+    const normalizedWorktree = worktreePath.replace(/[/\\]+$/, "") + "/";
+    if (absolutePath.startsWith(normalizedWorktree)) {
+      cwd = worktreePath;
+      relativePath = absolutePath.slice(normalizedWorktree.length);
+    } else {
+      // File is outside the worktree — use its parent directory
+      const lastSlash = absolutePath.lastIndexOf("/");
+      cwd = lastSlash > 0 ? absolutePath.slice(0, lastSlash) : "/";
+      relativePath = lastSlash > 0 ? absolutePath.slice(lastSlash + 1) : absolutePath;
+    }
+  } else {
+    // No worktree — use file's parent directory
+    const lastSlash = absolutePath.lastIndexOf("/");
+    cwd = lastSlash > 0 ? absolutePath.slice(0, lastSlash) : "/";
+    relativePath = lastSlash > 0 ? absolutePath.slice(lastSlash + 1) : absolutePath;
   }
 
-  const relativePath = absolutePath.slice(normalizedWorktree.length);
-  const result = await api.projects.readFile({
-    cwd: worktreePath,
-    relativePath,
-  });
+  const result = await api.projects.readFile({ cwd, relativePath });
   return result.content;
 }

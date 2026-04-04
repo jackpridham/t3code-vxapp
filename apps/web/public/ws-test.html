@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head><title>T3 WS Test</title></head>
+<body>
+<h2>T3 WebSocket Diagnostic</h2>
+<pre id="log"></pre>
+<script>
+const log = (msg) => {
+  document.getElementById('log').textContent += new Date().toISOString().slice(11,23) + ' ' + msg + '\n';
+  console.log(msg);
+};
+
+const wsUrl = 'ws://' + location.host + '/ws';
+log('Connecting to: ' + wsUrl);
+
+const ws = new WebSocket(wsUrl);
+ws.onopen = () => {
+  log('✓ Connected');
+  ws.send(JSON.stringify({id:'1', body:{_tag:'orchestration.getSnapshot'}}));
+  log('→ Sent getSnapshot request');
+};
+ws.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  if (data.channel === 'server.welcome') {
+    log('✓ Welcome received: bootstrapProjectId=' + (data.data.bootstrapProjectId || 'none'));
+  } else if (data.id === '1') {
+    const r = data.result;
+    if (r) {
+      log('✓ Snapshot received: ' + (e.data.length/1024).toFixed(1) + ' KB');
+      log('  Projects: ' + (r.projects||[]).length);
+      log('  Threads: ' + (r.threads||[]).length);
+      (r.projects||[]).forEach(p => log('    - ' + p.title + ' (' + p.id.slice(0,8) + ')'));
+    } else {
+      log('✗ Error: ' + JSON.stringify(data.error));
+    }
+  }
+};
+ws.onerror = () => log('✗ WebSocket ERROR');
+ws.onclose = (e) => log('✗ WebSocket CLOSED: code=' + e.code + ' reason=' + e.reason);
+</script>
+</body>
+</html>
