@@ -185,13 +185,25 @@ export async function discoverThreadArtifacts(
 /**
  * Load the text content of an artifact given its absolute path.
  * Resolves it as a relative path within the worktree.
- *
- * TODO: Implement once projects.readFile API is added to the contracts and server.
- * For now, returns a placeholder message.
  */
 export async function readArtifactContent(
-  _worktreePath: string,
+  worktreePath: string,
   absolutePath: string,
 ): Promise<string> {
-  return `*Content loading not yet available.*\n\nPath: \`${absolutePath}\``;
+  const api = readNativeApi();
+  if (!api) throw new Error("Native API not available");
+
+  const normalizedWorktree = worktreePath.replace(/[/\\]+$/, "") + "/";
+  if (!absolutePath.startsWith(normalizedWorktree)) {
+    throw new Error(
+      `Artifact path "${absolutePath}" is not within worktree "${worktreePath}"`,
+    );
+  }
+
+  const relativePath = absolutePath.slice(normalizedWorktree.length);
+  const result = await api.projects.readFile({
+    cwd: worktreePath,
+    relativePath,
+  });
+  return result.content;
 }

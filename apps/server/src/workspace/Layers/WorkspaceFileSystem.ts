@@ -1,8 +1,10 @@
 import { Effect, FileSystem, Layer, Path } from "effect";
 
+import { PROJECT_READ_FILE_MAX_BYTES } from "@t3tools/contracts";
 import {
   WorkspaceFileSystem,
   WorkspaceFileSystemError,
+  WorkspaceReadFileTooLargeError,
   type WorkspaceFileSystemShape,
 } from "../Services/WorkspaceFileSystem.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
@@ -49,7 +51,54 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     yield* workspaceEntries.invalidate(input.cwd);
     return { relativePath: target.relativePath };
   });
-  return { writeFile } satisfies WorkspaceFileSystemShape;
+
+  const readFile: WorkspaceFileSystemShape["readFile"] = Effect.fn(
+    "WorkspaceFileSystem.readFile",
+  )(function* (input) {
+    const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+      workspaceRoot: input.cwd,
+      relativePath: input.relativePath,
+    });
+
+    const stat = yield* fileSystem.stat(target.absolutePath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new WorkspaceFileSystemError({
+            cwd: input.cwd,
+            relativePath: input.relativePath,
+            operation: "workspaceFileSystem.readFile.stat",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+
+    if (stat.size > PROJECT_READ_FILE_MAX_BYTES) {
+      return yield* new WorkspaceReadFileTooLargeError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+        sizeBytes: Number(stat.size),
+        maxBytes: PROJECT_READ_FILE_MAX_BYTES,
+      });
+    }
+
+    const content = yield* fileSystem.readFileString(target.absolutePath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new WorkspaceFileSystemError({
+            cwd: input.cwd,
+            relativePath: input.relativePath,
+            operation: "workspaceFileSystem.readFile",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+
+    return { content };
+  });
+
+  return { writeFile, readFile } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);

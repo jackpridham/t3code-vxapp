@@ -9,7 +9,7 @@
 import { Schema, ServiceMap } from "effect";
 import type { Effect } from "effect";
 
-import type { ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
+import type { ProjectReadFileInput, ProjectReadFileResult, ProjectWriteFileInput, ProjectWriteFileResult } from "@t3tools/contracts";
 import { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
 
 export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceFileSystemError>()(
@@ -20,6 +20,16 @@ export class WorkspaceFileSystemError extends Schema.TaggedErrorClass<WorkspaceF
     operation: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class WorkspaceReadFileTooLargeError extends Schema.TaggedErrorClass<WorkspaceReadFileTooLargeError>()(
+  "WorkspaceReadFileTooLargeError",
+  {
+    cwd: Schema.String,
+    relativePath: Schema.String,
+    sizeBytes: Schema.Number,
+    maxBytes: Schema.Number,
   },
 ) {}
 
@@ -38,6 +48,12 @@ export interface WorkspaceFileSystemShape {
   ) => Effect.Effect<
     ProjectWriteFileResult,
     WorkspaceFileSystemError | WorkspacePathOutsideRootError
+  >;
+  readonly readFile: (
+    input: ProjectReadFileInput,
+  ) => Effect.Effect<
+    ProjectReadFileResult,
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError | WorkspaceReadFileTooLargeError
   >;
 }
 
