@@ -41,6 +41,7 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   server: {
+    ...(process.env.VITE_HOST === "true" ? { host: "0.0.0.0" } : {}),
     port,
     strictPort: true,
     hmr: {

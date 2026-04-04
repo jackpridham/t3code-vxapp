@@ -1728,6 +1728,9 @@ export function NotificationsSettingsPanel() {
   const setPrefs = useUiStateStore((s) => s.setNotificationPreferences);
   const toggleEvent = useUiStateStore((s) => s.toggleNotificationEvent);
 
+  const notificationsSupported = typeof globalThis.Notification !== "undefined";
+  const notificationPermission = notificationsSupported ? Notification.permission : "unsupported";
+
   return (
     <SettingsPageContainer>
       <SettingsSection title="Notifications">
@@ -1743,10 +1746,17 @@ export function NotificationsSettingsPanel() {
         />
         <SettingsRow
           title="Desktop notifications"
-          description="Show native OS notifications (requires browser permission)"
+          description={
+            !notificationsSupported
+              ? "Not available \u2014 requires HTTPS or localhost (browser security restriction)"
+              : notificationPermission === "denied"
+                ? "Blocked by browser \u2014 reset notification permissions in browser settings"
+                : "Show native OS notifications (requires browser permission)"
+          }
           control={
             <Switch
               checked={prefs.desktopNotifications}
+              disabled={!notificationsSupported || notificationPermission === "denied"}
               onCheckedChange={(checked) => {
                 setPrefs({ desktopNotifications: checked });
                 if (checked) requestDesktopNotificationPermission();

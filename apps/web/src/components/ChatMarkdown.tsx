@@ -23,6 +23,7 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import { useUiStateStore } from "../uiStateStore";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -238,6 +239,7 @@ function SuspenseShikiCodeBlock({
 function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const openArtifactPanel = useUiStateStore((s) => s.openArtifactPanel);
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
@@ -246,6 +248,11 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
 
+        // Route @Docs/@Scratch/*.md links to the ArtifactPanel
+        const isArtifactLink =
+          targetPath.toLowerCase().endsWith(".md") &&
+          targetPath.includes("@Docs/@Scratch/");
+
         return (
           <a
             {...props}
@@ -253,6 +260,10 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
+              if (isArtifactLink) {
+                openArtifactPanel(targetPath);
+                return;
+              }
               const api = readNativeApi();
               if (api) {
                 void openInPreferredEditor(api, targetPath);
@@ -285,7 +296,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [cwd, diffThemeName, isStreaming, openArtifactPanel],
   );
 
   return (
