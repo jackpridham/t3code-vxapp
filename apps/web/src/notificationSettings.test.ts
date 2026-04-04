@@ -76,8 +76,12 @@ describe("mergeNotificationPreferences", () => {
     expect(result.events["turn-completed"]).toBe(false);
     expect(result.events["thread-created"]).toBe(true);
     // Other events fall back to defaults
-    expect(result.events["turn-failed"]).toBe(DEFAULT_NOTIFICATION_PREFERENCES.events["turn-failed"]);
-    expect(result.events["hook-failure"]).toBe(DEFAULT_NOTIFICATION_PREFERENCES.events["hook-failure"]);
+    expect(result.events["turn-failed"]).toBe(
+      DEFAULT_NOTIFICATION_PREFERENCES.events["turn-failed"],
+    );
+    expect(result.events["hook-failure"]).toBe(
+      DEFAULT_NOTIFICATION_PREFERENCES.events["hook-failure"],
+    );
   });
 
   it("ignores non-boolean events values", () => {

@@ -308,7 +308,11 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onArtifactLinkClick }: C
 
   return (
     <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={urlTransform} components={markdownComponents}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        urlTransform={urlTransform}
+        components={markdownComponents}
+      >
         {text}
       </ReactMarkdown>
     </div>

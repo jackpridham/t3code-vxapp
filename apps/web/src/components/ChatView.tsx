@@ -3325,7 +3325,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         parentThreadId: activeThread.id,
         spawnRole: "worker" as const,
         spawnedBy: "t3code-web",
-        orchestratorProjectId: (activeThread.orchestratorProjectId ?? activeProject.id) as ProjectId,
+        orchestratorProjectId: (activeThread.orchestratorProjectId ??
+          activeProject.id) as ProjectId,
         orchestratorThreadId: (activeThread.orchestratorThreadId ?? activeThread.id) as ThreadId,
       })
       .then(() => {

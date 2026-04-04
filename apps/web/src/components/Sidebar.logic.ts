@@ -608,12 +608,7 @@ export function getFallbackThreadIdAfterDelete<
 /** Minimal shape needed for lineage grouping — works with Thread and SidebarThreadSnapshot. */
 type LineageGroupable = Pick<
   Thread,
-  | "id"
-  | "createdAt"
-  | "orchestratorThreadId"
-  | "parentThreadId"
-  | "spawnRole"
-  | "workflowId"
+  "id" | "createdAt" | "orchestratorThreadId" | "parentThreadId" | "spawnRole" | "workflowId"
 >;
 
 export interface ThreadLineageGroup<T extends LineageGroupable = Thread> {
@@ -668,7 +663,10 @@ export function groupThreadsByLineage<T extends LineageGroupable>(
 }
 
 export function threadHasLineage(
-  thread: Pick<Thread, "orchestratorProjectId" | "orchestratorThreadId" | "parentThreadId" | "spawnRole" | "workflowId">,
+  thread: Pick<
+    Thread,
+    "orchestratorProjectId" | "orchestratorThreadId" | "parentThreadId" | "spawnRole" | "workflowId"
+  >,
 ): boolean {
   return !!(
     thread.orchestratorProjectId ||

@@ -6,6 +6,7 @@ import type { DiscoveredArtifact } from "./artifactDiscovery";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   mergeNotificationPreferences,
+  type NotificationEventType,
   type NotificationPreferences,
 } from "./notificationSettings";
 
@@ -102,12 +103,14 @@ function readPersistedState(): UiState {
           ...initialState,
           orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
           labelFiltersByProject: persistedLabelFiltersByProject,
+          notificationPreferences: persistedNotificationPreferences,
         };
       }
       return {
         ...initialState,
         orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
         labelFiltersByProject: persistedLabelFiltersByProject,
+        notificationPreferences: persistedNotificationPreferences,
       };
     }
     const parsed = JSON.parse(raw) as PersistedUiState;
@@ -129,6 +132,7 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
   persistedProjectOrderCwds.length = 0;
   persistedOrchestratorProjectCwds.clear();
   persistedLabelFiltersByProject = {};
+  persistedNotificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
   for (const cwd of parsed.expandedProjectCwds ?? []) {
     if (typeof cwd === "string" && cwd.length > 0) {
       persistedExpandedProjectCwds.add(cwd);
@@ -156,6 +160,7 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
       }
     }
   }
+  persistedNotificationPreferences = mergeNotificationPreferences(parsed.notificationPreferences);
 }
 
 function persistState(state: UiState): void {
@@ -481,6 +486,26 @@ export function setProjectExpanded(
   };
 }
 
+// ── Artifact panel ─────────────────────────────────────────────────────────
+
+export function openArtifactPanel(state: UiState, path: string): UiState {
+  if (state.artifactPanelOpen && state.artifactPanelPath === path) {
+    return state;
+  }
+  return { ...state, artifactPanelOpen: true, artifactPanelPath: path };
+}
+
+export function closeArtifactPanel(state: UiState): UiState {
+  if (!state.artifactPanelOpen && state.artifactPanelPath === null) {
+    return state;
+  }
+  return { ...state, artifactPanelOpen: false, artifactPanelPath: null };
+}
+
+export function setDiscoveredArtifacts(state: UiState, artifacts: DiscoveredArtifact[]): UiState {
+  return { ...state, artifactPanelArtifacts: artifacts };
+}
+
 export function reorderProjects(
   state: UiState,
   draggedProjectId: ProjectId,
@@ -506,6 +531,30 @@ export function reorderProjects(
   };
 }
 
+// ── Notification preferences ────────────────────────────────────────────────
+
+export function setNotificationPreferences(
+  state: UiState,
+  prefs: Partial<NotificationPreferences>,
+): UiState {
+  const merged = mergeNotificationPreferences({ ...state.notificationPreferences, ...prefs });
+  return { ...state, notificationPreferences: merged };
+}
+
+export function toggleNotificationEvent(
+  state: UiState,
+  eventType: NotificationEventType,
+  enabled: boolean,
+): UiState {
+  return {
+    ...state,
+    notificationPreferences: {
+      ...state.notificationPreferences,
+      events: { ...state.notificationPreferences.events, [eventType]: enabled },
+    },
+  };
+}
+
 interface UiStateStore extends UiState {
   syncProjects: (projects: readonly SyncProjectInput[]) => void;
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
@@ -519,13 +568,11 @@ interface UiStateStore extends UiState {
   toggleProjectLabelFilter: (projectId: string, label: string) => void;
   clearProjectLabelFilters: (projectId: string) => void;
   setProjectLabelFilter: (projectId: string, labels: string[]) => void;
-  // Notification preferences
-  setNotificationPreferences: (prefs: Partial<NotificationPreferences>) => void;
-  toggleNotificationEvent: (eventType: string, enabled: boolean) => void;
-  // Artifact panel
   openArtifactPanel: (path: string) => void;
   closeArtifactPanel: () => void;
   setDiscoveredArtifacts: (artifacts: DiscoveredArtifact[]) => void;
+  setNotificationPreferences: (prefs: Partial<NotificationPreferences>) => void;
+  toggleNotificationEvent: (eventType: NotificationEventType, enabled: boolean) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -549,38 +596,12 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => clearProjectLabelFilters(state, projectId)),
   setProjectLabelFilter: (projectId, labels) =>
     set((state) => setProjectLabelFilter(state, projectId, labels)),
-  // Notification preferences
-  setNotificationPreferences: (prefs) =>
-    set((state) => ({
-      ...state,
-      notificationPreferences: { ...state.notificationPreferences, ...prefs },
-    })),
+  openArtifactPanel: (path) => set((state) => openArtifactPanel(state, path)),
+  closeArtifactPanel: () => set((state) => closeArtifactPanel(state)),
+  setDiscoveredArtifacts: (artifacts) => set((state) => setDiscoveredArtifacts(state, artifacts)),
+  setNotificationPreferences: (prefs) => set((state) => setNotificationPreferences(state, prefs)),
   toggleNotificationEvent: (eventType, enabled) =>
-    set((state) => ({
-      ...state,
-      notificationPreferences: {
-        ...state.notificationPreferences,
-        events: { ...state.notificationPreferences.events, [eventType]: enabled },
-      },
-    })),
-  // Artifact panel
-  openArtifactPanel: (path) =>
-    set((state) => ({
-      ...state,
-      artifactPanelOpen: true,
-      artifactPanelPath: path,
-    })),
-  closeArtifactPanel: () =>
-    set((state) => ({
-      ...state,
-      artifactPanelOpen: false,
-      artifactPanelPath: null,
-    })),
-  setDiscoveredArtifacts: (artifacts) =>
-    set((state) => ({
-      ...state,
-      artifactPanelArtifacts: artifacts,
-    })),
+    set((state) => toggleNotificationEvent(state, eventType, enabled)),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

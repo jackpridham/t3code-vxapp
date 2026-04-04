@@ -79,6 +79,7 @@ function RootRouteView() {
             <Outlet />
           </AppSidebarLayout>
         )}
+        <ArtifactPanel />
       </AnchoredToastProvider>
     </ToastProvider>
   );

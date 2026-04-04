@@ -52,51 +52,52 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  const readFile: WorkspaceFileSystemShape["readFile"] = Effect.fn(
-    "WorkspaceFileSystem.readFile",
-  )(function* (input) {
-    const target = yield* workspacePaths.resolveRelativePathWithinRoot({
-      workspaceRoot: input.cwd,
-      relativePath: input.relativePath,
-    });
-
-    const stat = yield* fileSystem.stat(target.absolutePath).pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkspaceFileSystemError({
-            cwd: input.cwd,
-            relativePath: input.relativePath,
-            operation: "workspaceFileSystem.readFile.stat",
-            detail: cause.message,
-            cause,
-          }),
-      ),
-    );
-
-    if (stat.size > PROJECT_READ_FILE_MAX_BYTES) {
-      return yield* new WorkspaceReadFileTooLargeError({
-        cwd: input.cwd,
+  const readFile: WorkspaceFileSystemShape["readFile"] = Effect.fn("WorkspaceFileSystem.readFile")(
+    function* (input) {
+      const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+        workspaceRoot: input.cwd,
         relativePath: input.relativePath,
-        sizeBytes: Number(stat.size),
-        maxBytes: PROJECT_READ_FILE_MAX_BYTES,
       });
-    }
 
-    const content = yield* fileSystem.readFileString(target.absolutePath).pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkspaceFileSystemError({
-            cwd: input.cwd,
-            relativePath: input.relativePath,
-            operation: "workspaceFileSystem.readFile",
-            detail: cause.message,
-            cause,
-          }),
-      ),
-    );
+      const stat = yield* fileSystem.stat(target.absolutePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceFileSystem.readFile.stat",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
 
-    return { content };
-  });
+      const actualBytes = Number(stat.size);
+      if (actualBytes > PROJECT_READ_FILE_MAX_BYTES) {
+        return yield* new WorkspaceReadFileTooLargeError({
+          cwd: input.cwd,
+          relativePath: input.relativePath,
+          maxBytes: PROJECT_READ_FILE_MAX_BYTES,
+          actualBytes,
+        });
+      }
+
+      const content = yield* fileSystem.readFileString(target.absolutePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemError({
+              cwd: input.cwd,
+              relativePath: input.relativePath,
+              operation: "workspaceFileSystem.readFile",
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
+
+      return { content };
+    },
+  );
 
   return { writeFile, readFile } satisfies WorkspaceFileSystemShape;
 });

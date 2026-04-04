@@ -4,9 +4,8 @@ import { PositiveInt, TrimmedNonEmptyString, TrimmedString } from "./baseSchemas
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
-const PROJECT_READ_FILE_MAX_BYTES = 1_048_576; // 1 MiB
-
-export { PROJECT_READ_FILE_MAX_BYTES };
+/** Maximum file size for readFile (2 MiB). */
+export const PROJECT_READ_FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,

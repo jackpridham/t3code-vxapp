@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
+import { dispatchNotification } from "./notificationDispatch";
 import { type ChatMessage, type Project, type Thread } from "./types";
 
 // ── State ────────────────────────────────────────────────────────────
@@ -536,6 +537,12 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       const threads = existing
         ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
         : [...state.threads, nextThread];
+      dispatchNotification(
+        "thread-created",
+        "info",
+        "Thread created",
+        event.payload.title ?? event.payload.threadId,
+      );
       return { ...state, threads };
     }
 
@@ -589,6 +596,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         ...(event.payload.workflowId !== undefined ? { workflowId: event.payload.workflowId } : {}),
         updatedAt: event.payload.updatedAt,
       }));
+      if (threads !== state.threads && threadLabels !== undefined) {
+        dispatchNotification("label-changed", "info", "Labels updated");
+      }
       return threads === state.threads ? state : { ...state, threads };
     }
 
@@ -771,6 +781,19 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
             : thread.latestTurn,
         updatedAt: event.occurredAt,
       }));
+      if (
+        threads !== state.threads &&
+        event.payload.session.status === "error" &&
+        event.payload.session.lastError !== null &&
+        /rate.?limit/i.test(event.payload.session.lastError)
+      ) {
+        dispatchNotification(
+          "thread-rate-limited",
+          "warning",
+          "Rate limited",
+          event.payload.session.lastError,
+        );
+      }
       return threads === state.threads ? state : { ...state, threads };
     }
 
@@ -861,6 +884,24 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           updatedAt: event.occurredAt,
         };
       });
+      if (threads !== state.threads) {
+        const turnThread = threads.find((t) => t.id === event.payload.threadId);
+        if (event.payload.status === "ready") {
+          dispatchNotification(
+            "turn-completed",
+            "info",
+            "Turn completed",
+            turnThread?.title ?? event.payload.threadId,
+          );
+        } else if (event.payload.status === "error") {
+          dispatchNotification(
+            "turn-failed",
+            "error",
+            "Turn failed",
+            turnThread?.title ?? event.payload.threadId,
+          );
+        }
+      }
       return threads === state.threads ? state : { ...state, threads };
     }
 
@@ -931,6 +972,18 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           updatedAt: event.occurredAt,
         };
       });
+      if (
+        threads !== state.threads &&
+        event.payload.activity.tone === "error" &&
+        /hook/i.test(event.payload.activity.kind)
+      ) {
+        dispatchNotification(
+          "hook-failure",
+          "error",
+          "Hook failed",
+          event.payload.activity.summary,
+        );
+      }
       return threads === state.threads ? state : { ...state, threads };
     }
 

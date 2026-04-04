@@ -2026,10 +2026,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                   {group.parentThread ? (
                     renderThreadRow(group.parentThread)
                   ) : (
-                    <SidebarMenuSubItem
-                      className="w-full"
-                      data-thread-selection-safe
-                    >
+                    <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
                       <div
                         data-thread-selection-safe
                         className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted-foreground/60"

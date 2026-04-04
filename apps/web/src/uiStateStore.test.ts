@@ -1,11 +1,15 @@
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_NOTIFICATION_PREFERENCES } from "./notificationSettings";
 import {
   clearProjectLabelFilters,
   clearThreadUi,
+  closeArtifactPanel,
   markThreadUnread,
+  openArtifactPanel,
   reorderProjects,
+  setDiscoveredArtifacts,
   setProjectExpanded,
   setProjectLabelFilter,
   syncProjects,
@@ -13,7 +17,6 @@ import {
   toggleProjectLabelFilter,
   type UiState,
 } from "./uiStateStore";
-import { DEFAULT_NOTIFICATION_PREFERENCES } from "./notificationSettings";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -270,5 +273,79 @@ describe("uiStateStore pure functions", () => {
 
     expect(next.labelFiltersByProject[projectA]).toEqual(["worker"]);
     expect(next.labelFiltersByProject[projectB]).toBeUndefined();
+  });
+});
+
+// ── Artifact panel ───────────────────────────────────────────────────────────
+
+describe("artifact panel pure functions", () => {
+  it("openArtifactPanel sets open=true and currentPath", () => {
+    const state = makeUiState();
+    const next = openArtifactPanel(state, "/repo/@Docs/@Scratch/repo/plan.md");
+    expect(next.artifactPanelOpen).toBe(true);
+    expect(next.artifactPanelPath).toBe("/repo/@Docs/@Scratch/repo/plan.md");
+  });
+
+  it("openArtifactPanel returns same reference when already open at same path", () => {
+    const state = makeUiState({
+      artifactPanelOpen: true,
+      artifactPanelPath: "/repo/plan.md",
+    });
+    const next = openArtifactPanel(state, "/repo/plan.md");
+    expect(next).toBe(state);
+  });
+
+  it("openArtifactPanel navigates to a different path", () => {
+    const state = makeUiState({
+      artifactPanelOpen: true,
+      artifactPanelPath: "/repo/old.md",
+    });
+    const next = openArtifactPanel(state, "/repo/new.md");
+    expect(next.artifactPanelOpen).toBe(true);
+    expect(next.artifactPanelPath).toBe("/repo/new.md");
+  });
+
+  it("closeArtifactPanel sets open=false and path=null", () => {
+    const state = makeUiState({
+      artifactPanelOpen: true,
+      artifactPanelPath: "/repo/plan.md",
+    });
+    const next = closeArtifactPanel(state);
+    expect(next.artifactPanelOpen).toBe(false);
+    expect(next.artifactPanelPath).toBeNull();
+  });
+
+  it("closeArtifactPanel returns same reference when already closed", () => {
+    const state = makeUiState({ artifactPanelOpen: false, artifactPanelPath: null });
+    expect(closeArtifactPanel(state)).toBe(state);
+  });
+
+  it("setDiscoveredArtifacts replaces the artifact list", () => {
+    const state = makeUiState();
+    const artifacts = [
+      {
+        path: "/repo/@Docs/@Scratch/repo/plan.md",
+        title: "Plan",
+        repo: "repo",
+        relativePath: "@Docs/@Scratch/repo/plan.md",
+      },
+    ];
+    const next = setDiscoveredArtifacts(state, artifacts);
+    expect(next.artifactPanelArtifacts).toEqual(artifacts);
+  });
+
+  it("setDiscoveredArtifacts with empty array clears the list", () => {
+    const state = makeUiState({
+      artifactPanelArtifacts: [
+        {
+          path: "/repo/@Docs/@Scratch/repo/plan.md",
+          title: "Plan",
+          repo: "repo",
+          relativePath: "@Docs/@Scratch/repo/plan.md",
+        },
+      ],
+    });
+    const next = setDiscoveredArtifacts(state, []);
+    expect(next.artifactPanelArtifacts).toHaveLength(0);
   });
 });

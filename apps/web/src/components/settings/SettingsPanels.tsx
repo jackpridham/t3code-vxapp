@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ArchiveX,
+  BellIcon,
   ChevronDownIcon,
   InfoIcon,
   LoaderIcon,
@@ -53,6 +54,14 @@ import { ensureNativeApi, readNativeApi } from "../../nativeApi";
 import { SIDEBAR_PROJECT_SORT_LABELS } from "../../lib/sidebarSettings";
 import { useStore } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
+import { useUiStateStore } from "../../uiStateStore";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  NOTIFICATION_EVENT_DESCRIPTIONS,
+  NOTIFICATION_EVENT_LABELS,
+  type NotificationEventType,
+} from "../../notificationSettings";
+import { requestDesktopNotificationPermission } from "../../notificationDispatch";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -63,13 +72,6 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
-import {
-  NOTIFICATION_EVENT_DESCRIPTIONS,
-  NOTIFICATION_EVENT_LABELS,
-  type NotificationEventType,
-} from "../../notificationSettings";
-import { requestDesktopNotificationPermission } from "../../notificationDispatch";
-import { useUiStateStore } from "../../uiStateStore";
 
 const THEME_OPTIONS = [
   {
@@ -1725,22 +1727,39 @@ export function ArchivedThreadsPanel() {
 
 export function NotificationsSettingsPanel() {
   const prefs = useUiStateStore((s) => s.notificationPreferences);
-  const setPrefs = useUiStateStore((s) => s.setNotificationPreferences);
-  const toggleEvent = useUiStateStore((s) => s.toggleNotificationEvent);
-
+  const setNotificationPreferences = useUiStateStore((s) => s.setNotificationPreferences);
+  const toggleNotificationEvent = useUiStateStore((s) => s.toggleNotificationEvent);
   const notificationsSupported = typeof globalThis.Notification !== "undefined";
   const notificationPermission = notificationsSupported ? Notification.permission : "unsupported";
 
+  const isNonDefault =
+    prefs.enabled !== DEFAULT_NOTIFICATION_PREFERENCES.enabled ||
+    prefs.desktopNotifications !== DEFAULT_NOTIFICATION_PREFERENCES.desktopNotifications ||
+    (Object.keys(prefs.events) as NotificationEventType[]).some(
+      (k) => prefs.events[k] !== DEFAULT_NOTIFICATION_PREFERENCES.events[k],
+    );
+
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Notifications">
+      <SettingsSection
+        title="Notifications"
+        icon={<BellIcon className="size-3" />}
+        headerAction={
+          isNonDefault ? (
+            <SettingResetButton
+              label="notification preferences"
+              onClick={() => setNotificationPreferences(DEFAULT_NOTIFICATION_PREFERENCES)}
+            />
+          ) : undefined
+        }
+      >
         <SettingsRow
           title="Enable notifications"
-          description="Master toggle for all in-app notification toasts"
+          description="Show in-app toast notifications for agent activity."
           control={
             <Switch
               checked={prefs.enabled}
-              onCheckedChange={(checked) => setPrefs({ enabled: checked })}
+              onCheckedChange={(checked) => setNotificationPreferences({ enabled: checked })}
             />
           }
         />
@@ -1748,9 +1767,9 @@ export function NotificationsSettingsPanel() {
           title="Desktop notifications"
           description={
             !notificationsSupported
-              ? "Not available \u2014 requires HTTPS or localhost (browser security restriction)"
+              ? "Not available - requires HTTPS or localhost (browser security restriction)"
               : notificationPermission === "denied"
-                ? "Blocked by browser \u2014 reset notification permissions in browser settings"
+                ? "Blocked by browser - reset notification permissions in browser settings"
                 : "Show native OS notifications (requires browser permission)"
           }
           control={
@@ -1758,7 +1777,7 @@ export function NotificationsSettingsPanel() {
               checked={prefs.desktopNotifications}
               disabled={!notificationsSupported || notificationPermission === "denied"}
               onCheckedChange={(checked) => {
-                setPrefs({ desktopNotifications: checked });
+                setNotificationPreferences({ desktopNotifications: checked });
                 if (checked) requestDesktopNotificationPermission();
               }}
             />
@@ -1766,8 +1785,8 @@ export function NotificationsSettingsPanel() {
         />
       </SettingsSection>
 
-      <SettingsSection title="Event types">
-        {(Object.keys(NOTIFICATION_EVENT_LABELS) as NotificationEventType[]).map((eventType) => (
+      <SettingsSection title="Events">
+        {(Object.keys(prefs.events) as NotificationEventType[]).map((eventType) => (
           <SettingsRow
             key={eventType}
             title={NOTIFICATION_EVENT_LABELS[eventType]}
@@ -1776,7 +1795,7 @@ export function NotificationsSettingsPanel() {
               <Switch
                 checked={prefs.events[eventType]}
                 disabled={!prefs.enabled}
-                onCheckedChange={(checked) => toggleEvent(eventType, checked)}
+                onCheckedChange={(checked) => toggleNotificationEvent(eventType, checked)}
               />
             }
           />

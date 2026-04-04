@@ -20,14 +20,7 @@ import {
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import ChatMarkdown from "./ChatMarkdown";
-import {
-  Sheet,
-  SheetClose,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-} from "./ui/sheet";
+import { Sheet, SheetClose, SheetHeader, SheetPanel, SheetPopup, SheetTitle } from "./ui/sheet";
 import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
 import { cn } from "~/lib/utils";
@@ -124,7 +117,8 @@ export function ArtifactPanel() {
       ? (artifactPanelArtifacts.find((a) => a.path === artifactPanelPath) ?? null)
       : null;
 
-  const panelTitle = activeArtifact?.title ??
+  const panelTitle =
+    activeArtifact?.title ??
     (artifactPanelPath
       ? titleFromFilename(artifactPanelPath.slice(artifactPanelPath.lastIndexOf("/") + 1))
       : "Artifact");
@@ -158,7 +152,12 @@ export function ArtifactPanel() {
               )}
               <SheetClose
                 render={
-                  <Button size="icon" variant="ghost" aria-label="Close artifact panel" className="size-7">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Close artifact panel"
+                    className="size-7"
+                  >
                     <XIcon className="size-4" />
                   </Button>
                 }

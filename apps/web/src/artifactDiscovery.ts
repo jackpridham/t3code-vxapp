@@ -109,9 +109,7 @@ export function extractTitleFromMarkdown(content: string, filename: string): str
  */
 export function titleFromFilename(filename: string): string {
   const base = filename.replace(/\.md$/i, "");
-  return base
-    .replaceAll(/[-_]+/g, " ")
-    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+  return base.replaceAll(/[-_]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
 // ── Thread-based discovery ────────────────────────────────────────────────────
@@ -134,9 +132,7 @@ function repoNameFromWorktreePath(worktreePath: string): string {
  *
  * Returns an empty array if the native API is unavailable or discovery fails.
  */
-export async function discoverThreadArtifacts(
-  worktreePath: string,
-): Promise<DiscoveredArtifact[]> {
+export async function discoverThreadArtifacts(worktreePath: string): Promise<DiscoveredArtifact[]> {
   const api = readNativeApi();
   if (!api) return [];
 
