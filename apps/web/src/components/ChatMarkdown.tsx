@@ -14,7 +14,7 @@ import React, {
   type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
@@ -23,6 +23,16 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+
+/**
+ * Extend react-markdown's default URL transform to also allow `file:` protocol.
+ * The default only permits http(s), irc(s), mailto, xmpp — file: links are
+ * stripped to "" which breaks artifact panel routing.
+ */
+function urlTransform(url: string): string {
+  if (url.trim().toLowerCase().startsWith("file:")) return url;
+  return defaultUrlTransform(url);
+}
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -298,7 +308,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onArtifactLinkClick }: C
 
   return (
     <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={urlTransform} components={markdownComponents}>
         {text}
       </ReactMarkdown>
     </div>
