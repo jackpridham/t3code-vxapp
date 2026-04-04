@@ -23,7 +23,6 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
-import { useUiStateStore } from "../uiStateStore";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -50,6 +49,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  onArtifactLinkClick?: ((path: string) => void) | undefined;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -236,10 +236,9 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, isStreaming = false, onArtifactLinkClick }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
-  const openArtifactPanel = useUiStateStore((s) => s.openArtifactPanel);
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
@@ -248,8 +247,9 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
 
-        // Route @Docs/@Scratch/*.md links to the ArtifactPanel
+        // Route @Docs/@Scratch/*.md links to the ArtifactPanel (if handler provided)
         const isArtifactLink =
+          onArtifactLinkClick != null &&
           targetPath.toLowerCase().endsWith(".md") &&
           targetPath.includes("@Docs/@Scratch/");
 
@@ -261,7 +261,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
               event.preventDefault();
               event.stopPropagation();
               if (isArtifactLink) {
-                openArtifactPanel(targetPath);
+                onArtifactLinkClick(targetPath);
                 return;
               }
               const api = readNativeApi();
@@ -296,7 +296,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming, openArtifactPanel],
+    [cwd, diffThemeName, isStreaming, onArtifactLinkClick],
   );
 
   return (
