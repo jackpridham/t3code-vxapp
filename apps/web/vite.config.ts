@@ -44,12 +44,14 @@ export default defineConfig({
     ...(process.env.VITE_HOST === "true" ? { host: "0.0.0.0" } : {}),
     port,
     strictPort: true,
+    // When VITE_HOST is set, omit hmr config so the client derives the
+    // WebSocket URL from window.location (works for remote browsers).
+    // Otherwise pin to localhost for Electron BrowserWindow reliability.
     hmr: {
-      // Explicit config so Vite's HMR WebSocket connects reliably
-      // inside Electron's BrowserWindow. Vite 8 uses console.debug for
-      // connection logs — enable "Verbose" in DevTools to see them.
       protocol: "ws",
-      host: "localhost",
+      // VITE_HMR_HOST overrides for remote access (e.g. LAN dev server).
+      // Defaults to localhost for Electron BrowserWindow reliability.
+      host: process.env.VITE_HMR_HOST ?? "localhost",
     },
   },
   build: {

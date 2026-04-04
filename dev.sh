@@ -83,6 +83,7 @@ sleep 3
 
 # Start Vite web (foreground — catches Ctrl+C)
 export PORT=$WEB_PORT
+export VITE_HMR_HOST="${HOST_IP}"
 export VITE_WS_URL="ws://${HOST_IP}:${SERVER_PORT}"
 cd "${REPO_ROOT}/apps/web"
 exec npx vite --host 0.0.0.0
