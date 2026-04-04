@@ -82,6 +82,9 @@ echo ""
 sleep 3
 
 # Start Vite web (foreground — catches Ctrl+C)
+# NODE_ENV must be "development" — inherited "production" from t3code.service
+# disables React Fast Refresh preamble injection ($RefreshSig$ is never defined)
+export NODE_ENV=development
 export PORT=$WEB_PORT
 export VITE_HMR_HOST="${HOST_IP}"
 export VITE_WS_URL="ws://${HOST_IP}:${SERVER_PORT}"
