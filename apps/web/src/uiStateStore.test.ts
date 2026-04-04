@@ -13,6 +13,7 @@ import {
   toggleProjectLabelFilter,
   type UiState,
 } from "./uiStateStore";
+import { DEFAULT_NOTIFICATION_PREFERENCES } from "./notificationSettings";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -21,6 +22,10 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     orchestratorProjectCwds: [],
     threadLastVisitedAtById: {},
     labelFiltersByProject: {},
+    artifactPanelOpen: false,
+    artifactPanelPath: null,
+    artifactPanelArtifacts: [],
+    notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
     ...overrides,
   };
 }

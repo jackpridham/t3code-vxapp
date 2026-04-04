@@ -2,6 +2,13 @@ import { Debouncer } from "@tanstack/react-pacer";
 import { type ProjectId, type ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 
+import type { DiscoveredArtifact } from "./artifactDiscovery";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  mergeNotificationPreferences,
+  type NotificationPreferences,
+} from "./notificationSettings";
+
 const PERSISTED_STATE_KEY = "t3code:ui-state:v1";
 const LEGACY_PERSISTED_STATE_KEYS = [
   "t3code:renderer-state:v8",
@@ -21,6 +28,7 @@ interface PersistedUiState {
   projectOrderCwds?: string[];
   orchestratorProjectCwds?: string[];
   labelFiltersByProject?: Record<string, string[]>;
+  notificationPreferences?: NotificationPreferences;
 }
 
 export interface UiProjectState {
@@ -34,7 +42,18 @@ export interface UiThreadState {
   threadLastVisitedAtById: Record<string, string>;
 }
 
-export interface UiState extends UiProjectState, UiThreadState {}
+export interface UiArtifactPanelState {
+  /** Whether the artifact viewer panel is open. */
+  artifactPanelOpen: boolean;
+  /** Absolute path of the currently viewed artifact, or null. */
+  artifactPanelPath: string | null;
+  /** Artifacts discovered for the active thread's worktree. Not persisted. */
+  artifactPanelArtifacts: DiscoveredArtifact[];
+}
+
+export interface UiState extends UiProjectState, UiThreadState, UiArtifactPanelState {
+  notificationPreferences: NotificationPreferences;
+}
 
 export interface SyncProjectInput {
   id: ProjectId;
@@ -52,12 +71,17 @@ const initialState: UiState = {
   orchestratorProjectCwds: [],
   threadLastVisitedAtById: {},
   labelFiltersByProject: {},
+  artifactPanelOpen: false,
+  artifactPanelPath: null,
+  artifactPanelArtifacts: [],
+  notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
 };
 
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 const persistedOrchestratorProjectCwds = new Set<string>();
 let persistedLabelFiltersByProject: Record<string, string[]> = {};
+let persistedNotificationPreferences: NotificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
 const currentProjectCwdById = new Map<ProjectId, string>();
 let legacyKeysCleanedUp = false;
 
@@ -86,11 +110,14 @@ function readPersistedState(): UiState {
         labelFiltersByProject: persistedLabelFiltersByProject,
       };
     }
-    hydratePersistedProjectState(JSON.parse(raw) as PersistedUiState);
+    const parsed = JSON.parse(raw) as PersistedUiState;
+    hydratePersistedProjectState(parsed);
+    persistedNotificationPreferences = mergeNotificationPreferences(parsed.notificationPreferences);
     return {
       ...initialState,
       orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
       labelFiltersByProject: persistedLabelFiltersByProject,
+      notificationPreferences: persistedNotificationPreferences,
     };
   } catch {
     return initialState;
@@ -153,6 +180,7 @@ function persistState(state: UiState): void {
         projectOrderCwds,
         orchestratorProjectCwds: state.orchestratorProjectCwds,
         labelFiltersByProject: state.labelFiltersByProject,
+        notificationPreferences: state.notificationPreferences,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -491,6 +519,13 @@ interface UiStateStore extends UiState {
   toggleProjectLabelFilter: (projectId: string, label: string) => void;
   clearProjectLabelFilters: (projectId: string) => void;
   setProjectLabelFilter: (projectId: string, labels: string[]) => void;
+  // Notification preferences
+  setNotificationPreferences: (prefs: Partial<NotificationPreferences>) => void;
+  toggleNotificationEvent: (eventType: string, enabled: boolean) => void;
+  // Artifact panel
+  openArtifactPanel: (path: string) => void;
+  closeArtifactPanel: () => void;
+  setDiscoveredArtifacts: (artifacts: DiscoveredArtifact[]) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -514,6 +549,38 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => clearProjectLabelFilters(state, projectId)),
   setProjectLabelFilter: (projectId, labels) =>
     set((state) => setProjectLabelFilter(state, projectId, labels)),
+  // Notification preferences
+  setNotificationPreferences: (prefs) =>
+    set((state) => ({
+      ...state,
+      notificationPreferences: { ...state.notificationPreferences, ...prefs },
+    })),
+  toggleNotificationEvent: (eventType, enabled) =>
+    set((state) => ({
+      ...state,
+      notificationPreferences: {
+        ...state.notificationPreferences,
+        events: { ...state.notificationPreferences.events, [eventType]: enabled },
+      },
+    })),
+  // Artifact panel
+  openArtifactPanel: (path) =>
+    set((state) => ({
+      ...state,
+      artifactPanelOpen: true,
+      artifactPanelPath: path,
+    })),
+  closeArtifactPanel: () =>
+    set((state) => ({
+      ...state,
+      artifactPanelOpen: false,
+      artifactPanelPath: null,
+    })),
+  setDiscoveredArtifacts: (artifacts) =>
+    set((state) => ({
+      ...state,
+      artifactPanelArtifacts: artifacts,
+    })),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

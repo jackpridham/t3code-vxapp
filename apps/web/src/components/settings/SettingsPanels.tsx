@@ -63,6 +63,13 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
+import {
+  NOTIFICATION_EVENT_DESCRIPTIONS,
+  NOTIFICATION_EVENT_LABELS,
+  type NotificationEventType,
+} from "../../notificationSettings";
+import { requestDesktopNotificationPermission } from "../../notificationDispatch";
+import { useUiStateStore } from "../../uiStateStore";
 
 const THEME_OPTIONS = [
   {
@@ -1712,6 +1719,59 @@ export function ArchivedThreadsPanel() {
           </SettingsSection>
         ))
       )}
+    </SettingsPageContainer>
+  );
+}
+
+export function NotificationsSettingsPanel() {
+  const prefs = useUiStateStore((s) => s.notificationPreferences);
+  const setPrefs = useUiStateStore((s) => s.setNotificationPreferences);
+  const toggleEvent = useUiStateStore((s) => s.toggleNotificationEvent);
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Notifications">
+        <SettingsRow
+          title="Enable notifications"
+          description="Master toggle for all in-app notification toasts"
+          control={
+            <Switch
+              checked={prefs.enabled}
+              onCheckedChange={(checked) => setPrefs({ enabled: checked })}
+            />
+          }
+        />
+        <SettingsRow
+          title="Desktop notifications"
+          description="Show native OS notifications (requires browser permission)"
+          control={
+            <Switch
+              checked={prefs.desktopNotifications}
+              onCheckedChange={(checked) => {
+                setPrefs({ desktopNotifications: checked });
+                if (checked) requestDesktopNotificationPermission();
+              }}
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Event types">
+        {(Object.keys(NOTIFICATION_EVENT_LABELS) as NotificationEventType[]).map((eventType) => (
+          <SettingsRow
+            key={eventType}
+            title={NOTIFICATION_EVENT_LABELS[eventType]}
+            description={NOTIFICATION_EVENT_DESCRIPTIONS[eventType]}
+            control={
+              <Switch
+                checked={prefs.events[eventType]}
+                disabled={!prefs.enabled}
+                onCheckedChange={(checked) => toggleEvent(eventType, checked)}
+              />
+            }
+          />
+        ))}
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }
