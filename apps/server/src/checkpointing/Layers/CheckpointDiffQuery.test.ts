@@ -39,6 +39,7 @@ function makeSnapshot(input: {
         deletedAt: null,
       },
     ],
+    orchestratorWakeItems: [],
     threads: [
       {
         id: input.threadId,
@@ -181,6 +182,7 @@ describe("CheckpointDiffQueryLive", () => {
               snapshotSequence: 0,
               projects: [],
               threads: [],
+              orchestratorWakeItems: [],
               updatedAt: "2026-01-01T00:00:00.000Z",
             } satisfies OrchestrationReadModel),
         }),

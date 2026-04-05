@@ -1,11 +1,13 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { ProjectionOrchestratorWakeRepositoryLive } from "./ProjectionOrchestratorWakes.ts";
 import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./ProjectionThreads.ts";
+import { ProjectionOrchestratorWakeRepository } from "../Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionProjectRepository } from "../Services/ProjectionProjects.ts";
 import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
 
@@ -13,6 +15,7 @@ const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionOrchestratorWakeRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
   ),
 );
@@ -132,6 +135,93 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         provider: "claudeAgent",
         model: "claude-opus-4-6",
       });
+    }),
+  );
+
+  it.effect("stores and queries orchestrator wake rows by thread and worker", () =>
+    Effect.gen(function* () {
+      const wakes = yield* ProjectionOrchestratorWakeRepository;
+
+      yield* wakes.upsert({
+        wakeId: "wake:worker-1:turn-1:completed",
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-orch-1"),
+        orchestratorProjectId: ProjectId.makeUnsafe("project-orch-1"),
+        workerThreadId: ThreadId.makeUnsafe("thread-worker-1"),
+        workerProjectId: ProjectId.makeUnsafe("project-worker-1"),
+        workerTurnId: TurnId.makeUnsafe("turn-1"),
+        workflowId: "wf-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "completed",
+        summary: "Completed the queue projection",
+        queuedAt: "2026-04-05T10:00:00.000Z",
+        state: "pending",
+        deliveryMessageId: null,
+        deliveredAt: null,
+        consumedAt: null,
+        consumeReason: null,
+      });
+
+      yield* wakes.upsert({
+        wakeId: "wake:worker-1:turn-1:completed",
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-orch-1"),
+        orchestratorProjectId: ProjectId.makeUnsafe("project-orch-1"),
+        workerThreadId: ThreadId.makeUnsafe("thread-worker-1"),
+        workerProjectId: ProjectId.makeUnsafe("project-worker-1"),
+        workerTurnId: TurnId.makeUnsafe("turn-1"),
+        workflowId: "wf-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "completed",
+        summary: "Delivered to orchestrator",
+        queuedAt: "2026-04-05T10:00:00.000Z",
+        state: "delivered",
+        deliveryMessageId: "msg-wake-1" as MessageId,
+        deliveredAt: "2026-04-05T10:02:00.000Z",
+        consumedAt: null,
+        consumeReason: null,
+      });
+
+      yield* wakes.upsert({
+        wakeId: "wake:worker-2:turn-2:failed",
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-orch-1"),
+        orchestratorProjectId: ProjectId.makeUnsafe("project-orch-1"),
+        workerThreadId: ThreadId.makeUnsafe("thread-worker-2"),
+        workerProjectId: ProjectId.makeUnsafe("project-worker-2"),
+        workerTurnId: TurnId.makeUnsafe("turn-2"),
+        workflowId: null,
+        workerTitleSnapshot: "Worker Two",
+        outcome: "failed",
+        summary: "Waiting for review",
+        queuedAt: "2026-04-05T10:01:00.000Z",
+        state: "pending",
+        deliveryMessageId: null,
+        deliveredAt: null,
+        consumedAt: null,
+        consumeReason: null,
+      });
+
+      const byOrchestrator = yield* wakes.listByOrchestratorThreadId({
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-orch-1"),
+      });
+      assert.equal(byOrchestrator.length, 2);
+      assert.equal(byOrchestrator[0]?.wakeId, "wake:worker-1:turn-1:completed");
+      assert.equal(byOrchestrator[0]?.state, "delivered");
+
+      const pending = yield* wakes.listPendingByOrchestratorThreadId({
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-orch-1"),
+      });
+      assert.equal(pending.length, 1);
+      assert.equal(pending[0]?.wakeId, "wake:worker-2:turn-2:failed");
+
+      const undeliveredForWorkerOne = yield* wakes.listUndeliveredByWorkerThreadId({
+        workerThreadId: ThreadId.makeUnsafe("thread-worker-1"),
+      });
+      assert.equal(undeliveredForWorkerOne.length, 0);
+
+      const undeliveredForWorkerTwo = yield* wakes.listUndeliveredByWorkerThreadId({
+        workerThreadId: ThreadId.makeUnsafe("thread-worker-2"),
+      });
+      assert.equal(undeliveredForWorkerTwo.length, 1);
+      assert.equal(undeliveredForWorkerTwo[0]?.state, "pending");
     }),
   );
 });

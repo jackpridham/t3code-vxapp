@@ -64,7 +64,7 @@ import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { SIDEBAR_PROJECT_SORT_LABELS, SIDEBAR_THREAD_SORT_LABELS } from "../lib/sidebarSettings";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { cn, isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -550,6 +550,7 @@ function SortableProjectItem({
 export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
   const projects = useStore((store) => store.projects);
   const serverThreads = useStore((store) => store.threads);
+  const orchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById, labelFiltersByProject } =
     useUiStateStore(
       useShallow((store) => ({
@@ -650,6 +651,47 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       ),
     [serverThreads, threadLastVisitedAtById],
   );
+  const orchestratorWakeSummaryByThreadId = useMemo(() => {
+    const summaryByThreadId = new Map<
+      ThreadId,
+      {
+        pendingCount: number;
+        deliveringCount: number;
+        workerState: "pending" | "delivering" | null;
+      }
+    >();
+
+    for (const wakeItem of orchestratorWakeItems) {
+      if (wakeItem.state === "pending" || wakeItem.state === "delivering") {
+        const orchestratorSummary = summaryByThreadId.get(wakeItem.orchestratorThreadId) ?? {
+          pendingCount: 0,
+          deliveringCount: 0,
+          workerState: null,
+        };
+        summaryByThreadId.set(wakeItem.orchestratorThreadId, {
+          ...orchestratorSummary,
+          pendingCount: orchestratorSummary.pendingCount + (wakeItem.state === "pending" ? 1 : 0),
+          deliveringCount:
+            orchestratorSummary.deliveringCount + (wakeItem.state === "delivering" ? 1 : 0),
+        });
+
+        const workerSummary = summaryByThreadId.get(wakeItem.workerThreadId) ?? {
+          pendingCount: 0,
+          deliveringCount: 0,
+          workerState: null,
+        };
+        summaryByThreadId.set(wakeItem.workerThreadId, {
+          ...workerSummary,
+          workerState:
+            wakeItem.state === "delivering"
+              ? "delivering"
+              : (workerSummary.workerState ?? "pending"),
+        });
+      }
+    }
+
+    return summaryByThreadId;
+  }, [orchestratorWakeItems]);
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
@@ -1775,6 +1817,10 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       const isHighlighted = isActive || isSelected;
       const threadLabels = getSidebarThreadLabels(thread.labels);
       const jumpLabel = threadJumpLabelById.get(thread.id) ?? null;
+      const wakeSummary = orchestratorWakeSummaryByThreadId.get(thread.id) ?? null;
+      const orchestratorWakeBadgeCount =
+        (wakeSummary?.pendingCount ?? 0) + (wakeSummary?.deliveringCount ?? 0);
+      const workerWakeState = wakeSummary?.workerState ?? null;
       const isThreadRunning =
         thread.session?.status === "running" && thread.session.activeTurnId != null;
       const threadStatus = threadStatuses.get(thread.id) ?? null;
@@ -1924,6 +1970,25 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                       {thread.spawnRole}
                     </Badge>
                   )}
+                  {orchestratorWakeBadgeCount > 0 ? (
+                    <Badge className="h-4 shrink-0 border-0 bg-amber-500/12 px-1 text-[9px] font-medium leading-none text-amber-600 dark:text-amber-300">
+                      {wakeSummary?.deliveringCount
+                        ? `${orchestratorWakeBadgeCount} active`
+                        : `${orchestratorWakeBadgeCount} waiting`}
+                    </Badge>
+                  ) : null}
+                  {workerWakeState !== null ? (
+                    <Badge
+                      className={cn(
+                        "h-4 shrink-0 border-0 px-1 text-[9px] font-medium leading-none",
+                        workerWakeState === "delivering"
+                          ? "bg-sky-500/12 text-sky-600 dark:text-sky-300"
+                          : "bg-emerald-500/12 text-emerald-600 dark:text-emerald-300",
+                      )}
+                    >
+                      {workerWakeState === "delivering" ? "waking" : "queued"}
+                    </Badge>
+                  ) : null}
                 </>
               )}
             </div>

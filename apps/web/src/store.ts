@@ -2,6 +2,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationMessage,
   type OrchestrationProposedPlan,
+  type OrchestratorWakeItem,
   type ProviderKind,
   ThreadId,
   type OrchestrationReadModel,
@@ -20,12 +21,14 @@ import { type ChatMessage, type Project, type Thread } from "./types";
 export interface AppState {
   projects: Project[];
   threads: Thread[];
+  orchestratorWakeItems: OrchestratorWakeItem[];
   bootstrapComplete: boolean;
 }
 
 const initialState: AppState = {
   projects: [],
   threads: [],
+  orchestratorWakeItems: [],
   bootstrapComplete: false,
 };
 const MAX_THREAD_MESSAGES = 2_000;
@@ -167,6 +170,10 @@ function mapTurnDiffSummary(
     checkpointRef: checkpoint.checkpointRef,
     files: checkpoint.files.map((file) => ({ ...file })),
   };
+}
+
+function mapOrchestratorWakeItem(wakeItem: OrchestratorWakeItem): OrchestratorWakeItem {
+  return { ...wakeItem };
 }
 
 function mapThread(thread: OrchestrationThreadWithLabels): Thread {
@@ -449,6 +456,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     ...state,
     projects,
     threads,
+    orchestratorWakeItems: readModel.orchestratorWakeItems.map(mapOrchestratorWakeItem),
     bootstrapComplete: true,
   };
 }
@@ -985,6 +993,19 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         );
       }
       return threads === state.threads ? state : { ...state, threads };
+    }
+
+    case "thread.orchestrator-wake-upserted": {
+      const orchestratorWakeItems = [
+        ...state.orchestratorWakeItems.filter(
+          (wakeItem) => wakeItem.wakeId !== event.payload.wakeItem.wakeId,
+        ),
+        mapOrchestratorWakeItem(event.payload.wakeItem),
+      ].toSorted(
+        (left, right) =>
+          left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
+      );
+      return { ...state, orchestratorWakeItems };
     }
 
     case "thread.approval-response-requested":

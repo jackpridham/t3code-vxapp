@@ -56,6 +56,7 @@ const readModel: OrchestrationReadModel = {
       deletedAt: null,
     },
   ],
+  orchestratorWakeItems: [],
   threads: [
     {
       id: ThreadId.makeUnsafe("thread-1"),

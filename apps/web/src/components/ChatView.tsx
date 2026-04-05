@@ -4,6 +4,7 @@ import {
   type ClaudeCodeEffort,
   type MessageId,
   type ModelSelection,
+  type OrchestratorWakeItem,
   type ProjectHook,
   type ProjectScript,
   type ProviderKind,
@@ -69,7 +70,12 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { useStore } from "../store";
-import { useProjectById, useThreadById } from "../storeSelectors";
+import {
+  useProjectById,
+  useThreadById,
+  useWakeItemsForOrchestratorThread,
+  useWakeItemsForWorkerThread,
+} from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
 import {
   buildPlanImplementationThreadTitle,
@@ -108,6 +114,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Separator } from "./ui/separator";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { cn, randomUUID } from "~/lib/utils";
@@ -281,6 +288,25 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
   }, [threadIds]);
 
   return useStore(selector);
+}
+
+function isActiveWakeState(state: OrchestratorWakeItem["state"]): boolean {
+  return state === "pending" || state === "delivering";
+}
+
+function formatWakeStateLabel(state: OrchestratorWakeItem["state"]): string {
+  switch (state) {
+    case "pending":
+      return "Queued";
+    case "delivering":
+      return "Waking";
+    case "delivered":
+      return "Delivered";
+    case "consumed":
+      return "Consumed";
+    case "dropped":
+      return "Dropped";
+  }
 }
 
 function formatOutgoingPrompt(params: {
@@ -656,6 +682,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  const orchestratorWakeItems = useWakeItemsForOrchestratorThread(activeThread?.id);
+  const workerWakeItems = useWakeItemsForWorkerThread(activeThread?.id);
   const threadPlanCatalog = useThreadPlanCatalog(
     useMemo(() => {
       const threadIds: ThreadId[] = [];
@@ -675,6 +703,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = useProjectById(activeThread?.projectId);
+  const activeOrchestratorWakeItems = useMemo(
+    () =>
+      orchestratorWakeItems
+        .filter((wakeItem) => isActiveWakeState(wakeItem.state))
+        .toSorted(
+          (left, right) =>
+            left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
+        ),
+    [orchestratorWakeItems],
+  );
+  const latestWorkerWakeItem = useMemo(
+    () =>
+      workerWakeItems
+        .toSorted(
+          (left, right) =>
+            left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
+        )
+        .at(-1) ?? null,
+    [workerWakeItems],
+  );
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -3857,6 +3905,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
+      {activeOrchestratorWakeItems.length > 0 ? (
+        <div className="border-b border-border px-3 py-2 sm:px-5">
+          <Alert>
+            <ListTodoIcon className="size-4" />
+            <AlertTitle>Worker wake queue</AlertTitle>
+            <AlertDescription>
+              <div className="space-y-2">
+                {activeOrchestratorWakeItems.map((wakeItem) => (
+                  <div
+                    key={wakeItem.wakeId}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+                  >
+                    <span className="font-medium text-foreground">
+                      {wakeItem.workerTitleSnapshot}
+                    </span>
+                    <span>{formatWakeStateLabel(wakeItem.state)}</span>
+                    <span>{wakeItem.outcome}</span>
+                    <span>{wakeItem.summary}</span>
+                  </div>
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+      {activeThread.spawnRole === "worker" && latestWorkerWakeItem !== null ? (
+        <div className="border-b border-border px-3 py-2 sm:px-5">
+          <Alert>
+            <BotIcon className="size-4" />
+            <AlertTitle>Orchestrator wake status</AlertTitle>
+            <AlertDescription className="text-xs text-muted-foreground">
+              {formatWakeStateLabel(latestWorkerWakeItem.state)} for{" "}
+              {latestWorkerWakeItem.orchestratorThreadId}. {latestWorkerWakeItem.summary}
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}

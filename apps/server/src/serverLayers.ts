@@ -11,6 +11,7 @@ import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/Provi
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
+import { OrchestratorWakeReactorLive } from "./orchestration/Layers/OrchestratorWakeReactor";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
@@ -132,10 +133,14 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(WorkspaceEntriesLive),
   );
+  const orchestratorWakeReactorLayer = OrchestratorWakeReactorLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
+    Layer.provideMerge(orchestratorWakeReactorLayer),
   );
 
   const terminalLayer = TerminalManagerLive.pipe(Layer.provide(makeRuntimePtyAdapterLayer()));

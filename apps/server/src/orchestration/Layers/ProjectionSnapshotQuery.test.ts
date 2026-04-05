@@ -9,6 +9,7 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQu
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
+const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
@@ -26,6 +27,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_state`;
+      yield* sql`DELETE FROM projection_orchestrator_wakes`;
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
       yield* sql`DELETE FROM projection_turns`;
 
@@ -174,6 +176,45 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       `;
 
       yield* sql`
+        INSERT INTO projection_orchestrator_wakes (
+          wake_id,
+          orchestrator_thread_id,
+          orchestrator_project_id,
+          worker_thread_id,
+          worker_project_id,
+          worker_turn_id,
+          workflow_id,
+          worker_title_snapshot,
+          outcome,
+          summary,
+          queued_at,
+          state,
+          delivery_message_id,
+          delivered_at,
+          consumed_at,
+          consume_reason
+        )
+        VALUES (
+          'wake:thread-worker-1:turn-1:completed',
+          'thread-1',
+          'project-1',
+          'thread-worker-1',
+          'project-worker-1',
+          'turn-1',
+          'wf-1',
+          'Worker One',
+          'completed',
+          'Ready for orchestrator review',
+          '2026-02-24T00:00:07.500Z',
+          'delivered',
+          'message-2',
+          '2026-02-24T00:00:07.750Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      yield* sql`
         INSERT INTO projection_turns (
           thread_id,
           turn_id,
@@ -252,6 +293,26 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
           deletedAt: null,
+        },
+      ]);
+      assert.deepEqual(snapshot.orchestratorWakeItems, [
+        {
+          wakeId: "wake:thread-worker-1:turn-1:completed",
+          orchestratorThreadId: asThreadId("thread-1"),
+          orchestratorProjectId: asProjectId("project-1"),
+          workerThreadId: asThreadId("thread-worker-1"),
+          workerProjectId: asProjectId("project-worker-1"),
+          workerTurnId: asTurnId("turn-1"),
+          workflowId: "wf-1",
+          workerTitleSnapshot: "Worker One",
+          outcome: "completed",
+          summary: "Ready for orchestrator review",
+          queuedAt: "2026-02-24T00:00:07.500Z",
+          state: "delivered",
+          deliveryMessageId: asMessageId("message-2"),
+          deliveredAt: "2026-02-24T00:00:07.750Z",
+          consumedAt: null,
+          consumeReason: undefined,
         },
       ]);
       assert.deepEqual(snapshot.threads, [
@@ -337,6 +398,12 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             lastError: null,
             updatedAt: "2026-02-24T00:00:07.000Z",
           },
+          orchestratorProjectId: undefined,
+          orchestratorThreadId: undefined,
+          parentThreadId: undefined,
+          spawnRole: undefined,
+          spawnedBy: undefined,
+          workflowId: undefined,
         },
       ]);
     }),

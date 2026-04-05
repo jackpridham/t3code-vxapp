@@ -325,10 +325,62 @@ export const OrchestrationThread = Schema.Struct({
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
+export const OrchestratorWakeOutcome = Schema.Literals(["completed", "failed", "interrupted"]);
+export type OrchestratorWakeOutcome = typeof OrchestratorWakeOutcome.Type;
+
+export const OrchestratorWakeState = Schema.Literals([
+  "pending",
+  "delivering",
+  "delivered",
+  "consumed",
+  "dropped",
+]);
+export type OrchestratorWakeState = typeof OrchestratorWakeState.Type;
+
+export const OrchestratorWakeConsumeReason = Schema.Literals([
+  "worker_rechecked",
+  "worker_superseded_by_new_turn",
+  "worker_deleted",
+  "worker_reparented",
+  "orchestrator_missing",
+  "orchestrator_deleted",
+  "orchestrator_mismatch",
+  "duplicate",
+  "manual_dismiss",
+]);
+export type OrchestratorWakeConsumeReason = typeof OrchestratorWakeConsumeReason.Type;
+
+export const OrchestratorWakeItem = Schema.Struct({
+  wakeId: TrimmedNonEmptyString,
+  orchestratorThreadId: ThreadId,
+  orchestratorProjectId: ProjectId,
+  workerThreadId: ThreadId,
+  workerProjectId: ProjectId,
+  workerTurnId: TurnId,
+  workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  workerTitleSnapshot: TrimmedNonEmptyString,
+  outcome: OrchestratorWakeOutcome,
+  summary: TrimmedNonEmptyString,
+  queuedAt: IsoDateTime,
+  state: OrchestratorWakeState,
+  deliveryMessageId: Schema.optional(MessageId).pipe(Schema.withDecodingDefault(() => undefined)),
+  deliveredAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consumedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consumeReason: Schema.optional(OrchestratorWakeConsumeReason).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+});
+export type OrchestratorWakeItem = typeof OrchestratorWakeItem.Type;
+
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  orchestratorWakeItems: Schema.Array(OrchestratorWakeItem).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -614,6 +666,14 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadOrchestratorWakeUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.orchestrator-wake.upsert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  wakeItem: OrchestratorWakeItem,
+  createdAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -629,6 +689,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadOrchestratorWakeUpsertCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -662,6 +723,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.orchestrator-wake-upserted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -860,6 +922,11 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const ThreadOrchestratorWakeUpsertedPayload = Schema.Struct({
+  threadId: ThreadId,
+  wakeItem: OrchestratorWakeItem,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -991,6 +1058,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.orchestrator-wake-upserted"),
+    payload: ThreadOrchestratorWakeUpsertedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

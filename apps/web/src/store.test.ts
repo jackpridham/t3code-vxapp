@@ -67,6 +67,7 @@ function makeState(thread: Thread): AppState {
       },
     ],
     threads: [thread],
+    orchestratorWakeItems: [],
     bootstrapComplete: true,
   };
 }
@@ -147,6 +148,7 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
       },
     ],
     threads: [thread],
+    orchestratorWakeItems: [],
   };
 }
 
@@ -321,6 +323,7 @@ describe("store read model sync", () => {
         },
       ],
       threads: [],
+      orchestratorWakeItems: [],
       bootstrapComplete: true,
     };
     const readModel: OrchestrationReadModel = {
@@ -343,6 +346,7 @@ describe("store read model sync", () => {
           workspaceRoot: "/tmp/project-3",
         }),
       ],
+      orchestratorWakeItems: [],
       threads: [],
     };
 
@@ -512,6 +516,7 @@ describe("incremental orchestration updates", () => {
         },
       ],
       threads: [],
+      orchestratorWakeItems: [],
       bootstrapComplete: true,
     };
 
@@ -556,6 +561,7 @@ describe("incremental orchestration updates", () => {
         },
       ],
       threads: [],
+      orchestratorWakeItems: [],
       bootstrapComplete: true,
     };
 

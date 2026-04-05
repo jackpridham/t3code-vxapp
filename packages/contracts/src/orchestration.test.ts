@@ -9,12 +9,15 @@ import {
   OrchestrationEvent,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationReadModel,
   OrchestrationThread,
+  OrchestratorWakeItem,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
   ProjectCreateCommand,
+  ThreadOrchestratorWakeUpsertedPayload,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
@@ -35,10 +38,15 @@ const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLa
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
+const decodeOrchestrationReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
+const decodeOrchestratorWakeItem = Schema.decodeUnknownEffect(OrchestratorWakeItem);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeThreadOrchestratorWakeUpsertedPayload = Schema.decodeUnknownEffect(
+  ThreadOrchestratorWakeUpsertedPayload,
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -713,5 +721,125 @@ it.effect("OrchestrationThread schema includes lineage fields with undefined def
     assert.strictEqual(withLineage.spawnRole, "worker");
     assert.strictEqual(withLineage.spawnedBy, "jasper");
     assert.strictEqual(withLineage.workflowId, "workflow-abc");
+  }),
+);
+
+it.effect("decodes orchestrator wake items with expected defaults", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestratorWakeItem({
+      wakeId: "wake:worker-1:turn-1:completed",
+      orchestratorThreadId: "thread-orch-1",
+      orchestratorProjectId: "project-orch-1",
+      workerThreadId: "thread-worker-1",
+      workerProjectId: "project-worker-1",
+      workerTurnId: "turn-1",
+      workerTitleSnapshot: "Worker One",
+      outcome: "completed",
+      summary: "Updated the wake queue projection",
+      queuedAt: "2026-04-05T10:00:00.000Z",
+      state: "pending",
+    });
+
+    assert.strictEqual(parsed.workflowId, undefined);
+    assert.strictEqual(parsed.deliveryMessageId, undefined);
+    assert.strictEqual(parsed.deliveredAt, null);
+    assert.strictEqual(parsed.consumedAt, null);
+    assert.strictEqual(parsed.consumeReason, undefined);
+  }),
+);
+
+it.effect("decodes wake upsert command and event payloads", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "thread.orchestrator-wake.upsert",
+      commandId: "cmd-wake-1",
+      threadId: "thread-orch-1",
+      createdAt: "2026-04-05T10:01:00.000Z",
+      wakeItem: {
+        wakeId: "wake:worker-1:turn-1:failed",
+        orchestratorThreadId: "thread-orch-1",
+        orchestratorProjectId: "project-orch-1",
+        workerThreadId: "thread-worker-1",
+        workerProjectId: "project-worker-1",
+        workerTurnId: "turn-1",
+        workflowId: "wf-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "failed",
+        summary: "Worker failed with a lint error",
+        queuedAt: "2026-04-05T10:00:00.000Z",
+        state: "pending",
+      },
+    });
+    assert.strictEqual(command.type, "thread.orchestrator-wake.upsert");
+    if (command.type !== "thread.orchestrator-wake.upsert") return;
+    assert.strictEqual(command.wakeItem.outcome, "failed");
+
+    const payload = yield* decodeThreadOrchestratorWakeUpsertedPayload({
+      threadId: "thread-orch-1",
+      wakeItem: {
+        wakeId: "wake:worker-1:turn-1:failed",
+        orchestratorThreadId: "thread-orch-1",
+        orchestratorProjectId: "project-orch-1",
+        workerThreadId: "thread-worker-1",
+        workerProjectId: "project-worker-1",
+        workerTurnId: "turn-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "failed",
+        summary: "Worker failed with a lint error",
+        queuedAt: "2026-04-05T10:00:00.000Z",
+        state: "consumed",
+        consumedAt: "2026-04-05T10:02:00.000Z",
+        consumeReason: "worker_superseded_by_new_turn",
+      },
+    });
+    assert.strictEqual(payload.wakeItem.state, "consumed");
+    assert.strictEqual(payload.wakeItem.consumeReason, "worker_superseded_by_new_turn");
+
+    const event = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "evt-wake-1",
+      aggregateKind: "thread",
+      aggregateId: "thread-orch-1",
+      occurredAt: "2026-04-05T10:01:00.000Z",
+      commandId: "cmd-wake-1",
+      causationEventId: null,
+      correlationId: "cmd-wake-1",
+      metadata: {},
+      type: "thread.orchestrator-wake-upserted",
+      payload,
+    });
+    assert.strictEqual(event.type, "thread.orchestrator-wake-upserted");
+  }),
+);
+
+it.effect("decodes snapshots containing orchestrator wake items", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* decodeOrchestrationReadModel({
+      snapshotSequence: 4,
+      projects: [],
+      threads: [],
+      orchestratorWakeItems: [
+        {
+          wakeId: "wake:worker-1:turn-1:completed",
+          orchestratorThreadId: "thread-orch-1",
+          orchestratorProjectId: "project-orch-1",
+          workerThreadId: "thread-worker-1",
+          workerProjectId: "project-worker-1",
+          workerTurnId: "turn-1",
+          workerTitleSnapshot: "Worker One",
+          outcome: "completed",
+          summary: "Worker completed the task",
+          queuedAt: "2026-04-05T10:00:00.000Z",
+          state: "delivered",
+          deliveryMessageId: "msg-wake-1",
+          deliveredAt: "2026-04-05T10:03:00.000Z",
+        },
+      ],
+      updatedAt: "2026-04-05T10:03:00.000Z",
+    });
+
+    assert.strictEqual(snapshot.orchestratorWakeItems.length, 1);
+    assert.strictEqual(snapshot.orchestratorWakeItems[0]?.state, "delivered");
+    assert.strictEqual(snapshot.orchestratorWakeItems[0]?.deliveryMessageId, "msg-wake-1");
   }),
 );

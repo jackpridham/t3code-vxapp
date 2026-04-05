@@ -168,6 +168,115 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       }
     }),
   );
+
+  it.effect("projects orchestrator wake upserts into the wake queue table", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = new Date().toISOString();
+
+      yield* eventStore.append({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-wake-project"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.makeUnsafe("project-wake"),
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-wake-project"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-wake-project"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.makeUnsafe("project-wake"),
+          title: "Wake Project",
+          workspaceRoot: "/tmp/project-wake",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-wake-thread"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-orch-wake"),
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-wake-thread"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-wake-thread"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-orch-wake"),
+          projectId: ProjectId.makeUnsafe("project-wake"),
+          title: "Orchestrator Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.orchestrator-wake-upserted",
+        eventId: EventId.makeUnsafe("evt-wake-upsert"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-orch-wake"),
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-wake-upsert"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-wake-upsert"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-orch-wake"),
+          wakeItem: {
+            wakeId: "wake:thread-worker-1:turn-1:completed",
+            orchestratorThreadId: ThreadId.makeUnsafe("thread-orch-wake"),
+            orchestratorProjectId: ProjectId.makeUnsafe("project-wake"),
+            workerThreadId: ThreadId.makeUnsafe("thread-worker-1"),
+            workerProjectId: ProjectId.makeUnsafe("project-worker-1"),
+            workerTurnId: TurnId.makeUnsafe("turn-1"),
+            workerTitleSnapshot: "Worker One",
+            outcome: "completed",
+            summary: "Completed the task",
+            queuedAt: now,
+            state: "pending",
+            deliveredAt: null,
+            consumedAt: null,
+          },
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const wakeRows = yield* sql<{
+        readonly wakeId: string;
+        readonly state: string;
+        readonly summary: string;
+      }>`
+        SELECT
+          wake_id AS "wakeId",
+          state,
+          summary
+        FROM projection_orchestrator_wakes
+      `;
+
+      assert.deepEqual(wakeRows, [
+        {
+          wakeId: "wake:thread-worker-1:turn-1:completed",
+          state: "pending",
+          summary: "Completed the task",
+        },
+      ]);
+    }),
+  );
 });
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(

@@ -10,6 +10,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import { ProjectionOrchestratorWakeRepository } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -29,6 +30,7 @@ import {
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProjectionOrchestratorWakeRepositoryLive } from "../../persistence/Layers/ProjectionOrchestratorWakes.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -59,6 +61,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
+  orchestratorWakes: "projection.orchestrator-wakes",
 } as const;
 
 type ProjectorName =
@@ -369,6 +372,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+    const projectionOrchestratorWakeRepository = yield* ProjectionOrchestratorWakeRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -585,9 +589,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
-        case "thread.activity-appended": {
+        case "thread.activity-appended":
+        case "thread.orchestrator-wake-upserted": {
+          const targetThreadId =
+            event.type === "thread.orchestrator-wake-upserted"
+              ? event.payload.wakeItem.orchestratorThreadId
+              : event.payload.threadId;
           const existingRow = yield* projectionThreadRepository.getById({
-            threadId: event.payload.threadId,
+            threadId: targetThreadId,
           });
           if (Option.isNone(existingRow)) {
             return;
@@ -825,6 +834,33 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         default:
           return;
       }
+    });
+
+    const applyOrchestratorWakesProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyOrchestratorWakesProjection",
+    )(function* (event, _attachmentSideEffects) {
+      if (event.type !== "thread.orchestrator-wake-upserted") {
+        return;
+      }
+
+      yield* projectionOrchestratorWakeRepository.upsert({
+        wakeId: event.payload.wakeItem.wakeId,
+        orchestratorThreadId: event.payload.wakeItem.orchestratorThreadId,
+        orchestratorProjectId: event.payload.wakeItem.orchestratorProjectId,
+        workerThreadId: event.payload.wakeItem.workerThreadId,
+        workerProjectId: event.payload.wakeItem.workerProjectId,
+        workerTurnId: event.payload.wakeItem.workerTurnId,
+        workflowId: event.payload.wakeItem.workflowId ?? null,
+        workerTitleSnapshot: event.payload.wakeItem.workerTitleSnapshot,
+        outcome: event.payload.wakeItem.outcome,
+        summary: event.payload.wakeItem.summary,
+        queuedAt: event.payload.wakeItem.queuedAt,
+        state: event.payload.wakeItem.state,
+        deliveryMessageId: event.payload.wakeItem.deliveryMessageId ?? null,
+        deliveredAt: event.payload.wakeItem.deliveredAt,
+        consumedAt: event.payload.wakeItem.consumedAt,
+        consumeReason: event.payload.wakeItem.consumeReason ?? null,
+      });
     });
 
     const applyThreadSessionsProjection: ProjectorDefinition["apply"] = Effect.fn(
@@ -1224,6 +1260,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyPendingApprovalsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
+        apply: applyOrchestratorWakesProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
         apply: applyThreadsProjection,
       },
@@ -1330,5 +1370,6 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
+  Layer.provideMerge(ProjectionOrchestratorWakeRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
 );

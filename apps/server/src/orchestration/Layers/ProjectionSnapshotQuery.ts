@@ -10,6 +10,7 @@ import {
   ProjectHooks,
   ProjectScript,
   OrchestrationProjectKind,
+  OrchestratorWakeItem,
   ThreadId,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -34,6 +35,7 @@ import {
 } from "../../persistence/Errors.ts";
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
+import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
@@ -74,6 +76,7 @@ const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
     sequence: Schema.NullOr(NonNegativeInt),
   }),
 );
+const ProjectionOrchestratorWakeDbRowSchema = ProjectionOrchestratorWake;
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
@@ -101,6 +104,7 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+  ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
 ] as const;
 
 function maxIso(left: string | null, right: string): string {
@@ -280,6 +284,33 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listOrchestratorWakeRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionOrchestratorWakeDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          wake_id AS "wakeId",
+          orchestrator_thread_id AS "orchestratorThreadId",
+          orchestrator_project_id AS "orchestratorProjectId",
+          worker_thread_id AS "workerThreadId",
+          worker_project_id AS "workerProjectId",
+          worker_turn_id AS "workerTurnId",
+          workflow_id AS "workflowId",
+          worker_title_snapshot AS "workerTitleSnapshot",
+          outcome,
+          summary,
+          queued_at AS "queuedAt",
+          state,
+          delivery_message_id AS "deliveryMessageId",
+          delivered_at AS "deliveredAt",
+          consumed_at AS "consumedAt",
+          consume_reason AS "consumeReason"
+        FROM projection_orchestrator_wakes
+        ORDER BY queued_at ASC, wake_id ASC
+      `,
+  });
+
   const listCheckpointRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionCheckpointDbRowSchema,
@@ -345,6 +376,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             proposedPlanRows,
             activityRows,
             sessionRows,
+            orchestratorWakeRows,
             checkpointRows,
             latestTurnRows,
             stateRows,
@@ -397,6 +429,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 ),
               ),
             ),
+            listOrchestratorWakeRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getSnapshot:listOrchestratorWakes:query",
+                  "ProjectionSnapshotQuery.getSnapshot:listOrchestratorWakes:decodeRows",
+                ),
+              ),
+            ),
             listCheckpointRows(undefined).pipe(
               Effect.mapError(
                 toPersistenceSqlOrDecodeError(
@@ -429,6 +469,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>();
           const sessionsByThread = new Map<string, OrchestrationSession>();
           const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
+          const orchestratorWakeItems: Array<OrchestratorWakeItem> = [];
 
           let updatedAt: string | null = null;
 
@@ -553,6 +594,36 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             });
           }
 
+          for (const row of orchestratorWakeRows) {
+            updatedAt = maxIso(updatedAt, row.queuedAt);
+            if (row.deliveredAt !== null) {
+              updatedAt = maxIso(updatedAt, row.deliveredAt);
+            }
+            if (row.consumedAt !== null) {
+              updatedAt = maxIso(updatedAt, row.consumedAt);
+            }
+            orchestratorWakeItems.push({
+              wakeId: row.wakeId,
+              orchestratorThreadId: row.orchestratorThreadId,
+              orchestratorProjectId: row.orchestratorProjectId,
+              workerThreadId: row.workerThreadId,
+              workerProjectId: row.workerProjectId,
+              workerTurnId: row.workerTurnId,
+              ...(row.workflowId !== null ? { workflowId: row.workflowId } : {}),
+              workerTitleSnapshot: row.workerTitleSnapshot,
+              outcome: row.outcome,
+              summary: row.summary,
+              queuedAt: row.queuedAt,
+              state: row.state,
+              ...(row.deliveryMessageId !== null
+                ? { deliveryMessageId: row.deliveryMessageId }
+                : {}),
+              deliveredAt: row.deliveredAt,
+              consumedAt: row.consumedAt,
+              ...(row.consumeReason !== null ? { consumeReason: row.consumeReason } : {}),
+            });
+          }
+
           const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
             id: row.projectId,
             title: row.title,
@@ -566,42 +637,48 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             deletedAt: row.deletedAt,
           }));
 
-          const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
-            id: row.threadId,
-            projectId: row.projectId,
-            title: row.title,
-            labels: row.labels,
-            modelSelection: row.modelSelection,
-            runtimeMode: row.runtimeMode,
-            interactionMode: row.interactionMode,
-            branch: row.branch,
-            worktreePath: row.worktreePath,
-            latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            archivedAt: row.archivedAt,
-            deletedAt: row.deletedAt,
-            messages: messagesByThread.get(row.threadId) ?? [],
-            proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-            activities: activitiesByThread.get(row.threadId) ?? [],
-            checkpoints: checkpointsByThread.get(row.threadId) ?? [],
-            session: sessionsByThread.get(row.threadId) ?? null,
-            ...(row.orchestratorProjectId !== null
-              ? { orchestratorProjectId: row.orchestratorProjectId }
-              : {}),
-            ...(row.orchestratorThreadId !== null
-              ? { orchestratorThreadId: row.orchestratorThreadId }
-              : {}),
-            ...(row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : {}),
-            ...(row.spawnRole !== null ? { spawnRole: row.spawnRole } : {}),
-            ...(row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : {}),
-            ...(row.workflowId !== null ? { workflowId: row.workflowId } : {}),
-          }));
+          const threads: ReadonlyArray<OrchestrationThread> = threadRows.map(
+            (row) =>
+              Object.assign(
+                {
+                  id: row.threadId,
+                  projectId: row.projectId,
+                  title: row.title,
+                  labels: row.labels,
+                  modelSelection: row.modelSelection,
+                  runtimeMode: row.runtimeMode,
+                  interactionMode: row.interactionMode,
+                  branch: row.branch,
+                  worktreePath: row.worktreePath,
+                  latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  archivedAt: row.archivedAt,
+                  deletedAt: row.deletedAt,
+                  messages: messagesByThread.get(row.threadId) ?? [],
+                  proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+                  activities: activitiesByThread.get(row.threadId) ?? [],
+                  checkpoints: checkpointsByThread.get(row.threadId) ?? [],
+                  session: sessionsByThread.get(row.threadId) ?? null,
+                },
+                row.orchestratorProjectId !== null
+                  ? { orchestratorProjectId: row.orchestratorProjectId }
+                  : undefined,
+                row.orchestratorThreadId !== null
+                  ? { orchestratorThreadId: row.orchestratorThreadId }
+                  : undefined,
+                row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
+                row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
+                row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
+                row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+              ) satisfies OrchestrationThread,
+          );
 
           const snapshot = {
             snapshotSequence: computeSnapshotSequence(stateRows),
             projects,
             threads,
+            orchestratorWakeItems,
             updatedAt: updatedAt ?? new Date(0).toISOString(),
           };
 
