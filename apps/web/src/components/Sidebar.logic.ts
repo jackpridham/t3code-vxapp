@@ -18,7 +18,7 @@ type SidebarProject = Pick<Project, "id" | "name" | "cwd" | "kind"> & {
 };
 type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
   latestUserMessageAt?: string | null;
-  messages?: Pick<Thread["messages"][number], "createdAt" | "role">[];
+  messages?: ReadonlyArray<Pick<Thread["messages"][number], "createdAt" | "role">>;
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
@@ -158,6 +158,17 @@ export function resolveSidebarNewThreadEnvMode(input: {
   defaultEnvMode: SidebarNewThreadEnvMode;
 }): SidebarNewThreadEnvMode {
   return input.requestedEnvMode ?? input.defaultEnvMode;
+}
+
+export function buildCopyThreadIdErrorDescription(input: {
+  threadId: string;
+  errorMessage?: string | null | undefined;
+}): string {
+  const message = input.errorMessage?.trim();
+  if (!message) {
+    return `Thread ID: ${input.threadId}`;
+  }
+  return `${message}\nThread ID: ${input.threadId}`;
 }
 
 function toNormalizedCwdSegments(cwd: string): string[] {
@@ -576,6 +587,51 @@ export function sortThreadsForSidebar<
     if (byTimestamp !== 0) return byTimestamp;
     return right.id.localeCompare(left.id);
   });
+}
+
+type ActiveProjectThreadSortInput = Pick<
+  Thread,
+  "id" | "projectId" | "archivedAt" | "createdAt" | "updatedAt"
+> &
+  SidebarThreadSortInput & {
+    deletedAt?: string | null | undefined;
+    latestTurn?: {
+      completedAt?: string | null | undefined;
+    } | null;
+    session?: {
+      status?: string | undefined;
+    } | null;
+  };
+
+export function resolveLatestActiveThreadForProject<T extends ActiveProjectThreadSortInput>(input: {
+  projectId: T["projectId"];
+  threads: readonly T[];
+  sortOrder: SidebarThreadSortOrder;
+}): T | null {
+  const activeThreads = sortThreadsForSidebar(
+    input.threads.filter(
+      (thread) =>
+        thread.projectId === input.projectId &&
+        thread.archivedAt === null &&
+        thread.deletedAt == null,
+    ),
+    input.sortOrder,
+  );
+  const activeSessionThread = activeThreads.find((thread) => {
+    const status = thread.session?.status;
+    return status !== undefined && status !== "closed";
+  });
+  if (activeSessionThread) {
+    return activeSessionThread;
+  }
+  const pendingTurnThread = activeThreads.find((thread) => {
+    const latestTurn = thread.latestTurn;
+    return latestTurn != null && latestTurn.completedAt === null;
+  });
+  if (pendingTurnThread) {
+    return pendingTurnThread;
+  }
+  return activeThreads[0] ?? null;
 }
 
 export function getFallbackThreadIdAfterDelete<

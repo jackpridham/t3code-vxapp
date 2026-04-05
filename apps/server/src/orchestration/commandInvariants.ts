@@ -38,6 +38,55 @@ export function listThreadsByProjectId(
   return readModel.threads.filter((thread) => thread.projectId === projectId);
 }
 
+export function listActiveThreadsByProjectId(
+  readModel: OrchestrationReadModel,
+  projectId: ProjectId,
+): ReadonlyArray<OrchestrationThread> {
+  return listThreadsByProjectId(readModel, projectId).filter(
+    (thread) => thread.archivedAt === null && thread.deletedAt === null,
+  );
+}
+
+export function requireOrchestratorProjectThreadSlotAvailable(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly project: OrchestrationProject;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (input.project.kind !== "orchestrator") {
+    return Effect.void;
+  }
+
+  const existingActiveThread = listActiveThreadsByProjectId(input.readModel, input.project.id)[0];
+  if (!existingActiveThread) {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Orchestrator project '${input.project.id}' already has an active thread '${existingActiveThread.id}'. Archive it before creating a new session.`,
+    ),
+  );
+}
+
+export function requireProjectCanBecomeOrchestrator(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly project: OrchestrationProject;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const activeThreads = listActiveThreadsByProjectId(input.readModel, input.project.id);
+  if (activeThreads.length <= 1) {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Project '${input.project.id}' has ${activeThreads.length} active threads and cannot be converted to an orchestrator until only one active thread remains.`,
+    ),
+  );
+}
+
 export function requireProject(input: {
   readonly readModel: OrchestrationReadModel;
   readonly command: OrchestrationCommand;

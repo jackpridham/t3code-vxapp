@@ -20,7 +20,7 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -193,7 +193,10 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
-  async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
+  async function createHarness(options?: {
+    serverSettings?: Partial<ServerSettings>;
+    projectHooksLayer?: Layer.Layer<ProjectHooksService, never>;
+  }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
@@ -208,7 +211,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
-      Layer.provideMerge(ProjectHooksService.layerTest),
+      Layer.provideMerge(options?.projectHooksLayer ?? ProjectHooksService.layerTest),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -2383,5 +2386,49 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("runtime still processed");
+  });
+
+  it("invokes project hooks only for turn.completed runtime events", async () => {
+    const handleTurnCompleted = vi.fn(() => Effect.void);
+    const { emit, drain } = await createHarness({
+      projectHooksLayer: Layer.succeed(ProjectHooksService, {
+        prepareTurnStartCommand: (command) => Effect.succeed(command),
+        handleTurnCompleted,
+      }),
+    });
+
+    emit({
+      type: "turn.started",
+      eventId: asEventId("evt-project-hooks-turn-started"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hooks-1"),
+      createdAt: new Date().toISOString(),
+      itemId: asItemId("item-hooks-1"),
+      payload: {},
+    } as unknown as ProviderRuntimeEvent);
+    await drain();
+    expect(handleTurnCompleted).not.toHaveBeenCalled();
+
+    emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-project-hooks-turn-completed"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-hooks-1"),
+      createdAt: new Date().toISOString(),
+      payload: {
+        state: "completed",
+      },
+    });
+    await drain();
+
+    expect(handleTurnCompleted).toHaveBeenCalledTimes(1);
+    expect(handleTurnCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "turn.completed",
+        turnId: asTurnId("turn-hooks-1"),
+      }),
+    );
   });
 });

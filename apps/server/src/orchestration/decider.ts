@@ -3,10 +3,18 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@t3tools/contracts";
+import {
+  buildOrchestratorThreadLabels,
+  reconcileOrchestratorThreadLabels,
+  stripOrchestratorThreadLabels,
+} from "@t3tools/shared/orchestrator";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
+  listActiveThreadsByProjectId,
+  requireProjectCanBecomeOrchestrator,
+  requireOrchestratorProjectThreadSlotAvailable,
   requireProject,
   requireProjectAbsent,
   requireThread,
@@ -45,6 +53,20 @@ function withEventBase(
     correlationId: input.commandId,
     metadata: input.metadata ?? {},
   };
+}
+
+function sameLabels(
+  left: ReadonlyArray<string> | null | undefined,
+  right: ReadonlyArray<string> | null | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((label, index) => label === right[index]);
 }
 
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
@@ -88,33 +110,87 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.meta.update": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
       });
       const occurredAt = nowIso();
-      return {
-        ...withEventBase({
-          aggregateKind: "project",
-          aggregateId: command.projectId,
-          occurredAt,
-          commandId: command.commandId,
-        }),
-        type: "project.meta-updated",
-        payload: {
-          projectId: command.projectId,
-          ...(command.title !== undefined ? { title: command.title } : {}),
-          ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
-          ...(command.kind !== undefined ? { kind: command.kind } : {}),
-          ...(command.defaultModelSelection !== undefined
-            ? { defaultModelSelection: command.defaultModelSelection }
-            : {}),
-          ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
-          ...(command.hooks !== undefined ? { hooks: command.hooks } : {}),
-          updatedAt: occurredAt,
+      const nextProjectKind = command.kind ?? project.kind ?? "project";
+      const nextProjectTitle = command.title ?? project.title;
+
+      if (nextProjectKind === "orchestrator" && project.kind !== "orchestrator") {
+        yield* requireProjectCanBecomeOrchestrator({
+          readModel,
+          command,
+          project,
+        });
+      }
+
+      const events: Array<Omit<OrchestrationEvent, "sequence">> = [
+        {
+          ...withEventBase({
+            aggregateKind: "project",
+            aggregateId: command.projectId,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+          type: "project.meta-updated",
+          payload: {
+            projectId: command.projectId,
+            ...(command.title !== undefined ? { title: command.title } : {}),
+            ...(command.workspaceRoot !== undefined
+              ? { workspaceRoot: command.workspaceRoot }
+              : {}),
+            ...(command.kind !== undefined ? { kind: command.kind } : {}),
+            ...(command.defaultModelSelection !== undefined
+              ? { defaultModelSelection: command.defaultModelSelection }
+              : {}),
+            ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
+            ...(command.hooks !== undefined ? { hooks: command.hooks } : {}),
+            updatedAt: occurredAt,
+          },
         },
-      };
+      ];
+
+      const activeThreads = listActiveThreadsByProjectId(readModel, command.projectId);
+      for (const thread of activeThreads) {
+        const nextLabels =
+          nextProjectKind === "orchestrator"
+            ? reconcileOrchestratorThreadLabels({
+                existingLabels: thread.labels,
+                orchestratorName: nextProjectTitle,
+                previousOrchestratorName:
+                  project.kind === "orchestrator" ? project.title : undefined,
+              })
+            : project.kind === "orchestrator"
+              ? stripOrchestratorThreadLabels({
+                  existingLabels: thread.labels,
+                  orchestratorName: project.title,
+                })
+              : null;
+
+        if (nextLabels === null || sameLabels(thread.labels, nextLabels)) {
+          continue;
+        }
+
+        events.push({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: thread.id,
+            occurredAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.meta-updated",
+          payload: {
+            threadId: thread.id,
+            labels: nextLabels,
+            updatedAt: occurredAt,
+          },
+        });
+      }
+
+      return events.length === 1 ? events[0]! : events;
     }
 
     case "project.delete": {
@@ -140,7 +216,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.create": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
@@ -150,6 +226,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      yield* requireOrchestratorProjectThreadSlotAvailable({
+        readModel,
+        command,
+        project,
+      });
+      const labels =
+        command.labels ??
+        (project.kind === "orchestrator" ? buildOrchestratorThreadLabels(project.title) : []);
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -162,7 +246,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           projectId: command.projectId,
           title: command.title,
-          labels: command.labels ?? [],
+          labels,
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
@@ -232,10 +316,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.unarchive": {
-      yield* requireThreadArchived({
+      const thread = yield* requireThreadArchived({
         readModel,
         command,
         threadId: command.threadId,
+      });
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: thread.projectId,
+      });
+      yield* requireOrchestratorProjectThreadSlotAvailable({
+        readModel,
+        command,
+        project,
       });
       const occurredAt = nowIso();
       return {

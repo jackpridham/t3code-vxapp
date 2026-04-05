@@ -129,6 +129,7 @@ import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  buildCopyThreadIdErrorDescription,
   filterThreadsByLabels,
   getUniqueLabelsFromThreads,
   getVisibleSidebarThreadIds,
@@ -136,6 +137,7 @@ import {
   groupThreadsByLineage,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
+  resolveLatestActiveThreadForProject,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
   resolveSidebarProjectKind,
@@ -622,6 +624,8 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
+  const defaultThreadEnvMode = appSettings.defaultThreadEnvMode;
+  const sidebarThreadSortOrder = appSettings.sidebarThreadSortOrder;
   const shouldShowAddProjectForm =
     addingProject && (!shouldBrowseForProjectImmediately || newProjectKind === "orchestrator");
   const orderedProjects = useMemo(() => {
@@ -752,38 +756,24 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     (projectId: ProjectId) => {
       const latestThread = sortThreadsForSidebar(
         threads.filter((thread) => thread.projectId === projectId && thread.archivedAt === null),
-        appSettings.sidebarThreadSortOrder,
+        sidebarThreadSortOrder,
       )[0];
       if (!latestThread) return;
 
       void navigate(resolveThreadRouteTarget(pathname, latestThread.id));
     },
-    [appSettings.sidebarThreadSortOrder, navigate, pathname, threads],
+    [navigate, pathname, sidebarThreadSortOrder, threads],
   );
 
   const getLatestActiveThreadForProject = useCallback(
     (projectId: ProjectId) => {
-      const activeThreads = sortThreadsForSidebar(
-        threads.filter((thread) => thread.projectId === projectId && thread.archivedAt === null),
-        appSettings.sidebarThreadSortOrder,
-      );
-      const activeSessionThread = activeThreads.find((thread) => {
-        const status = thread.session?.status;
-        return status !== undefined && status !== "closed";
+      return resolveLatestActiveThreadForProject({
+        projectId,
+        threads,
+        sortOrder: sidebarThreadSortOrder,
       });
-      if (activeSessionThread) {
-        return activeSessionThread;
-      }
-      const pendingTurnThread = activeThreads.find((thread) => {
-        const latestTurn = thread.latestTurn;
-        return latestTurn !== null && latestTurn.completedAt === null;
-      });
-      if (pendingTurnThread) {
-        return pendingTurnThread;
-      }
-      return activeThreads[0] ?? null;
     },
-    [appSettings.sidebarThreadSortOrder, threads],
+    [sidebarThreadSortOrder, threads],
   );
 
   const openOrCreateOrchestratorSession = useCallback(
@@ -800,17 +790,48 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         return;
       }
 
+      const api = readNativeApi();
+      if (!api) {
+        await handleNewThread(projectId, {
+          envMode: defaultThreadEnvMode,
+        });
+        return;
+      }
+
+      try {
+        const snapshot = await api.orchestration.getSnapshot();
+        useStore.getState().syncServerReadModel(snapshot);
+
+        const latestServerThread = resolveLatestActiveThreadForProject({
+          projectId,
+          threads: snapshot.threads,
+          sortOrder: sidebarThreadSortOrder,
+        });
+        if (latestServerThread) {
+          await navigate(resolveThreadRouteTarget(pathname, latestServerThread.id));
+          return;
+        }
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to load orchestrator session",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+        return;
+      }
+
       await handleNewThread(projectId, {
-        envMode: appSettings.defaultThreadEnvMode,
+        envMode: defaultThreadEnvMode,
       });
     },
     [
-      appSettings.defaultThreadEnvMode,
+      defaultThreadEnvMode,
       getDraftThreadByProjectId,
       getLatestActiveThreadForProject,
       handleNewThread,
       navigate,
       pathname,
+      sidebarThreadSortOrder,
     ],
   );
 
@@ -830,7 +851,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
 
         const activeThreads = sortThreadsForSidebar(
           threads.filter((thread) => thread.projectId === projectId && thread.archivedAt === null),
-          appSettings.sidebarThreadSortOrder,
+          sidebarThreadSortOrder,
         );
 
         for (const thread of activeThreads) {
@@ -864,7 +885,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         }
 
         await handleNewThread(projectId, {
-          envMode: appSettings.defaultThreadEnvMode,
+          envMode: defaultThreadEnvMode,
         });
       } catch (error) {
         toastManager.add({
@@ -875,12 +896,12 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       }
     },
     [
-      appSettings.defaultThreadEnvMode,
-      appSettings.sidebarThreadSortOrder,
+      defaultThreadEnvMode,
       clearComposerDraftForThread,
       clearProjectDraftThreadId,
       getDraftThreadByProjectId,
       handleNewThread,
+      sidebarThreadSortOrder,
       threads,
     ],
   );
@@ -1118,11 +1139,14 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         description: ctx.threadId,
       });
     },
-    onError: (error) => {
+    onError: (error, ctx) => {
       toastManager.add({
         type: "error",
         title: "Failed to copy thread ID",
-        description: error instanceof Error ? error.message : "An error occurred.",
+        description: buildCopyThreadIdErrorDescription({
+          threadId: ctx.threadId,
+          errorMessage: error instanceof Error ? error.message : "An error occurred.",
+        }),
       });
     },
   });

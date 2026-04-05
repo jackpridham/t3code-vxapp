@@ -47,6 +47,10 @@
     "./projectHooks": {
       "types": "./src/projectHooks.ts",
       "import": "./src/projectHooks.ts"
+    },
+    "./orchestrator": {
+      "types": "./src/orchestrator.ts",
+      "import": "./src/orchestrator.ts"
     }
   },
   "scripts": {

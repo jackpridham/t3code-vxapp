@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildCopyThreadIdErrorDescription,
   createThreadJumpHintVisibilityController,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
@@ -16,6 +17,7 @@ import {
   getSidebarThreadLabels,
   resolveSidebarProjectKind,
   resolveSidebarNewThreadEnvMode,
+  resolveLatestActiveThreadForProject,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
@@ -169,6 +171,26 @@ describe("resolveSidebarNewThreadEnvMode", () => {
   });
 });
 
+describe("buildCopyThreadIdErrorDescription", () => {
+  it("includes the actual thread id alongside the clipboard error", () => {
+    expect(
+      buildCopyThreadIdErrorDescription({
+        threadId: ThreadId.makeUnsafe("thread-copy-1"),
+        errorMessage: "Clipboard API unavailable.",
+      }),
+    ).toBe("Clipboard API unavailable.\nThread ID: thread-copy-1");
+  });
+
+  it("falls back to only the thread id when the error message is empty", () => {
+    expect(
+      buildCopyThreadIdErrorDescription({
+        threadId: ThreadId.makeUnsafe("thread-copy-2"),
+        errorMessage: "   ",
+      }),
+    ).toBe("Thread ID: thread-copy-2");
+  });
+});
+
 describe("resolveSidebarProjectKind", () => {
   it("prefers the persisted project kind when present", () => {
     expect(
@@ -303,6 +325,97 @@ describe("resolveAdjacentThreadId", () => {
         direction: "previous",
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveLatestActiveThreadForProject", () => {
+  it("prefers the thread with a live session over newer idle threads", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const liveThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-live"),
+      projectId,
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:01:00.000Z",
+      session: {
+        provider: "codex",
+        status: "running",
+        orchestrationStatus: "running",
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:01:00.000Z",
+      },
+    });
+    const newerIdleThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-idle"),
+      projectId,
+      createdAt: "2026-03-09T11:00:00.000Z",
+      updatedAt: "2026-03-09T11:01:00.000Z",
+    });
+
+    expect(
+      resolveLatestActiveThreadForProject({
+        projectId,
+        threads: [newerIdleThread, liveThread],
+        sortOrder: "updated_at",
+      })?.id,
+    ).toBe(liveThread.id);
+  });
+
+  it("falls back to the pending-turn thread when no session is live", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const pendingThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-pending"),
+      projectId,
+      createdAt: "2026-03-09T10:00:00.000Z",
+      updatedAt: "2026-03-09T10:05:00.000Z",
+      latestTurn: makeLatestTurn({ completedAt: null }),
+    });
+    const olderIdleThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-idle"),
+      projectId,
+      createdAt: "2026-03-09T09:00:00.000Z",
+      updatedAt: "2026-03-09T09:05:00.000Z",
+    });
+
+    expect(
+      resolveLatestActiveThreadForProject({
+        projectId,
+        threads: [olderIdleThread, pendingThread],
+        sortOrder: "updated_at",
+      })?.id,
+    ).toBe(pendingThread.id);
+  });
+
+  it("ignores archived and deleted threads when resolving the active thread", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const archivedThread = {
+      ...makeThread({
+        id: ThreadId.makeUnsafe("thread-archived"),
+        projectId,
+        updatedAt: "2026-03-09T12:00:00.000Z",
+      }),
+      archivedAt: "2026-03-09T12:30:00.000Z",
+    };
+    const deletedThread = {
+      ...makeThread({
+        id: ThreadId.makeUnsafe("thread-deleted"),
+        projectId,
+        updatedAt: "2026-03-09T12:20:00.000Z",
+      }),
+      deletedAt: "2026-03-09T12:40:00.000Z",
+    };
+    const activeThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-active"),
+      projectId,
+      updatedAt: "2026-03-09T11:00:00.000Z",
+    });
+
+    expect(
+      resolveLatestActiveThreadForProject({
+        projectId,
+        threads: [archivedThread, deletedThread, activeThread],
+        sortOrder: "updated_at",
+      })?.id,
+    ).toBe(activeThread.id);
   });
 });
 

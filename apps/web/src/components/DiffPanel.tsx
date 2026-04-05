@@ -353,6 +353,14 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
       },
     });
   };
+  const closeDiff = useCallback(() => {
+    if (!activeThread) return;
+    void navigate({
+      to: "/$threadId",
+      params: { threadId: activeThread.id },
+      search: (previous) => stripDiffSearchParams(previous),
+    });
+  }, [activeThread, navigate]);
   const updateTurnStripScrollState = useCallback(() => {
     const element = turnStripRef.current;
     if (!element) {
@@ -543,7 +551,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
   );
 
   return (
-    <DiffPanelShell mode={mode} header={headerRow}>
+    <DiffPanelShell mode={mode} header={headerRow} onClose={closeDiff}>
       {!activeThread ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.

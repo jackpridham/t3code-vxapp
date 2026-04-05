@@ -55,3 +55,5 @@ __screenshots__/
 .claude/skills/vx-plan-tests-implement
 .claude/skills/vx-plan-tests-refine
 .claude/skills/vx-agents-handoff
+.claude/skills/vx-agents-feedback
+.agents/

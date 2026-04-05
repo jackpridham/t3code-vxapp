@@ -2500,4 +2500,41 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await mounted.cleanup();
     }
   });
+
+  it("closes the diff panel from the top-right close button", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-diff-close" as MessageId,
+        targetText: "diff close target",
+      }),
+    });
+
+    try {
+      await mounted.router.navigate({
+        to: "/$threadId",
+        params: { threadId: THREAD_ID },
+        search: { diff: "1" },
+      });
+      await waitForLayout();
+
+      const closeButton = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('button[aria-label="Close diff panel"]'),
+        "Unable to find diff panel close button.",
+      );
+      closeButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(mounted.router.state.location.search).not.toHaveProperty("diff");
+          expect(
+            document.querySelector('button[aria-label="Close diff panel"]'),
+          ).not.toBeInTheDocument();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 });

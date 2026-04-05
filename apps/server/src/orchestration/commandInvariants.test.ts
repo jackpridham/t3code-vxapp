@@ -12,8 +12,11 @@ import { Effect } from "effect";
 
 import {
   findThreadById,
+  listActiveThreadsByProjectId,
   listThreadsByProjectId,
   requireNonNegativeInteger,
+  requireProjectCanBecomeOrchestrator,
+  requireOrchestratorProjectThreadSlotAvailable,
   requireThread,
   requireThreadAbsent,
 } from "./commandInvariants.ts";
@@ -125,10 +128,28 @@ describe("commandInvariants", () => {
     expect(findThreadById(readModel, ThreadId.makeUnsafe("thread-1"))?.projectId).toBe("project-a");
     expect(findThreadById(readModel, ThreadId.makeUnsafe("missing"))).toBeUndefined();
     expect(
+      listActiveThreadsByProjectId(readModel, ProjectId.makeUnsafe("project-b")).map(
+        (thread) => thread.id,
+      ),
+    ).toEqual([ThreadId.makeUnsafe("thread-2")]);
+    expect(
       listThreadsByProjectId(readModel, ProjectId.makeUnsafe("project-b")).map(
         (thread) => thread.id,
       ),
     ).toEqual([ThreadId.makeUnsafe("thread-2")]);
+  });
+
+  it("treats deleted threads as inactive for orchestrator slot enforcement", () => {
+    const deletedThreadReadModel: OrchestrationReadModel = {
+      ...readModel,
+      threads: readModel.threads.map((thread) =>
+        thread.id === ThreadId.makeUnsafe("thread-1") ? { ...thread, deletedAt: now } : thread,
+      ),
+    };
+
+    expect(
+      listActiveThreadsByProjectId(deletedThreadReadModel, ProjectId.makeUnsafe("project-a")),
+    ).toEqual([]);
   });
 
   it("requires existing thread", async () => {
@@ -200,6 +221,108 @@ describe("commandInvariants", () => {
         }),
       ),
     ).rejects.toThrow("already exists");
+  });
+
+  it("rejects a second active thread in an orchestrator project", async () => {
+    const orchestratorReadModel: OrchestrationReadModel = {
+      ...readModel,
+      projects: readModel.projects.map((project) =>
+        project.id === ProjectId.makeUnsafe("project-a")
+          ? { ...project, kind: "orchestrator" as const }
+          : project,
+      ),
+    };
+
+    await expect(
+      Effect.runPromise(
+        requireOrchestratorProjectThreadSlotAvailable({
+          readModel: orchestratorReadModel,
+          command: {
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe("cmd-4"),
+            threadId: ThreadId.makeUnsafe("thread-4"),
+            projectId: ProjectId.makeUnsafe("project-a"),
+            title: "next orchestrator session",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+          },
+          project: orchestratorReadModel.projects[0]!,
+        }),
+      ),
+    ).rejects.toThrow("already has an active thread");
+  });
+
+  it("allows a new orchestrator thread when the previous thread was deleted", async () => {
+    const orchestratorReadModel: OrchestrationReadModel = {
+      ...readModel,
+      projects: readModel.projects.map((project) =>
+        project.id === ProjectId.makeUnsafe("project-a")
+          ? { ...project, kind: "orchestrator" as const }
+          : project,
+      ),
+      threads: readModel.threads.map((thread) =>
+        thread.id === ThreadId.makeUnsafe("thread-1") ? { ...thread, deletedAt: now } : thread,
+      ),
+    };
+
+    await Effect.runPromise(
+      requireOrchestratorProjectThreadSlotAvailable({
+        readModel: orchestratorReadModel,
+        command: {
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("cmd-5"),
+          threadId: ThreadId.makeUnsafe("thread-5"),
+          projectId: ProjectId.makeUnsafe("project-a"),
+          title: "replacement orchestrator session",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+        },
+        project: orchestratorReadModel.projects[0]!,
+      }),
+    );
+  });
+
+  it("rejects converting a multi-thread project into an orchestrator", async () => {
+    const crowdedReadModel: OrchestrationReadModel = {
+      ...readModel,
+      threads: [
+        ...readModel.threads,
+        {
+          ...readModel.threads[0]!,
+          id: ThreadId.makeUnsafe("thread-3"),
+          title: "Thread A2",
+        },
+      ],
+    };
+
+    await expect(
+      Effect.runPromise(
+        requireProjectCanBecomeOrchestrator({
+          readModel: crowdedReadModel,
+          command: {
+            type: "project.meta.update",
+            commandId: CommandId.makeUnsafe("cmd-project-update-kind"),
+            projectId: ProjectId.makeUnsafe("project-a"),
+            kind: "orchestrator",
+          },
+          project: crowdedReadModel.projects[0]!,
+        }),
+      ),
+    ).rejects.toThrow("cannot be converted to an orchestrator");
   });
 
   it("requires non-negative integers", async () => {

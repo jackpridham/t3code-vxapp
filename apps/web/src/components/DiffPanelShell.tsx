@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
+import { XIcon } from "lucide-react";
 
 import { isElectron } from "~/env";
 import { cn } from "~/lib/utils";
 
+import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
 
 export type DiffPanelMode = "inline" | "sheet" | "sidebar";
@@ -19,8 +21,11 @@ export function DiffPanelShell(props: {
   mode: DiffPanelMode;
   header: ReactNode;
   children: ReactNode;
+  onClose?: () => void;
+  closeLabel?: string;
 }) {
   const shouldUseDragRegion = isElectron && props.mode !== "sheet";
+  const closeLabel = props.closeLabel ?? "Close diff panel";
 
   return (
     <div
@@ -32,10 +37,40 @@ export function DiffPanelShell(props: {
       )}
     >
       {shouldUseDragRegion ? (
-        <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
+        <div className={getDiffPanelHeaderRowClassName(props.mode)}>
+          {props.header}
+          {props.onClose ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={closeLabel}
+              title={closeLabel}
+              className="size-7 shrink-0 [-webkit-app-region:no-drag]"
+              onClick={props.onClose}
+            >
+              <XIcon className="size-4" />
+            </Button>
+          ) : null}
+        </div>
       ) : (
         <div className="border-b border-border">
-          <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
+          <div className={getDiffPanelHeaderRowClassName(props.mode)}>
+            {props.header}
+            {props.onClose ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={closeLabel}
+                title={closeLabel}
+                className="size-7 shrink-0"
+                onClick={props.onClose}
+              >
+                <XIcon className="size-4" />
+              </Button>
+            ) : null}
+          </div>
         </div>
       )}
       {props.children}
