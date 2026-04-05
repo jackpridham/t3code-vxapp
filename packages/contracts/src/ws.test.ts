@@ -73,6 +73,21 @@ it.effect("accepts git.preparePullRequestThread requests", () =>
   }),
 );
 
+it.effect("accepts knowledge.query requests", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-knowledge-1",
+      body: {
+        _tag: WS_METHODS.knowledgeQuery,
+        query: "Where are the technical docs entry points documented?",
+        topK: 3,
+        rebuild: false,
+      },
+    });
+    assert.strictEqual(parsed.body._tag, WS_METHODS.knowledgeQuery);
+  }),
+);
+
 it.effect("accepts typed websocket push envelopes with sequence", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWsResponse({

@@ -39,6 +39,7 @@ import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput 
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload, ServerProviderUpdatedPayload } from "./server";
 import { ServerSettingsPatch } from "./settings";
+import { KnowledgeQueryInput } from "./knowledge";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
 
@@ -81,6 +82,11 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+
+  // Knowledge methods
+  knowledgeDoctor: "knowledge.doctor",
+  knowledgeReadiness: "knowledge.readiness",
+  knowledgeQuery: "knowledge.query",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -151,6 +157,11 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),
   tagRequestBody(WS_METHODS.serverGetSettings, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpdateSettings, Schema.Struct({ patch: ServerSettingsPatch })),
+
+  // Knowledge methods
+  tagRequestBody(WS_METHODS.knowledgeDoctor, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.knowledgeReadiness, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.knowledgeQuery, KnowledgeQueryInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

@@ -216,6 +216,11 @@ export function createWsNativeApi(): NativeApi {
       getSettings: () => transport.request(WS_METHODS.serverGetSettings),
       updateSettings: (patch) => transport.request(WS_METHODS.serverUpdateSettings, { patch }),
     },
+    knowledge: {
+      doctor: () => transport.request(WS_METHODS.knowledgeDoctor),
+      readiness: () => transport.request(WS_METHODS.knowledgeReadiness),
+      query: (input) => transport.request(WS_METHODS.knowledgeQuery, input, { timeoutMs: null }),
+    },
     orchestration: {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       dispatchCommand: (command) =>

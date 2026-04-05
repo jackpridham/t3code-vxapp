@@ -82,6 +82,7 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
+import { KnowledgeClient } from "./knowledge/Services/KnowledgeClient.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -184,6 +185,7 @@ export type ServerRuntimeServices =
   | WorkspaceFileSystem
   | WorkspacePaths
   | ProjectHooksService
+  | typeof KnowledgeClient
   | Open
   | AnalyticsService;
 
@@ -888,6 +890,22 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.serverUpdateSettings: {
         const body = stripRequestTag(request.body);
         return yield* serverSettingsManager.updateSettings(body.patch);
+      }
+
+      case WS_METHODS.knowledgeDoctor: {
+        const knowledgeClient = yield* KnowledgeClient;
+        return yield* knowledgeClient.doctor;
+      }
+
+      case WS_METHODS.knowledgeReadiness: {
+        const knowledgeClient = yield* KnowledgeClient;
+        return yield* knowledgeClient.readiness;
+      }
+
+      case WS_METHODS.knowledgeQuery: {
+        const body = stripRequestTag(request.body);
+        const knowledgeClient = yield* KnowledgeClient;
+        return yield* knowledgeClient.query(body);
       }
 
       default: {

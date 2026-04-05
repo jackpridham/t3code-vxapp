@@ -54,6 +54,12 @@ import type {
 } from "./orchestration";
 import { EditorId } from "./editor";
 import { ServerSettings, ServerSettingsPatch } from "./settings";
+import type {
+  KnowledgeDoctorResult,
+  KnowledgeQueryInput,
+  KnowledgeQueryResult,
+  KnowledgeReadinessResult,
+} from "./knowledge";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -179,6 +185,11 @@ export interface NativeApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+  };
+  knowledge: {
+    doctor: () => Promise<KnowledgeDoctorResult>;
+    readiness: () => Promise<KnowledgeReadinessResult>;
+    query: (input: KnowledgeQueryInput) => Promise<KnowledgeQueryResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

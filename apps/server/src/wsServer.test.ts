@@ -26,6 +26,9 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EDITORS,
   EventId,
+  type KnowledgeDoctorResult,
+  type KnowledgeQueryResult,
+  type KnowledgeReadinessResult,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
   ProviderItemId,
@@ -66,6 +69,11 @@ import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import {
+  KnowledgeClient,
+  makeKnowledgeClientTestLayer,
+  type KnowledgeClientShape,
+} from "./knowledge/Services/KnowledgeClient.ts";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -514,6 +522,7 @@ describe("WebSocket Server", () => {
       gitManager?: GitManagerShape;
       gitCore?: Pick<GitCoreShape, "listBranches" | "initRepo" | "pullCurrentBranch">;
       terminalManager?: TerminalManagerShape;
+      knowledgeClient?: Partial<KnowledgeClientShape>;
       serverSettings?: Partial<ServerSettings>;
     } = {},
   ): Promise<Http.Server> {
@@ -566,6 +575,7 @@ describe("WebSocket Server", () => {
       options.terminalManager
         ? Layer.succeed(TerminalManager, options.terminalManager)
         : Layer.empty,
+      options.knowledgeClient ? makeKnowledgeClientTestLayer(options.knowledgeClient) : Layer.empty,
     );
 
     const runtimeLayer = Layer.merge(
@@ -2054,6 +2064,96 @@ describe("WebSocket Server", () => {
         }),
       }),
     );
+  });
+
+  it("routes knowledge.doctor requests through the knowledge client", async () => {
+    const doctorResult: KnowledgeDoctorResult = {
+      pythonPackages: ["llama-index"],
+      missingPythonPackages: [],
+      ollamaBinary: "/usr/local/bin/ollama",
+      ollamaVersion: "0.0.0",
+      ollamaReachable: true,
+      installedModels: ["llama3.1:8b"],
+      missingModels: [],
+      indexDirWritable: true,
+      autoStartOllama: true,
+      autoPullModels: false,
+    };
+
+    server = await createTestServer({
+      knowledgeClient: {
+        doctor: Effect.succeed(doctorResult),
+      },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.knowledgeDoctor);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual(doctorResult);
+  });
+
+  it("routes knowledge.readiness and knowledge.query requests through the knowledge client", async () => {
+    const readinessResult: KnowledgeReadinessResult = {
+      ok: true,
+      reasons: [],
+      runtime: {
+        pythonPackages: ["llama-index"],
+        missingPythonPackages: [],
+        ollamaBinary: "/usr/local/bin/ollama",
+        ollamaVersion: "0.0.0",
+        ollamaReachable: true,
+        installedModels: ["llama3.1:8b"],
+        missingModels: [],
+        indexDirWritable: true,
+        autoStartOllama: true,
+        autoPullModels: false,
+      },
+    };
+    const queryResult: KnowledgeQueryResult = {
+      answer: "The entry points are documented in README.md.",
+      rebuilt: false,
+      sources: [
+        {
+          source: "/repo/README.md",
+          score: 0.88,
+          content: "Technical docs entry points are listed here.",
+        },
+      ],
+    };
+
+    server = await createTestServer({
+      knowledgeClient: {
+        readiness: Effect.succeed(readinessResult),
+        query: (input) =>
+          Effect.succeed({
+            ...queryResult,
+            answer: input.query.includes("entry points") ? queryResult.answer : "unknown",
+          }),
+      },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const readinessResponse = await sendRequest(ws, WS_METHODS.knowledgeReadiness);
+    expect(readinessResponse.error).toBeUndefined();
+    expect(readinessResponse.result).toEqual(readinessResult);
+
+    const response = await sendRequest(ws, WS_METHODS.knowledgeQuery, {
+      query: "Where are the technical docs entry points documented?",
+      topK: 3,
+      rebuild: false,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual(queryResult);
   });
 
   it("rejects websocket connections without a valid auth token", async () => {

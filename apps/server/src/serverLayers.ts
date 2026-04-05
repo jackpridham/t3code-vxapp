@@ -39,6 +39,8 @@ import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ProjectHooksLive } from "./projectHooks/Layers/ProjectHooks.ts";
+import { KnowledgeHttpClientLive } from "./knowledge/Layers/KnowledgeHttpClient.ts";
+import { KnowledgeConfig } from "./knowledge/config.ts";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -159,8 +161,12 @@ export function makeServerRuntimeServicesLayer() {
     workspaceEntriesLayer,
     workspaceFileSystemLayer,
     projectFaviconResolverLayer,
+    KnowledgeHttpClientLive.pipe(Layer.provide(KnowledgeConfig.layer)),
     gitManagerLayer,
     terminalLayer,
     KeybindingsLive,
-  ).pipe(Layer.provideMerge(gitCoreLayer), Layer.provideMerge(NodeServices.layer));
+  ).pipe(
+    Layer.provideMerge(gitCoreLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
 }

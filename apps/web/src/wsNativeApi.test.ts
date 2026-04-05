@@ -407,6 +407,33 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards knowledge requests to websocket methods", async () => {
+    requestMock.mockResolvedValue({});
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.knowledge.doctor();
+    await api.knowledge.readiness();
+    await api.knowledge.query({
+      query: "Where are the technical docs entry points documented?",
+      topK: 3,
+      rebuild: false,
+    });
+
+    expect(requestMock).toHaveBeenNthCalledWith(1, WS_METHODS.knowledgeDoctor);
+    expect(requestMock).toHaveBeenNthCalledWith(2, WS_METHODS.knowledgeReadiness);
+    expect(requestMock).toHaveBeenNthCalledWith(
+      3,
+      WS_METHODS.knowledgeQuery,
+      {
+        query: "Where are the technical docs entry points documented?",
+        topK: 3,
+        rebuild: false,
+      },
+      { timeoutMs: null },
+    );
+  });
+
   it("forwards context menu metadata to desktop bridge", async () => {
     const showContextMenu = vi.fn().mockResolvedValue("delete");
     Object.defineProperty(getWindowForTest(), "desktopBridge", {
