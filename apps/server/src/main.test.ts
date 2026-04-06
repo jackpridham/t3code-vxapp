@@ -1,7 +1,6 @@
 import * as Http from "node:http";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
-import type { OrchestrationReadModel } from "@t3tools/contracts";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,7 +13,7 @@ import { NetService } from "@t3tools/shared/Net";
 import { CliConfig, recordStartupHeartbeat, t3Cli, type CliConfigShape } from "./main";
 import { ServerConfig, type ServerConfigShape } from "./config";
 import { Open, type OpenShape } from "./open";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { ProjectionOperationalQuery } from "./orchestration/Services/ProjectionOperationalQuery";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
 import { ServerSettingsService } from "./serverSettings";
@@ -351,22 +350,20 @@ it.layer(testLayer)("server CLI command", (it) => {
       const recordTelemetry = vi.fn(
         (_event: string, _properties?: Readonly<Record<string, unknown>>) => Effect.void,
       );
-      const getSnapshot = vi.fn(() =>
+      const getReadiness = vi.fn(() =>
         Effect.succeed({
           snapshotSequence: 2,
-          projects: [{} as OrchestrationReadModel["projects"][number]],
-          threads: [
-            {} as OrchestrationReadModel["threads"][number],
-            {} as OrchestrationReadModel["threads"][number],
-          ],
-          orchestratorWakeItems: [],
-          updatedAt: new Date(1).toISOString(),
-        } satisfies OrchestrationReadModel),
+          projectCount: 1,
+          threadCount: 2,
+        }),
       );
 
       yield* recordStartupHeartbeat.pipe(
-        Effect.provideService(ProjectionSnapshotQuery, {
-          getSnapshot,
+        Effect.provideService(ProjectionOperationalQuery, {
+          getReadiness,
+          listProjects: () => Effect.die("unexpected listProjects"),
+          getProjectByWorkspace: () => Effect.die("unexpected getProjectByWorkspace"),
+          listProjectThreads: () => Effect.die("unexpected listProjectThreads"),
         }),
         Effect.provideService(AnalyticsService, {
           record: recordTelemetry,

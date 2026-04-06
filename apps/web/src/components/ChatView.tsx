@@ -199,6 +199,7 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   threadHasStarted,
+  threadIsHydratingHistory,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -1455,11 +1456,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     });
   }, [diffOpen, navigate, threadId]);
 
-  const envLocked = Boolean(
-    activeThread &&
-    (activeThread.messages.length > 0 ||
-      (activeThread.session !== null && activeThread.session.status !== "closed")),
-  );
+  const envLocked = Boolean(activeThread && threadHasStarted(activeThread));
   const activeTerminalGroup =
     terminalState.terminalGroups.find(
       (group) => group.id === terminalState.activeTerminalGroupId,
@@ -2766,7 +2763,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
-    const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+    const isFirstMessage = !isServerThread || !threadHasStarted(activeThread);
     const baseBranchForWorktree =
       isFirstMessage && envMode === "worktree" && !activeThread.worktreePath
         ? activeThread.branch
@@ -3966,6 +3963,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               <MessagesTimeline
                 key={activeThread.id}
                 hasMessages={timelineEntries.length > 0}
+                isHydratingHistory={threadIsHydratingHistory(activeThread)}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnStartedAt={activeWorkStartedAt}

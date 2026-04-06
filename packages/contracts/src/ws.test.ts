@@ -22,6 +22,34 @@ it.effect("accepts getTurnDiff requests when fromTurnCount <= toTurnCount", () =
   }),
 );
 
+it.effect("accepts bounded orchestration read requests", () =>
+  Effect.gen(function* () {
+    const bootstrapSummaryRequest = yield* decodeWebSocketRequest({
+      id: "req-bootstrap-summary-1",
+      body: {
+        _tag: ORCHESTRATION_WS_METHODS.getBootstrapSummary,
+      },
+    });
+    assert.strictEqual(
+      bootstrapSummaryRequest.body._tag,
+      ORCHESTRATION_WS_METHODS.getBootstrapSummary,
+    );
+
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-readiness-1",
+      body: {
+        _tag: ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
+        workspaceRoot: "/tmp/workspace",
+      },
+    });
+
+    assert.strictEqual(parsed.body._tag, ORCHESTRATION_WS_METHODS.getProjectByWorkspace);
+    if (parsed.body._tag === ORCHESTRATION_WS_METHODS.getProjectByWorkspace) {
+      assert.strictEqual(parsed.body.workspaceRoot, "/tmp/workspace");
+    }
+  }),
+);
+
 it.effect("rejects getTurnDiff requests when fromTurnCount > toTurnCount", () =>
   Effect.gen(function* () {
     const result = yield* Effect.exit(

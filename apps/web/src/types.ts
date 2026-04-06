@@ -4,6 +4,7 @@ import type {
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
+  OrchestrationThreadSnapshotCoverage,
   ProjectHook as ContractProjectHook,
   ProjectScript as ContractProjectScript,
   ThreadId,
@@ -116,6 +117,7 @@ export interface Thread {
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  snapshotCoverage?: OrchestrationThreadSnapshotCoverage | undefined;
   // Lineage metadata — set when thread is spawned by an orchestrator
   orchestratorProjectId?: string | undefined;
   orchestratorThreadId?: string | undefined;

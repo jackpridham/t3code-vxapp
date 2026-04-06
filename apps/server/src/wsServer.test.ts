@@ -742,6 +742,10 @@ describe("WebSocket Server", () => {
     const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
     expect(snapshotResponse.error).toBeUndefined();
     const snapshot = snapshotResponse.result as {
+      snapshotProfile?: string;
+      snapshotCoverage?: {
+        includeArchivedThreads: boolean;
+      };
       projects: Array<{
         id: string;
         workspaceRoot: string;
@@ -767,6 +771,12 @@ describe("WebSocket Server", () => {
     const bootstrapThreadId = (welcome.data as { bootstrapThreadId?: string }).bootstrapThreadId;
     expect(bootstrapProjectId).toBeDefined();
     expect(bootstrapThreadId).toBeDefined();
+    expect(snapshot.snapshotProfile).toBe("operational");
+    expect(snapshot.snapshotCoverage).toEqual(
+      expect.objectContaining({
+        includeArchivedThreads: true,
+      }),
+    );
 
     expect(snapshot.projects).toEqual(
       expect.arrayContaining([
@@ -795,6 +805,102 @@ describe("WebSocket Server", () => {
           worktreePath: null,
         }),
       ]),
+    );
+
+    const debugSnapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot, {
+      profile: "debug-export",
+    });
+    expect(debugSnapshotResponse.error).toBeUndefined();
+    expect(debugSnapshotResponse.result).toEqual(
+      expect.objectContaining({
+        snapshotProfile: "debug-export",
+      }),
+    );
+
+    const activeThreadSnapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot, {
+      profile: "active-thread",
+      threadId: bootstrapThreadId,
+    });
+    expect(activeThreadSnapshotResponse.error).toBeUndefined();
+    expect(activeThreadSnapshotResponse.result).toEqual(
+      expect.objectContaining({
+        snapshotProfile: "active-thread",
+        threads: [expect.objectContaining({ id: bootstrapThreadId })],
+      }),
+    );
+  });
+
+  it("serves bounded orchestration read RPCs without requiring a snapshot", async () => {
+    server = await createTestServer({
+      cwd: "/test/bounded-read-workspace",
+      autoBootstrapProjectFromCwd: true,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    const bootstrapThreadId = (welcome.data as { bootstrapThreadId?: string }).bootstrapThreadId;
+    expect(bootstrapProjectId).toBeDefined();
+    expect(bootstrapThreadId).toBeDefined();
+
+    const readinessResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getReadiness);
+    expect(readinessResponse.error).toBeUndefined();
+    expect(readinessResponse.result).toEqual(
+      expect.objectContaining({
+        projectCount: 1,
+        threadCount: 1,
+      }),
+    );
+
+    const projectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getProjectByWorkspace, {
+      workspaceRoot: "/test/bounded-read-workspace",
+    });
+    expect(projectResponse.error).toBeUndefined();
+    expect(projectResponse.result).toEqual(
+      expect.objectContaining({
+        id: bootstrapProjectId,
+        workspaceRoot: "/test/bounded-read-workspace",
+        title: "bounded-read-workspace",
+      }),
+    );
+
+    const threadsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.listProjectThreads, {
+      projectId: bootstrapProjectId,
+    });
+    expect(threadsResponse.error).toBeUndefined();
+    expect(threadsResponse.result).toEqual([
+      expect.objectContaining({
+        id: bootstrapThreadId,
+        projectId: bootstrapProjectId,
+        title: "New thread",
+      }),
+    ]);
+
+    const bootstrapSummaryResponse = await sendRequest(
+      ws,
+      ORCHESTRATION_WS_METHODS.getBootstrapSummary,
+    );
+    expect(bootstrapSummaryResponse.error).toBeUndefined();
+    expect(bootstrapSummaryResponse.result).toEqual(
+      expect.objectContaining({
+        projects: expect.arrayContaining([
+          expect.objectContaining({
+            id: bootstrapProjectId,
+          }),
+        ]),
+        threads: expect.arrayContaining([
+          expect.objectContaining({
+            id: bootstrapThreadId,
+            messages: [],
+            proposedPlans: [],
+            activities: [],
+            checkpoints: [],
+          }),
+        ]),
+      }),
     );
   });
 

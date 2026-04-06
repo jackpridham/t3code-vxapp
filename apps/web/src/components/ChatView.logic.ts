@@ -163,8 +163,29 @@ export function buildExpiredTerminalContextToastCopy(
 
 export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(
-    thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
+    thread &&
+      (thread.latestTurn !== null ||
+        thread.messages.length > 0 ||
+        thread.session !== null ||
+        thread.activities.length > 0 ||
+        thread.proposedPlans.length > 0 ||
+        thread.turnDiffSummaries.length > 0),
   );
+}
+
+export function threadHasHydratedHistory(thread: Thread | null | undefined): boolean {
+  return Boolean(
+    thread &&
+      (thread.snapshotCoverage !== undefined ||
+        thread.messages.length > 0 ||
+        thread.activities.length > 0 ||
+        thread.proposedPlans.length > 0 ||
+        thread.turnDiffSummaries.length > 0),
+  );
+}
+
+export function threadIsHydratingHistory(thread: Thread | null | undefined): boolean {
+  return Boolean(thread && threadHasStarted(thread) && !threadHasHydratedHistory(thread));
 }
 
 export async function waitForStartedServerThread(

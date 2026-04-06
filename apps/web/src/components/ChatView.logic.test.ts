@@ -1,5 +1,14 @@
 import { ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("~/lib/utils", () => ({
+  randomUUID: () => "00000000-0000-0000-0000-000000000000",
+}));
+
+vi.mock("../notificationDispatch", () => ({
+  dispatchNotification: vi.fn(),
+}));
+
 import { useStore } from "../store";
 
 import {
@@ -7,6 +16,9 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
+  threadHasHydratedHistory,
+  threadHasStarted,
+  threadIsHydratingHistory,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 
@@ -219,6 +231,47 @@ describe("waitForStartedServerThread", () => {
     await vi.advanceTimersByTimeAsync(500);
 
     await expect(promise).resolves.toBe(false);
+  });
+});
+
+describe("thread history helpers", () => {
+  it("treats latest-turn-only summaries as started but not fully hydrated", () => {
+    const thread = makeThread({
+      latestTurn: {
+        turnId: TurnId.makeUnsafe("turn-summary"),
+        state: "completed",
+        requestedAt: "2026-03-29T00:00:01.000Z",
+        startedAt: "2026-03-29T00:00:01.000Z",
+        completedAt: "2026-03-29T00:00:05.000Z",
+      },
+    });
+
+    expect(threadHasStarted(thread)).toBe(true);
+    expect(threadHasHydratedHistory(thread)).toBe(false);
+    expect(threadIsHydratingHistory(thread)).toBe(true);
+  });
+
+  it("treats bounded snapshot coverage as hydrated history even when message arrays are empty", () => {
+    const thread = {
+      ...makeThread(),
+      snapshotCoverage: {
+        messageCount: 0,
+        messageLimit: 200,
+        messagesTruncated: false,
+        proposedPlanCount: 0,
+        proposedPlanLimit: 50,
+        proposedPlansTruncated: false,
+        activityCount: 0,
+        activityLimit: 100,
+        activitiesTruncated: false,
+        checkpointCount: 0,
+        checkpointLimit: 50,
+        checkpointsTruncated: false,
+      },
+    };
+
+    expect(threadHasHydratedHistory(thread)).toBe(true);
+    expect(threadIsHydratingHistory(thread)).toBe(false);
   });
 });
 

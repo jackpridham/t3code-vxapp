@@ -85,16 +85,38 @@ export function deriveOrchestrationBatchEffects(
  */
 export function processEventNotifications(events: ReadonlyArray<OrchestrationEvent>): void {
   for (const event of events) {
+    const state = useStore.getState();
+    const resolveThreadContext = (threadId: ThreadId) => {
+      const thread = state.threads.find((entry) => entry.id === threadId);
+      const project = thread
+        ? state.projects.find((entry) => entry.id === thread.projectId)
+        : undefined;
+      return {
+        thread,
+        projectName: project?.name ?? "Unknown project",
+        labels: thread?.labels ?? [],
+      };
+    };
+
     switch (event.type) {
       case "thread.turn-diff-completed": {
         const threadId = event.payload.threadId;
-        const thread = useStore.getState().threads.find((t) => t.id === threadId);
-        const threadTitle = thread?.title ?? "Unknown thread";
+        const context = resolveThreadContext(threadId);
 
         if (event.payload.status === "error") {
-          dispatchNotification("turn-failed", "error", "Turn Failed", threadTitle);
+          dispatchNotification("turn-failed", "error", "Turn Failed", undefined, {
+            threadId,
+            projectName: context.projectName,
+            labels: context.labels,
+            occurredAt: event.payload.completedAt,
+          });
         } else {
-          dispatchNotification("turn-completed", "info", "Turn Completed", threadTitle);
+          dispatchNotification("turn-completed", "info", "Turn Completed", undefined, {
+            threadId,
+            projectName: context.projectName,
+            labels: context.labels,
+            occurredAt: event.payload.completedAt,
+          });
         }
         break;
       }
@@ -102,25 +124,42 @@ export function processEventNotifications(events: ReadonlyArray<OrchestrationEve
       case "thread.turn-interrupt-requested": {
         if (event.payload.turnId !== undefined) {
           const threadId = event.payload.threadId;
-          const thread = useStore.getState().threads.find((t) => t.id === threadId);
-          const threadTitle = thread?.title ?? "Unknown thread";
-          dispatchNotification("turn-failed", "warning", "Turn Interrupted", threadTitle);
+          const context = resolveThreadContext(threadId);
+          dispatchNotification("turn-failed", "warning", "Turn Interrupted", undefined, {
+            threadId,
+            projectName: context.projectName,
+            labels: context.labels,
+            occurredAt: event.occurredAt,
+          });
         }
         break;
       }
 
       case "thread.created": {
-        const title = event.payload.title ?? "Untitled";
-        dispatchNotification("thread-created", "info", "Thread Created", title);
+        const state = useStore.getState();
+        const project = state.projects.find((entry) => entry.id === event.payload.projectId);
+        dispatchNotification("thread-created", "info", "Thread Created", undefined, {
+          threadId: event.payload.threadId,
+          projectName: project?.name ?? "Unknown project",
+          labels:
+            "labels" in event.payload && Array.isArray(event.payload.labels)
+              ? event.payload.labels
+              : [],
+          occurredAt: event.payload.createdAt,
+        });
         break;
       }
 
       case "thread.meta-updated": {
         if (event.payload.labels !== undefined) {
           const threadId = event.payload.threadId;
-          const thread = useStore.getState().threads.find((t) => t.id === threadId);
-          const threadTitle = thread?.title ?? "Unknown thread";
-          dispatchNotification("label-changed", "info", "Labels Updated", threadTitle);
+          const context = resolveThreadContext(threadId);
+          dispatchNotification("label-changed", "info", "Labels Updated", undefined, {
+            threadId,
+            projectName: context.projectName,
+            labels: event.payload.labels,
+            occurredAt: event.payload.updatedAt,
+          });
         }
         break;
       }
@@ -137,10 +176,38 @@ export function processEventNotifications(events: ReadonlyArray<OrchestrationEve
             errorMsg.toLowerCase().includes("429")
           ) {
             const threadId = event.payload.threadId;
-            const thread = useStore.getState().threads.find((t) => t.id === threadId);
-            const threadTitle = thread?.title ?? "Unknown thread";
-            dispatchNotification("thread-rate-limited", "warning", "Rate Limited", threadTitle);
+            const context = resolveThreadContext(threadId);
+            dispatchNotification("thread-rate-limited", "warning", "Rate Limited", undefined, {
+              threadId,
+              projectName: context.projectName,
+              labels: context.labels,
+              occurredAt: event.payload.session.updatedAt,
+              detail: errorMsg,
+            });
           }
+        }
+        break;
+      }
+
+      case "thread.activity-appended": {
+        if (
+          event.payload.activity.tone === "error" &&
+          /hook/i.test(event.payload.activity.kind)
+        ) {
+          const context = resolveThreadContext(event.payload.threadId);
+          dispatchNotification(
+            "hook-failure",
+            "error",
+            "Hook failed",
+            undefined,
+            {
+              threadId: event.payload.threadId,
+              projectName: context.projectName,
+              labels: context.labels,
+              occurredAt: event.payload.activity.createdAt,
+              detail: event.payload.activity.summary,
+            },
+          );
         }
         break;
       }

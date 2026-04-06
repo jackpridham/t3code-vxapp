@@ -4,11 +4,16 @@ import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./ba
 import {
   ClientOrchestrationCommand,
   OrchestrationEvent,
+  OrchestrationGetBootstrapSummaryInput,
+  OrchestrationGetProjectByWorkspaceInput,
   ORCHESTRATION_WS_CHANNELS,
+  OrchestrationGetReadinessInput,
   OrchestrationGetFullThreadDiffInput,
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotInput,
   OrchestrationGetTurnDiffInput,
+  OrchestrationListProjectThreadsInput,
+  OrchestrationListProjectsInput,
   OrchestrationReplayEventsInput,
 } from "./orchestration";
 import {
@@ -107,6 +112,20 @@ const tagRequestBody = <const Tag extends string, const Fields extends Schema.St
 
 const WebSocketRequestBody = Schema.Union([
   // Orchestration methods
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.getBootstrapSummary,
+    OrchestrationGetBootstrapSummaryInput,
+  ),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getReadiness, OrchestrationGetReadinessInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.listProjects, OrchestrationListProjectsInput),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
+    OrchestrationGetProjectByWorkspaceInput,
+  ),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.listProjectThreads,
+    OrchestrationListProjectThreadsInput,
+  ),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),

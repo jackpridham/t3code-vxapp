@@ -7,9 +7,15 @@ import {
   DEFAULT_RUNTIME_MODE,
   OrchestrationCommand,
   OrchestrationEvent,
+  OrchestrationGetBootstrapSummaryResult,
+  OrchestrationGetSnapshotInput,
+  OrchestrationGetProjectByWorkspaceResult,
+  OrchestrationGetReadinessResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationListProjectThreadsResult,
   OrchestrationReadModel,
+  OrchestrationSnapshotProfile,
   OrchestrationThread,
   OrchestratorWakeItem,
   ProjectCreatedPayload,
@@ -33,6 +39,21 @@ const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUp
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
+);
+const decodeOrchestrationGetBootstrapSummaryResult = Schema.decodeUnknownEffect(
+  OrchestrationGetBootstrapSummaryResult,
+);
+const decodeOrchestrationGetSnapshotInput = Schema.decodeUnknownEffect(
+  OrchestrationGetSnapshotInput,
+);
+const decodeOrchestrationGetReadinessResult = Schema.decodeUnknownEffect(
+  OrchestrationGetReadinessResult,
+);
+const decodeOrchestrationGetProjectByWorkspaceResult = Schema.decodeUnknownEffect(
+  OrchestrationGetProjectByWorkspaceResult,
+);
+const decodeOrchestrationListProjectThreadsResult = Schema.decodeUnknownEffect(
+  OrchestrationListProjectThreadsResult,
 );
 const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
@@ -841,5 +862,136 @@ it.effect("decodes snapshots containing orchestrator wake items", () =>
     assert.strictEqual(snapshot.orchestratorWakeItems.length, 1);
     assert.strictEqual(snapshot.orchestratorWakeItems[0]?.state, "delivered");
     assert.strictEqual(snapshot.orchestratorWakeItems[0]?.deliveryMessageId, "msg-wake-1");
+  }),
+);
+
+it.effect("decodes bounded orchestration read results", () =>
+  Effect.gen(function* () {
+    const snapshotInput = yield* decodeOrchestrationGetSnapshotInput({});
+    assert.strictEqual(snapshotInput.profile, "operational");
+    assert.strictEqual(snapshotInput.threadId, undefined);
+
+    const activeThreadSnapshotInput = yield* decodeOrchestrationGetSnapshotInput({
+      profile: "active-thread",
+      threadId: "thread-1",
+    });
+    assert.strictEqual(activeThreadSnapshotInput.profile, "active-thread");
+    assert.strictEqual(activeThreadSnapshotInput.threadId, "thread-1");
+
+    const bootstrapSummary = yield* decodeOrchestrationGetBootstrapSummaryResult({
+      snapshotSequence: 6,
+      snapshotProfile: "bootstrap-summary",
+      projects: [],
+      threads: [],
+      orchestratorWakeItems: [],
+      updatedAt: "2026-04-05T10:00:00.000Z",
+    });
+    assert.strictEqual(bootstrapSummary.snapshotSequence, 6);
+    assert.strictEqual(bootstrapSummary.snapshotProfile, "bootstrap-summary");
+
+    const readiness = yield* decodeOrchestrationGetReadinessResult({
+      snapshotSequence: 7,
+      projectCount: 2,
+      threadCount: 5,
+    });
+    assert.strictEqual(readiness.snapshotSequence, 7);
+    assert.strictEqual(readiness.projectCount, 2);
+    assert.strictEqual(readiness.threadCount, 5);
+
+    const project = yield* decodeOrchestrationGetProjectByWorkspaceResult({
+      id: "project-1",
+      title: "Project One",
+      workspaceRoot: "/tmp/project-one",
+      createdAt: "2026-04-05T10:00:00.000Z",
+      updatedAt: "2026-04-05T10:00:00.000Z",
+    });
+    assert.strictEqual(project?.id, "project-1");
+    assert.strictEqual(project?.defaultModelSelection, null);
+
+    const threads = yield* decodeOrchestrationListProjectThreadsResult([
+      {
+        id: "thread-1",
+        projectId: "project-1",
+        title: "Thread One",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-04-05T10:00:00.000Z",
+        updatedAt: "2026-04-05T10:00:00.000Z",
+      },
+    ]);
+    assert.strictEqual(threads.length, 1);
+    assert.deepStrictEqual(threads[0]?.labels, []);
+    assert.strictEqual(threads[0]?.latestTurn, null);
+    assert.strictEqual(threads[0]?.session, null);
+
+    const snapshot = yield* decodeOrchestrationReadModel({
+      snapshotSequence: 8,
+      snapshotProfile: "operational",
+      snapshotCoverage: {
+        includeArchivedThreads: true,
+        wakeItemCount: 4,
+        wakeItemLimit: 100,
+        wakeItemsTruncated: false,
+      },
+      projects: [],
+      threads: [
+        {
+          id: "thread-1",
+          projectId: "project-1",
+          title: "Thread One",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-04-05T10:00:00.000Z",
+          updatedAt: "2026-04-05T10:00:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+          snapshotCoverage: {
+            messageCount: 12,
+            messageLimit: 200,
+            messagesTruncated: true,
+            proposedPlanCount: 3,
+            proposedPlanLimit: 50,
+            proposedPlansTruncated: false,
+            activityCount: 8,
+            activityLimit: 100,
+            activitiesTruncated: false,
+            checkpointCount: 1,
+            checkpointLimit: 50,
+            checkpointsTruncated: false,
+          },
+        },
+      ],
+      orchestratorWakeItems: [],
+      updatedAt: "2026-04-05T10:01:00.000Z",
+    });
+    assert.strictEqual(snapshot.snapshotProfile, "operational");
+    assert.strictEqual(snapshot.snapshotCoverage?.includeArchivedThreads, true);
+    assert.strictEqual(snapshot.threads[0]?.snapshotCoverage?.messagesTruncated, true);
+  }),
+);
+
+it.effect("rejects invalid snapshot profiles", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      Schema.decodeUnknownEffect(OrchestrationSnapshotProfile)("bogus"),
+    );
+    assert.strictEqual(result._tag, "Failure");
   }),
 );

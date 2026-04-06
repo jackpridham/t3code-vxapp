@@ -17,12 +17,20 @@ import {
 import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { openThreadRoute } from "~/appNavigation";
 import { buildVisibleToastLayout, shouldHideCollapsedToastContent } from "./toast.logic";
 
 type ThreadToastData = {
   threadId?: ThreadId | null;
+  targetThreadId?: ThreadId | null;
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
+  notificationMeta?: {
+    subtitle: string;
+    metadataLine: string;
+    detail?: string;
+    tooltip: string;
+  };
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -44,7 +52,13 @@ function CopyErrorButton({ text }: { text: string }) {
   return (
     <button
       className="shrink-0 cursor-pointer rounded-md p-1 text-muted-foreground opacity-60 transition-opacity hover:opacity-100"
-      onClick={() => copyToClipboard(text)}
+      onClick={(event) => {
+        event.stopPropagation();
+        copyToClipboard(text);
+      }}
+      onContextMenu={(event) => {
+        event.stopPropagation();
+      }}
       title="Copy error"
       type="button"
     >
@@ -164,6 +178,12 @@ function ThreadToastVisibleAutoDismiss({
   return null;
 }
 
+function renderToastTitle(toast: {
+  title?: unknown;
+}): string | null {
+  return typeof toast.title === "string" && toast.title.length > 0 ? toast.title : null;
+}
+
 function ToastProvider({ children, position = "top-right", ...props }: ToastProviderProps) {
   return (
     <Toast.Provider toastManager={toastManager} {...props}>
@@ -218,6 +238,20 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
             visibleIndex,
             visibleToastLayout.items.length,
           );
+          const notificationMeta = toast.data?.notificationMeta;
+          const isNotificationToast = notificationMeta !== undefined;
+          const isNotificationClickable = toast.data?.targetThreadId !== null && toast.data?.targetThreadId !== undefined;
+          const openToastThread = () => {
+            const targetThreadId = toast.data?.targetThreadId;
+            if (!targetThreadId) return;
+            toastManager.close(toast.id);
+            openThreadRoute(targetThreadId);
+          };
+          const dismissNotificationToast = (event: { preventDefault(): void; stopPropagation(): void }) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toastManager.close(toast.id);
+          };
 
           return (
             <Toast.Root
@@ -266,9 +300,12 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                 "data-expanded:data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
                 "data-expanded:data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-100%-var(--toast-inset)))]",
                 "data-expanded:data-ending-style:data-[swipe-direction=down]:transform-[translateY(calc(var(--toast-swipe-movement-y)+100%+var(--toast-inset)))]",
+                isNotificationClickable && "cursor-pointer",
               )}
               data-position={position}
               key={toast.id}
+              onClick={isNotificationClickable ? openToastThread : undefined}
+              onContextMenu={isNotificationToast ? dismissNotificationToast : undefined}
               style={
                 {
                   "--toast-index": visibleIndex,
@@ -282,6 +319,7 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                     ? ["left", isTop ? "up" : "down"]
                     : ["right", isTop ? "up" : "down"]
               }
+              title={notificationMeta?.tooltip}
               toast={toast}
             >
               <ThreadToastVisibleAutoDismiss
@@ -307,18 +345,48 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
 
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <div className="flex items-center justify-between gap-1">
-                      <Toast.Title
-                        className="min-w-0 break-words font-medium"
-                        data-slot="toast-title"
-                      />
-                      {toast.type === "error" && typeof toast.description === "string" && (
+                      {notificationMeta ? (
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="min-w-0 break-words font-medium"
+                            data-slot="toast-title"
+                          >
+                            {renderToastTitle(toast) ?? <Toast.Title />}
+                          </div>
+                          <div className="min-w-0 break-words text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground/90">
+                            {notificationMeta.subtitle}
+                          </div>
+                        </div>
+                      ) : (
+                        <Toast.Title
+                          className="min-w-0 break-words font-medium"
+                          data-slot="toast-title"
+                        />
+                      )}
+                      {toast.type === "error" && typeof toast.description === "string" && !notificationMeta && (
                         <CopyErrorButton text={toast.description} />
                       )}
                     </div>
-                    <Toast.Description
-                      className="min-w-0 select-text break-words text-muted-foreground"
-                      data-slot="toast-description"
-                    />
+                    {notificationMeta ? (
+                      <div className="flex min-w-0 flex-col gap-0.5 text-muted-foreground">
+                        <div className="min-w-0 break-words text-xs">
+                          {notificationMeta.metadataLine}
+                        </div>
+                        {notificationMeta.detail ? (
+                          <div
+                            className="min-w-0 break-words text-sm text-foreground/85"
+                            data-slot="toast-description"
+                          >
+                            {notificationMeta.detail}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <Toast.Description
+                        className="min-w-0 select-text break-words text-muted-foreground"
+                        data-slot="toast-description"
+                      />
+                    )}
                   </div>
                 </div>
                 {toast.actionProps && (
@@ -360,6 +428,7 @@ function AnchoredToasts() {
             const Icon = toast.type ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS] : null;
             const tooltipStyle = toast.data?.tooltipStyle ?? false;
             const positionerProps = toast.positionerProps;
+            const targetThreadId = toast.data?.targetThreadId;
 
             if (!positionerProps?.anchor) {
               return null;
@@ -379,8 +448,27 @@ function AnchoredToasts() {
                     tooltipStyle
                       ? "rounded-md shadow-md/5 before:rounded-[calc(var(--radius-md)-1px)]"
                       : "rounded-lg shadow-lg/5 before:rounded-[calc(var(--radius-lg)-1px)]",
+                    targetThreadId ? "cursor-pointer" : undefined,
                   )}
                   data-slot="toast-popup"
+                  onClick={
+                    targetThreadId
+                      ? () => {
+                          anchoredToastManager.close(toast.id);
+                          openThreadRoute(targetThreadId);
+                        }
+                      : undefined
+                  }
+                  onContextMenu={
+                    toast.data?.notificationMeta
+                      ? (event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          anchoredToastManager.close(toast.id);
+                        }
+                      : undefined
+                  }
+                  title={toast.data?.notificationMeta?.tooltip}
                   toast={toast}
                 >
                   {tooltipStyle ? (
@@ -400,19 +488,43 @@ function AnchoredToasts() {
                         )}
 
                         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <div className="flex items-center gap-1">
-                            <Toast.Title
-                              className="min-w-0 break-words font-medium"
-                              data-slot="toast-title"
-                            />
-                            {toast.type === "error" && typeof toast.description === "string" && (
-                              <CopyErrorButton text={toast.description} />
-                            )}
-                          </div>
-                          <Toast.Description
-                            className="min-w-0 select-text break-words text-muted-foreground"
-                            data-slot="toast-description"
-                          />
+                          {toast.data?.notificationMeta ? (
+                            <>
+                              <div className="min-w-0 break-words font-medium" data-slot="toast-title">
+                                {renderToastTitle(toast) ?? <Toast.Title />}
+                              </div>
+                              <div className="min-w-0 break-words text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/90">
+                                {toast.data.notificationMeta.subtitle}
+                              </div>
+                              <div className="min-w-0 break-words text-[11px] text-muted-foreground">
+                                {toast.data.notificationMeta.metadataLine}
+                              </div>
+                              {toast.data.notificationMeta.detail ? (
+                                <div
+                                  className="min-w-0 break-words text-sm text-foreground/85"
+                                  data-slot="toast-description"
+                                >
+                                  {toast.data.notificationMeta.detail}
+                                </div>
+                              ) : null}
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-1">
+                                <Toast.Title
+                                  className="min-w-0 break-words font-medium"
+                                  data-slot="toast-title"
+                                />
+                                {toast.type === "error" && typeof toast.description === "string" && (
+                                  <CopyErrorButton text={toast.description} />
+                                )}
+                              </div>
+                              <Toast.Description
+                                className="min-w-0 select-text break-words text-muted-foreground"
+                                data-slot="toast-description"
+                              />
+                            </>
+                          )}
                         </div>
                       </div>
                       {toast.actionProps && (

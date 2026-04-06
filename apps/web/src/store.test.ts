@@ -9,7 +9,11 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("./notificationDispatch", () => ({
+  dispatchNotification: vi.fn(),
+}));
 
 import {
   applyOrchestrationEvent,
@@ -127,7 +131,10 @@ function makeReadModelThread(overrides: Partial<ReadModelThreadWithLabels> = {})
   } satisfies ReadModelThreadWithLabels;
 }
 
-function makeReadModel(thread: OrchestrationReadModel["threads"][number]): OrchestrationReadModel {
+function makeReadModel(
+  thread: OrchestrationReadModel["threads"][number],
+  overrides: Partial<OrchestrationReadModel> = {},
+): OrchestrationReadModel {
   return {
     snapshotSequence: 1,
     updatedAt: "2026-02-27T00:00:00.000Z",
@@ -149,6 +156,7 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
     ],
     threads: [thread],
     orchestratorWakeItems: [],
+    ...overrides,
   };
 }
 
@@ -182,6 +190,137 @@ describe("store read model sync", () => {
     const next = syncServerReadModel(initialState, makeReadModel(makeReadModelThread({})));
 
     expect(next.bootstrapComplete).toBe(true);
+  });
+
+  it("merges bootstrap summary payloads without dropping unrelated hydrated threads", () => {
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      threads: [
+        makeThread(),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-2"),
+          projectId: ProjectId.makeUnsafe("project-2"),
+          title: "Other thread",
+        }),
+      ],
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project",
+          cwd: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+        {
+          id: ProjectId.makeUnsafe("project-2"),
+          name: "Other project",
+          cwd: "/tmp/project-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(makeReadModelThread({ title: "Updated summary thread" }), {
+        snapshotProfile: "bootstrap-summary",
+      }),
+    );
+
+    expect(next.threads).toHaveLength(2);
+    expect(next.projects).toHaveLength(2);
+    expect(next.threads.find((thread) => thread.id === "thread-1")?.title).toBe(
+      "Updated summary thread",
+    );
+    expect(next.threads.find((thread) => thread.id === "thread-2")?.title).toBe("Other thread");
+  });
+
+  it("merges active-thread snapshots into the existing store", () => {
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      threads: [
+        makeThread(),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-2"),
+          projectId: ProjectId.makeUnsafe("project-2"),
+          title: "Other thread",
+        }),
+      ],
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project",
+          cwd: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+        {
+          id: ProjectId.makeUnsafe("project-2"),
+          name: "Other project",
+          cwd: "/tmp/project-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          id: ThreadId.makeUnsafe("thread-1"),
+          messages: [
+            {
+              id: MessageId.makeUnsafe("message-1"),
+              role: "assistant",
+              text: "hydrated",
+              turnId: null,
+              streaming: false,
+              createdAt: "2026-02-27T00:00:00.000Z",
+              updatedAt: "2026-02-27T00:00:00.000Z",
+            },
+          ],
+          snapshotCoverage: {
+            messageCount: 1,
+            messageLimit: 500,
+            messagesTruncated: false,
+            proposedPlanCount: 0,
+            proposedPlanLimit: 100,
+            proposedPlansTruncated: false,
+            activityCount: 0,
+            activityLimit: 250,
+            activitiesTruncated: false,
+            checkpointCount: 0,
+            checkpointLimit: 100,
+            checkpointsTruncated: false,
+          },
+        }),
+        {
+          snapshotProfile: "active-thread",
+        },
+      ),
+    );
+
+    expect(next.threads).toHaveLength(2);
+    expect(next.threads.find((thread) => thread.id === "thread-1")?.messages).toHaveLength(1);
+    expect(next.threads.find((thread) => thread.id === "thread-2")?.title).toBe("Other thread");
   });
 
   it("preserves claude model slugs without an active session", () => {
@@ -277,6 +416,46 @@ describe("store read model sync", () => {
     );
 
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
+  });
+
+  it("maps snapshot coverage from bounded thread payloads", () => {
+    const initialState = makeState(makeThread());
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          snapshotCoverage: {
+            messageCount: 240,
+            messageLimit: 200,
+            messagesTruncated: true,
+            proposedPlanCount: 10,
+            proposedPlanLimit: 50,
+            proposedPlansTruncated: false,
+            activityCount: 120,
+            activityLimit: 100,
+            activitiesTruncated: true,
+            checkpointCount: 3,
+            checkpointLimit: 50,
+            checkpointsTruncated: false,
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.snapshotCoverage).toEqual({
+      messageCount: 240,
+      messageLimit: 200,
+      messagesTruncated: true,
+      proposedPlanCount: 10,
+      proposedPlanLimit: 50,
+      proposedPlansTruncated: false,
+      activityCount: 120,
+      activityLimit: 100,
+      activitiesTruncated: true,
+      checkpointCount: 3,
+      checkpointLimit: 50,
+      checkpointsTruncated: false,
+    });
   });
 
   it("maps thread labels from the read model", () => {

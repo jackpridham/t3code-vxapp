@@ -841,15 +841,26 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       }
 
       try {
-        const snapshot = await api.orchestration.getSnapshot();
-        useStore.getState().syncServerReadModel(snapshot);
-
         const latestServerThread = resolveLatestActiveThreadForProject({
           projectId,
-          threads: snapshot.threads,
+          threads: await api.orchestration.listProjectThreads({
+            projectId,
+            includeArchived: false,
+            includeDeleted: false,
+          }),
           sortOrder: sidebarThreadSortOrder,
         });
         if (latestServerThread) {
+          const alreadyHydrated = useStore
+            .getState()
+            .threads.some((thread) => thread.id === latestServerThread.id);
+          if (!alreadyHydrated) {
+            const snapshot = await api.orchestration.getSnapshot({
+              profile: "active-thread",
+              threadId: latestServerThread.id,
+            });
+            useStore.getState().syncServerReadModel(snapshot);
+          }
           await navigate(resolveThreadRouteTarget(pathname, latestServerThread.id));
           return;
         }

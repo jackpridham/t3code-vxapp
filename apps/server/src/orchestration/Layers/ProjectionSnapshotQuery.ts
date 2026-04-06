@@ -11,6 +11,7 @@ import {
   ProjectScript,
   OrchestrationProjectKind,
   OrchestratorWakeItem,
+  OrchestrationSnapshotProfile,
   ThreadId,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -143,6 +144,78 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
       : toPersistenceSqlError(sqlOperation)(cause);
+}
+
+type SnapshotProfile = typeof OrchestrationSnapshotProfile.Type;
+
+type SnapshotBounds = {
+  includeArchivedThreads: boolean;
+  messageLimit: number | null;
+  proposedPlanLimit: number | null;
+  activityLimit: number | null;
+  checkpointLimit: number | null;
+  wakeItemLimit: number | null;
+};
+
+const SNAPSHOT_BOUNDS_BY_PROFILE: Record<SnapshotProfile, SnapshotBounds> = {
+  "bootstrap-summary": {
+    includeArchivedThreads: false,
+    messageLimit: 0,
+    proposedPlanLimit: 0,
+    activityLimit: 0,
+    checkpointLimit: 0,
+    wakeItemLimit: 100,
+  },
+  operational: {
+    includeArchivedThreads: true,
+    messageLimit: 200,
+    proposedPlanLimit: 50,
+    activityLimit: 100,
+    checkpointLimit: 50,
+    wakeItemLimit: 100,
+  },
+  "active-thread": {
+    includeArchivedThreads: false,
+    messageLimit: 500,
+    proposedPlanLimit: 100,
+    activityLimit: 250,
+    checkpointLimit: 100,
+    wakeItemLimit: 100,
+  },
+  "debug-export": {
+    includeArchivedThreads: true,
+    messageLimit: null,
+    proposedPlanLimit: null,
+    activityLimit: null,
+    checkpointLimit: null,
+    wakeItemLimit: null,
+  },
+};
+
+function resolveSnapshotBounds(profile: SnapshotProfile): SnapshotBounds {
+  return SNAPSHOT_BOUNDS_BY_PROFILE[profile];
+}
+
+function takeTailBounded<Value>(
+  values: ReadonlyArray<Value>,
+  limit: number | null,
+): {
+  values: ReadonlyArray<Value>;
+  totalCount: number;
+  truncated: boolean;
+} {
+  if (limit === null || values.length <= limit) {
+    return {
+      values,
+      totalCount: values.length,
+      truncated: false,
+    };
+  }
+  return {
+    values: values.slice(-limit),
+    totalCount: values.length,
+    truncated: true,
+  };
 }
 
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
@@ -365,10 +438,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
-  const getSnapshot: ProjectionSnapshotQueryShape["getSnapshot"] = () =>
+  const getSnapshot: ProjectionSnapshotQueryShape["getSnapshot"] = (input) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
+          const profile = input?.profile ?? "operational";
+          const requestedThreadId = input?.threadId;
+          const bounds = resolveSnapshotBounds(profile);
+          const includeArchivedThreads = bounds.includeArchivedThreads;
           const [
             projectRows,
             threadRows,
@@ -463,6 +540,18 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ]);
 
+          const scopedThreadRows = threadRows.filter((row) => {
+            if (requestedThreadId !== undefined && row.threadId !== requestedThreadId) {
+              return false;
+            }
+            return includeArchivedThreads || row.archivedAt === null;
+          });
+          const visibleThreadIds = new Set(scopedThreadRows.map((row) => row.threadId));
+          const visibleProjectIds =
+            requestedThreadId !== undefined
+              ? new Set(scopedThreadRows.map((row) => row.projectId))
+              : null;
+
           const messagesByThread = new Map<string, Array<OrchestrationMessage>>();
           const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>();
           const activitiesByThread = new Map<string, Array<OrchestrationThreadActivity>>();
@@ -474,9 +563,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           let updatedAt: string | null = null;
 
           for (const row of projectRows) {
+            if (visibleProjectIds !== null && !visibleProjectIds.has(row.projectId)) {
+              continue;
+            }
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
-          for (const row of threadRows) {
+          for (const row of scopedThreadRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
           for (const row of stateRows) {
@@ -484,6 +576,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           }
 
           for (const row of messageRows) {
+            if (!visibleThreadIds.has(row.threadId)) {
+              continue;
+            }
             updatedAt = maxIso(updatedAt, row.updatedAt);
             const threadMessages = messagesByThread.get(row.threadId) ?? [];
             threadMessages.push({
@@ -500,6 +595,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           }
 
           for (const row of proposedPlanRows) {
+            if (!visibleThreadIds.has(row.threadId)) {
+              continue;
+            }
             updatedAt = maxIso(updatedAt, row.updatedAt);
             const threadProposedPlans = proposedPlansByThread.get(row.threadId) ?? [];
             threadProposedPlans.push({
@@ -515,6 +613,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           }
 
           for (const row of activityRows) {
+            if (!visibleThreadIds.has(row.threadId)) {
+              continue;
+            }
             updatedAt = maxIso(updatedAt, row.createdAt);
             const threadActivities = activitiesByThread.get(row.threadId) ?? [];
             threadActivities.push({
@@ -531,6 +632,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           }
 
           for (const row of checkpointRows) {
+            if (!visibleThreadIds.has(row.threadId)) {
+              continue;
+            }
             updatedAt = maxIso(updatedAt, row.completedAt);
             const threadCheckpoints = checkpointsByThread.get(row.threadId) ?? [];
             threadCheckpoints.push({
@@ -546,6 +650,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           }
 
           for (const row of latestTurnRows) {
+            if (!visibleThreadIds.has(row.threadId)) {
+              continue;
+            }
             updatedAt = maxIso(updatedAt, row.requestedAt);
             if (row.startedAt !== null) {
               updatedAt = maxIso(updatedAt, row.startedAt);
@@ -582,6 +689,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           }
 
           for (const row of sessionRows) {
+            if (!visibleThreadIds.has(row.threadId)) {
+              continue;
+            }
             updatedAt = maxIso(updatedAt, row.updatedAt);
             sessionsByThread.set(row.threadId, {
               threadId: row.threadId,
@@ -624,61 +734,104 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             });
           }
 
-          const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
-            id: row.projectId,
-            title: row.title,
-            workspaceRoot: row.workspaceRoot,
-            kind: row.kind ?? "project",
-            defaultModelSelection: row.defaultModelSelection,
-            scripts: row.scripts,
-            hooks: row.hooks,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt,
-          }));
+          const boundedWakeItems = takeTailBounded(orchestratorWakeItems, bounds.wakeItemLimit);
 
-          const threads: ReadonlyArray<OrchestrationThread> = threadRows.map(
-            (row) =>
-              Object.assign(
-                {
-                  id: row.threadId,
-                  projectId: row.projectId,
-                  title: row.title,
-                  labels: row.labels,
-                  modelSelection: row.modelSelection,
-                  runtimeMode: row.runtimeMode,
-                  interactionMode: row.interactionMode,
-                  branch: row.branch,
-                  worktreePath: row.worktreePath,
-                  latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                  archivedAt: row.archivedAt,
-                  deletedAt: row.deletedAt,
-                  messages: messagesByThread.get(row.threadId) ?? [],
-                  proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-                  activities: activitiesByThread.get(row.threadId) ?? [],
-                  checkpoints: checkpointsByThread.get(row.threadId) ?? [],
-                  session: sessionsByThread.get(row.threadId) ?? null,
-                },
-                row.orchestratorProjectId !== null
-                  ? { orchestratorProjectId: row.orchestratorProjectId }
-                  : undefined,
-                row.orchestratorThreadId !== null
-                  ? { orchestratorThreadId: row.orchestratorThreadId }
-                  : undefined,
-                row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
-                row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
-                row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
-                row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
-              ) satisfies OrchestrationThread,
-          );
+          const projects: ReadonlyArray<OrchestrationProject> = projectRows
+            .filter((row) => visibleProjectIds === null || visibleProjectIds.has(row.projectId))
+            .map((row) => ({
+              id: row.projectId,
+              title: row.title,
+              workspaceRoot: row.workspaceRoot,
+              kind: row.kind ?? "project",
+              defaultModelSelection: row.defaultModelSelection,
+              scripts: row.scripts,
+              hooks: row.hooks,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+              deletedAt: row.deletedAt,
+            }));
+
+          const threads: ReadonlyArray<OrchestrationThread> = scopedThreadRows.map(
+              (row) => {
+                const boundedMessages = takeTailBounded(
+                  messagesByThread.get(row.threadId) ?? [],
+                  bounds.messageLimit,
+                );
+                const boundedProposedPlans = takeTailBounded(
+                  proposedPlansByThread.get(row.threadId) ?? [],
+                  bounds.proposedPlanLimit,
+                );
+                const boundedActivities = takeTailBounded(
+                  activitiesByThread.get(row.threadId) ?? [],
+                  bounds.activityLimit,
+                );
+                const boundedCheckpoints = takeTailBounded(
+                  checkpointsByThread.get(row.threadId) ?? [],
+                  bounds.checkpointLimit,
+                );
+
+                return Object.assign(
+                  {
+                    id: row.threadId,
+                    projectId: row.projectId,
+                    title: row.title,
+                    labels: row.labels,
+                    modelSelection: row.modelSelection,
+                    runtimeMode: row.runtimeMode,
+                    interactionMode: row.interactionMode,
+                    branch: row.branch,
+                    worktreePath: row.worktreePath,
+                    latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt,
+                    archivedAt: row.archivedAt,
+                    deletedAt: row.deletedAt,
+                    messages: boundedMessages.values,
+                    proposedPlans: boundedProposedPlans.values,
+                    activities: boundedActivities.values,
+                    checkpoints: boundedCheckpoints.values,
+                    snapshotCoverage: {
+                      messageCount: boundedMessages.totalCount,
+                      messageLimit: bounds.messageLimit,
+                      messagesTruncated: boundedMessages.truncated,
+                      proposedPlanCount: boundedProposedPlans.totalCount,
+                      proposedPlanLimit: bounds.proposedPlanLimit,
+                      proposedPlansTruncated: boundedProposedPlans.truncated,
+                      activityCount: boundedActivities.totalCount,
+                      activityLimit: bounds.activityLimit,
+                      activitiesTruncated: boundedActivities.truncated,
+                      checkpointCount: boundedCheckpoints.totalCount,
+                      checkpointLimit: bounds.checkpointLimit,
+                      checkpointsTruncated: boundedCheckpoints.truncated,
+                    },
+                    session: sessionsByThread.get(row.threadId) ?? null,
+                  },
+                  row.orchestratorProjectId !== null
+                    ? { orchestratorProjectId: row.orchestratorProjectId }
+                    : undefined,
+                  row.orchestratorThreadId !== null
+                    ? { orchestratorThreadId: row.orchestratorThreadId }
+                    : undefined,
+                  row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
+                  row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
+                  row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
+                  row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+                ) satisfies OrchestrationThread;
+              },
+            );
 
           const snapshot = {
             snapshotSequence: computeSnapshotSequence(stateRows),
+            snapshotProfile: profile,
+            snapshotCoverage: {
+              includeArchivedThreads,
+              wakeItemCount: boundedWakeItems.totalCount,
+              wakeItemLimit: bounds.wakeItemLimit,
+              wakeItemsTruncated: boundedWakeItems.truncated,
+            },
             projects,
             threads,
-            orchestratorWakeItems,
+            orchestratorWakeItems: boundedWakeItems.values,
             updatedAt: updatedAt ?? new Date(0).toISOString(),
           };
 
