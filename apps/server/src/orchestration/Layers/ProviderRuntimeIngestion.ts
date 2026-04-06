@@ -17,8 +17,11 @@ import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { ProviderSessionDirectoryLive } from "../../provider/Layers/ProviderSessionDirectory.ts";
+import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -70,6 +73,29 @@ function sameId(left: string | null | undefined, right: string | null | undefine
     return false;
   }
   return left === right;
+}
+
+function readRuntimePayloadRecord(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readRuntimePayloadTurnId(value: unknown): TurnId | null {
+  const record = readRuntimePayloadRecord(value);
+  if (!record) {
+    return null;
+  }
+  return typeof record.activeTurnId === "string" ? TurnId.makeUnsafe(record.activeTurnId) : null;
+}
+
+function readRuntimePayloadLastError(value: unknown): string | null {
+  const record = readRuntimePayloadRecord(value);
+  if (!record) {
+    return null;
+  }
+  return typeof record.lastError === "string" ? record.lastError : null;
 }
 
 function truncateDetail(value: string, limit = 180): string {
@@ -506,6 +532,7 @@ function runtimeEventToActivities(
 const make = Effect.fn("make")(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const providerSessionDirectory = yield* ProviderSessionDirectory;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const projectHooksService = yield* ProjectHooksService;
@@ -1257,6 +1284,72 @@ const make = Effect.fn("make")(function* () {
 
   const worker = yield* makeDrainableWorker(processInputSafely);
 
+  const reconcilePersistedSessionsOnStart = Effect.gen(function* () {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const threadIds = yield* providerSessionDirectory.listThreadIds();
+
+    yield* Effect.forEach(
+      threadIds,
+      (threadId) =>
+        Effect.gen(function* () {
+          const bindingOption = yield* providerSessionDirectory.getBinding(threadId);
+          if (Option.isNone(bindingOption)) {
+            return;
+          }
+
+          const binding = bindingOption.value;
+          if (binding.status !== "stopped" && binding.status !== "error") {
+            return;
+          }
+
+          const thread = readModel.threads.find((entry) => entry.id === threadId);
+          if (!thread) {
+            return;
+          }
+
+          const currentSession = thread.session;
+          const nextActiveTurnId =
+            binding.status === "stopped" ? null : readRuntimePayloadTurnId(binding.runtimePayload);
+          const nextStatus = binding.status === "stopped" ? "stopped" : "error";
+          const nextLastError = readRuntimePayloadLastError(binding.runtimePayload);
+
+          const alreadyMatches =
+            currentSession?.status === nextStatus &&
+            sameId(currentSession.activeTurnId, nextActiveTurnId) &&
+            (currentSession.lastError ?? null) === nextLastError;
+          if (alreadyMatches) {
+            return;
+          }
+
+          const createdAt = new Date().toISOString();
+          yield* orchestrationEngine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.makeUnsafe(
+              `provider:startup-reconcile:${threadId}:${crypto.randomUUID()}`,
+            ),
+            threadId,
+            session: {
+              threadId,
+              status: nextStatus,
+              providerName: binding.provider,
+              runtimeMode: binding.runtimeMode ?? currentSession?.runtimeMode ?? "full-access",
+              activeTurnId: nextActiveTurnId,
+              lastError: nextLastError,
+              updatedAt: createdAt,
+            },
+            createdAt,
+          });
+        }),
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("provider runtime ingestion failed to reconcile persisted sessions", {
+        cause: Cause.pretty(cause),
+      }),
+    ),
+  );
+
   const start: ProviderRuntimeIngestionShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(providerService.streamEvents, (event) =>
@@ -1271,6 +1364,7 @@ const make = Effect.fn("make")(function* () {
         return worker.enqueue({ source: "domain", event });
       }),
     );
+    yield* reconcilePersistedSessionsOnStart;
   });
 
   return {
@@ -1282,4 +1376,9 @@ const make = Effect.fn("make")(function* () {
 export const ProviderRuntimeIngestionLive = Layer.effect(
   ProviderRuntimeIngestionService,
   make(),
-).pipe(Layer.provide(ProjectionTurnRepositoryLive));
+).pipe(
+  Layer.provideMerge(ProjectionTurnRepositoryLive),
+  Layer.provideMerge(
+    ProviderSessionDirectoryLive.pipe(Layer.provideMerge(ProviderSessionRuntimeRepositoryLive)),
+  ),
+);

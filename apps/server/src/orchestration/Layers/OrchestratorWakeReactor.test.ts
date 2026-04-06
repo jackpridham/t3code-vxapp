@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -87,7 +88,7 @@ async function waitForReadModel(
   throw new Error("Timed out waiting for orchestration read model state.");
 }
 
-async function createHarness() {
+async function createHarness(options?: { autoStart?: boolean }) {
   const workspaceRoot = makeTempDir("t3-orchestrator-wake-reactor-");
   fs.mkdirSync(path.join(workspaceRoot, ".git"));
   const provider = createProviderServiceHarness();
@@ -108,8 +109,12 @@ async function createHarness() {
   const runtime = ManagedRuntime.make(layer);
   const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
   const reactor = await runtime.runPromise(Effect.service(OrchestratorWakeReactor));
+  const projectionTurns = await runtime.runPromise(Effect.service(ProjectionTurnRepository));
   const scope = await Effect.runPromise(Scope.make("sequential"));
-  await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+  const startReactor = () => Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+  if (options?.autoStart !== false) {
+    await startReactor();
+  }
 
   const createdAt = new Date().toISOString();
   await Effect.runPromise(
@@ -163,8 +168,10 @@ async function createHarness() {
   return {
     runtime,
     engine,
+    projectionTurns,
     scope,
     emit: provider.emit,
+    startReactor,
     workspaceRoot,
   };
 }
@@ -564,6 +571,85 @@ describe("OrchestratorWakeReactor", () => {
       state: "delivered",
       deliveryMessageId: expect.any(String),
       deliveredAt: "2026-04-05T12:08:00.000Z",
+    });
+  });
+
+  it("reconciles stale delivering wakes on startup when the delivery turn already settled", async () => {
+    const harness = await createHarness({ autoStart: false });
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await createWorkerThread(harness.engine);
+
+    await Effect.runPromise(
+      harness.projectionTurns.upsertByTurnId({
+        threadId: asThreadId("thread-orch"),
+        turnId: asTurnId("turn-stale-delivery"),
+        pendingMessageId: MessageId.makeUnsafe("msg-stale-wake-delivery"),
+        sourceProposedPlanThreadId: null,
+        sourceProposedPlanId: null,
+        assistantMessageId: MessageId.makeUnsafe("assistant:msg-stale-wake-delivery"),
+        state: "completed",
+        requestedAt: "2026-04-05T12:08:30.000Z",
+        startedAt: "2026-04-05T12:08:31.000Z",
+        completedAt: "2026-04-05T12:08:32.000Z",
+        checkpointTurnCount: null,
+        checkpointRef: null,
+        checkpointStatus: null,
+        checkpointFiles: [],
+      }),
+    );
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "stopped",
+      activeTurnId: null,
+      updatedAt: "2026-04-05T12:08:33.000Z",
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.orchestrator-wake.upsert",
+        commandId: CommandId.makeUnsafe("cmd-seed-stale-delivering-wake"),
+        threadId: asThreadId("thread-orch"),
+        wakeItem: {
+          wakeId: "wake:thread-worker:turn-stale-worker:completed",
+          orchestratorThreadId: asThreadId("thread-orch"),
+          orchestratorProjectId: asProjectId("project-orch"),
+          workerThreadId: asThreadId("thread-worker"),
+          workerProjectId: asProjectId("project-worker"),
+          workerTurnId: asTurnId("turn-stale-worker"),
+          workerTitleSnapshot: "Worker thread-worker",
+          outcome: "completed",
+          summary: "Worker thread-worker completed its assigned turn",
+          queuedAt: "2026-04-05T12:08:29.000Z",
+          state: "delivering",
+          deliveryMessageId: MessageId.makeUnsafe("msg-stale-wake-delivery"),
+          deliveredAt: null,
+          consumedAt: null,
+        },
+        createdAt: "2026-04-05T12:08:34.000Z",
+      }),
+    );
+
+    await harness.startReactor();
+
+    const readModel = await waitForReadModel(harness.engine, (model) =>
+      model.orchestratorWakeItems.some(
+        (item) =>
+          item.wakeId === "wake:thread-worker:turn-stale-worker:completed" &&
+          item.state === "delivered",
+      ),
+    );
+
+    expect(
+      readModel.orchestratorWakeItems.find(
+        (item) => item.wakeId === "wake:thread-worker:turn-stale-worker:completed",
+      ),
+    ).toMatchObject({
+      state: "delivered",
+      deliveryMessageId: MessageId.makeUnsafe("msg-stale-wake-delivery"),
+      deliveredAt: "2026-04-05T12:08:32.000Z",
     });
   });
 

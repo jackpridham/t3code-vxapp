@@ -13,10 +13,12 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { Cause, Effect, Layer, Stream } from "effect";
 
 import { ProjectionOrchestratorWakeRepositoryLive } from "../../persistence/Layers/ProjectionOrchestratorWakes.ts";
+import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import {
   ProjectionOrchestratorWake,
   ProjectionOrchestratorWakeRepository,
 } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
@@ -161,6 +163,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const wakeRepository = yield* ProjectionOrchestratorWakeRepository;
+  const projectionTurnRepository = yield* ProjectionTurnRepository;
   const drainingOrchestratorThreadIds = new Set<string>();
 
   const appendWakeRejectedActivity = Effect.fn("appendWakeRejectedActivity")(function* (input: {
@@ -382,6 +385,101 @@ const make = Effect.gen(function* () {
     ).pipe(Effect.asVoid);
   });
 
+  const reconcileDeliveringWakeItemsForOrchestrator = Effect.fn(
+    "reconcileDeliveringWakeItemsForOrchestrator",
+  )(function* (orchestratorThreadId: ThreadId) {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const orchestratorThread = readModel.threads.find((entry) => entry.id === orchestratorThreadId);
+    const rows = yield* wakeRepository.listByOrchestratorThreadId({
+      orchestratorThreadId,
+    });
+    const deliveringRows = rows.filter((row) => row.state === "delivering");
+    if (deliveringRows.length === 0) {
+      return;
+    }
+
+    if (!orchestratorThread || orchestratorThread.deletedAt !== null) {
+      const consumedAt = new Date().toISOString();
+      yield* Effect.forEach(
+        deliveringRows,
+        (row) =>
+          dispatchWakeUpsert({
+            preferredThreadId: row.orchestratorThreadId,
+            wakeItem: {
+              ...projectionWakeRowToWakeItem(row),
+              state: "dropped",
+              consumedAt,
+              consumeReason: orchestratorThread ? "orchestrator_deleted" : "orchestrator_missing",
+            },
+            createdAt: consumedAt,
+            commandTag: "startup-drop",
+          }),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+      return;
+    }
+
+    if (!isOrchestratorInactive(orchestratorThread)) {
+      return;
+    }
+
+    const turns = yield* projectionTurnRepository.listByThreadId({
+      threadId: orchestratorThreadId,
+    });
+
+    yield* Effect.forEach(
+      deliveringRows,
+      (row) =>
+        Effect.gen(function* () {
+          const deliveryTurn =
+            row.deliveryMessageId === null
+              ? undefined
+              : turns.find(
+                  (turn) =>
+                    turn.turnId !== null &&
+                    turn.pendingMessageId === row.deliveryMessageId &&
+                    (turn.state === "completed" ||
+                      turn.state === "error" ||
+                      turn.state === "interrupted"),
+                );
+
+          if (deliveryTurn) {
+            yield* dispatchWakeUpsert({
+              preferredThreadId: orchestratorThreadId,
+              wakeItem: {
+                ...projectionWakeRowToWakeItem(row),
+                state: "delivered",
+                deliveredAt:
+                  deliveryTurn.completedAt ??
+                  deliveryTurn.startedAt ??
+                  orchestratorThread.updatedAt,
+              },
+              createdAt:
+                deliveryTurn.completedAt ?? deliveryTurn.startedAt ?? orchestratorThread.updatedAt,
+              commandTag: "startup-delivered",
+            });
+            return;
+          }
+
+          const wakeItem = projectionWakeRowToWakeItem(row);
+          const { deliveryMessageId: _deliveryMessageId, ...wakeWithoutDeliveryMessageId } =
+            wakeItem;
+          yield* dispatchWakeUpsert({
+            preferredThreadId: orchestratorThreadId,
+            wakeItem: {
+              ...wakeWithoutDeliveryMessageId,
+              state: "pending",
+              deliveredAt: null,
+              consumedAt: null,
+            },
+            createdAt: new Date().toISOString(),
+            commandTag: "startup-redeliver",
+          });
+        }),
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+  });
+
   const evaluateDrainForOrchestrator = Effect.fn("evaluateDrainForOrchestrator")(function* (
     orchestratorThreadId: ThreadId,
   ) {
@@ -580,21 +678,26 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processInputSafely);
 
-  const reconcilePendingWakesOnStart = orchestrationEngine.getReadModel().pipe(
+  const reconcileWakesOnStart = orchestrationEngine.getReadModel().pipe(
     Effect.flatMap((readModel) => {
-      const pendingOrchestratorThreadIds = [
+      const activeOrchestratorThreadIds = [
         ...new Set(
           readModel.orchestratorWakeItems
-            .filter((wakeItem) => wakeItem.state === "pending")
+            .filter((wakeItem) => wakeItem.state === "pending" || wakeItem.state === "delivering")
             .map((wakeItem) => wakeItem.orchestratorThreadId),
         ),
       ];
-      return Effect.forEach(pendingOrchestratorThreadIds, evaluateDrainForOrchestrator, {
-        concurrency: 1,
-      }).pipe(Effect.asVoid);
+      return Effect.forEach(
+        activeOrchestratorThreadIds,
+        (orchestratorThreadId) =>
+          reconcileDeliveringWakeItemsForOrchestrator(orchestratorThreadId).pipe(
+            Effect.flatMap(() => evaluateDrainForOrchestrator(orchestratorThreadId)),
+          ),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
     }),
     Effect.catchCause((cause) => {
-      return Effect.logWarning("orchestrator wake reactor failed to reconcile pending wakes", {
+      return Effect.logWarning("orchestrator wake reactor failed to reconcile startup wakes", {
         cause: Cause.pretty(cause),
       });
     }),
@@ -625,7 +728,7 @@ const make = Effect.gen(function* () {
           return worker.enqueue({ source: "domain", event });
         }),
       );
-      yield* reconcilePendingWakesOnStart;
+      yield* reconcileWakesOnStart;
     });
 
   return {
@@ -634,5 +737,6 @@ const make = Effect.gen(function* () {
 });
 
 export const OrchestratorWakeReactorLive = Layer.effect(OrchestratorWakeReactor, make).pipe(
-  Layer.provide(ProjectionOrchestratorWakeRepositoryLive),
+  Layer.provideMerge(ProjectionOrchestratorWakeRepositoryLive),
+  Layer.provideMerge(ProjectionTurnRepositoryLive),
 );

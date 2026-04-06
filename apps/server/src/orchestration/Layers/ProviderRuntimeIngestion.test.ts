@@ -41,6 +41,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
@@ -167,7 +168,7 @@ type ProviderRuntimeTestCheckpoint = ProviderRuntimeTestThread["checkpoints"][nu
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService,
+    OrchestrationEngineService | ProviderRuntimeIngestionService | ProviderSessionDirectory,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -196,6 +197,7 @@ describe("ProviderRuntimeIngestion", () => {
   async function createHarness(options?: {
     serverSettings?: Partial<ServerSettings>;
     projectHooksLayer?: Layer.Layer<ProjectHooksService, never>;
+    autoStart?: boolean;
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
@@ -218,8 +220,12 @@ describe("ProviderRuntimeIngestion", () => {
     runtime = ManagedRuntime.make(layer);
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
+    const directory = await runtime.runPromise(Effect.service(ProviderSessionDirectory));
     scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
+    const start = () => Effect.runPromise(ingestion.start().pipe(Scope.provide(scope!)));
+    if (options?.autoStart !== false) {
+      await start();
+    }
     const drain = () => Effect.runPromise(ingestion.drain);
 
     const createdAt = new Date().toISOString();
@@ -285,6 +291,8 @@ describe("ProviderRuntimeIngestion", () => {
       engine,
       emit: provider.emit,
       setProviderSession: provider.setSession,
+      directory,
+      start,
       drain,
     };
   }
@@ -329,6 +337,52 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  it("reconciles a persisted stopped provider binding on startup", async () => {
+    const harness = await createHarness({ autoStart: false });
+    const runningAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-running-before-reconcile"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-stale"),
+          updatedAt: runningAt,
+          lastError: null,
+        },
+        createdAt: runningAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          activeTurnId: null,
+          lastError: null,
+          lastRuntimeEvent: "provider.stopAll",
+        },
+      }),
+    );
+
+    await harness.start();
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "stopped" && entry.session?.activeTurnId === null,
+    );
+    expect(thread.session?.status).toBe("stopped");
+    expect(thread.session?.activeTurnId).toBeNull();
   });
 
   it("applies provider session.state.changed transitions directly", async () => {
