@@ -12,6 +12,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
+  ProjectId,
   ProviderItemId,
   ProviderRuntimeEvent,
   ThreadId,
@@ -277,6 +278,71 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settingSources, ["user", "project", "local"]);
       assert.equal(createInput?.options.permissionMode, "bypassPermissions");
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("injects VX_T3_CURRENT_THREAD_ID into queryOptions.env", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(
+        (createInput?.options.env as Record<string, string>)?.VX_T3_CURRENT_THREAD_ID,
+        THREAD_ID,
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect(
+    "injects VX_T3_CURRENT_PROJECT_ID into queryOptions.env when projectId is provided",
+    () => {
+      const harness = makeHarness();
+      const PROJECT_ID = ProjectId.makeUnsafe("proj-abc");
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          projectId: PROJECT_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+
+        const createInput = harness.getLastCreateQueryInput();
+        const env = createInput?.options.env as Record<string, string>;
+        assert.equal(env?.VX_T3_CURRENT_THREAD_ID, THREAD_ID);
+        assert.equal(env?.VX_T3_CURRENT_PROJECT_ID, PROJECT_ID);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("omits VX_T3_CURRENT_PROJECT_ID from queryOptions.env when projectId is absent", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      const env = createInput?.options.env as Record<string, string>;
+      assert.equal("VX_T3_CURRENT_PROJECT_ID" in (env ?? {}), false);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

@@ -4,6 +4,7 @@ import {
   ApprovalRequestId,
   EventId,
   IsoDateTime,
+  ProjectId,
   ProviderItemId,
   ThreadId,
   TurnId,
@@ -48,6 +49,7 @@ export type ProviderSession = typeof ProviderSession.Type;
 
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
+  projectId: Schema.optional(ProjectId),
   provider: Schema.optional(ProviderKind),
   cwd: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),

@@ -41,6 +41,23 @@ describe("ProviderSessionStartInput", () => {
     ).toThrow();
   });
 
+  it("accepts optional projectId", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      projectId: "proj-abc",
+      runtimeMode: "full-access",
+    });
+    expect(parsed.projectId).toBe("proj-abc");
+  });
+
+  it("accepts payload without projectId", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      runtimeMode: "full-access",
+    });
+    expect(parsed.projectId).toBeUndefined();
+  });
+
   it("accepts claude runtime knobs", () => {
     const parsed = decodeProviderSessionStartInput({
       threadId: "thread-1",
