@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, TerminalSquareIcon } from "lucide-react";
+import { FolderOpenIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -31,9 +31,9 @@ interface ChatHeaderProps {
   terminalAvailable: boolean;
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
-  diffToggleShortcutLabel: string | null;
+  changesPanelShortcutLabel: string | null;
+  changesPanelOpen: boolean;
   gitCwd: string | null;
-  diffOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
@@ -42,7 +42,7 @@ interface ChatHeaderProps {
   onUpdateProjectHook: (hookId: string, input: NewProjectHookInput) => Promise<void>;
   onDeleteProjectHook: (hookId: string) => Promise<void>;
   onToggleTerminal: () => void;
-  onToggleDiff: () => void;
+  onToggleChangesPanel: () => void;
   onLabelClick?: (label: string) => void;
 }
 
@@ -61,9 +61,9 @@ export const ChatHeader = memo(function ChatHeader({
   terminalAvailable,
   terminalOpen,
   terminalToggleShortcutLabel,
-  diffToggleShortcutLabel,
+  changesPanelShortcutLabel,
+  changesPanelOpen,
   gitCwd,
-  diffOpen,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -72,7 +72,7 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectHook,
   onDeleteProjectHook,
   onToggleTerminal,
-  onToggleDiff,
+  onToggleChangesPanel,
   onLabelClick,
 }: ChatHeaderProps) {
   return (
@@ -168,23 +168,20 @@ export const ChatHeader = memo(function ChatHeader({
             render={
               <Toggle
                 className="shrink-0"
-                pressed={diffOpen}
-                onPressedChange={onToggleDiff}
-                aria-label="Toggle diff panel"
+                pressed={changesPanelOpen}
+                onPressedChange={onToggleChangesPanel}
+                aria-label="Toggle changes panel"
                 variant="outline"
                 size="xs"
-                disabled={!isGitRepo}
               >
-                <DiffIcon className="size-3" />
+                <FolderOpenIcon className="size-3" />
               </Toggle>
             }
           />
           <TooltipPopup side="bottom">
-            {!isGitRepo
-              ? "Diff panel is unavailable because this project is not a git repository."
-              : diffToggleShortcutLabel
-                ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                : "Toggle diff panel"}
+            {changesPanelShortcutLabel
+              ? `Toggle changes panel (${changesPanelShortcutLabel})`
+              : "Toggle changes panel"}
           </TooltipPopup>
         </Tooltip>
       </div>

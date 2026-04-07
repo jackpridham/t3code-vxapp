@@ -81,6 +81,22 @@ export interface TurnDiffSummary {
   checkpointTurnCount?: number | undefined;
 }
 
+/** A file change persisted against the thread, surviving commits. */
+export interface PersistedFileChange {
+  /** Relative file path. */
+  path: string;
+  /** Change kind: "added" | "modified" | "deleted" | "renamed" | undefined */
+  kind?: string | undefined;
+  /** Total insertions for this file across all turns. */
+  totalInsertions: number;
+  /** Total deletions for this file across all turns. */
+  totalDeletions: number;
+  /** TurnId of the first turn that changed this file. */
+  firstTurnId: string;
+  /** TurnId of the most recent turn that changed this file. */
+  lastTurnId: string;
+}
+
 export type ProjectKind = "project" | "orchestrator";
 
 export interface Project {
@@ -116,6 +132,8 @@ export interface Thread {
   branch: string | null;
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
+  /** Cumulative file changes, persisted across commits. Built from turnDiffSummaries. */
+  persistedFileChanges: PersistedFileChange[];
   activities: OrchestrationThreadActivity[];
   snapshotCoverage?: OrchestrationThreadSnapshotCoverage | undefined;
   // Lineage metadata — set when thread is spawned by an orchestrator

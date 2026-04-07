@@ -20,6 +20,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     session: null,
     messages: [],
     turnDiffSummaries: [],
+    persistedFileChanges: [],
     activities: [],
     proposedPlans: [],
     error: null,

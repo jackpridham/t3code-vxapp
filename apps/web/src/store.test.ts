@@ -16,6 +16,7 @@ vi.mock("./notificationDispatch", () => ({
 }));
 
 import {
+  accumulateFileChanges,
   applyOrchestrationEvent,
   applyOrchestrationEvents,
   syncServerReadModel,
@@ -39,6 +40,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     session: null,
     messages: [],
     turnDiffSummaries: [],
+    persistedFileChanges: [],
     activities: [],
     proposedPlans: [],
     error: null,
@@ -1122,5 +1124,191 @@ describe("incremental orchestration updates", () => {
       state: "running",
     });
     expect(next.threads[0]?.latestTurn?.sourceProposedPlan).toBeUndefined();
+  });
+});
+
+// ── accumulateFileChanges ─────────────────────────────────────────────────────
+
+describe("accumulateFileChanges", () => {
+  it("returns empty array for empty summaries", () => {
+    expect(accumulateFileChanges([])).toEqual([]);
+  });
+
+  it("accumulates a single turn with multiple files", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [
+          { path: "src/index.ts", kind: "modified", additions: 10, deletions: 3 },
+          { path: "src/utils.ts", kind: "added", additions: 25, deletions: 0 },
+        ],
+      },
+    ]);
+
+    expect(result).toHaveLength(2);
+    expect(result).toContainEqual({
+      path: "src/index.ts",
+      kind: "modified",
+      totalInsertions: 10,
+      totalDeletions: 3,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-1"),
+    });
+    expect(result).toContainEqual({
+      path: "src/utils.ts",
+      kind: "added",
+      totalInsertions: 25,
+      totalDeletions: 0,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-1"),
+    });
+  });
+
+  it("accumulates file changes across multiple turns", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/index.ts", kind: "modified", additions: 10, deletions: 3 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "ready",
+        files: [{ path: "src/index.ts", kind: "modified", additions: 5, deletions: 2 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      path: "src/index.ts",
+      kind: "modified",
+      totalInsertions: 15,
+      totalDeletions: 5,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-2"),
+    });
+  });
+
+  it("skips turns with missing or error status", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/a.ts", kind: "modified", additions: 5, deletions: 0 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "missing",
+        files: [{ path: "src/b.ts", kind: "added", additions: 20, deletions: 0 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-3"),
+        completedAt: "2026-04-07T00:02:00.000Z",
+        status: "error",
+        files: [{ path: "src/c.ts", kind: "added", additions: 10, deletions: 0 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.path).toBe("src/a.ts");
+  });
+
+  it("preserves 'added' kind when a file is later modified", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/new.ts", kind: "added", additions: 20, deletions: 0 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "ready",
+        files: [{ path: "src/new.ts", kind: "modified", additions: 5, deletions: 1 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.kind).toBe("added");
+    expect(result[0]?.totalInsertions).toBe(25);
+    expect(result[0]?.totalDeletions).toBe(1);
+  });
+
+  it("upgrades kind to 'deleted' when a file is deleted", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/old.ts", kind: "modified", additions: 5, deletions: 3 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "ready",
+        files: [{ path: "src/old.ts", kind: "deleted", additions: 0, deletions: 50 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.kind).toBe("deleted");
+  });
+
+  it("handles files with undefined additions/deletions", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/unknown.ts" }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      path: "src/unknown.ts",
+      kind: undefined,
+      totalInsertions: 0,
+      totalDeletions: 0,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-1"),
+    });
+  });
+
+  it("wires into turn-diff-completed event and updates persistedFileChanges", () => {
+    const thread = makeThread({
+      turnDiffSummaries: [],
+      persistedFileChanges: [],
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-diff-completed", {
+        threadId: thread.id,
+        turnId: TurnId.makeUnsafe("turn-1"),
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("cp-1"),
+        status: "ready",
+        files: [{ path: "src/app.ts", kind: "modified", additions: 8, deletions: 2 }],
+        assistantMessageId: null,
+        completedAt: "2026-04-07T00:00:00.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.persistedFileChanges).toHaveLength(1);
+    expect(next.threads[0]?.persistedFileChanges[0]).toMatchObject({
+      path: "src/app.ts",
+      kind: "modified",
+      totalInsertions: 8,
+      totalDeletions: 2,
+    });
   });
 });

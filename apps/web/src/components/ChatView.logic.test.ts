@@ -120,6 +120,7 @@ const makeThread = (input?: {
   branch: null,
   worktreePath: null,
   turnDiffSummaries: [],
+  persistedFileChanges: [],
   activities: [],
 });
 
@@ -314,6 +315,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       branch: null,
       worktreePath: null,
       turnDiffSummaries: [],
+      persistedFileChanges: [],
       activities: [],
     });
 
@@ -350,6 +352,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       branch: null,
       worktreePath: null,
       turnDiffSummaries: [],
+      persistedFileChanges: [],
       activities: [],
     });
 
@@ -395,6 +398,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       branch: null,
       worktreePath: null,
       turnDiffSummaries: [],
+      persistedFileChanges: [],
       activities: [],
     });
 

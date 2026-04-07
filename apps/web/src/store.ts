@@ -13,7 +13,13 @@ import {
 } from "@t3tools/contracts";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
-import { type ChatMessage, type Project, type Thread } from "./types";
+import {
+  type ChatMessage,
+  type PersistedFileChange,
+  type Project,
+  type Thread,
+  type TurnDiffSummary,
+} from "./types";
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -203,6 +209,46 @@ function mapTurnDiffSummary(
   };
 }
 
+/**
+ * Build the cumulative file-change list from all turn diff summaries.
+ * Each file path gets a single entry with aggregated insertions/deletions
+ * and first/last turn ids for provenance.
+ */
+export function accumulateFileChanges(
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>,
+): PersistedFileChange[] {
+  const byPath = new Map<string, PersistedFileChange>();
+
+  for (const summary of turnDiffSummaries) {
+    if (summary.status === "missing" || summary.status === "error") continue;
+    for (const file of summary.files) {
+      const existing = byPath.get(file.path);
+      if (existing) {
+        existing.totalInsertions += file.additions ?? 0;
+        existing.totalDeletions += file.deletions ?? 0;
+        existing.lastTurnId = summary.turnId;
+        // Upgrade kind: if a file was "added" then "modified", keep "added"
+        if (file.kind === "deleted") {
+          existing.kind = "deleted";
+        } else if (existing.kind !== "added" && file.kind) {
+          existing.kind = file.kind;
+        }
+      } else {
+        byPath.set(file.path, {
+          path: file.path,
+          kind: file.kind,
+          totalInsertions: file.additions ?? 0,
+          totalDeletions: file.deletions ?? 0,
+          firstTurnId: summary.turnId,
+          lastTurnId: summary.turnId,
+        });
+      }
+    }
+  }
+
+  return Array.from(byPath.values());
+}
+
 function mapOrchestratorWakeItem(wakeItem: OrchestratorWakeItem): OrchestratorWakeItem {
   return { ...wakeItem };
 }
@@ -229,6 +275,7 @@ function mapThread(thread: OrchestrationThreadWithLabels): Thread {
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
+    persistedFileChanges: accumulateFileChanges(thread.checkpoints.map(mapTurnDiffSummary)),
     activities: thread.activities.map((activity) => ({ ...activity })),
     snapshotCoverage: thread.snapshotCoverage,
     // Lineage metadata
@@ -937,6 +984,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         return {
           ...thread,
           turnDiffSummaries,
+          persistedFileChanges: accumulateFileChanges(turnDiffSummaries),
           latestTurn,
           updatedAt: event.occurredAt,
         };
@@ -974,6 +1022,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         return {
           ...thread,
           turnDiffSummaries,
+          persistedFileChanges: accumulateFileChanges(turnDiffSummaries),
           messages,
           proposedPlans,
           activities,

@@ -52,7 +52,17 @@ export interface UiArtifactPanelState {
   artifactPanelArtifacts: DiscoveredArtifact[];
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiArtifactPanelState {
+export interface UiChangesPanelState {
+  /** Whether the Changes panel is open. */
+  changesPanelOpen: boolean;
+  /** Currently active/selected file path in the panel, or null. */
+  changesPanelActivePath: string | null;
+  /** Which section is currently expanded. Null means default (all expanded). */
+  changesPanelActiveSection: string | null;
+}
+
+export interface UiState
+  extends UiProjectState, UiThreadState, UiArtifactPanelState, UiChangesPanelState {
   notificationPreferences: NotificationPreferences;
 }
 
@@ -75,6 +85,9 @@ const initialState: UiState = {
   artifactPanelOpen: false,
   artifactPanelPath: null,
   artifactPanelArtifacts: [],
+  changesPanelOpen: false,
+  changesPanelActivePath: null,
+  changesPanelActiveSection: null,
   notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
 };
 
@@ -506,6 +519,49 @@ export function setDiscoveredArtifacts(state: UiState, artifacts: DiscoveredArti
   return { ...state, artifactPanelArtifacts: artifacts };
 }
 
+// ── Changes panel ─────────────────────────────────────────────────────────
+
+export function openChangesPanel(state: UiState, path?: string | null): UiState {
+  const nextPath = path ?? state.changesPanelActivePath;
+  if (state.changesPanelOpen && state.changesPanelActivePath === nextPath) {
+    return state;
+  }
+  return {
+    ...state,
+    changesPanelOpen: true,
+    changesPanelActivePath: nextPath ?? null,
+  };
+}
+
+export function closeChangesPanel(state: UiState): UiState {
+  if (!state.changesPanelOpen) {
+    return state;
+  }
+  return {
+    ...state,
+    changesPanelOpen: false,
+    // Preserve activePath so reopening returns to last viewed item
+  };
+}
+
+export function toggleChangesPanel(state: UiState): UiState {
+  return state.changesPanelOpen ? closeChangesPanel(state) : openChangesPanel(state);
+}
+
+export function setChangesPanelActivePath(state: UiState, path: string | null): UiState {
+  if (state.changesPanelActivePath === path) {
+    return state;
+  }
+  return { ...state, changesPanelActivePath: path };
+}
+
+export function setChangesPanelActiveSection(state: UiState, section: string | null): UiState {
+  if (state.changesPanelActiveSection === section) {
+    return state;
+  }
+  return { ...state, changesPanelActiveSection: section };
+}
+
 export function reorderProjects(
   state: UiState,
   draggedProjectId: ProjectId,
@@ -571,6 +627,11 @@ interface UiStateStore extends UiState {
   openArtifactPanel: (path: string) => void;
   closeArtifactPanel: () => void;
   setDiscoveredArtifacts: (artifacts: DiscoveredArtifact[]) => void;
+  openChangesPanel: (path?: string | null) => void;
+  closeChangesPanel: () => void;
+  toggleChangesPanel: () => void;
+  setChangesPanelActivePath: (path: string | null) => void;
+  setChangesPanelActiveSection: (section: string | null) => void;
   setNotificationPreferences: (prefs: Partial<NotificationPreferences>) => void;
   toggleNotificationEvent: (eventType: NotificationEventType, enabled: boolean) => void;
 }
@@ -599,6 +660,12 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   openArtifactPanel: (path) => set((state) => openArtifactPanel(state, path)),
   closeArtifactPanel: () => set((state) => closeArtifactPanel(state)),
   setDiscoveredArtifacts: (artifacts) => set((state) => setDiscoveredArtifacts(state, artifacts)),
+  openChangesPanel: (path) => set((state) => openChangesPanel(state, path)),
+  closeChangesPanel: () => set((state) => closeChangesPanel(state)),
+  toggleChangesPanel: () => set((state) => toggleChangesPanel(state)),
+  setChangesPanelActivePath: (path) => set((state) => setChangesPanelActivePath(state, path)),
+  setChangesPanelActiveSection: (section) =>
+    set((state) => setChangesPanelActiveSection(state, section)),
   setNotificationPreferences: (prefs) => set((state) => setNotificationPreferences(state, prefs)),
   toggleNotificationEvent: (eventType, enabled) =>
     set((state) => toggleNotificationEvent(state, eventType, enabled)),

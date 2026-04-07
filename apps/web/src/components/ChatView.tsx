@@ -29,14 +29,14 @@ import { truncate } from "@t3tools/shared/String";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import { projectSkillEntriesQueryOptions } from "~/lib/skillReactQuery";
 import type { ProjectSkillEntry } from "~/lib/skillReferences";
 import { isElectron } from "../env";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -450,10 +450,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
-  const rawSearch = useSearch({
-    strict: false,
-    select: (params) => parseDiffRouteSearch(params),
-  });
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
@@ -682,7 +678,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const orchestratorWakeItems = useWakeItemsForOrchestratorThread(activeThread?.id);
@@ -1442,21 +1437,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   );
-  const diffPanelShortcutLabel = useMemo(
+  const changesPanelShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
-  const onToggleDiff = useCallback(() => {
-    void navigate({
-      to: "/$threadId",
-      params: { threadId },
-      replace: true,
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
-      },
-    });
-  }, [diffOpen, navigate, threadId]);
+  const toggleChangesPanel = useUiStateStore((s) => s.toggleChangesPanel);
+  const changesPanelOpen = useUiStateStore((s) => s.changesPanelOpen);
 
   const envLocked = Boolean(activeThread && threadHasStarted(activeThread));
   const activeTerminalGroup =
@@ -2520,7 +2506,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (command === "diff.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        onToggleDiff();
+        toggleChangesPanel();
         return;
       }
 
@@ -2545,7 +2531,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
-    onToggleDiff,
+    toggleChangesPanel,
     toggleTerminalVisibility,
   ]);
 
@@ -3876,9 +3862,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
+          changesPanelShortcutLabel={changesPanelShortcutLabel}
+          changesPanelOpen={changesPanelOpen}
           gitCwd={gitCwd}
-          diffOpen={diffOpen}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -3889,7 +3875,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onUpdateProjectHook={updateProjectHook}
           onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
+          onToggleChangesPanel={toggleChangesPanel}
           onLabelClick={(label) => {
             if (activeProject) {
               toggleProjectLabelFilter(activeProject.id, label);

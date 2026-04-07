@@ -889,6 +889,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: null,
     worktreePath: null,
     turnDiffSummaries: [],
+    persistedFileChanges: [],
     activities: [],
     ...overrides,
   };
