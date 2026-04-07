@@ -30,6 +30,7 @@ type ProviderIntentEvent = Extract<
   OrchestrationEvent,
   {
     type:
+      | "thread.archived"
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
@@ -725,9 +726,40 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const processThreadArchived = Effect.fnUntraced(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.archived" }>,
+  ) {
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread) {
+      return;
+    }
+
+    const archivedAt = event.payload.archivedAt;
+    if (thread.session && thread.session.status !== "stopped") {
+      yield* providerService.stopSession({ threadId: thread.id });
+    }
+
+    yield* setThreadSession({
+      threadId: thread.id,
+      session: {
+        threadId: thread.id,
+        status: "stopped",
+        providerName: thread.session?.providerName ?? null,
+        runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        activeTurnId: null,
+        lastError: thread.session?.lastError ?? null,
+        updatedAt: archivedAt,
+      },
+      createdAt: archivedAt,
+    });
+  });
+
   const processDomainEvent = (event: ProviderIntentEvent) =>
     Effect.gen(function* () {
       switch (event.type) {
+        case "thread.archived":
+          yield* processThreadArchived(event);
+          return;
         case "thread.runtime-mode-set": {
           const thread = yield* resolveThread(event.payload.threadId);
           if (!thread?.session || thread.session.status === "stopped") {
@@ -777,6 +809,7 @@ const make = Effect.gen(function* () {
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
+        event.type === "thread.archived" ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
