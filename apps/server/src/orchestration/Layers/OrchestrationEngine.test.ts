@@ -492,7 +492,8 @@ describe("OrchestrationEngine", () => {
     let shouldFailRequestedProjection = true;
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
-      projectEvent: (event) => {
+      projectEvent: () => Effect.void,
+      projectEventInTransaction: (event) => {
         if (
           shouldFailRequestedProjection &&
           event.commandId === CommandId.makeUnsafe("cmd-turn-start-atomic") &&
@@ -506,8 +507,9 @@ describe("OrchestrationEngine", () => {
             }),
           );
         }
-        return Effect.void;
+        return Effect.succeed([]);
       },
+      flushAttachmentSideEffects: () => Effect.void,
     };
 
     const runtime = ManagedRuntime.make(
@@ -634,7 +636,8 @@ describe("OrchestrationEngine", () => {
     let shouldFailProjection = true;
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
-      projectEvent: (event) => {
+      projectEvent: () => Effect.void,
+      projectEventInTransaction: (event) => {
         if (
           shouldFailProjection &&
           event.commandId === CommandId.makeUnsafe("cmd-thread-meta-sync-fail")
@@ -647,8 +650,9 @@ describe("OrchestrationEngine", () => {
             }),
           );
         }
-        return Effect.void;
+        return Effect.succeed([]);
       },
+      flushAttachmentSideEffects: () => Effect.void,
     };
 
     const runtime = ManagedRuntime.make(

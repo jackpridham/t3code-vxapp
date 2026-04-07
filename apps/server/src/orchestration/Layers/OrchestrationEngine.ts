@@ -23,6 +23,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import type { ProjectionAttachmentSideEffects } from "../Services/ProjectionPipeline.ts";
 
 interface CommandEnvelope {
   command: OrchestrationCommand;
@@ -111,12 +112,15 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         .withTransaction(
           Effect.gen(function* () {
             const committedEvents: OrchestrationEvent[] = [];
+            const committedAttachmentSideEffects: ProjectionAttachmentSideEffects[] = [];
             let nextReadModel = readModel;
 
             for (const nextEvent of eventBases) {
               const savedEvent = yield* eventStore.append(nextEvent);
               nextReadModel = yield* projectEvent(nextReadModel, savedEvent);
-              yield* projectionPipeline.projectEvent(savedEvent);
+              const attachmentSideEffects =
+                yield* projectionPipeline.projectEventInTransaction(savedEvent);
+              committedAttachmentSideEffects.push(...attachmentSideEffects);
               committedEvents.push(savedEvent);
             }
 
@@ -139,6 +143,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             });
 
             return {
+              committedAttachmentSideEffects,
               committedEvents,
               lastSequence: lastSavedEvent.sequence,
               nextReadModel,
@@ -154,6 +159,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         );
 
       readModel = committedCommand.nextReadModel;
+      yield* projectionPipeline.flushAttachmentSideEffects(
+        committedCommand.committedAttachmentSideEffects,
+      );
       for (const event of committedCommand.committedEvents) {
         yield* PubSub.publish(eventPubSub, event);
       }
