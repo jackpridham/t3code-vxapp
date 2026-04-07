@@ -36,6 +36,19 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
       : toPersistenceSqlError(sqlOperation)(cause);
 }
 
+function normalizeTurnLifecycle(row: ProjectionTurnById): ProjectionTurnById {
+  let requestedAt = row.requestedAt;
+
+  if (row.startedAt !== null && row.startedAt.localeCompare(requestedAt) < 0) {
+    requestedAt = row.startedAt;
+  }
+  if (row.completedAt !== null && row.completedAt.localeCompare(requestedAt) < 0) {
+    requestedAt = row.completedAt;
+  }
+
+  return requestedAt === row.requestedAt ? row : { ...row, requestedAt };
+}
+
 const makeProjectionTurnRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -251,7 +264,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
   });
 
   const upsertByTurnId: ProjectionTurnRepositoryShape["upsertByTurnId"] = (row) =>
-    upsertProjectionTurnById(row).pipe(
+    upsertProjectionTurnById(normalizeTurnLifecycle(row)).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
           "ProjectionTurnRepository.upsertByTurnId:query",
