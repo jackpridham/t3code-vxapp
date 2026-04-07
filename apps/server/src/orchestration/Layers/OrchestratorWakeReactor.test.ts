@@ -958,11 +958,14 @@ describe("OrchestratorWakeReactor", () => {
       const wakeItem = model.orchestratorWakeItems.find(
         (item) => item.workerTurnId === asTurnId("turn-archive-closeout"),
       );
-      const workerThread = model.threads.find((thread) => thread.id === asThreadId("thread-worker"));
+      const workerThread = model.threads.find(
+        (thread) => thread.id === asThreadId("thread-worker"),
+      );
       return (
         wakeItem?.state === "consumed" &&
         wakeItem.consumeReason === "worker_rechecked" &&
         wakeItem.consumedAt !== null &&
+        workerThread !== undefined &&
         workerThread?.archivedAt !== null &&
         wakeItem.consumedAt === workerThread.archivedAt
       );
@@ -971,7 +974,9 @@ describe("OrchestratorWakeReactor", () => {
     const wakeItem = readModel.orchestratorWakeItems.find(
       (item) => item.workerTurnId === asTurnId("turn-archive-closeout"),
     );
-    const workerThread = readModel.threads.find((thread) => thread.id === asThreadId("thread-worker"));
+    const workerThread = readModel.threads.find(
+      (thread) => thread.id === asThreadId("thread-worker"),
+    );
 
     expect(wakeItem).toMatchObject({
       state: "consumed",

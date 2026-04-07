@@ -98,6 +98,7 @@ import { LRUCache } from "../lib/lruCache";
 import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -434,6 +435,7 @@ function useLocalDispatchState(input: {
 
 export default function ChatView({ threadId }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
+  const isMobile = useIsMobile();
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -3783,7 +3785,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     }
 
-    if (key === "Enter" && !event.shiftKey) {
+    if (key === "Enter" && !event.shiftKey && !isMobile) {
       void onSend();
       return true;
     }
