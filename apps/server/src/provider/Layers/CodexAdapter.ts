@@ -1386,6 +1386,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       const homePath = codexSettings.homePath;
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
+        ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         provider: "codex",
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
         ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),

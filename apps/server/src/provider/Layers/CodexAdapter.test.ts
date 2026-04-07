@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   ApprovalRequestId,
   EventId,
+  ProjectId,
   ProviderItemId,
   type ProviderApprovalDecision,
   type ProviderEvent,
@@ -208,6 +209,45 @@ validationLayer("CodexAdapterLive validation", (it) => {
         serviceTier: "fast",
         runtimeMode: "full-access",
       });
+    }),
+  );
+
+  it.effect("passes projectId to manager input when provided", () =>
+    Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: "codex",
+        threadId: asThreadId("thread-proj"),
+        projectId: ProjectId.makeUnsafe("proj-123"),
+        runtimeMode: "full-access",
+      });
+
+      assert.deepStrictEqual(validationManager.startSessionImpl.mock.calls[0]?.[0], {
+        provider: "codex",
+        threadId: asThreadId("thread-proj"),
+        binaryPath: "codex",
+        projectId: "proj-123",
+        runtimeMode: "full-access",
+      });
+    }),
+  );
+
+  it.effect("omits projectId from manager input when not provided", () =>
+    Effect.gen(function* () {
+      validationManager.startSessionImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: "codex",
+        threadId: asThreadId("thread-noproj"),
+        runtimeMode: "full-access",
+      });
+
+      const managerCall = validationManager.startSessionImpl.mock.calls[0]?.[0];
+      assert.ok(managerCall);
+      assert.equal("projectId" in managerCall, false);
     }),
   );
 });

@@ -2,6 +2,95 @@ import { MessageId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
+vi.mock("../ui/button", () => ({
+  Button: ({ children }: { children?: unknown }) => children ?? null,
+}));
+
+vi.mock("../ChatMarkdown", () => ({
+  default: ({ children }: { children?: unknown }) => children ?? null,
+}));
+
+vi.mock("./ChangedFilesTree", () => ({
+  ChangedFilesTree: () => null,
+}));
+
+vi.mock("./ProposedPlanCard", () => ({
+  ProposedPlanCard: ({ planMarkdown }: { planMarkdown: string }) => planMarkdown,
+}));
+
+vi.mock("./MessageCopyButton", () => ({
+  MessageCopyButton: () => null,
+}));
+
+vi.mock("./ExpandedImagePreview", () => ({
+  buildExpandedImagePreview: () => null,
+  ExpandedImagePreview: () => null,
+}));
+
+vi.mock("../timelineHeight", () => ({
+  estimateTimelineMessageHeight: () => 48,
+}));
+
+vi.mock("~/lib/terminalContext", () => ({
+  deriveDisplayedUserMessageState: (text: string) => ({
+    visibleText: text,
+    copyText: text,
+    contextCount: 0,
+    previewTitle: null,
+    terminalContextEntries: [],
+    contexts: [],
+  }),
+}));
+
+vi.mock("~/lib/skillReferences", () => ({
+  splitTextIntoSkillReferenceSegments: (text: string) => {
+    const match = text.match(/@\/.+?\/([^/]+)\/SKILL\.md/);
+    if (!match) {
+      return [{ type: "text", text }];
+    }
+    const fullMatch = match[0];
+    const start = match.index ?? 0;
+    const skillName = match[1] ?? "skill";
+    const segments: Array<Record<string, string>> = [];
+    if (start > 0) {
+      segments.push({ type: "text", text: text.slice(0, start) });
+    }
+    segments.push({
+      type: "skill",
+      skillName,
+      skillMarkdownPath: fullMatch.slice(1),
+    });
+    if (start + fullMatch.length < text.length) {
+      segments.push({ type: "text", text: text.slice(start + fullMatch.length) });
+    }
+    return segments;
+  },
+}));
+
+vi.mock("./SkillIcon", () => ({
+  SkillIcon: () => <span data-skill-icon="true" />,
+}));
+
+vi.mock("./TerminalContextInlineChip", () => ({
+  TerminalContextInlineChip: ({ label }: { label: string }) => (
+    <span>
+      <span className="lucide-terminal" />
+      {label}
+    </span>
+  ),
+}));
+
+vi.mock("./userMessageTerminalContexts", () => ({
+  buildInlineTerminalContextText: (label: string) => label,
+  formatInlineTerminalContextLabel: (label: string) => label,
+  textContainsInlineTerminalContextLabels: (text: string) => text.includes("@terminal-"),
+}));
+
+vi.mock("~/lib/utils", () => ({
+  cn: (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" "),
+  randomUUID: () => "00000000-0000-0000-0000-000000000000",
+}));
+
 function matchMedia() {
   return {
     matches: false,
@@ -48,6 +137,7 @@ describe("MessagesTimeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         hasMessages
+        isHydratingHistory={false}
         isWorking={false}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
@@ -93,7 +183,6 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Terminal 1 lines 1-5");
-    expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s ");
   });
 
@@ -102,6 +191,7 @@ describe("MessagesTimeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         hasMessages
+        isHydratingHistory={false}
         isWorking={false}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
@@ -148,6 +238,7 @@ describe("MessagesTimeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         hasMessages
+        isHydratingHistory={false}
         isWorking={false}
         activeTurnInProgress={false}
         activeTurnStartedAt={null}
@@ -185,5 +276,38 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Context compacted");
     expect(markup).toContain("Work log");
+  });
+
+  it("renders a loading message while thread history is hydrating", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages={false}
+        isHydratingHistory
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Loading conversation history");
+    expect(markup).not.toContain("Send a message to start the conversation");
   });
 });

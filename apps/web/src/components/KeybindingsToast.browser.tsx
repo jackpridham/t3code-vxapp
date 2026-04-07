@@ -87,6 +87,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         deletedAt: null,
       },
     ],
+    orchestratorWakeItems: [],
     threads: [
       {
         id: THREAD_ID,

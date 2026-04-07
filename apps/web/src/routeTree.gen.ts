@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SidebarRouteImport } from './routes/sidebar'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ArtifactRouteImport } from './routes/artifact'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SidebarThreadIdRouteImport } from './routes/sidebar.$threadId'
@@ -27,6 +28,11 @@ const SidebarRoute = SidebarRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ArtifactRoute = ArtifactRouteImport.update({
+  id: '/artifact',
+  path: '/artifact',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
@@ -66,6 +72,7 @@ const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
+  '/artifact': typeof ArtifactRoute
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByFullPath {
   '/sidebar/$threadId': typeof SidebarThreadIdRoute
 }
 export interface FileRoutesByTo {
+  '/artifact': typeof ArtifactRoute
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
@@ -87,6 +95,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
+  '/artifact': typeof ArtifactRoute
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
@@ -100,6 +109,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/artifact'
     | '/settings'
     | '/sidebar'
     | '/$threadId'
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/sidebar/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/artifact'
     | '/settings'
     | '/sidebar'
     | '/$threadId'
@@ -120,6 +131,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_chat'
+    | '/artifact'
     | '/settings'
     | '/sidebar'
     | '/_chat/$threadId'
@@ -132,6 +144,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
+  ArtifactRoute: typeof ArtifactRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   SidebarRoute: typeof SidebarRouteWithChildren
 }
@@ -150,6 +163,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/artifact': {
+      id: '/artifact'
+      path: '/artifact'
+      fullPath: '/artifact'
+      preLoaderRoute: typeof ArtifactRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_chat': {
@@ -245,6 +265,7 @@ const SidebarRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
+  ArtifactRoute: ArtifactRoute,
   SettingsRoute: SettingsRouteWithChildren,
   SidebarRoute: SidebarRouteWithChildren,
 }

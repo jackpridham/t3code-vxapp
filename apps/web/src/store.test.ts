@@ -9,9 +9,14 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("./notificationDispatch", () => ({
+  dispatchNotification: vi.fn(),
+}));
 
 import {
+  accumulateFileChanges,
   applyOrchestrationEvent,
   applyOrchestrationEvents,
   syncServerReadModel,
@@ -35,6 +40,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     session: null,
     messages: [],
     turnDiffSummaries: [],
+    persistedFileChanges: [],
     activities: [],
     proposedPlans: [],
     error: null,
@@ -67,6 +73,7 @@ function makeState(thread: Thread): AppState {
       },
     ],
     threads: [thread],
+    orchestratorWakeItems: [],
     bootstrapComplete: true,
   };
 }
@@ -126,7 +133,10 @@ function makeReadModelThread(overrides: Partial<ReadModelThreadWithLabels> = {})
   } satisfies ReadModelThreadWithLabels;
 }
 
-function makeReadModel(thread: OrchestrationReadModel["threads"][number]): OrchestrationReadModel {
+function makeReadModel(
+  thread: OrchestrationReadModel["threads"][number],
+  overrides: Partial<OrchestrationReadModel> = {},
+): OrchestrationReadModel {
   return {
     snapshotSequence: 1,
     updatedAt: "2026-02-27T00:00:00.000Z",
@@ -147,6 +157,8 @@ function makeReadModel(thread: OrchestrationReadModel["threads"][number]): Orche
       },
     ],
     threads: [thread],
+    orchestratorWakeItems: [],
+    ...overrides,
   };
 }
 
@@ -180,6 +192,137 @@ describe("store read model sync", () => {
     const next = syncServerReadModel(initialState, makeReadModel(makeReadModelThread({})));
 
     expect(next.bootstrapComplete).toBe(true);
+  });
+
+  it("merges bootstrap summary payloads without dropping unrelated hydrated threads", () => {
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      threads: [
+        makeThread(),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-2"),
+          projectId: ProjectId.makeUnsafe("project-2"),
+          title: "Other thread",
+        }),
+      ],
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project",
+          cwd: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+        {
+          id: ProjectId.makeUnsafe("project-2"),
+          name: "Other project",
+          cwd: "/tmp/project-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(makeReadModelThread({ title: "Updated summary thread" }), {
+        snapshotProfile: "bootstrap-summary",
+      }),
+    );
+
+    expect(next.threads).toHaveLength(2);
+    expect(next.projects).toHaveLength(2);
+    expect(next.threads.find((thread) => thread.id === "thread-1")?.title).toBe(
+      "Updated summary thread",
+    );
+    expect(next.threads.find((thread) => thread.id === "thread-2")?.title).toBe("Other thread");
+  });
+
+  it("merges active-thread snapshots into the existing store", () => {
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      threads: [
+        makeThread(),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-2"),
+          projectId: ProjectId.makeUnsafe("project-2"),
+          title: "Other thread",
+        }),
+      ],
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project",
+          cwd: "/tmp/project",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+        {
+          id: ProjectId.makeUnsafe("project-2"),
+          name: "Other project",
+          cwd: "/tmp/project-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          scripts: [],
+          hooks: [],
+        },
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          id: ThreadId.makeUnsafe("thread-1"),
+          messages: [
+            {
+              id: MessageId.makeUnsafe("message-1"),
+              role: "assistant",
+              text: "hydrated",
+              turnId: null,
+              streaming: false,
+              createdAt: "2026-02-27T00:00:00.000Z",
+              updatedAt: "2026-02-27T00:00:00.000Z",
+            },
+          ],
+          snapshotCoverage: {
+            messageCount: 1,
+            messageLimit: 500,
+            messagesTruncated: false,
+            proposedPlanCount: 0,
+            proposedPlanLimit: 100,
+            proposedPlansTruncated: false,
+            activityCount: 0,
+            activityLimit: 250,
+            activitiesTruncated: false,
+            checkpointCount: 0,
+            checkpointLimit: 100,
+            checkpointsTruncated: false,
+          },
+        }),
+        {
+          snapshotProfile: "active-thread",
+        },
+      ),
+    );
+
+    expect(next.threads).toHaveLength(2);
+    expect(next.threads.find((thread) => thread.id === "thread-1")?.messages).toHaveLength(1);
+    expect(next.threads.find((thread) => thread.id === "thread-2")?.title).toBe("Other thread");
   });
 
   it("preserves claude model slugs without an active session", () => {
@@ -277,6 +420,46 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
   });
 
+  it("maps snapshot coverage from bounded thread payloads", () => {
+    const initialState = makeState(makeThread());
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          snapshotCoverage: {
+            messageCount: 240,
+            messageLimit: 200,
+            messagesTruncated: true,
+            proposedPlanCount: 10,
+            proposedPlanLimit: 50,
+            proposedPlansTruncated: false,
+            activityCount: 120,
+            activityLimit: 100,
+            activitiesTruncated: true,
+            checkpointCount: 3,
+            checkpointLimit: 50,
+            checkpointsTruncated: false,
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.snapshotCoverage).toEqual({
+      messageCount: 240,
+      messageLimit: 200,
+      messagesTruncated: true,
+      proposedPlanCount: 10,
+      proposedPlanLimit: 50,
+      proposedPlansTruncated: false,
+      activityCount: 120,
+      activityLimit: 100,
+      activitiesTruncated: true,
+      checkpointCount: 3,
+      checkpointLimit: 50,
+      checkpointsTruncated: false,
+    });
+  });
+
   it("maps thread labels from the read model", () => {
     const initialState = makeState(makeThread());
     const next = syncServerReadModel(
@@ -321,6 +504,7 @@ describe("store read model sync", () => {
         },
       ],
       threads: [],
+      orchestratorWakeItems: [],
       bootstrapComplete: true,
     };
     const readModel: OrchestrationReadModel = {
@@ -343,6 +527,7 @@ describe("store read model sync", () => {
           workspaceRoot: "/tmp/project-3",
         }),
       ],
+      orchestratorWakeItems: [],
       threads: [],
     };
 
@@ -512,6 +697,7 @@ describe("incremental orchestration updates", () => {
         },
       ],
       threads: [],
+      orchestratorWakeItems: [],
       bootstrapComplete: true,
     };
 
@@ -556,6 +742,7 @@ describe("incremental orchestration updates", () => {
         },
       ],
       threads: [],
+      orchestratorWakeItems: [],
       bootstrapComplete: true,
     };
 
@@ -937,5 +1124,191 @@ describe("incremental orchestration updates", () => {
       state: "running",
     });
     expect(next.threads[0]?.latestTurn?.sourceProposedPlan).toBeUndefined();
+  });
+});
+
+// ── accumulateFileChanges ─────────────────────────────────────────────────────
+
+describe("accumulateFileChanges", () => {
+  it("returns empty array for empty summaries", () => {
+    expect(accumulateFileChanges([])).toEqual([]);
+  });
+
+  it("accumulates a single turn with multiple files", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [
+          { path: "src/index.ts", kind: "modified", additions: 10, deletions: 3 },
+          { path: "src/utils.ts", kind: "added", additions: 25, deletions: 0 },
+        ],
+      },
+    ]);
+
+    expect(result).toHaveLength(2);
+    expect(result).toContainEqual({
+      path: "src/index.ts",
+      kind: "modified",
+      totalInsertions: 10,
+      totalDeletions: 3,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-1"),
+    });
+    expect(result).toContainEqual({
+      path: "src/utils.ts",
+      kind: "added",
+      totalInsertions: 25,
+      totalDeletions: 0,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-1"),
+    });
+  });
+
+  it("accumulates file changes across multiple turns", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/index.ts", kind: "modified", additions: 10, deletions: 3 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "ready",
+        files: [{ path: "src/index.ts", kind: "modified", additions: 5, deletions: 2 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      path: "src/index.ts",
+      kind: "modified",
+      totalInsertions: 15,
+      totalDeletions: 5,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-2"),
+    });
+  });
+
+  it("skips turns with missing or error status", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/a.ts", kind: "modified", additions: 5, deletions: 0 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "missing",
+        files: [{ path: "src/b.ts", kind: "added", additions: 20, deletions: 0 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-3"),
+        completedAt: "2026-04-07T00:02:00.000Z",
+        status: "error",
+        files: [{ path: "src/c.ts", kind: "added", additions: 10, deletions: 0 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.path).toBe("src/a.ts");
+  });
+
+  it("preserves 'added' kind when a file is later modified", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/new.ts", kind: "added", additions: 20, deletions: 0 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "ready",
+        files: [{ path: "src/new.ts", kind: "modified", additions: 5, deletions: 1 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.kind).toBe("added");
+    expect(result[0]?.totalInsertions).toBe(25);
+    expect(result[0]?.totalDeletions).toBe(1);
+  });
+
+  it("upgrades kind to 'deleted' when a file is deleted", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/old.ts", kind: "modified", additions: 5, deletions: 3 }],
+      },
+      {
+        turnId: TurnId.makeUnsafe("turn-2"),
+        completedAt: "2026-04-07T00:01:00.000Z",
+        status: "ready",
+        files: [{ path: "src/old.ts", kind: "deleted", additions: 0, deletions: 50 }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.kind).toBe("deleted");
+  });
+
+  it("handles files with undefined additions/deletions", () => {
+    const result = accumulateFileChanges([
+      {
+        turnId: TurnId.makeUnsafe("turn-1"),
+        completedAt: "2026-04-07T00:00:00.000Z",
+        status: "ready",
+        files: [{ path: "src/unknown.ts" }],
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      path: "src/unknown.ts",
+      kind: undefined,
+      totalInsertions: 0,
+      totalDeletions: 0,
+      firstTurnId: TurnId.makeUnsafe("turn-1"),
+      lastTurnId: TurnId.makeUnsafe("turn-1"),
+    });
+  });
+
+  it("wires into turn-diff-completed event and updates persistedFileChanges", () => {
+    const thread = makeThread({
+      turnDiffSummaries: [],
+      persistedFileChanges: [],
+    });
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-diff-completed", {
+        threadId: thread.id,
+        turnId: TurnId.makeUnsafe("turn-1"),
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("cp-1"),
+        status: "ready",
+        files: [{ path: "src/app.ts", kind: "modified", additions: 8, deletions: 2 }],
+        assistantMessageId: null,
+        completedAt: "2026-04-07T00:00:00.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.persistedFileChanges).toHaveLength(1);
+    expect(next.threads[0]?.persistedFileChanges[0]).toMatchObject({
+      path: "src/app.ts",
+      kind: "modified",
+      totalInsertions: 8,
+      totalDeletions: 2,
+    });
   });
 });

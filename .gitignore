@@ -57,3 +57,4 @@ __screenshots__/
 .claude/skills/vx-agents-handoff
 .claude/skills/vx-agents-feedback
 .agents/
+.claude/skills/api-runtime-diagnostics

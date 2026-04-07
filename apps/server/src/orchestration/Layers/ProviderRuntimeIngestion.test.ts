@@ -41,6 +41,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
@@ -167,7 +168,7 @@ type ProviderRuntimeTestCheckpoint = ProviderRuntimeTestThread["checkpoints"][nu
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService,
+    OrchestrationEngineService | ProviderRuntimeIngestionService | ProviderSessionDirectory,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -196,6 +197,7 @@ describe("ProviderRuntimeIngestion", () => {
   async function createHarness(options?: {
     serverSettings?: Partial<ServerSettings>;
     projectHooksLayer?: Layer.Layer<ProjectHooksService, never>;
+    autoStart?: boolean;
   }) {
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
@@ -218,8 +220,12 @@ describe("ProviderRuntimeIngestion", () => {
     runtime = ManagedRuntime.make(layer);
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
+    const directory = await runtime.runPromise(Effect.service(ProviderSessionDirectory));
     scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
+    const start = () => Effect.runPromise(ingestion.start().pipe(Scope.provide(scope!)));
+    if (options?.autoStart !== false) {
+      await start();
+    }
     const drain = () => Effect.runPromise(ingestion.drain);
 
     const createdAt = new Date().toISOString();
@@ -285,6 +291,8 @@ describe("ProviderRuntimeIngestion", () => {
       engine,
       emit: provider.emit,
       setProviderSession: provider.setSession,
+      directory,
+      start,
       drain,
     };
   }
@@ -329,6 +337,206 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  it("persists turn lifecycle updates back into provider session runtime state", async () => {
+    const harness = await createHarness();
+    const runningAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-running-before-runtime-persist"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-persisted"),
+          updatedAt: runningAt,
+          lastError: null,
+        },
+        createdAt: runningAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "running",
+        runtimePayload: {
+          activeTurnId: "turn-persisted",
+          lastError: null,
+          lastRuntimeEvent: "provider.sendTurn",
+          lastRuntimeEventAt: runningAt,
+        },
+      }),
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-persist"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: new Date().toISOString(),
+      turnId: asTurnId("turn-persisted"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
+    );
+
+    const bindingOption = await Effect.runPromise(
+      harness.directory.getBinding(asThreadId("thread-1")),
+    );
+    expect(bindingOption._tag).toBe("Some");
+    if (bindingOption._tag !== "Some") {
+      return;
+    }
+
+    expect(bindingOption.value.status).toBe("ready");
+    const payload =
+      bindingOption.value.runtimePayload !== null &&
+      typeof bindingOption.value.runtimePayload === "object" &&
+      !Array.isArray(bindingOption.value.runtimePayload)
+        ? (bindingOption.value.runtimePayload as Record<string, unknown>)
+        : null;
+    expect(payload).not.toBeNull();
+    expect(payload?.activeTurnId == null).toBe(true);
+    expect(payload?.lastError == null).toBe(true);
+    expect(payload?.lastRuntimeEvent).toBe("turn.completed");
+    expect(typeof payload?.lastRuntimeEventAt).toBe("string");
+  });
+
+  it("ignores stale lifecycle events that arrive after a turn has already settled", async () => {
+    const harness = await createHarness();
+    const startedAt = "2026-04-08T00:00:01.000Z";
+    const staleRunningAt = "2026-04-08T00:00:02.000Z";
+    const completedAt = "2026-04-08T00:00:03.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-stale-regression"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: startedAt,
+      turnId: asTurnId("turn-stale-regression"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-stale-regression",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-stale-regression"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: completedAt,
+      turnId: asTurnId("turn-stale-regression"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
+    );
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-session-state-waiting-stale-regression"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: staleRunningAt,
+      payload: {
+        state: "waiting",
+        reason: "stale approval prompt",
+      },
+    });
+
+    await harness.drain();
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === asThreadId("thread-1"));
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.activeTurnId).toBeNull();
+
+    const bindingOption = await Effect.runPromise(
+      harness.directory.getBinding(asThreadId("thread-1")),
+    );
+    expect(bindingOption._tag).toBe("Some");
+    if (bindingOption._tag !== "Some") {
+      return;
+    }
+
+    expect(bindingOption.value.status).toBe("ready");
+    const payload =
+      bindingOption.value.runtimePayload !== null &&
+      typeof bindingOption.value.runtimePayload === "object" &&
+      !Array.isArray(bindingOption.value.runtimePayload)
+        ? (bindingOption.value.runtimePayload as Record<string, unknown>)
+        : null;
+    expect(payload?.activeTurnId).toBeNull();
+    expect(payload?.lastRuntimeEvent).toBe("turn.completed");
+    expect(payload?.lastRuntimeEventAt).toBe(completedAt);
+  });
+
+  it("reconciles a persisted stopped provider binding on startup", async () => {
+    const harness = await createHarness({ autoStart: false });
+    const runningAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-running-before-reconcile"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-stale"),
+          updatedAt: runningAt,
+          lastError: null,
+        },
+        createdAt: runningAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          activeTurnId: null,
+          lastError: null,
+          lastRuntimeEvent: "provider.stopAll",
+        },
+      }),
+    );
+
+    await harness.start();
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "stopped" && entry.session?.activeTurnId === null,
+    );
+    expect(thread.session?.status).toBe("stopped");
+    expect(thread.session?.activeTurnId).toBeNull();
   });
 
   it("applies provider session.state.changed transitions directly", async () => {

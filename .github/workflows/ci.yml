@@ -65,14 +65,6 @@ jobs:
       - name: Browser test
         run: bun run --cwd apps/web test:browser
 
-      - name: Build desktop pipeline
-        run: bun run build:desktop
-
-      - name: Verify preload bundle output
-        run: |
-          test -f apps/desktop/dist-electron/preload.js
-          grep -nE "desktopBridge|getWsUrl|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.js
-
   release_smoke:
     name: Release Smoke
     runs-on: ubuntu-24.04

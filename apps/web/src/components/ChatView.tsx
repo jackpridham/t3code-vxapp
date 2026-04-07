@@ -4,6 +4,7 @@ import {
   type ClaudeCodeEffort,
   type MessageId,
   type ModelSelection,
+  type OrchestratorWakeItem,
   type ProjectHook,
   type ProjectScript,
   type ProviderKind,
@@ -28,14 +29,14 @@ import { truncate } from "@t3tools/shared/String";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import { projectSkillEntriesQueryOptions } from "~/lib/skillReactQuery";
 import type { ProjectSkillEntry } from "~/lib/skillReferences";
 import { isElectron } from "../env";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -69,7 +70,12 @@ import {
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { useStore } from "../store";
-import { useProjectById, useThreadById } from "../storeSelectors";
+import {
+  useProjectById,
+  useThreadById,
+  useWakeItemsForOrchestratorThread,
+  useWakeItemsForWorkerThread,
+} from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
 import {
   buildPlanImplementationThreadTitle,
@@ -92,6 +98,7 @@ import { LRUCache } from "../lib/lruCache";
 import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useIsMobile } from "../hooks/useMediaQuery";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -108,6 +115,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Separator } from "./ui/separator";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { cn, randomUUID } from "~/lib/utils";
@@ -192,6 +200,7 @@ import {
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
   threadHasStarted,
+  threadIsHydratingHistory,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -281,6 +290,25 @@ function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalog
   }, [threadIds]);
 
   return useStore(selector);
+}
+
+function isActiveWakeState(state: OrchestratorWakeItem["state"]): boolean {
+  return state === "pending" || state === "delivering";
+}
+
+function formatWakeStateLabel(state: OrchestratorWakeItem["state"]): string {
+  switch (state) {
+    case "pending":
+      return "Queued";
+    case "delivering":
+      return "Waking";
+    case "delivered":
+      return "Delivered";
+    case "consumed":
+      return "Consumed";
+    case "dropped":
+      return "Dropped";
+  }
 }
 
 function formatOutgoingPrompt(params: {
@@ -407,6 +435,7 @@ function useLocalDispatchState(input: {
 
 export default function ChatView({ threadId }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
+  const isMobile = useIsMobile();
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -421,10 +450,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
-  const rawSearch = useSearch({
-    strict: false,
-    select: (params) => parseDiffRouteSearch(params),
-  });
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
   const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
@@ -653,9 +678,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  const orchestratorWakeItems = useWakeItemsForOrchestratorThread(activeThread?.id);
+  const workerWakeItems = useWakeItemsForWorkerThread(activeThread?.id);
   const threadPlanCatalog = useThreadPlanCatalog(
     useMemo(() => {
       const threadIds: ThreadId[] = [];
@@ -675,6 +701,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = useProjectById(activeThread?.projectId);
+  const activeOrchestratorWakeItems = useMemo(
+    () =>
+      orchestratorWakeItems
+        .filter((wakeItem) => isActiveWakeState(wakeItem.state))
+        .toSorted(
+          (left, right) =>
+            left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
+        ),
+    [orchestratorWakeItems],
+  );
+  const latestWorkerWakeItem = useMemo(
+    () =>
+      workerWakeItems
+        .toSorted(
+          (left, right) =>
+            left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
+        )
+        .at(-1) ?? null,
+    [workerWakeItems],
+  );
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -1391,27 +1437,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   );
-  const diffPanelShortcutLabel = useMemo(
+  const changesPanelShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
-  const onToggleDiff = useCallback(() => {
-    void navigate({
-      to: "/$threadId",
-      params: { threadId },
-      replace: true,
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
-      },
-    });
-  }, [diffOpen, navigate, threadId]);
+  const toggleChangesPanel = useUiStateStore((s) => s.toggleChangesPanel);
+  const changesPanelOpen = useUiStateStore((s) => s.changesPanelOpen);
 
-  const envLocked = Boolean(
-    activeThread &&
-    (activeThread.messages.length > 0 ||
-      (activeThread.session !== null && activeThread.session.status !== "closed")),
-  );
+  const envLocked = Boolean(activeThread && threadHasStarted(activeThread));
   const activeTerminalGroup =
     terminalState.terminalGroups.find(
       (group) => group.id === terminalState.activeTerminalGroupId,
@@ -2473,7 +2506,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (command === "diff.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        onToggleDiff();
+        toggleChangesPanel();
         return;
       }
 
@@ -2498,7 +2531,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
-    onToggleDiff,
+    toggleChangesPanel,
     toggleTerminalVisibility,
   ]);
 
@@ -2718,7 +2751,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
-    const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+    const isFirstMessage = !isServerThread || !threadHasStarted(activeThread);
     const baseBranchForWorktree =
       isFirstMessage && envMode === "worktree" && !activeThread.worktreePath
         ? activeThread.branch
@@ -3738,7 +3771,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
     }
 
-    if (key === "Enter" && !event.shiftKey) {
+    if (key === "Enter" && !event.shiftKey && !isMobile) {
       void onSend();
       return true;
     }
@@ -3829,9 +3862,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
+          changesPanelShortcutLabel={changesPanelShortcutLabel}
+          changesPanelOpen={changesPanelOpen}
           gitCwd={gitCwd}
-          diffOpen={diffOpen}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -3842,7 +3875,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onUpdateProjectHook={updateProjectHook}
           onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
+          onToggleChangesPanel={toggleChangesPanel}
           onLabelClick={(label) => {
             if (activeProject) {
               toggleProjectLabelFilter(activeProject.id, label);
@@ -3857,6 +3890,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
+      {activeOrchestratorWakeItems.length > 0 ? (
+        <div className="border-b border-border px-3 py-2 sm:px-5">
+          <Alert>
+            <ListTodoIcon className="size-4" />
+            <AlertTitle>Worker wake queue</AlertTitle>
+            <AlertDescription>
+              <div className="space-y-2">
+                {activeOrchestratorWakeItems.map((wakeItem) => (
+                  <div
+                    key={wakeItem.wakeId}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+                  >
+                    <span className="font-medium text-foreground">
+                      {wakeItem.workerTitleSnapshot}
+                    </span>
+                    <span>{formatWakeStateLabel(wakeItem.state)}</span>
+                    <span>{wakeItem.outcome}</span>
+                    <span>{wakeItem.summary}</span>
+                  </div>
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+      {activeThread.spawnRole === "worker" && latestWorkerWakeItem !== null ? (
+        <div className="border-b border-border px-3 py-2 sm:px-5">
+          <Alert>
+            <BotIcon className="size-4" />
+            <AlertTitle>Orchestrator wake status</AlertTitle>
+            <AlertDescription className="text-xs text-muted-foreground">
+              {formatWakeStateLabel(latestWorkerWakeItem.state)} for{" "}
+              {latestWorkerWakeItem.orchestratorThreadId}. {latestWorkerWakeItem.summary}
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
@@ -3881,6 +3951,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               <MessagesTimeline
                 key={activeThread.id}
                 hasMessages={timelineEntries.length > 0}
+                isHydratingHistory={threadIsHydratingHistory(activeThread)}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnStartedAt={activeWorkStartedAt}

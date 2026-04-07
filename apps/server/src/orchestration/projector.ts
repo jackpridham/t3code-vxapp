@@ -2,6 +2,7 @@ import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3to
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
+  OrchestratorWakeItem,
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
@@ -25,6 +26,7 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadOrchestratorWakeUpsertedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -160,6 +162,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     snapshotSequence: 0,
     projects: [],
     threads: [],
+    orchestratorWakeItems: [],
     updatedAt: nowIso,
   };
 }
@@ -671,6 +674,38 @@ export function projectEvent(
           };
         }),
       );
+
+    case "thread.orchestrator-wake-upserted":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadOrchestratorWakeUpsertedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const wakeItem: OrchestratorWakeItem = yield* decodeForEvent(
+          OrchestratorWakeItem,
+          payload.wakeItem,
+          event.type,
+          "wakeItem",
+        );
+
+        const orchestratorWakeItems = [
+          ...nextBase.orchestratorWakeItems.filter((entry) => entry.wakeId !== wakeItem.wakeId),
+          wakeItem,
+        ].toSorted(
+          (left, right) =>
+            left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
+        );
+
+        return {
+          ...nextBase,
+          orchestratorWakeItems,
+          threads: updateThread(nextBase.threads, wakeItem.orchestratorThreadId, {
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
 
     default:
       return Effect.succeed(nextBase);

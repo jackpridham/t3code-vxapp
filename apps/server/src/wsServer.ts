@@ -50,7 +50,9 @@ import { GitManager } from "./git/Services/GitManager.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import { ServerSettingsService } from "./serverSettings";
+import { ProjectionBootstrapSummaryQuery } from "./orchestration/Services/ProjectionBootstrapSummaryQuery";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
+import { ProjectionOperationalQuery } from "./orchestration/Services/ProjectionOperationalQuery";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProviderService } from "./provider/Services/ProviderService";
@@ -165,7 +167,9 @@ const encodeWsResponse = Schema.encodeEffect(Schema.fromJsonString(WsResponse));
 const decodeWebSocketRequest = decodeJsonResult(WebSocketRequest);
 
 export type ServerCoreRuntimeServices =
+  | ProjectionBootstrapSummaryQuery
   | OrchestrationEngineService
+  | ProjectionOperationalQuery
   | ProjectionSnapshotQuery
   | CheckpointDiffQuery
   | OrchestrationReactor
@@ -567,7 +571,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const listenOptions = host ? { host, port } : { port };
 
+  const projectionBootstrapSummaryQuery = yield* ProjectionBootstrapSummaryQuery;
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const projectionOperationalQuery = yield* ProjectionOperationalQuery;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
   const orchestrationReactor = yield* OrchestrationReactor;
@@ -610,8 +616,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
-      const snapshot = yield* projectionReadModelQuery.getSnapshot();
-      const existingProject = snapshot.projects.find(
+      const bootstrapSummary = yield* projectionBootstrapSummaryQuery.getBootstrapSummary();
+      const existingProject = bootstrapSummary.projects.find(
         (project) => project.workspaceRoot === cwd && project.deletedAt === null,
       );
       let bootstrapProjectId: ProjectId;
@@ -642,7 +648,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         };
       }
 
-      const existingThread = snapshot.threads.find(
+      const existingThread = bootstrapSummary.threads.find(
         (thread) => thread.projectId === bootstrapProjectId && thread.deletedAt === null,
       );
       if (!existingThread) {
@@ -691,8 +697,29 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
     switch (request.body._tag) {
-      case ORCHESTRATION_WS_METHODS.getSnapshot:
-        return yield* projectionReadModelQuery.getSnapshot();
+      case ORCHESTRATION_WS_METHODS.getBootstrapSummary:
+        return yield* projectionBootstrapSummaryQuery.getBootstrapSummary();
+
+      case ORCHESTRATION_WS_METHODS.getReadiness:
+        return yield* projectionOperationalQuery.getReadiness();
+
+      case ORCHESTRATION_WS_METHODS.listProjects:
+        return yield* projectionOperationalQuery.listProjects();
+
+      case ORCHESTRATION_WS_METHODS.getProjectByWorkspace: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.getProjectByWorkspace(body);
+      }
+
+      case ORCHESTRATION_WS_METHODS.listProjectThreads: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.listProjectThreads(body);
+      }
+
+      case ORCHESTRATION_WS_METHODS.getSnapshot: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionReadModelQuery.getSnapshot(body);
+      }
 
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
         const { command } = request.body;

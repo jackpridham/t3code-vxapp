@@ -117,6 +117,7 @@ export interface CodexAppServerSendTurnInput {
 
 export interface CodexAppServerStartSessionInput {
   readonly threadId: ThreadId;
+  readonly projectId?: string;
   readonly provider?: "codex";
   readonly cwd?: string;
   readonly model?: string;
@@ -469,6 +470,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         env: {
           ...process.env,
           ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
+          VX_T3_CURRENT_THREAD_ID: threadId,
+          ...(input.projectId !== undefined ? { VX_T3_CURRENT_PROJECT_ID: input.projectId } : {}),
         },
         stdio: ["pipe", "pipe", "pipe"],
         shell: process.platform === "win32",

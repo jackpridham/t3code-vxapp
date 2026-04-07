@@ -70,6 +70,7 @@ const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
+  isHydratingHistory: boolean;
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
@@ -95,6 +96,7 @@ interface MessagesTimelineProps {
 
 export const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
+  isHydratingHistory,
   isWorking,
   activeTurnInProgress,
   activeTurnStartedAt,
@@ -575,7 +577,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
+          {isHydratingHistory
+            ? "Loading conversation history..."
+            : "Send a message to start the conversation."}
         </p>
       </div>
     );

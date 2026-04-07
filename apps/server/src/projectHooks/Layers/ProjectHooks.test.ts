@@ -43,6 +43,7 @@ function makeReadModel(options?: {
         deletedAt: null,
       },
     ],
+    orchestratorWakeItems: [],
     threads: [
       {
         id: ThreadId.makeUnsafe("thread-1"),

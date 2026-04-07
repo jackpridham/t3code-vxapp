@@ -7,14 +7,23 @@ import {
   DEFAULT_RUNTIME_MODE,
   OrchestrationCommand,
   OrchestrationEvent,
+  OrchestrationGetBootstrapSummaryResult,
+  OrchestrationGetSnapshotInput,
+  OrchestrationGetProjectByWorkspaceResult,
+  OrchestrationGetReadinessResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationListProjectThreadsResult,
+  OrchestrationReadModel,
+  OrchestrationSnapshotProfile,
   OrchestrationThread,
+  OrchestratorWakeItem,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
   ProjectCreateCommand,
+  ThreadOrchestratorWakeUpsertedPayload,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
@@ -31,14 +40,34 @@ const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartC
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
 );
+const decodeOrchestrationGetBootstrapSummaryResult = Schema.decodeUnknownEffect(
+  OrchestrationGetBootstrapSummaryResult,
+);
+const decodeOrchestrationGetSnapshotInput = Schema.decodeUnknownEffect(
+  OrchestrationGetSnapshotInput,
+);
+const decodeOrchestrationGetReadinessResult = Schema.decodeUnknownEffect(
+  OrchestrationGetReadinessResult,
+);
+const decodeOrchestrationGetProjectByWorkspaceResult = Schema.decodeUnknownEffect(
+  OrchestrationGetProjectByWorkspaceResult,
+);
+const decodeOrchestrationListProjectThreadsResult = Schema.decodeUnknownEffect(
+  OrchestrationListProjectThreadsResult,
+);
 const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
+const decodeOrchestrationReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
+const decodeOrchestratorWakeItem = Schema.decodeUnknownEffect(OrchestratorWakeItem);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeThreadOrchestratorWakeUpsertedPayload = Schema.decodeUnknownEffect(
+  ThreadOrchestratorWakeUpsertedPayload,
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -713,5 +742,256 @@ it.effect("OrchestrationThread schema includes lineage fields with undefined def
     assert.strictEqual(withLineage.spawnRole, "worker");
     assert.strictEqual(withLineage.spawnedBy, "jasper");
     assert.strictEqual(withLineage.workflowId, "workflow-abc");
+  }),
+);
+
+it.effect("decodes orchestrator wake items with expected defaults", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestratorWakeItem({
+      wakeId: "wake:worker-1:turn-1:completed",
+      orchestratorThreadId: "thread-orch-1",
+      orchestratorProjectId: "project-orch-1",
+      workerThreadId: "thread-worker-1",
+      workerProjectId: "project-worker-1",
+      workerTurnId: "turn-1",
+      workerTitleSnapshot: "Worker One",
+      outcome: "completed",
+      summary: "Updated the wake queue projection",
+      queuedAt: "2026-04-05T10:00:00.000Z",
+      state: "pending",
+    });
+
+    assert.strictEqual(parsed.workflowId, undefined);
+    assert.strictEqual(parsed.deliveryMessageId, undefined);
+    assert.strictEqual(parsed.deliveredAt, null);
+    assert.strictEqual(parsed.consumedAt, null);
+    assert.strictEqual(parsed.consumeReason, undefined);
+  }),
+);
+
+it.effect("decodes wake upsert command and event payloads", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeOrchestrationCommand({
+      type: "thread.orchestrator-wake.upsert",
+      commandId: "cmd-wake-1",
+      threadId: "thread-orch-1",
+      createdAt: "2026-04-05T10:01:00.000Z",
+      wakeItem: {
+        wakeId: "wake:worker-1:turn-1:failed",
+        orchestratorThreadId: "thread-orch-1",
+        orchestratorProjectId: "project-orch-1",
+        workerThreadId: "thread-worker-1",
+        workerProjectId: "project-worker-1",
+        workerTurnId: "turn-1",
+        workflowId: "wf-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "failed",
+        summary: "Worker failed with a lint error",
+        queuedAt: "2026-04-05T10:00:00.000Z",
+        state: "pending",
+      },
+    });
+    assert.strictEqual(command.type, "thread.orchestrator-wake.upsert");
+    if (command.type !== "thread.orchestrator-wake.upsert") return;
+    assert.strictEqual(command.wakeItem.outcome, "failed");
+
+    const payload = yield* decodeThreadOrchestratorWakeUpsertedPayload({
+      threadId: "thread-orch-1",
+      wakeItem: {
+        wakeId: "wake:worker-1:turn-1:failed",
+        orchestratorThreadId: "thread-orch-1",
+        orchestratorProjectId: "project-orch-1",
+        workerThreadId: "thread-worker-1",
+        workerProjectId: "project-worker-1",
+        workerTurnId: "turn-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "failed",
+        summary: "Worker failed with a lint error",
+        queuedAt: "2026-04-05T10:00:00.000Z",
+        state: "consumed",
+        consumedAt: "2026-04-05T10:02:00.000Z",
+        consumeReason: "worker_superseded_by_new_turn",
+      },
+    });
+    assert.strictEqual(payload.wakeItem.state, "consumed");
+    assert.strictEqual(payload.wakeItem.consumeReason, "worker_superseded_by_new_turn");
+
+    const event = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "evt-wake-1",
+      aggregateKind: "thread",
+      aggregateId: "thread-orch-1",
+      occurredAt: "2026-04-05T10:01:00.000Z",
+      commandId: "cmd-wake-1",
+      causationEventId: null,
+      correlationId: "cmd-wake-1",
+      metadata: {},
+      type: "thread.orchestrator-wake-upserted",
+      payload,
+    });
+    assert.strictEqual(event.type, "thread.orchestrator-wake-upserted");
+  }),
+);
+
+it.effect("decodes snapshots containing orchestrator wake items", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* decodeOrchestrationReadModel({
+      snapshotSequence: 4,
+      projects: [],
+      threads: [],
+      orchestratorWakeItems: [
+        {
+          wakeId: "wake:worker-1:turn-1:completed",
+          orchestratorThreadId: "thread-orch-1",
+          orchestratorProjectId: "project-orch-1",
+          workerThreadId: "thread-worker-1",
+          workerProjectId: "project-worker-1",
+          workerTurnId: "turn-1",
+          workerTitleSnapshot: "Worker One",
+          outcome: "completed",
+          summary: "Worker completed the task",
+          queuedAt: "2026-04-05T10:00:00.000Z",
+          state: "delivered",
+          deliveryMessageId: "msg-wake-1",
+          deliveredAt: "2026-04-05T10:03:00.000Z",
+        },
+      ],
+      updatedAt: "2026-04-05T10:03:00.000Z",
+    });
+
+    assert.strictEqual(snapshot.orchestratorWakeItems.length, 1);
+    assert.strictEqual(snapshot.orchestratorWakeItems[0]?.state, "delivered");
+    assert.strictEqual(snapshot.orchestratorWakeItems[0]?.deliveryMessageId, "msg-wake-1");
+  }),
+);
+
+it.effect("decodes bounded orchestration read results", () =>
+  Effect.gen(function* () {
+    const snapshotInput = yield* decodeOrchestrationGetSnapshotInput({});
+    assert.strictEqual(snapshotInput.profile, "operational");
+    assert.strictEqual(snapshotInput.threadId, undefined);
+
+    const activeThreadSnapshotInput = yield* decodeOrchestrationGetSnapshotInput({
+      profile: "active-thread",
+      threadId: "thread-1",
+    });
+    assert.strictEqual(activeThreadSnapshotInput.profile, "active-thread");
+    assert.strictEqual(activeThreadSnapshotInput.threadId, "thread-1");
+
+    const bootstrapSummary = yield* decodeOrchestrationGetBootstrapSummaryResult({
+      snapshotSequence: 6,
+      snapshotProfile: "bootstrap-summary",
+      projects: [],
+      threads: [],
+      orchestratorWakeItems: [],
+      updatedAt: "2026-04-05T10:00:00.000Z",
+    });
+    assert.strictEqual(bootstrapSummary.snapshotSequence, 6);
+    assert.strictEqual(bootstrapSummary.snapshotProfile, "bootstrap-summary");
+
+    const readiness = yield* decodeOrchestrationGetReadinessResult({
+      snapshotSequence: 7,
+      projectCount: 2,
+      threadCount: 5,
+    });
+    assert.strictEqual(readiness.snapshotSequence, 7);
+    assert.strictEqual(readiness.projectCount, 2);
+    assert.strictEqual(readiness.threadCount, 5);
+
+    const project = yield* decodeOrchestrationGetProjectByWorkspaceResult({
+      id: "project-1",
+      title: "Project One",
+      workspaceRoot: "/tmp/project-one",
+      createdAt: "2026-04-05T10:00:00.000Z",
+      updatedAt: "2026-04-05T10:00:00.000Z",
+    });
+    assert.strictEqual(project?.id, "project-1");
+    assert.strictEqual(project?.defaultModelSelection, null);
+
+    const threads = yield* decodeOrchestrationListProjectThreadsResult([
+      {
+        id: "thread-1",
+        projectId: "project-1",
+        title: "Thread One",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt: "2026-04-05T10:00:00.000Z",
+        updatedAt: "2026-04-05T10:00:00.000Z",
+      },
+    ]);
+    assert.strictEqual(threads.length, 1);
+    assert.deepStrictEqual(threads[0]?.labels, []);
+    assert.strictEqual(threads[0]?.latestTurn, null);
+    assert.strictEqual(threads[0]?.session, null);
+
+    const snapshot = yield* decodeOrchestrationReadModel({
+      snapshotSequence: 8,
+      snapshotProfile: "operational",
+      snapshotCoverage: {
+        includeArchivedThreads: true,
+        wakeItemCount: 4,
+        wakeItemLimit: 100,
+        wakeItemsTruncated: false,
+      },
+      projects: [],
+      threads: [
+        {
+          id: "thread-1",
+          projectId: "project-1",
+          title: "Thread One",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-04-05T10:00:00.000Z",
+          updatedAt: "2026-04-05T10:00:00.000Z",
+          archivedAt: null,
+          deletedAt: null,
+          messages: [],
+          proposedPlans: [],
+          activities: [],
+          checkpoints: [],
+          session: null,
+          snapshotCoverage: {
+            messageCount: 12,
+            messageLimit: 200,
+            messagesTruncated: true,
+            proposedPlanCount: 3,
+            proposedPlanLimit: 50,
+            proposedPlansTruncated: false,
+            activityCount: 8,
+            activityLimit: 100,
+            activitiesTruncated: false,
+            checkpointCount: 1,
+            checkpointLimit: 50,
+            checkpointsTruncated: false,
+          },
+        },
+      ],
+      orchestratorWakeItems: [],
+      updatedAt: "2026-04-05T10:01:00.000Z",
+    });
+    assert.strictEqual(snapshot.snapshotProfile, "operational");
+    assert.strictEqual(snapshot.snapshotCoverage?.includeArchivedThreads, true);
+    assert.strictEqual(snapshot.threads[0]?.snapshotCoverage?.messagesTruncated, true);
+  }),
+);
+
+it.effect("rejects invalid snapshot profiles", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      Schema.decodeUnknownEffect(OrchestrationSnapshotProfile)("bogus"),
+    );
+    assert.strictEqual(result._tag, "Failure");
   }),
 );

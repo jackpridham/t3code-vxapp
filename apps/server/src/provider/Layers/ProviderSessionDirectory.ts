@@ -37,6 +37,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function readRuntimePayloadLastRuntimeEventAt(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return typeof value.lastRuntimeEventAt === "string" ? value.lastRuntimeEventAt : null;
+}
+
 function mergeRuntimePayload(
   existing: unknown | null,
   next: unknown | null | undefined,
@@ -94,24 +101,38 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
     const now = new Date().toISOString();
     const providerChanged =
       existingRuntime !== undefined && existingRuntime.providerName !== binding.provider;
+    const nextRuntimePayload = mergeRuntimePayload(
+      existingRuntime?.runtimePayload ?? null,
+      binding.runtimePayload,
+    );
+    const nextLastRuntimeEventAt = readRuntimePayloadLastRuntimeEventAt(nextRuntimePayload);
+    const existingLastRuntimeEventAt = readRuntimePayloadLastRuntimeEventAt(
+      existingRuntime?.runtimePayload ?? null,
+    );
+
+    if (
+      nextLastRuntimeEventAt !== null &&
+      existingLastRuntimeEventAt !== null &&
+      existingLastRuntimeEventAt.localeCompare(nextLastRuntimeEventAt) > 0
+    ) {
+      return;
+    }
+
     yield* repository
       .upsert({
         threadId: resolvedThreadId,
         providerName: binding.provider,
         adapterKey:
           binding.adapterKey ??
-          (providerChanged ? binding.provider : (existingRuntime?.adapterKey ?? binding.provider)),
+            (providerChanged ? binding.provider : (existingRuntime?.adapterKey ?? binding.provider)),
         runtimeMode: binding.runtimeMode ?? existingRuntime?.runtimeMode ?? "full-access",
         status: binding.status ?? existingRuntime?.status ?? "running",
-        lastSeenAt: now,
+        lastSeenAt: nextLastRuntimeEventAt ?? now,
         resumeCursor:
           binding.resumeCursor !== undefined
             ? binding.resumeCursor
             : (existingRuntime?.resumeCursor ?? null),
-        runtimePayload: mergeRuntimePayload(
-          existingRuntime?.runtimePayload ?? null,
-          binding.runtimePayload,
-        ),
+        runtimePayload: nextRuntimePayload,
       })
       .pipe(Effect.mapError(toPersistenceError("ProviderSessionDirectory.upsert:upsert")));
   });

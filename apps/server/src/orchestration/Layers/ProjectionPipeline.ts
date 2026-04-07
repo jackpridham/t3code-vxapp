@@ -10,6 +10,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import { ProjectionOrchestratorWakeRepository } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -29,6 +30,7 @@ import {
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProjectionOrchestratorWakeRepositoryLive } from "../../persistence/Layers/ProjectionOrchestratorWakes.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -40,6 +42,7 @@ import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/Project
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestrationProjectionPipeline,
+  type ProjectionAttachmentSideEffects,
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
 import {
@@ -59,6 +62,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
+  orchestratorWakes: "projection.orchestrator-wakes",
 } as const;
 
 type ProjectorName =
@@ -72,7 +76,7 @@ interface ProjectorDefinition {
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
-interface AttachmentSideEffects {
+interface AttachmentSideEffects extends ProjectionAttachmentSideEffects {
   readonly deletedThreadIds: Set<string>;
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
 }
@@ -369,6 +373,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
+    const projectionOrchestratorWakeRepository = yield* ProjectionOrchestratorWakeRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -585,9 +590,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
-        case "thread.activity-appended": {
+        case "thread.activity-appended":
+        case "thread.orchestrator-wake-upserted": {
+          const targetThreadId =
+            event.type === "thread.orchestrator-wake-upserted"
+              ? event.payload.wakeItem.orchestratorThreadId
+              : event.payload.threadId;
           const existingRow = yield* projectionThreadRepository.getById({
-            threadId: event.payload.threadId,
+            threadId: targetThreadId,
           });
           if (Option.isNone(existingRow)) {
             return;
@@ -825,6 +835,33 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         default:
           return;
       }
+    });
+
+    const applyOrchestratorWakesProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyOrchestratorWakesProjection",
+    )(function* (event, _attachmentSideEffects) {
+      if (event.type !== "thread.orchestrator-wake-upserted") {
+        return;
+      }
+
+      yield* projectionOrchestratorWakeRepository.upsert({
+        wakeId: event.payload.wakeItem.wakeId,
+        orchestratorThreadId: event.payload.wakeItem.orchestratorThreadId,
+        orchestratorProjectId: event.payload.wakeItem.orchestratorProjectId,
+        workerThreadId: event.payload.wakeItem.workerThreadId,
+        workerProjectId: event.payload.wakeItem.workerProjectId,
+        workerTurnId: event.payload.wakeItem.workerTurnId,
+        workflowId: event.payload.wakeItem.workflowId ?? null,
+        workerTitleSnapshot: event.payload.wakeItem.workerTitleSnapshot,
+        outcome: event.payload.wakeItem.outcome,
+        summary: event.payload.wakeItem.summary,
+        queuedAt: event.payload.wakeItem.queuedAt,
+        state: event.payload.wakeItem.state,
+        deliveryMessageId: event.payload.wakeItem.deliveryMessageId ?? null,
+        deliveredAt: event.payload.wakeItem.deliveredAt,
+        consumedAt: event.payload.wakeItem.consumedAt,
+        consumeReason: event.payload.wakeItem.consumeReason ?? null,
+      });
     });
 
     const applyThreadSessionsProjection: ProjectorDefinition["apply"] = Effect.fn(
@@ -1224,12 +1261,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyPendingApprovalsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
+        apply: applyOrchestratorWakesProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
         apply: applyThreadsProjection,
       },
     ];
 
-    const runProjectorForEvent = Effect.fn("runProjectorForEvent")(function* (
+    const applyProjectorForEvent = Effect.fn("applyProjectorForEvent")(function* (
       projector: ProjectorDefinition,
       event: OrchestrationEvent,
     ) {
@@ -1238,28 +1279,47 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         prunedThreadRelativePaths: new Map<string, Set<string>>(),
       };
 
-      yield* sql.withTransaction(
-        projector.apply(event, attachmentSideEffects).pipe(
-          Effect.flatMap(() =>
-            projectionStateRepository.upsert({
-              projector: projector.name,
-              lastAppliedSequence: event.sequence,
-              updatedAt: event.occurredAt,
-            }),
-          ),
-        ),
-      );
-
-      yield* runAttachmentSideEffects(attachmentSideEffects).pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("failed to apply projected attachment side-effects", {
+      yield* projector.apply(event, attachmentSideEffects).pipe(
+        Effect.flatMap(() =>
+          projectionStateRepository.upsert({
             projector: projector.name,
-            sequence: event.sequence,
-            eventType: event.type,
-            cause,
+            lastAppliedSequence: event.sequence,
+            updatedAt: event.occurredAt,
           }),
         ),
       );
+
+      return attachmentSideEffects;
+    });
+
+    const flushAttachmentSideEffects: OrchestrationProjectionPipelineShape["flushAttachmentSideEffects"] =
+      (sideEffects) =>
+        Effect.forEach(
+          sideEffects,
+          (sideEffect) =>
+            runAttachmentSideEffects(sideEffect).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("failed to apply projected attachment side-effects", {
+                  cause,
+                }),
+              ),
+            ),
+          { concurrency: 1 },
+        ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(ServerConfig, serverConfig),
+          Effect.asVoid,
+        );
+
+    const runProjectorForEvent = Effect.fn("runProjectorForEvent")(function* (
+      projector: ProjectorDefinition,
+      event: OrchestrationEvent,
+    ) {
+      const attachmentSideEffects = yield* sql.withTransaction(
+        applyProjectorForEvent(projector, event),
+      );
+      yield* flushAttachmentSideEffects([attachmentSideEffects]);
     });
 
     const bootstrapProjector = (projector: ProjectorDefinition) =>
@@ -1278,13 +1338,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           ),
         );
 
+    const projectEventInTransaction: OrchestrationProjectionPipelineShape["projectEventInTransaction"] =
+      (event) =>
+        Effect.forEach(projectors, (projector) => applyProjectorForEvent(projector, event), {
+          concurrency: 1,
+        });
+
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
-      Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
-        concurrency: 1,
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-        Effect.provideService(ServerConfig, serverConfig),
+      sql.withTransaction(projectEventInTransaction(event)).pipe(
+        Effect.flatMap((sideEffects) => flushAttachmentSideEffects(sideEffects)),
         Effect.asVoid,
         Effect.catchTag("SqlError", (sqlError) =>
           Effect.fail(toPersistenceSqlError("ProjectionPipeline.projectEvent:query")(sqlError)),
@@ -1313,6 +1375,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     return {
       bootstrap,
       projectEvent,
+      projectEventInTransaction,
+      flushAttachmentSideEffects,
     } satisfies OrchestrationProjectionPipelineShape;
   },
 );
@@ -1330,5 +1394,6 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
+  Layer.provideMerge(ProjectionOrchestratorWakeRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
 );

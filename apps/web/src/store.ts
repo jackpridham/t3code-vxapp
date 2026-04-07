@@ -2,6 +2,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationMessage,
   type OrchestrationProposedPlan,
+  type OrchestratorWakeItem,
   type ProviderKind,
   ThreadId,
   type OrchestrationReadModel,
@@ -12,20 +13,27 @@ import {
 } from "@t3tools/contracts";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
-import { dispatchNotification } from "./notificationDispatch";
-import { type ChatMessage, type Project, type Thread } from "./types";
+import {
+  type ChatMessage,
+  type PersistedFileChange,
+  type Project,
+  type Thread,
+  type TurnDiffSummary,
+} from "./types";
 
 // ── State ────────────────────────────────────────────────────────────
 
 export interface AppState {
   projects: Project[];
   threads: Thread[];
+  orchestratorWakeItems: OrchestratorWakeItem[];
   bootstrapComplete: boolean;
 }
 
 const initialState: AppState = {
   projects: [],
   threads: [],
+  orchestratorWakeItems: [],
   bootstrapComplete: false,
 };
 const MAX_THREAD_MESSAGES = 2_000;
@@ -67,6 +75,38 @@ function updateProject(
     return updated;
   });
   return changed ? next : projects;
+}
+
+function mergeProjects(
+  existingProjects: Project[],
+  incomingProjects: ReadonlyArray<OrchestrationReadModel["projects"][number]>,
+): Project[] {
+  const nextProjects = [...existingProjects];
+  const indexByProjectId = new Map(
+    nextProjects.map((project, index) => [project.id, index] as const),
+  );
+
+  for (const project of incomingProjects) {
+    const existingIndex = indexByProjectId.get(project.id);
+    if (project.deletedAt !== null) {
+      if (existingIndex === undefined) {
+        continue;
+      }
+      nextProjects.splice(existingIndex, 1);
+      indexByProjectId.clear();
+      nextProjects.forEach((entry, index) => indexByProjectId.set(entry.id, index));
+      continue;
+    }
+
+    const mappedProject = mapProject(project);
+    if (existingIndex === undefined) {
+      indexByProjectId.set(mappedProject.id, nextProjects.push(mappedProject) - 1);
+      continue;
+    }
+    nextProjects[existingIndex] = mappedProject;
+  }
+
+  return nextProjects;
 }
 
 function normalizeModelSelection<T extends { provider: "codex" | "claudeAgent"; model: string }>(
@@ -169,6 +209,50 @@ function mapTurnDiffSummary(
   };
 }
 
+/**
+ * Build the cumulative file-change list from all turn diff summaries.
+ * Each file path gets a single entry with aggregated insertions/deletions
+ * and first/last turn ids for provenance.
+ */
+export function accumulateFileChanges(
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>,
+): PersistedFileChange[] {
+  const byPath = new Map<string, PersistedFileChange>();
+
+  for (const summary of turnDiffSummaries) {
+    if (summary.status === "missing" || summary.status === "error") continue;
+    for (const file of summary.files) {
+      const existing = byPath.get(file.path);
+      if (existing) {
+        existing.totalInsertions += file.additions ?? 0;
+        existing.totalDeletions += file.deletions ?? 0;
+        existing.lastTurnId = summary.turnId;
+        // Upgrade kind: if a file was "added" then "modified", keep "added"
+        if (file.kind === "deleted") {
+          existing.kind = "deleted";
+        } else if (existing.kind !== "added" && file.kind) {
+          existing.kind = file.kind;
+        }
+      } else {
+        byPath.set(file.path, {
+          path: file.path,
+          kind: file.kind,
+          totalInsertions: file.additions ?? 0,
+          totalDeletions: file.deletions ?? 0,
+          firstTurnId: summary.turnId,
+          lastTurnId: summary.turnId,
+        });
+      }
+    }
+  }
+
+  return Array.from(byPath.values());
+}
+
+function mapOrchestratorWakeItem(wakeItem: OrchestratorWakeItem): OrchestratorWakeItem {
+  return { ...wakeItem };
+}
+
 function mapThread(thread: OrchestrationThreadWithLabels): Thread {
   return {
     id: thread.id,
@@ -191,7 +275,9 @@ function mapThread(thread: OrchestrationThreadWithLabels): Thread {
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
+    persistedFileChanges: accumulateFileChanges(thread.checkpoints.map(mapTurnDiffSummary)),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    snapshotCoverage: thread.snapshotCoverage,
     // Lineage metadata
     orchestratorProjectId: thread.orchestratorProjectId,
     orchestratorThreadId: thread.orchestratorThreadId,
@@ -216,6 +302,43 @@ function mapProject(project: OrchestrationReadModel["projects"][number]): Projec
     scripts: mapProjectScripts(project.scripts),
     hooks: mapProjectHooks(project.hooks),
   };
+}
+
+function mergeThreads(
+  existingThreads: Thread[],
+  incomingThreads: ReadonlyArray<OrchestrationReadModel["threads"][number]>,
+): Thread[] {
+  const nextThreads = [...existingThreads];
+  const indexByThreadId = new Map(nextThreads.map((thread, index) => [thread.id, index] as const));
+
+  for (const thread of incomingThreads) {
+    const existingIndex = indexByThreadId.get(thread.id);
+    if (thread.deletedAt !== null) {
+      if (existingIndex === undefined) {
+        continue;
+      }
+      nextThreads.splice(existingIndex, 1);
+      indexByThreadId.clear();
+      nextThreads.forEach((entry, index) => indexByThreadId.set(entry.id, index));
+      continue;
+    }
+
+    const mappedThread = mapThread(thread as OrchestrationThreadWithLabels);
+    if (existingIndex === undefined) {
+      indexByThreadId.set(mappedThread.id, nextThreads.push(mappedThread) - 1);
+      continue;
+    }
+    nextThreads[existingIndex] = mappedThread;
+  }
+
+  return nextThreads;
+}
+
+function isPartialReadModel(readModel: OrchestrationReadModel): boolean {
+  return (
+    readModel.snapshotProfile === "bootstrap-summary" ||
+    readModel.snapshotProfile === "active-thread"
+  );
 }
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
@@ -439,16 +562,19 @@ function attachmentPreviewRoutePath(attachmentId: string): string {
 // ── Pure state transition functions ────────────────────────────────────
 
 export function syncServerReadModel(state: AppState, readModel: OrchestrationReadModel): AppState {
-  const projects = readModel.projects
-    .filter((project) => project.deletedAt === null)
-    .map(mapProject);
-  const threads = readModel.threads
-    .filter((thread) => thread.deletedAt === null)
-    .map((thread) => mapThread(thread as OrchestrationThreadWithLabels));
+  const projects = isPartialReadModel(readModel)
+    ? mergeProjects(state.projects, readModel.projects)
+    : readModel.projects.filter((project) => project.deletedAt === null).map(mapProject);
+  const threads = isPartialReadModel(readModel)
+    ? mergeThreads(state.threads, readModel.threads)
+    : readModel.threads
+        .filter((thread) => thread.deletedAt === null)
+        .map((thread) => mapThread(thread as OrchestrationThreadWithLabels));
   return {
     ...state,
     projects,
     threads,
+    orchestratorWakeItems: readModel.orchestratorWakeItems.map(mapOrchestratorWakeItem),
     bootstrapComplete: true,
   };
 }
@@ -537,12 +663,6 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       const threads = existing
         ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
         : [...state.threads, nextThread];
-      dispatchNotification(
-        "thread-created",
-        "info",
-        "Thread created",
-        event.payload.title ?? event.payload.threadId,
-      );
       return { ...state, threads };
     }
 
@@ -596,9 +716,6 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         ...(event.payload.workflowId !== undefined ? { workflowId: event.payload.workflowId } : {}),
         updatedAt: event.payload.updatedAt,
       }));
-      if (threads !== state.threads && threadLabels !== undefined) {
-        dispatchNotification("label-changed", "info", "Labels updated");
-      }
       return threads === state.threads ? state : { ...state, threads };
     }
 
@@ -781,19 +898,6 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
             : thread.latestTurn,
         updatedAt: event.occurredAt,
       }));
-      if (
-        threads !== state.threads &&
-        event.payload.session.status === "error" &&
-        event.payload.session.lastError !== null &&
-        /rate.?limit/i.test(event.payload.session.lastError)
-      ) {
-        dispatchNotification(
-          "thread-rate-limited",
-          "warning",
-          "Rate limited",
-          event.payload.session.lastError,
-        );
-      }
       return threads === state.threads ? state : { ...state, threads };
     }
 
@@ -880,28 +984,11 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         return {
           ...thread,
           turnDiffSummaries,
+          persistedFileChanges: accumulateFileChanges(turnDiffSummaries),
           latestTurn,
           updatedAt: event.occurredAt,
         };
       });
-      if (threads !== state.threads) {
-        const turnThread = threads.find((t) => t.id === event.payload.threadId);
-        if (event.payload.status === "ready") {
-          dispatchNotification(
-            "turn-completed",
-            "info",
-            "Turn completed",
-            turnThread?.title ?? event.payload.threadId,
-          );
-        } else if (event.payload.status === "error") {
-          dispatchNotification(
-            "turn-failed",
-            "error",
-            "Turn failed",
-            turnThread?.title ?? event.payload.threadId,
-          );
-        }
-      }
       return threads === state.threads ? state : { ...state, threads };
     }
 
@@ -935,6 +1022,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         return {
           ...thread,
           turnDiffSummaries,
+          persistedFileChanges: accumulateFileChanges(turnDiffSummaries),
           messages,
           proposedPlans,
           activities,
@@ -972,19 +1060,20 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           updatedAt: event.occurredAt,
         };
       });
-      if (
-        threads !== state.threads &&
-        event.payload.activity.tone === "error" &&
-        /hook/i.test(event.payload.activity.kind)
-      ) {
-        dispatchNotification(
-          "hook-failure",
-          "error",
-          "Hook failed",
-          event.payload.activity.summary,
-        );
-      }
       return threads === state.threads ? state : { ...state, threads };
+    }
+
+    case "thread.orchestrator-wake-upserted": {
+      const orchestratorWakeItems = [
+        ...state.orchestratorWakeItems.filter(
+          (wakeItem) => wakeItem.wakeId !== event.payload.wakeItem.wakeId,
+        ),
+        mapOrchestratorWakeItem(event.payload.wakeItem),
+      ].toSorted(
+        (left, right) =>
+          left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
+      );
+      return { ...state, orchestratorWakeItems };
     }
 
     case "thread.approval-response-requested":

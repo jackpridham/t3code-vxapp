@@ -217,7 +217,14 @@ export function createWsNativeApi(): NativeApi {
       updateSettings: (patch) => transport.request(WS_METHODS.serverUpdateSettings, { patch }),
     },
     orchestration: {
-      getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
+      getBootstrapSummary: () => transport.request(ORCHESTRATION_WS_METHODS.getBootstrapSummary),
+      getSnapshot: (input) => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot, input),
+      getReadiness: () => transport.request(ORCHESTRATION_WS_METHODS.getReadiness),
+      listProjects: () => transport.request(ORCHESTRATION_WS_METHODS.listProjects),
+      getProjectByWorkspace: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.getProjectByWorkspace, input),
+      listProjectThreads: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.listProjectThreads, input),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),

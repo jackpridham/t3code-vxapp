@@ -6,14 +6,19 @@ import {
   clearProjectLabelFilters,
   clearThreadUi,
   closeArtifactPanel,
+  closeChangesPanel,
   markThreadUnread,
   openArtifactPanel,
+  openChangesPanel,
   reorderProjects,
+  setChangesPanelActivePath,
+  setChangesPanelActiveSection,
   setDiscoveredArtifacts,
   setProjectExpanded,
   setProjectLabelFilter,
   syncProjects,
   syncThreads,
+  toggleChangesPanel,
   toggleProjectLabelFilter,
   type UiState,
 } from "./uiStateStore";
@@ -28,6 +33,9 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     artifactPanelOpen: false,
     artifactPanelPath: null,
     artifactPanelArtifacts: [],
+    changesPanelOpen: false,
+    changesPanelActivePath: null,
+    changesPanelActiveSection: null,
     notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
     ...overrides,
   };
@@ -347,5 +355,107 @@ describe("artifact panel pure functions", () => {
     });
     const next = setDiscoveredArtifacts(state, []);
     expect(next.artifactPanelArtifacts).toHaveLength(0);
+  });
+});
+
+// ── Changes panel ───────────────────────────────────────────────────────────
+
+describe("changes panel pure functions", () => {
+  it("openChangesPanel sets open=true", () => {
+    const state = makeUiState();
+    const next = openChangesPanel(state);
+    expect(next.changesPanelOpen).toBe(true);
+    expect(next.changesPanelActivePath).toBeNull();
+  });
+
+  it("openChangesPanel sets open=true with a path", () => {
+    const state = makeUiState();
+    const next = openChangesPanel(state, "/repo/src/index.ts");
+    expect(next.changesPanelOpen).toBe(true);
+    expect(next.changesPanelActivePath).toBe("/repo/src/index.ts");
+  });
+
+  it("openChangesPanel returns same reference when already open at same path", () => {
+    const state = makeUiState({
+      changesPanelOpen: true,
+      changesPanelActivePath: "/repo/plan.md",
+    });
+    const next = openChangesPanel(state, "/repo/plan.md");
+    expect(next).toBe(state);
+  });
+
+  it("openChangesPanel navigates to a different path", () => {
+    const state = makeUiState({
+      changesPanelOpen: true,
+      changesPanelActivePath: "/repo/old.md",
+    });
+    const next = openChangesPanel(state, "/repo/new.md");
+    expect(next.changesPanelOpen).toBe(true);
+    expect(next.changesPanelActivePath).toBe("/repo/new.md");
+  });
+
+  it("openChangesPanel preserves previous activePath when no path given", () => {
+    const state = makeUiState({
+      changesPanelOpen: false,
+      changesPanelActivePath: "/repo/last.md",
+    });
+    const next = openChangesPanel(state);
+    expect(next.changesPanelOpen).toBe(true);
+    expect(next.changesPanelActivePath).toBe("/repo/last.md");
+  });
+
+  it("closeChangesPanel sets open=false but preserves activePath", () => {
+    const state = makeUiState({
+      changesPanelOpen: true,
+      changesPanelActivePath: "/repo/plan.md",
+    });
+    const next = closeChangesPanel(state);
+    expect(next.changesPanelOpen).toBe(false);
+    expect(next.changesPanelActivePath).toBe("/repo/plan.md");
+  });
+
+  it("closeChangesPanel returns same reference when already closed", () => {
+    const state = makeUiState({ changesPanelOpen: false });
+    expect(closeChangesPanel(state)).toBe(state);
+  });
+
+  it("toggleChangesPanel opens when closed", () => {
+    const state = makeUiState({ changesPanelOpen: false });
+    const next = toggleChangesPanel(state);
+    expect(next.changesPanelOpen).toBe(true);
+  });
+
+  it("toggleChangesPanel closes when open", () => {
+    const state = makeUiState({ changesPanelOpen: true });
+    const next = toggleChangesPanel(state);
+    expect(next.changesPanelOpen).toBe(false);
+  });
+
+  it("setChangesPanelActivePath updates the path", () => {
+    const state = makeUiState();
+    const next = setChangesPanelActivePath(state, "/repo/src/index.ts");
+    expect(next.changesPanelActivePath).toBe("/repo/src/index.ts");
+  });
+
+  it("setChangesPanelActivePath returns same reference when path unchanged", () => {
+    const state = makeUiState({ changesPanelActivePath: "/repo/foo.ts" });
+    expect(setChangesPanelActivePath(state, "/repo/foo.ts")).toBe(state);
+  });
+
+  it("setChangesPanelActiveSection updates the section", () => {
+    const state = makeUiState();
+    const next = setChangesPanelActiveSection(state, "plans");
+    expect(next.changesPanelActiveSection).toBe("plans");
+  });
+
+  it("setChangesPanelActiveSection returns same reference when section unchanged", () => {
+    const state = makeUiState({ changesPanelActiveSection: "plans" });
+    expect(setChangesPanelActiveSection(state, "plans")).toBe(state);
+  });
+
+  it("setChangesPanelActiveSection clears with null", () => {
+    const state = makeUiState({ changesPanelActiveSection: "plans" });
+    const next = setChangesPanelActiveSection(state, null);
+    expect(next.changesPanelActiveSection).toBeNull();
   });
 });

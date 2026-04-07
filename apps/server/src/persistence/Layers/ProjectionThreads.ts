@@ -21,13 +21,34 @@ const ProjectionThreadDbRow = ProjectionThread.mapFields(
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
 
+const MODEL_LABEL_PREFIX = "model:";
+
+function normalizeThreadLabels(labels: ReadonlyArray<string>, modelSelection: ModelSelection) {
+  const normalizedModelLabel = `${MODEL_LABEL_PREFIX}${modelSelection.model}`;
+  let replacedModelLabel = false;
+
+  const normalizedLabels = labels.flatMap((label) => {
+    if (!label.startsWith(MODEL_LABEL_PREFIX)) {
+      return [label];
+    }
+    if (replacedModelLabel) {
+      return [];
+    }
+    replacedModelLabel = true;
+    return [normalizedModelLabel];
+  });
+
+  return replacedModelLabel ? normalizedLabels : labels;
+}
+
 const makeProjectionThreadRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   const upsertProjectionThreadRow = SqlSchema.void({
     Request: ProjectionThread,
-    execute: (row) =>
-      sql`
+    execute: (row) => {
+      const labels = normalizeThreadLabels(row.labels, row.modelSelection);
+      return sql`
         INSERT INTO projection_threads (
           thread_id,
           project_id,
@@ -54,7 +75,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.threadId},
           ${row.projectId},
           ${row.title},
-          ${JSON.stringify(row.labels)},
+          ${JSON.stringify(labels)},
           ${JSON.stringify(row.modelSelection)},
           ${row.runtimeMode},
           ${row.interactionMode},
@@ -93,7 +114,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           spawn_role = excluded.spawn_role,
           spawned_by = excluded.spawned_by,
           workflow_id = excluded.workflow_id
-      `,
+      `;
+    },
   });
 
   const getProjectionThreadRow = SqlSchema.findOneOption({

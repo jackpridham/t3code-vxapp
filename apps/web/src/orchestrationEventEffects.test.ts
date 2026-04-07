@@ -7,9 +7,25 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deriveOrchestrationBatchEffects } from "./orchestrationEventEffects";
+const { dispatchNotification, getState } = vi.hoisted(() => ({
+  dispatchNotification: vi.fn(),
+  getState: vi.fn(),
+}));
+
+vi.mock("./notificationDispatch", () => ({
+  dispatchNotification,
+}));
+
+vi.mock("./store", () => ({
+  useStore: { getState },
+}));
+
+import {
+  deriveOrchestrationBatchEffects,
+  processEventNotifications,
+} from "./orchestrationEventEffects";
 
 function makeEvent<T extends OrchestrationEvent["type"]>(
   type: T,
@@ -39,6 +55,27 @@ function makeEvent<T extends OrchestrationEvent["type"]>(
 }
 
 describe("deriveOrchestrationBatchEffects", () => {
+  beforeEach(() => {
+    dispatchNotification.mockReset();
+    getState.mockReset();
+    getState.mockReturnValue({
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project 1",
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread 1",
+          labels: ["urgent"],
+        },
+      ],
+    });
+  });
+
   it("targets draft promotion and terminal cleanup from thread lifecycle events", () => {
     const createdThreadId = ThreadId.makeUnsafe("thread-created");
     const deletedThreadId = ThreadId.makeUnsafe("thread-deleted");
@@ -106,5 +143,66 @@ describe("deriveOrchestrationBatchEffects", () => {
     expect(effects.clearDeletedThreadIds).toEqual([]);
     expect(effects.removeTerminalStateThreadIds).toEqual([]);
     expect(effects.needsProviderInvalidation).toBe(true);
+  });
+});
+
+describe("processEventNotifications", () => {
+  it("fires a completion toast for ready turn diffs", () => {
+    processEventNotifications([
+      makeEvent("thread.turn-diff-completed", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId: TurnId.makeUnsafe("turn-1"),
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("checkpoint-1"),
+        status: "ready",
+        files: [],
+        assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+        completedAt: "2026-02-27T00:00:03.000Z",
+      }),
+    ]);
+
+    expect(dispatchNotification).toHaveBeenCalledWith(
+      "turn-completed",
+      "info",
+      "Turn Completed",
+      undefined,
+      {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        projectName: "Project 1",
+        labels: ["urgent"],
+        occurredAt: "2026-02-27T00:00:03.000Z",
+      },
+    );
+  });
+
+  it("fires a hook failure toast for error hook activities", () => {
+    processEventNotifications([
+      makeEvent("thread.activity-appended", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        activity: {
+          id: EventId.makeUnsafe("activity-1"),
+          kind: "hook.post-turn",
+          summary: "Post-turn hook failed",
+          tone: "error",
+          payload: {},
+          turnId: null,
+          createdAt: "2026-02-27T00:00:03.000Z",
+        },
+      }),
+    ]);
+
+    expect(dispatchNotification).toHaveBeenCalledWith(
+      "hook-failure",
+      "error",
+      "Hook failed",
+      undefined,
+      {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        projectName: "Project 1",
+        labels: ["urgent"],
+        occurredAt: "2026-02-27T00:00:03.000Z",
+        detail: "Post-turn hook failed",
+      },
+    );
   });
 });

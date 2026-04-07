@@ -23,6 +23,7 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import { cn } from "~/lib/utils";
 
 /**
  * Extend react-markdown's default URL transform to also allow `file:` protocol.
@@ -59,6 +60,8 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  variant?: "chat" | "document";
+  className?: string;
   onArtifactLinkClick?: ((path: string) => void) | undefined;
 }
 
@@ -246,7 +249,14 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false, onArtifactLinkClick }: ChatMarkdownProps) {
+function ChatMarkdown({
+  text,
+  cwd,
+  isStreaming = false,
+  variant = "chat",
+  className,
+  onArtifactLinkClick,
+}: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownComponents = useMemo<Components>(
@@ -281,6 +291,13 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onArtifactLinkClick }: C
           />
         );
       },
+      table({ node: _node, children, ...props }) {
+        return (
+          <div className="chat-markdown-table">
+            <table {...props}>{children}</table>
+          </div>
+        );
+      },
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
@@ -307,7 +324,13 @@ function ChatMarkdown({ text, cwd, isStreaming = false, onArtifactLinkClick }: C
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div
+      className={cn(
+        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80",
+        className,
+      )}
+      data-variant={variant}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         urlTransform={urlTransform}

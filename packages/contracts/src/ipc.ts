@@ -45,11 +45,18 @@ import type {
 import type { ServerUpsertKeybindingInput } from "./server";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationGetSnapshotInput,
+  OrchestrationGetProjectByWorkspaceInput,
+  OrchestrationGetProjectByWorkspaceResult,
+  OrchestrationGetReadinessResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
+  OrchestrationListProjectThreadsInput,
+  OrchestrationListProjectThreadsResult,
+  OrchestrationListProjectsResult,
   OrchestrationReadModel,
 } from "./orchestration";
 import { EditorId } from "./editor";
@@ -181,7 +188,16 @@ export interface NativeApi {
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
   };
   orchestration: {
-    getSnapshot: () => Promise<OrchestrationReadModel>;
+    getBootstrapSummary: () => Promise<OrchestrationReadModel>;
+    getSnapshot: (input?: OrchestrationGetSnapshotInput) => Promise<OrchestrationReadModel>;
+    getReadiness: () => Promise<OrchestrationGetReadinessResult>;
+    listProjects: () => Promise<OrchestrationListProjectsResult>;
+    getProjectByWorkspace: (
+      input: OrchestrationGetProjectByWorkspaceInput,
+    ) => Promise<OrchestrationGetProjectByWorkspaceResult>;
+    listProjectThreads: (
+      input: OrchestrationListProjectThreadsInput,
+    ) => Promise<OrchestrationListProjectThreadsResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (

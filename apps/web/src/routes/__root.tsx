@@ -1,4 +1,9 @@
-import { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
+import {
+  type NativeApi,
+  type OrchestrationReadModel,
+  OrchestrationEvent,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -38,6 +43,7 @@ import {
   processEventNotifications,
 } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { isArtifactWindowPath } from "../lib/artifactWindow";
 import { isSidebarWindowPath } from "../lib/sidebarWindow";
 
 export const Route = createRootRouteWithContext<{
@@ -53,6 +59,7 @@ export const Route = createRootRouteWithContext<{
 function RootRouteView() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isSidebarWindowRoute = isSidebarWindowPath(pathname);
+  const isArtifactWindowRoute = isArtifactWindowPath(pathname);
 
   if (!readNativeApi()) {
     return (
@@ -66,20 +73,23 @@ function RootRouteView() {
     );
   }
 
+  if (isArtifactWindowRoute) {
+    return <Outlet />;
+  }
+
   return (
     <ToastProvider>
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
-        <ArtifactPanel />
         {isSidebarWindowRoute ? (
           <Outlet />
         ) : (
           <AppSidebarLayout>
             <Outlet />
+            <ArtifactPanel />
           </AppSidebarLayout>
         )}
-        <ArtifactPanel />
       </AnchoredToastProvider>
     </ToastProvider>
   );
@@ -156,6 +166,64 @@ function errorDetails(error: unknown): string {
   }
 }
 
+type BootstrapRecoveryDeps = {
+  api: NativeApi;
+  recovery: ReturnType<typeof createOrchestrationRecoveryCoordinator>;
+  syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  reconcileSnapshotDerivedState: () => void;
+  recoverFromSequenceGap: () => Promise<void>;
+  isDisposed: () => boolean;
+};
+
+export async function bootstrapOrchestrationState({
+  api,
+  recovery,
+  syncServerReadModel,
+  reconcileSnapshotDerivedState,
+  recoverFromSequenceGap,
+  isDisposed,
+}: BootstrapRecoveryDeps): Promise<void> {
+  const applyReadModel = async (
+    loadReadModel: () => Promise<OrchestrationReadModel>,
+  ): Promise<void> => {
+    const readModel = await loadReadModel();
+    if (isDisposed()) {
+      return;
+    }
+    syncServerReadModel(readModel);
+    reconcileSnapshotDerivedState();
+    if (recovery.completeSnapshotRecovery(readModel.snapshotSequence)) {
+      void recoverFromSequenceGap();
+    }
+  };
+
+  const runSnapshotRecovery = async (
+    loadReadModel: () => Promise<OrchestrationReadModel>,
+  ): Promise<boolean> => {
+    if (!recovery.beginSnapshotRecovery("bootstrap")) {
+      return false;
+    }
+
+    try {
+      await applyReadModel(loadReadModel);
+      return true;
+    } catch {
+      recovery.failSnapshotRecovery();
+      return false;
+    }
+  };
+
+  const summaryApplied = await runSnapshotRecovery(() => api.orchestration.getBootstrapSummary());
+  if (summaryApplied) {
+    // The bootstrap summary intentionally omits persisted thread history. Refresh it
+    // with the bounded operational snapshot so reloaded threads render real content.
+    await runSnapshotRecovery(() => api.orchestration.getSnapshot());
+    return;
+  }
+
+  await runSnapshotRecovery(() => api.orchestration.getSnapshot());
+}
+
 function EventRouter() {
   const applyOrchestrationEvents = useStore((store) => store.applyOrchestrationEvents);
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
@@ -181,7 +249,7 @@ function EventRouter() {
     let disposed = false;
     const recovery = createOrchestrationRecoveryCoordinator();
     let needsProviderInvalidation = false;
-    // Suppress notifications during initial hydration (snapshot + replay recovery).
+    // Suppress notifications during initial hydration (summary/snapshot + replay recovery).
     // Only fire notifications for real-time domain events after bootstrap completes.
     let notificationsReady = false;
 
@@ -321,10 +389,6 @@ function EventRouter() {
       }
     };
 
-    const bootstrapFromSnapshot = async (): Promise<void> => {
-      await runSnapshotRecovery("bootstrap");
-    };
-
     const fallbackToSnapshotRecovery = async (): Promise<void> => {
       await runSnapshotRecovery("replay-failed");
     };
@@ -356,7 +420,14 @@ function EventRouter() {
       // Migrate old localStorage settings to server on first connect
       migrateLocalSettingsToServer();
       void (async () => {
-        await bootstrapFromSnapshot();
+        await bootstrapOrchestrationState({
+          api,
+          recovery,
+          syncServerReadModel,
+          reconcileSnapshotDerivedState,
+          recoverFromSequenceGap,
+          isDisposed: () => disposed,
+        });
         if (disposed) {
           return;
         }

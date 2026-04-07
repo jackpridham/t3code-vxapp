@@ -12,6 +12,11 @@ import type { Effect } from "effect";
 
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 
+export interface ProjectionAttachmentSideEffects {
+  readonly deletedThreadIds: Set<string>;
+  readonly prunedThreadRelativePaths: Map<string, Set<string>>;
+}
+
 /**
  * OrchestrationProjectionPipelineShape - Service API for projection execution.
  */
@@ -31,6 +36,23 @@ export interface OrchestrationProjectionPipelineShape {
   readonly projectEvent: (
     event: OrchestrationEvent,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Project a single orchestration event assuming the caller already owns the
+   * surrounding SQL transaction. Attachment side effects are returned so the
+   * caller can flush them only after the outer transaction commits.
+   */
+  readonly projectEventInTransaction: (
+    event: OrchestrationEvent,
+  ) => Effect.Effect<ReadonlyArray<ProjectionAttachmentSideEffects>, ProjectionRepositoryError>;
+
+  /**
+   * Flush deferred attachment side effects after the related transaction has
+   * committed successfully.
+   */
+  readonly flushAttachmentSideEffects: (
+    sideEffects: ReadonlyArray<ProjectionAttachmentSideEffects>,
+  ) => Effect.Effect<void>;
 }
 
 /**

@@ -248,6 +248,7 @@ function createSnapshotForTargetUser(options: {
         deletedAt: null,
       },
     ],
+    orchestratorWakeItems: [],
     threads: [
       {
         id: THREAD_ID,

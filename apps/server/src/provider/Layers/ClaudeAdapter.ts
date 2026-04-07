@@ -2714,7 +2714,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: process.env,
+        env: {
+          ...process.env,
+          VX_T3_CURRENT_THREAD_ID: threadId,
+          ...(input.projectId !== undefined ? { VX_T3_CURRENT_PROJECT_ID: input.projectId } : {}),
+        },
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
       };
 

@@ -17,7 +17,12 @@ import {
 } from "./baseSchemas";
 
 export const ORCHESTRATION_WS_METHODS = {
+  getBootstrapSummary: "orchestration.getBootstrapSummary",
   getSnapshot: "orchestration.getSnapshot",
+  getReadiness: "orchestration.getReadiness",
+  listProjects: "orchestration.listProjects",
+  getProjectByWorkspace: "orchestration.getProjectByWorkspace",
+  listProjectThreads: "orchestration.listProjectThreads",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
@@ -155,6 +160,14 @@ export type ThreadLabels = typeof ThreadLabels.Type;
 export const OrchestrationProjectKind = Schema.Literals(["project", "orchestrator"]);
 export type OrchestrationProjectKind = typeof OrchestrationProjectKind.Type;
 
+export const OrchestrationSnapshotProfile = Schema.Literals([
+  "bootstrap-summary",
+  "operational",
+  "active-thread",
+  "debug-export",
+]);
+export type OrchestrationSnapshotProfile = typeof OrchestrationSnapshotProfile.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -286,6 +299,22 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const OrchestrationThreadSnapshotCoverage = Schema.Struct({
+  messageCount: NonNegativeInt,
+  messageLimit: Schema.NullOr(NonNegativeInt),
+  messagesTruncated: Schema.Boolean,
+  proposedPlanCount: NonNegativeInt,
+  proposedPlanLimit: Schema.NullOr(NonNegativeInt),
+  proposedPlansTruncated: Schema.Boolean,
+  activityCount: NonNegativeInt,
+  activityLimit: Schema.NullOr(NonNegativeInt),
+  activitiesTruncated: Schema.Boolean,
+  checkpointCount: NonNegativeInt,
+  checkpointLimit: Schema.NullOr(NonNegativeInt),
+  checkpointsTruncated: Schema.Boolean,
+});
+export type OrchestrationThreadSnapshotCoverage = typeof OrchestrationThreadSnapshotCoverage.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -307,6 +336,9 @@ export const OrchestrationThread = Schema.Struct({
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
+  snapshotCoverage: Schema.optional(OrchestrationThreadSnapshotCoverage).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
   session: Schema.NullOr(OrchestrationSession),
   orchestratorProjectId: Schema.optional(ProjectId).pipe(
     Schema.withDecodingDefault(() => undefined),
@@ -325,10 +357,126 @@ export const OrchestrationThread = Schema.Struct({
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
+export const OrchestrationProjectSummary = Schema.Struct({
+  id: ProjectId,
+  title: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+  kind: Schema.NullOr(OrchestrationProjectKind).pipe(Schema.withDecodingDefault(() => null)),
+  defaultModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  deletedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+});
+export type OrchestrationProjectSummary = typeof OrchestrationProjectSummary.Type;
+
+export const OrchestrationThreadSummary = Schema.Struct({
+  id: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  labels: ThreadLabels.pipe(Schema.withDecodingDefault(() => [])),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  latestTurn: Schema.NullOr(OrchestrationLatestTurn).pipe(Schema.withDecodingDefault(() => null)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  deletedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  session: Schema.NullOr(OrchestrationSession).pipe(Schema.withDecodingDefault(() => null)),
+  orchestratorProjectId: Schema.optional(ProjectId).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  orchestratorThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  parentThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  spawnedBy: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+});
+export type OrchestrationThreadSummary = typeof OrchestrationThreadSummary.Type;
+
+export const OrchestrationReadinessSummary = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  projectCount: NonNegativeInt,
+  threadCount: NonNegativeInt,
+});
+export type OrchestrationReadinessSummary = typeof OrchestrationReadinessSummary.Type;
+
+export const OrchestratorWakeOutcome = Schema.Literals(["completed", "failed", "interrupted"]);
+export type OrchestratorWakeOutcome = typeof OrchestratorWakeOutcome.Type;
+
+export const OrchestratorWakeState = Schema.Literals([
+  "pending",
+  "delivering",
+  "delivered",
+  "consumed",
+  "dropped",
+]);
+export type OrchestratorWakeState = typeof OrchestratorWakeState.Type;
+
+export const OrchestratorWakeConsumeReason = Schema.Literals([
+  "worker_rechecked",
+  "worker_superseded_by_new_turn",
+  "worker_deleted",
+  "worker_reparented",
+  "orchestrator_missing",
+  "orchestrator_deleted",
+  "orchestrator_mismatch",
+  "duplicate",
+  "manual_dismiss",
+]);
+export type OrchestratorWakeConsumeReason = typeof OrchestratorWakeConsumeReason.Type;
+
+export const OrchestratorWakeItem = Schema.Struct({
+  wakeId: TrimmedNonEmptyString,
+  orchestratorThreadId: ThreadId,
+  orchestratorProjectId: ProjectId,
+  workerThreadId: ThreadId,
+  workerProjectId: ProjectId,
+  workerTurnId: TurnId,
+  workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  workerTitleSnapshot: TrimmedNonEmptyString,
+  outcome: OrchestratorWakeOutcome,
+  summary: TrimmedNonEmptyString,
+  queuedAt: IsoDateTime,
+  state: OrchestratorWakeState,
+  deliveryMessageId: Schema.optional(MessageId).pipe(Schema.withDecodingDefault(() => undefined)),
+  deliveredAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consumedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consumeReason: Schema.optional(OrchestratorWakeConsumeReason).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+});
+export type OrchestratorWakeItem = typeof OrchestratorWakeItem.Type;
+
+export const OrchestrationSnapshotCoverage = Schema.Struct({
+  includeArchivedThreads: Schema.Boolean,
+  wakeItemCount: NonNegativeInt,
+  wakeItemLimit: Schema.NullOr(NonNegativeInt),
+  wakeItemsTruncated: Schema.Boolean,
+});
+export type OrchestrationSnapshotCoverage = typeof OrchestrationSnapshotCoverage.Type;
+
 export const OrchestrationReadModel = Schema.Struct({
   snapshotSequence: NonNegativeInt,
+  snapshotProfile: Schema.optional(OrchestrationSnapshotProfile),
+  snapshotCoverage: Schema.optional(OrchestrationSnapshotCoverage),
   projects: Schema.Array(OrchestrationProject),
   threads: Schema.Array(OrchestrationThread),
+  orchestratorWakeItems: Schema.Array(OrchestratorWakeItem).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationReadModel = typeof OrchestrationReadModel.Type;
@@ -614,6 +762,14 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadOrchestratorWakeUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.orchestrator-wake.upsert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  wakeItem: OrchestratorWakeItem,
+  createdAt: IsoDateTime,
+});
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -629,6 +785,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadOrchestratorWakeUpsertCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -662,6 +819,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.orchestrator-wake-upserted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -860,6 +1018,11 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const ThreadOrchestratorWakeUpsertedPayload = Schema.Struct({
+  threadId: ThreadId,
+  wakeItem: OrchestratorWakeItem,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -992,6 +1155,11 @@ export const OrchestrationEvent = Schema.Union([
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
   }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.orchestrator-wake-upserted"),
+    payload: ThreadOrchestratorWakeUpsertedPayload,
+  }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
@@ -1023,6 +1191,7 @@ export const ThreadTurnDiff = TurnCountRange.mapFields(
 export const ProviderSessionRuntimeStatus = Schema.Literals([
   "starting",
   "running",
+  "ready",
   "stopped",
   "error",
 ]);
@@ -1059,10 +1228,51 @@ export const DispatchResult = Schema.Struct({
 });
 export type DispatchResult = typeof DispatchResult.Type;
 
-export const OrchestrationGetSnapshotInput = Schema.Struct({});
+export const OrchestrationGetSnapshotInput = Schema.Struct({
+  profile: Schema.optional(OrchestrationSnapshotProfile).pipe(
+    Schema.withDecodingDefault(() => "operational"),
+  ),
+  threadId: Schema.optional(ThreadId),
+});
 export type OrchestrationGetSnapshotInput = typeof OrchestrationGetSnapshotInput.Type;
 const OrchestrationGetSnapshotResult = OrchestrationReadModel;
 export type OrchestrationGetSnapshotResult = typeof OrchestrationGetSnapshotResult.Type;
+
+export const OrchestrationGetBootstrapSummaryInput = Schema.Struct({});
+export type OrchestrationGetBootstrapSummaryInput =
+  typeof OrchestrationGetBootstrapSummaryInput.Type;
+export const OrchestrationGetBootstrapSummaryResult = OrchestrationReadModel;
+export type OrchestrationGetBootstrapSummaryResult =
+  typeof OrchestrationGetBootstrapSummaryResult.Type;
+
+export const OrchestrationGetReadinessInput = Schema.Struct({});
+export type OrchestrationGetReadinessInput = typeof OrchestrationGetReadinessInput.Type;
+export const OrchestrationGetReadinessResult = OrchestrationReadinessSummary;
+export type OrchestrationGetReadinessResult = typeof OrchestrationGetReadinessResult.Type;
+
+export const OrchestrationListProjectsInput = Schema.Struct({});
+export type OrchestrationListProjectsInput = typeof OrchestrationListProjectsInput.Type;
+export const OrchestrationListProjectsResult = Schema.Array(OrchestrationProjectSummary);
+export type OrchestrationListProjectsResult = typeof OrchestrationListProjectsResult.Type;
+
+export const OrchestrationGetProjectByWorkspaceInput = Schema.Struct({
+  workspaceRoot: TrimmedNonEmptyString,
+});
+export type OrchestrationGetProjectByWorkspaceInput =
+  typeof OrchestrationGetProjectByWorkspaceInput.Type;
+export const OrchestrationGetProjectByWorkspaceResult = Schema.NullOr(OrchestrationProjectSummary);
+export type OrchestrationGetProjectByWorkspaceResult =
+  typeof OrchestrationGetProjectByWorkspaceResult.Type;
+
+export const OrchestrationListProjectThreadsInput = Schema.Struct({
+  projectId: ProjectId,
+  includeArchived: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  includeDeleted: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+});
+export type OrchestrationListProjectThreadsInput = typeof OrchestrationListProjectThreadsInput.Type;
+export const OrchestrationListProjectThreadsResult = Schema.Array(OrchestrationThreadSummary);
+export type OrchestrationListProjectThreadsResult =
+  typeof OrchestrationListProjectThreadsResult.Type;
 
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
@@ -1091,9 +1301,29 @@ const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
 export const OrchestrationRpcSchemas = {
+  getBootstrapSummary: {
+    input: OrchestrationGetBootstrapSummaryInput,
+    output: OrchestrationGetBootstrapSummaryResult,
+  },
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
     output: OrchestrationGetSnapshotResult,
+  },
+  getReadiness: {
+    input: OrchestrationGetReadinessInput,
+    output: OrchestrationGetReadinessResult,
+  },
+  listProjects: {
+    input: OrchestrationListProjectsInput,
+    output: OrchestrationListProjectsResult,
+  },
+  getProjectByWorkspace: {
+    input: OrchestrationGetProjectByWorkspaceInput,
+    output: OrchestrationGetProjectByWorkspaceResult,
+  },
+  listProjectThreads: {
+    input: OrchestrationListProjectThreadsInput,
+    output: OrchestrationListProjectThreadsResult,
   },
   dispatchCommand: {
     input: ClientOrchestrationCommand,

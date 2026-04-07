@@ -64,7 +64,7 @@ import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { SIDEBAR_PROJECT_SORT_LABELS, SIDEBAR_THREAD_SORT_LABELS } from "../lib/sidebarSettings";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { cn, isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -79,7 +79,7 @@ import { derivePendingApprovals, derivePendingUserInputs } from "../session-logi
 import { gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { type DraftThreadEnvMode, useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -124,6 +124,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
@@ -548,8 +549,10 @@ function SortableProjectItem({
 }
 
 export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
+  const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
   const serverThreads = useStore((store) => store.threads);
+  const orchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById, labelFiltersByProject } =
     useUiStateStore(
       useShallow((store) => ({
@@ -650,6 +653,47 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       ),
     [serverThreads, threadLastVisitedAtById],
   );
+  const orchestratorWakeSummaryByThreadId = useMemo(() => {
+    const summaryByThreadId = new Map<
+      ThreadId,
+      {
+        pendingCount: number;
+        deliveringCount: number;
+        workerState: "pending" | "delivering" | null;
+      }
+    >();
+
+    for (const wakeItem of orchestratorWakeItems) {
+      if (wakeItem.state === "pending" || wakeItem.state === "delivering") {
+        const orchestratorSummary = summaryByThreadId.get(wakeItem.orchestratorThreadId) ?? {
+          pendingCount: 0,
+          deliveringCount: 0,
+          workerState: null,
+        };
+        summaryByThreadId.set(wakeItem.orchestratorThreadId, {
+          ...orchestratorSummary,
+          pendingCount: orchestratorSummary.pendingCount + (wakeItem.state === "pending" ? 1 : 0),
+          deliveringCount:
+            orchestratorSummary.deliveringCount + (wakeItem.state === "delivering" ? 1 : 0),
+        });
+
+        const workerSummary = summaryByThreadId.get(wakeItem.workerThreadId) ?? {
+          pendingCount: 0,
+          deliveringCount: 0,
+          workerState: null,
+        };
+        summaryByThreadId.set(wakeItem.workerThreadId, {
+          ...workerSummary,
+          workerState:
+            wakeItem.state === "delivering"
+              ? "delivering"
+              : (workerSummary.workerState ?? "pending"),
+        });
+      }
+    }
+
+    return summaryByThreadId;
+  }, [orchestratorWakeItems]);
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
@@ -737,6 +781,35 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     });
   }, []);
 
+  const dismissMobileSidebar = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+
+  const navigateToSelectedThread = useCallback(
+    async (threadId: ThreadId) => {
+      dismissMobileSidebar();
+      await navigate(resolveThreadRouteTarget(pathname, threadId));
+    },
+    [dismissMobileSidebar, navigate, pathname],
+  );
+
+  const handleSidebarNewThread = useCallback(
+    async (
+      projectId: ProjectId,
+      options?: {
+        branch?: string | null;
+        worktreePath?: string | null;
+        envMode?: DraftThreadEnvMode;
+      },
+    ) => {
+      dismissMobileSidebar();
+      await handleNewThread(projectId, options);
+    },
+    [dismissMobileSidebar, handleNewThread],
+  );
+
   const attemptArchiveThread = useCallback(
     async (threadId: ThreadId) => {
       try {
@@ -760,9 +833,9 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       )[0];
       if (!latestThread) return;
 
-      void navigate(resolveThreadRouteTarget(pathname, latestThread.id));
+      void navigateToSelectedThread(latestThread.id);
     },
-    [navigate, pathname, sidebarThreadSortOrder, threads],
+    [navigateToSelectedThread, sidebarThreadSortOrder, threads],
   );
 
   const getLatestActiveThreadForProject = useCallback(
@@ -780,35 +853,46 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     async (projectId: ProjectId) => {
       const draftThread = getDraftThreadByProjectId(projectId);
       if (draftThread) {
-        await navigate(resolveThreadRouteTarget(pathname, draftThread.threadId));
+        await navigateToSelectedThread(draftThread.threadId);
         return;
       }
 
       const latestThread = getLatestActiveThreadForProject(projectId);
       if (latestThread) {
-        await navigate(resolveThreadRouteTarget(pathname, latestThread.id));
+        await navigateToSelectedThread(latestThread.id);
         return;
       }
 
       const api = readNativeApi();
       if (!api) {
-        await handleNewThread(projectId, {
+        await handleSidebarNewThread(projectId, {
           envMode: defaultThreadEnvMode,
         });
         return;
       }
 
       try {
-        const snapshot = await api.orchestration.getSnapshot();
-        useStore.getState().syncServerReadModel(snapshot);
-
         const latestServerThread = resolveLatestActiveThreadForProject({
           projectId,
-          threads: snapshot.threads,
+          threads: await api.orchestration.listProjectThreads({
+            projectId,
+            includeArchived: false,
+            includeDeleted: false,
+          }),
           sortOrder: sidebarThreadSortOrder,
         });
         if (latestServerThread) {
-          await navigate(resolveThreadRouteTarget(pathname, latestServerThread.id));
+          const alreadyHydrated = useStore
+            .getState()
+            .threads.some((thread) => thread.id === latestServerThread.id);
+          if (!alreadyHydrated) {
+            const snapshot = await api.orchestration.getSnapshot({
+              profile: "active-thread",
+              threadId: latestServerThread.id,
+            });
+            useStore.getState().syncServerReadModel(snapshot);
+          }
+          await navigateToSelectedThread(latestServerThread.id);
           return;
         }
       } catch (error) {
@@ -820,7 +904,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         return;
       }
 
-      await handleNewThread(projectId, {
+      await handleSidebarNewThread(projectId, {
         envMode: defaultThreadEnvMode,
       });
     },
@@ -828,9 +912,8 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       defaultThreadEnvMode,
       getDraftThreadByProjectId,
       getLatestActiveThreadForProject,
-      handleNewThread,
-      navigate,
-      pathname,
+      handleSidebarNewThread,
+      navigateToSelectedThread,
       sidebarThreadSortOrder,
     ],
   );
@@ -884,7 +967,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
           });
         }
 
-        await handleNewThread(projectId, {
+        await handleSidebarNewThread(projectId, {
           envMode: defaultThreadEnvMode,
         });
       } catch (error) {
@@ -900,7 +983,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       clearComposerDraftForThread,
       clearProjectDraftThreadId,
       getDraftThreadByProjectId,
-      handleNewThread,
+      handleSidebarNewThread,
       sidebarThreadSortOrder,
       threads,
     ],
@@ -990,7 +1073,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
             ? { ...createCommand, kind: "orchestrator" }
             : createCommand) as never,
         );
-        await handleNewThread(projectId, {
+        await handleSidebarNewThread(projectId, {
           envMode: appSettings.defaultThreadEnvMode,
         });
       } catch (error) {
@@ -1021,7 +1104,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
     [
       appSettings.defaultThreadEnvMode,
       focusMostRecentThreadForProject,
-      handleNewThread,
+      handleSidebarNewThread,
       isAddingProject,
       openOrCreateOrchestratorSession,
       markProjectOrchestratorCwd,
@@ -1316,12 +1399,11 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         clearSelection();
       }
       setSelectionAnchor(threadId);
-      void navigate(resolveThreadRouteTarget(pathname, threadId));
+      void navigateToSelectedThread(threadId);
     },
     [
       clearSelection,
-      navigate,
-      pathname,
+      navigateToSelectedThread,
       rangeSelectTo,
       selectedThreadIds.size,
       setSelectionAnchor,
@@ -1335,9 +1417,9 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
         clearSelection();
       }
       setSelectionAnchor(threadId);
-      void navigate(resolveThreadRouteTarget(pathname, threadId));
+      void navigateToSelectedThread(threadId);
     },
-    [clearSelection, navigate, pathname, selectedThreadIds.size, setSelectionAnchor],
+    [clearSelection, navigateToSelectedThread, selectedThreadIds.size, setSelectionAnchor],
   );
 
   const handleProjectContextMenu = useCallback(
@@ -1775,6 +1857,10 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
       const isHighlighted = isActive || isSelected;
       const threadLabels = getSidebarThreadLabels(thread.labels);
       const jumpLabel = threadJumpLabelById.get(thread.id) ?? null;
+      const wakeSummary = orchestratorWakeSummaryByThreadId.get(thread.id) ?? null;
+      const orchestratorWakeBadgeCount =
+        (wakeSummary?.pendingCount ?? 0) + (wakeSummary?.deliveringCount ?? 0);
+      const workerWakeState = wakeSummary?.workerState ?? null;
       const isThreadRunning =
         thread.session?.status === "running" && thread.session.activeTurnId != null;
       const threadStatus = threadStatuses.get(thread.id) ?? null;
@@ -1924,6 +2010,25 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                       {thread.spawnRole}
                     </Badge>
                   )}
+                  {orchestratorWakeBadgeCount > 0 ? (
+                    <Badge className="h-4 shrink-0 border-0 bg-amber-500/12 px-1 text-[9px] font-medium leading-none text-amber-600 dark:text-amber-300">
+                      {wakeSummary?.deliveringCount
+                        ? `${orchestratorWakeBadgeCount} active`
+                        : `${orchestratorWakeBadgeCount} waiting`}
+                    </Badge>
+                  ) : null}
+                  {workerWakeState !== null ? (
+                    <Badge
+                      className={cn(
+                        "h-4 shrink-0 border-0 px-1 text-[9px] font-medium leading-none",
+                        workerWakeState === "delivering"
+                          ? "bg-sky-500/12 text-sky-600 dark:text-sky-300"
+                          : "bg-emerald-500/12 text-emerald-600 dark:text-emerald-300",
+                      )}
+                    >
+                      {workerWakeState === "delivering" ? "waking" : "queued"}
+                    </Badge>
+                  ) : null}
                 </>
               )}
             </div>
@@ -2151,7 +2256,7 @@ export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" 
                       void openOrCreateOrchestratorSession(project.id);
                       return;
                     }
-                    void handleNewThread(project.id, {
+                    void handleSidebarNewThread(project.id, {
                       envMode: resolveSidebarNewThreadEnvMode({
                         defaultEnvMode: appSettings.defaultThreadEnvMode,
                       }),
