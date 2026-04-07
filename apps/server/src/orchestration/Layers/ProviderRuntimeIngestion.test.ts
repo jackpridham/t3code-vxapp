@@ -393,7 +393,9 @@ describe("ProviderRuntimeIngestion", () => {
       (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
     );
 
-    const bindingOption = await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-1")));
+    const bindingOption = await Effect.runPromise(
+      harness.directory.getBinding(asThreadId("thread-1")),
+    );
     expect(bindingOption._tag).toBe("Some");
     if (bindingOption._tag !== "Some") {
       return;

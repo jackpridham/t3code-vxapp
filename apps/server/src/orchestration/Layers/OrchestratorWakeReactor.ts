@@ -185,12 +185,15 @@ function findSupersedingTurnRequestedAt(input: {
 }): string | null {
   if (input.activeTurnId !== null && input.activeTurnId !== input.completedTurnId) {
     return (
-      input.turns.find((turn) => turn.turnId === input.activeTurnId)?.requestedAt ?? input.completedAt
+      input.turns.find((turn) => turn.turnId === input.activeTurnId)?.requestedAt ??
+      input.completedAt
     );
   }
 
   const supersedingRequestedAts = input.turns
-    .filter((turn) => turn.turnId !== input.completedTurnId && turn.requestedAt >= input.completedAt)
+    .filter(
+      (turn) => turn.turnId !== input.completedTurnId && turn.requestedAt >= input.completedAt,
+    )
     .map((turn) => turn.requestedAt)
     .toSorted((left, right) => left.localeCompare(right));
 
@@ -408,42 +411,46 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const consumeActiveWakeItemsForWorker = Effect.fn("consumeActiveWakeItemsForWorker")(function* (
-    input: {
+  const consumeActiveWakeItemsForWorker = Effect.fn("consumeActiveWakeItemsForWorker")(
+    function* (input: {
       readonly workerThreadId: ThreadId;
       readonly consumedAt: string;
-      readonly consumeReason: "worker_deleted" | "worker_rechecked" | "worker_superseded_by_new_turn";
+      readonly consumeReason:
+        | "worker_deleted"
+        | "worker_rechecked"
+        | "worker_superseded_by_new_turn";
       readonly commandTag: string;
-    },
-  ) {
-    const readModel = yield* orchestrationEngine.getReadModel();
-    const wakeItems = readModel.orchestratorWakeItems
-      .filter(
-        (wakeItem) =>
-          wakeItem.workerThreadId === input.workerThreadId && isWorkerWakeActiveState(wakeItem.state),
-      )
-      .toSorted(compareWakeItems);
-    if (wakeItems.length === 0) {
-      return;
-    }
+    }) {
+      const readModel = yield* orchestrationEngine.getReadModel();
+      const wakeItems = readModel.orchestratorWakeItems
+        .filter(
+          (wakeItem) =>
+            wakeItem.workerThreadId === input.workerThreadId &&
+            isWorkerWakeActiveState(wakeItem.state),
+        )
+        .toSorted(compareWakeItems);
+      if (wakeItems.length === 0) {
+        return;
+      }
 
-    yield* Effect.forEach(
-      wakeItems,
-      (wakeItem) =>
-        dispatchWakeUpsert({
-          preferredThreadId: wakeItem.orchestratorThreadId,
-          wakeItem: {
-            ...wakeItem,
-            state: "consumed",
-            consumedAt: input.consumedAt,
-            consumeReason: input.consumeReason,
-          },
-          createdAt: input.consumedAt,
-          commandTag: input.commandTag,
-        }),
-      { concurrency: 1 },
-    ).pipe(Effect.asVoid);
-  });
+      yield* Effect.forEach(
+        wakeItems,
+        (wakeItem) =>
+          dispatchWakeUpsert({
+            preferredThreadId: wakeItem.orchestratorThreadId,
+            wakeItem: {
+              ...wakeItem,
+              state: "consumed",
+              consumedAt: input.consumedAt,
+              consumeReason: input.consumeReason,
+            },
+            createdAt: input.consumedAt,
+            commandTag: input.commandTag,
+          }),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+    },
+  );
 
   const finalizeDeliveringWakeItemsForOrchestrator = Effect.fn(
     "finalizeDeliveringWakeItemsForOrchestrator",

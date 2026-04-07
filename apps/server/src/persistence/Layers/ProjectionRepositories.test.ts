@@ -225,35 +225,37 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
-  it.effect("normalizes requestedAt when a turn upsert arrives with inverted lifecycle timestamps", () =>
-    Effect.gen(function* () {
-      const turns = yield* ProjectionTurnRepository;
-      const sql = yield* SqlClient.SqlClient;
-      const threadId = ThreadId.makeUnsafe("thread-turn-timestamps");
-      const turnId = TurnId.makeUnsafe("turn-timestamps");
+  it.effect(
+    "normalizes requestedAt when a turn upsert arrives with inverted lifecycle timestamps",
+    () =>
+      Effect.gen(function* () {
+        const turns = yield* ProjectionTurnRepository;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.makeUnsafe("thread-turn-timestamps");
+        const turnId = TurnId.makeUnsafe("turn-timestamps");
 
-      yield* turns.upsertByTurnId({
-        threadId,
-        turnId,
-        pendingMessageId: null,
-        sourceProposedPlanThreadId: null,
-        sourceProposedPlanId: null,
-        assistantMessageId: MessageId.makeUnsafe("assistant-turn-timestamps"),
-        state: "completed",
-        requestedAt: "2026-03-24T00:00:03.000Z",
-        startedAt: "2026-03-24T00:00:02.000Z",
-        completedAt: "2026-03-24T00:00:01.000Z",
-        checkpointTurnCount: null,
-        checkpointRef: null,
-        checkpointStatus: null,
-        checkpointFiles: [],
-      });
+        yield* turns.upsertByTurnId({
+          threadId,
+          turnId,
+          pendingMessageId: null,
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          assistantMessageId: MessageId.makeUnsafe("assistant-turn-timestamps"),
+          state: "completed",
+          requestedAt: "2026-03-24T00:00:03.000Z",
+          startedAt: "2026-03-24T00:00:02.000Z",
+          completedAt: "2026-03-24T00:00:01.000Z",
+          checkpointTurnCount: null,
+          checkpointRef: null,
+          checkpointStatus: null,
+          checkpointFiles: [],
+        });
 
-      const rows = yield* sql<{
-        readonly requestedAt: string;
-        readonly startedAt: string | null;
-        readonly completedAt: string | null;
-      }>`
+        const rows = yield* sql<{
+          readonly requestedAt: string;
+          readonly startedAt: string | null;
+          readonly completedAt: string | null;
+        }>`
         SELECT
           requested_at AS "requestedAt",
           started_at AS "startedAt",
@@ -262,20 +264,17 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         WHERE thread_id = ${threadId}
           AND turn_id = ${turnId}
       `;
-      assert.deepEqual(rows, [
-        {
-          requestedAt: "2026-03-24T00:00:01.000Z",
-          startedAt: "2026-03-24T00:00:02.000Z",
-          completedAt: "2026-03-24T00:00:01.000Z",
-        },
-      ]);
+        assert.deepEqual(rows, [
+          {
+            requestedAt: "2026-03-24T00:00:01.000Z",
+            startedAt: "2026-03-24T00:00:02.000Z",
+            completedAt: "2026-03-24T00:00:01.000Z",
+          },
+        ]);
 
-      const persisted = yield* turns.getByTurnId({ threadId, turnId });
-      assert.strictEqual(
-        Option.getOrNull(persisted)?.requestedAt,
-        "2026-03-24T00:00:01.000Z",
-      );
-    }),
+        const persisted = yield* turns.getByTurnId({ threadId, turnId });
+        assert.strictEqual(Option.getOrNull(persisted)?.requestedAt, "2026-03-24T00:00:01.000Z");
+      }),
   );
 
   it.effect("stores and queries orchestrator wake rows by thread and worker", () =>
