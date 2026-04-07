@@ -30,7 +30,6 @@ const MODE_ARGS = {
   ],
   "dev:server": ["run", "dev", "--filter=t3"],
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
-  "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
@@ -130,7 +129,7 @@ interface CreateDevRunnerEnvInput {
 }
 
 export function createDevRunnerEnv({
-  mode,
+  mode: _mode,
   baseEnv,
   serverOffset,
   webOffset,
@@ -147,41 +146,30 @@ export function createDevRunnerEnv({
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
     const resolvedBaseDir = yield* resolveBaseDir(t3Home);
-    const isDesktopMode = mode === "dev:desktop";
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
       PORT: String(webPort),
-      ELECTRON_RENDERER_PORT: String(webPort),
       VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
+      T3CODE_MODE: "web",
+      T3CODE_PORT: String(serverPort),
       T3CODE_HOME: resolvedBaseDir,
+      VITE_WS_URL: `ws://localhost:${serverPort}`,
     };
 
-    if (!isDesktopMode) {
-      output.T3CODE_PORT = String(serverPort);
-      output.VITE_WS_URL = `ws://localhost:${serverPort}`;
-    } else {
-      delete output.T3CODE_PORT;
-      delete output.VITE_WS_URL;
-      delete output.T3CODE_AUTH_TOKEN;
-      delete output.T3CODE_MODE;
-      delete output.T3CODE_NO_BROWSER;
-      delete output.T3CODE_HOST;
-    }
-
-    if (!isDesktopMode && host !== undefined) {
+    if (host !== undefined) {
       output.T3CODE_HOST = host;
     }
 
-    if (!isDesktopMode && authToken !== undefined) {
+    if (authToken !== undefined) {
       output.T3CODE_AUTH_TOKEN = authToken;
-    } else if (!isDesktopMode) {
+    } else {
       delete output.T3CODE_AUTH_TOKEN;
     }
 
-    if (!isDesktopMode && noBrowser !== undefined) {
+    if (noBrowser !== undefined) {
       output.T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
-    } else if (!isDesktopMode) {
+    } else {
       delete output.T3CODE_NO_BROWSER;
     }
 
@@ -195,20 +183,6 @@ export function createDevRunnerEnv({
       output.T3CODE_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
     } else {
       delete output.T3CODE_LOG_WS_EVENTS;
-    }
-
-    if (mode === "dev") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
-    }
-
-    if (mode === "dev:server" || mode === "dev:web") {
-      output.T3CODE_MODE = "web";
-      delete output.T3CODE_DESKTOP_WS_URL;
-    }
-
-    if (isDesktopMode) {
-      delete output.T3CODE_DESKTOP_WS_URL;
     }
 
     return output;
