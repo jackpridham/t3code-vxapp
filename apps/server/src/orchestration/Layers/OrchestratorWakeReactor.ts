@@ -159,6 +159,36 @@ function projectionWakeRowToWakeItem(wake: ProjectionOrchestratorWake): Orchestr
   };
 }
 
+function compareProjectionWakeRows(
+  left: ProjectionOrchestratorWake,
+  right: ProjectionOrchestratorWake,
+): number {
+  return left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId);
+}
+
+function partitionPendingWakeRowsForDelivery(rows: readonly ProjectionOrchestratorWake[]): {
+  readonly deliverableRows: ReadonlyArray<ProjectionOrchestratorWake>;
+  readonly duplicateRows: ReadonlyArray<ProjectionOrchestratorWake>;
+} {
+  const latestByWorkerThreadId = new Map<string, ProjectionOrchestratorWake>();
+
+  for (const row of rows) {
+    const current = latestByWorkerThreadId.get(row.workerThreadId);
+    if (!current || compareProjectionWakeRows(current, row) <= 0) {
+      latestByWorkerThreadId.set(row.workerThreadId, row);
+    }
+  }
+
+  const deliverableWakeIds = new Set([...latestByWorkerThreadId.values()].map((row) => row.wakeId));
+
+  return {
+    deliverableRows: rows
+      .filter((row) => deliverableWakeIds.has(row.wakeId))
+      .toSorted(compareProjectionWakeRows),
+    duplicateRows: rows.filter((row) => !deliverableWakeIds.has(row.wakeId)),
+  };
+}
+
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
@@ -558,7 +588,29 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      const batchRows = refreshedPendingRows.slice(0, MAX_WAKE_BATCH_SIZE);
+      const { deliverableRows, duplicateRows } =
+        partitionPendingWakeRowsForDelivery(refreshedPendingRows);
+
+      if (duplicateRows.length > 0) {
+        yield* Effect.forEach(
+          duplicateRows,
+          (row) =>
+            dispatchWakeUpsert({
+              preferredThreadId: orchestratorThreadId,
+              wakeItem: {
+                ...projectionWakeRowToWakeItem(row),
+                state: "consumed",
+                consumedAt: now,
+                consumeReason: "duplicate",
+              },
+              createdAt: now,
+              commandTag: "dedupe",
+            }),
+          { concurrency: 1 },
+        ).pipe(Effect.asVoid);
+      }
+
+      const batchRows = deliverableRows.slice(0, MAX_WAKE_BATCH_SIZE);
       if (batchRows.length === 0) {
         return;
       }

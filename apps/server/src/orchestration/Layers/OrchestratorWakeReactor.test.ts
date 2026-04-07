@@ -574,6 +574,86 @@ describe("OrchestratorWakeReactor", () => {
     });
   });
 
+  it("coalesces duplicate pending wakes for the same worker before delivery", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "running",
+      activeTurnId: asTurnId("turn-orch-active"),
+      updatedAt: "2026-04-05T12:08:10.000Z",
+    });
+    await createWorkerThread(harness.engine);
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-duplicate-wake-1"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:08:20.000Z",
+      threadId: asThreadId("thread-worker"),
+      turnId: asTurnId("turn-duplicate-1"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-duplicate-wake-2"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:08:30.000Z",
+      threadId: asThreadId("thread-worker"),
+      turnId: asTurnId("turn-duplicate-2"),
+      payload: {
+        state: "failed",
+        errorMessage: "Later failure detail",
+      },
+    });
+
+    await waitForReadModel(harness.engine, (model) => model.orchestratorWakeItems.length === 2);
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "ready",
+      activeTurnId: null,
+      updatedAt: "2026-04-05T12:08:40.000Z",
+    });
+
+    const readModel = await waitForReadModel(harness.engine, (model) => {
+      const duplicateWake = model.orchestratorWakeItems.find(
+        (item) => item.workerTurnId === asTurnId("turn-duplicate-1"),
+      );
+      const latestWake = model.orchestratorWakeItems.find(
+        (item) => item.workerTurnId === asTurnId("turn-duplicate-2"),
+      );
+      return (
+        duplicateWake?.state === "consumed" &&
+        duplicateWake.consumeReason === "duplicate" &&
+        latestWake?.state === "delivering"
+      );
+    });
+
+    expect(
+      readModel.orchestratorWakeItems.find(
+        (item) => item.workerTurnId === asTurnId("turn-duplicate-1"),
+      ),
+    ).toMatchObject({
+      state: "consumed",
+      consumeReason: "duplicate",
+    });
+    expect(
+      readModel.orchestratorWakeItems.find(
+        (item) => item.workerTurnId === asTurnId("turn-duplicate-2"),
+      ),
+    ).toMatchObject({
+      state: "delivering",
+      outcome: "failed",
+      summary: "Later failure detail",
+    });
+  });
+
   it("reconciles stale delivering wakes on startup when the delivery turn already settled", async () => {
     const harness = await createHarness({ autoStart: false });
     runtime = harness.runtime;
