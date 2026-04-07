@@ -4,6 +4,7 @@ import {
   CommandId,
   MessageId,
   type OrchestrationEvent,
+  type OrchestrationReadModel,
   type OrchestrationProposedPlanId,
   CheckpointRef,
   isToolLifecycleItemType,
@@ -96,6 +97,10 @@ function readRuntimePayloadLastError(value: unknown): string | null {
     return null;
   }
   return typeof record.lastError === "string" ? record.lastError : null;
+}
+
+function runtimeModeForThread(thread: OrchestrationReadModel["threads"][number]) {
+  return thread.session?.runtimeMode ?? thread.runtimeMode ?? "full-access";
 }
 
 function truncateDetail(value: string, limit = 180): string {
@@ -986,6 +991,8 @@ const make = Effect.fn("make")(function* () {
             : status === "ready"
               ? null
               : (thread.session?.lastError ?? null);
+      const runtimeStatus =
+        event.type === "session.exited" ? "stopped" : status === "error" ? "error" : "running";
 
       if (shouldApplyThreadLifecycle) {
         if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
@@ -1019,6 +1026,18 @@ const make = Effect.fn("make")(function* () {
             updatedAt: now,
           },
           createdAt: now,
+        });
+        yield* providerSessionDirectory.upsert({
+          threadId: thread.id,
+          provider: event.provider,
+          runtimeMode: runtimeModeForThread(thread),
+          status: runtimeStatus,
+          runtimePayload: {
+            activeTurnId: nextActiveTurnId,
+            lastError,
+            lastRuntimeEvent: event.type,
+            lastRuntimeEventAt: now,
+          },
         });
 
         if (event.type === "turn.completed") {
@@ -1203,6 +1222,18 @@ const make = Effect.fn("make")(function* () {
             updatedAt: now,
           },
           createdAt: now,
+        });
+        yield* providerSessionDirectory.upsert({
+          threadId: thread.id,
+          provider: event.provider,
+          runtimeMode: runtimeModeForThread(thread),
+          status: "error",
+          runtimePayload: {
+            activeTurnId: eventTurnId ?? null,
+            lastError: runtimeErrorMessage,
+            lastRuntimeEvent: event.type,
+            lastRuntimeEventAt: now,
+          },
         });
       }
     }

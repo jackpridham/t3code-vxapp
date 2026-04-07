@@ -339,6 +339,80 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
+  it("persists turn lifecycle updates back into provider session runtime state", async () => {
+    const harness = await createHarness();
+    const runningAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-running-before-runtime-persist"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-persisted"),
+          updatedAt: runningAt,
+          lastError: null,
+        },
+        createdAt: runningAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "running",
+        runtimePayload: {
+          activeTurnId: "turn-persisted",
+          lastError: null,
+          lastRuntimeEvent: "provider.sendTurn",
+          lastRuntimeEventAt: runningAt,
+        },
+      }),
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-persist"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: new Date().toISOString(),
+      turnId: asTurnId("turn-persisted"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
+    );
+
+    const bindingOption = await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-1")));
+    expect(bindingOption._tag).toBe("Some");
+    if (bindingOption._tag !== "Some") {
+      return;
+    }
+
+    expect(bindingOption.value.status).toBe("running");
+    const payload =
+      bindingOption.value.runtimePayload !== null &&
+      typeof bindingOption.value.runtimePayload === "object" &&
+      !Array.isArray(bindingOption.value.runtimePayload)
+        ? (bindingOption.value.runtimePayload as Record<string, unknown>)
+        : null;
+    expect(payload).not.toBeNull();
+    expect(payload?.activeTurnId == null).toBe(true);
+    expect(payload?.lastError == null).toBe(true);
+    expect(payload?.lastRuntimeEvent).toBe("turn.completed");
+    expect(typeof payload?.lastRuntimeEventAt).toBe("string");
+  });
+
   it("reconciles a persisted stopped provider binding on startup", async () => {
     const harness = await createHarness({ autoStart: false });
     const runningAt = new Date().toISOString();
