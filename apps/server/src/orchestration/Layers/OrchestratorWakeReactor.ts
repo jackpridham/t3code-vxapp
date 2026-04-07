@@ -18,7 +18,10 @@ import {
   ProjectionOrchestratorWake,
   ProjectionOrchestratorWakeRepository,
 } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
-import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
+import {
+  type ProjectionTurn,
+  ProjectionTurnRepository,
+} from "../../persistence/Services/ProjectionTurns.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
@@ -164,6 +167,34 @@ function compareProjectionWakeRows(
   right: ProjectionOrchestratorWake,
 ): number {
   return left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId);
+}
+
+function compareWakeItems(left: OrchestratorWakeItem, right: OrchestratorWakeItem): number {
+  return left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId);
+}
+
+function isWorkerWakeActiveState(state: OrchestratorWakeItem["state"]): boolean {
+  return state === "pending" || state === "delivering" || state === "delivered";
+}
+
+function findSupersedingTurnRequestedAt(input: {
+  readonly turns: readonly ProjectionTurn[];
+  readonly completedTurnId: TurnId;
+  readonly completedAt: string;
+  readonly activeTurnId: TurnId | null;
+}): string | null {
+  if (input.activeTurnId !== null && input.activeTurnId !== input.completedTurnId) {
+    return (
+      input.turns.find((turn) => turn.turnId === input.activeTurnId)?.requestedAt ?? input.completedAt
+    );
+  }
+
+  const supersedingRequestedAts = input.turns
+    .filter((turn) => turn.turnId !== input.completedTurnId && turn.requestedAt >= input.completedAt)
+    .map((turn) => turn.requestedAt)
+    .toSorted((left, right) => left.localeCompare(right));
+
+  return supersedingRequestedAts[0] ?? null;
 }
 
 function partitionPendingWakeRowsForDelivery(rows: readonly ProjectionOrchestratorWake[]): {
@@ -342,50 +373,77 @@ const make = Effect.gen(function* () {
     }
 
     const wakeId = `wake:${workerThread.id}:${turnId}:${outcome}`;
+    const turns = yield* projectionTurnRepository.listByThreadId({
+      threadId: workerThread.id,
+    });
+    const supersededAt = findSupersedingTurnRequestedAt({
+      turns,
+      completedTurnId: turnId,
+      completedAt: event.createdAt,
+      activeTurnId: workerThread.session?.activeTurnId ?? null,
+    });
+    const wakeItem = toWakeItem({
+      wakeId,
+      orchestratorThreadId: workerThread.orchestratorThreadId,
+      orchestratorProjectId: workerThread.orchestratorProjectId,
+      workerThread,
+      workerTurnId: turnId,
+      outcome,
+      summary: buildWakeSummary({ workerThread, outcome, runtimeEvent: event }),
+      queuedAt: event.createdAt,
+    });
     yield* dispatchWakeUpsert({
       preferredThreadId: workerThread.orchestratorThreadId,
-      wakeItem: toWakeItem({
-        wakeId,
-        orchestratorThreadId: workerThread.orchestratorThreadId,
-        orchestratorProjectId: workerThread.orchestratorProjectId,
-        workerThread,
-        workerTurnId: turnId,
-        outcome,
-        summary: buildWakeSummary({ workerThread, outcome, runtimeEvent: event }),
-        queuedAt: event.createdAt,
-      }),
-      createdAt: event.createdAt,
-      commandTag: "upsert",
+      wakeItem:
+        supersededAt === null
+          ? wakeItem
+          : {
+              ...wakeItem,
+              state: "consumed",
+              consumedAt: supersededAt,
+              consumeReason: "worker_superseded_by_new_turn",
+            },
+      createdAt: supersededAt ?? event.createdAt,
+      commandTag: supersededAt === null ? "upsert" : "upsert-superseded",
     });
   });
 
-  const consumeUndeliveredWakeItemsForWorker = Effect.fn("consumeUndeliveredWakeItemsForWorker")(
-    function* (event: Extract<WakeDomainEvent, { type: "thread.turn-start-requested" }>) {
-      const rows = yield* wakeRepository.listUndeliveredByWorkerThreadId({
-        workerThreadId: event.payload.threadId,
-      });
-      if (rows.length === 0) {
-        return;
-      }
-
-      yield* Effect.forEach(
-        rows,
-        (row) =>
-          dispatchWakeUpsert({
-            preferredThreadId: row.orchestratorThreadId,
-            wakeItem: {
-              ...projectionWakeRowToWakeItem(row),
-              state: "consumed",
-              consumedAt: event.payload.createdAt,
-              consumeReason: "worker_superseded_by_new_turn",
-            },
-            createdAt: event.payload.createdAt,
-            commandTag: "consume",
-          }),
-        { concurrency: 1 },
-      ).pipe(Effect.asVoid);
+  const consumeActiveWakeItemsForWorker = Effect.fn("consumeActiveWakeItemsForWorker")(function* (
+    input: {
+      readonly workerThreadId: ThreadId;
+      readonly consumedAt: string;
+      readonly consumeReason: "worker_deleted" | "worker_rechecked" | "worker_superseded_by_new_turn";
+      readonly commandTag: string;
     },
-  );
+  ) {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const wakeItems = readModel.orchestratorWakeItems
+      .filter(
+        (wakeItem) =>
+          wakeItem.workerThreadId === input.workerThreadId && isWorkerWakeActiveState(wakeItem.state),
+      )
+      .toSorted(compareWakeItems);
+    if (wakeItems.length === 0) {
+      return;
+    }
+
+    yield* Effect.forEach(
+      wakeItems,
+      (wakeItem) =>
+        dispatchWakeUpsert({
+          preferredThreadId: wakeItem.orchestratorThreadId,
+          wakeItem: {
+            ...wakeItem,
+            state: "consumed",
+            consumedAt: input.consumedAt,
+            consumeReason: input.consumeReason,
+          },
+          createdAt: input.consumedAt,
+          commandTag: input.commandTag,
+        }),
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+  });
 
   const finalizeDeliveringWakeItemsForOrchestrator = Effect.fn(
     "finalizeDeliveringWakeItemsForOrchestrator",
@@ -676,13 +734,30 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       switch (event.type) {
         case "thread.archived":
+          yield* consumeActiveWakeItemsForWorker({
+            workerThreadId: event.payload.threadId,
+            consumedAt: event.payload.archivedAt,
+            consumeReason: "worker_rechecked",
+            commandTag: "archive-consume",
+          });
           yield* evaluateDrainForOrchestrator(event.payload.threadId);
           return;
         case "thread.deleted":
+          yield* consumeActiveWakeItemsForWorker({
+            workerThreadId: event.payload.threadId,
+            consumedAt: event.payload.deletedAt,
+            consumeReason: "worker_deleted",
+            commandTag: "worker-delete-consume",
+          });
           yield* evaluateDrainForOrchestrator(event.payload.threadId);
           return;
         case "thread.turn-start-requested":
-          yield* consumeUndeliveredWakeItemsForWorker(event);
+          yield* consumeActiveWakeItemsForWorker({
+            workerThreadId: event.payload.threadId,
+            consumedAt: event.payload.createdAt,
+            consumeReason: "worker_superseded_by_new_turn",
+            commandTag: "consume",
+          });
           return;
         case "thread.session-set":
           if (
