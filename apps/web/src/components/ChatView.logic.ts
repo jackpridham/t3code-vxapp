@@ -189,6 +189,21 @@ export function threadIsHydratingHistory(thread: Thread | null | undefined): boo
   return Boolean(thread && threadHasStarted(thread) && !threadHasHydratedHistory(thread));
 }
 
+export function shouldMarkThreadVisitedForCompletedTurn(input: {
+  latestTurnCompletedAt: string | null | undefined;
+  lastVisitedAt: string | null | undefined;
+}): boolean {
+  if (!input.latestTurnCompletedAt) {
+    return false;
+  }
+  const turnCompletedAt = Date.parse(input.latestTurnCompletedAt);
+  if (Number.isNaN(turnCompletedAt)) {
+    return false;
+  }
+  const lastVisitedAt = input.lastVisitedAt ? Date.parse(input.lastVisitedAt) : NaN;
+  return Number.isNaN(lastVisitedAt) || lastVisitedAt < turnCompletedAt;
+}
+
 export async function waitForStartedServerThread(
   threadId: ThreadId,
   timeoutMs = 1_000,

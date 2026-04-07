@@ -13,7 +13,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Layer, ManagedRuntime, Option, PubSub, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
@@ -35,6 +35,7 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId =>
@@ -218,6 +219,7 @@ describe("ProviderCommandReactor", () => {
     );
     const layer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(Layer.succeed(GitCore, { renameBranch } as unknown as GitCoreShape)),
       Layer.provideMerge(
@@ -265,6 +267,14 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
+    const getBinding = () =>
+      runtime.runPromise(
+        Effect.service(ProviderSessionDirectory).pipe(
+          Effect.flatMap((directory) => directory.getBinding(ThreadId.makeUnsafe("thread-1"))),
+          Effect.map((binding) => Option.getOrUndefined(binding)),
+        ),
+      );
+
     return {
       engine,
       startSession,
@@ -278,6 +288,7 @@ describe("ProviderCommandReactor", () => {
       generateThreadTitle,
       stateDir,
       drain,
+      getBinding,
     };
   }
 

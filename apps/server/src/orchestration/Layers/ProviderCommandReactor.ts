@@ -17,7 +17,10 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { ProviderAdapterRequestError, ProviderServiceError } from "../../provider/Errors.ts";
+import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
+import { ProviderSessionDirectoryLive } from "../../provider/Layers/ProviderSessionDirectory.ts";
+import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
@@ -34,11 +37,19 @@ type ProviderIntentEvent = Extract<
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
+      | "thread.turn-diff-completed"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
+      | "thread.session-set"
       | "thread.session-stop-requested";
   }
 >;
+
+type SessionBoundaryFence = {
+  readonly session: OrchestrationSession;
+  readonly runtimeStatus: "running" | "stopped" | "error";
+  readonly recentTerminalTurnIds: ReadonlyArray<TurnId>;
+};
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -71,6 +82,7 @@ const serverCommandId = (tag: string): CommandId =>
 
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
+const SESSION_BOUNDARY_FENCE_TERMINAL_TURN_MAX = 4;
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
@@ -146,9 +158,17 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
   return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
 }
 
+function sameId(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (left === null || left === undefined || right === null || right === undefined) {
+    return false;
+  }
+  return left === right;
+}
+
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const providerSessionDirectory = yield* ProviderSessionDirectory;
   const git = yield* GitCore;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
@@ -166,6 +186,7 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  const sessionBoundaryFences = new Map<string, SessionBoundaryFence>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -216,6 +237,67 @@ const make = Effect.gen(function* () {
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
     return readModel.threads.find((entry) => entry.id === threadId);
+  });
+
+  const synchronizeAuthoritativeSessionState = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly session: OrchestrationSession;
+    readonly runtimeStatus: "running" | "stopped" | "error";
+    readonly runtimeEvent: string;
+    readonly recentTerminalTurnId?: TurnId;
+  }) {
+    const thread = yield* resolveThread(input.threadId);
+    if (!thread) {
+      return;
+    }
+
+    const providerName = thread.session?.providerName ?? thread.modelSelection.provider;
+    const runtimeMode = input.session.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+
+    yield* setThreadSession({
+      threadId: input.threadId,
+      session: {
+        ...input.session,
+        threadId: input.threadId,
+        providerName,
+        runtimeMode,
+      },
+      createdAt: input.session.updatedAt,
+    });
+
+    yield* providerSessionDirectory.upsert({
+      threadId: input.threadId,
+      provider: providerName ?? thread.modelSelection.provider,
+      runtimeMode,
+      status: input.runtimeStatus,
+      runtimePayload: {
+        activeTurnId: input.session.activeTurnId,
+        lastError: input.session.lastError,
+        lastRuntimeEvent: input.runtimeEvent,
+        lastRuntimeEventAt: input.session.updatedAt,
+      },
+    });
+
+    const existingFence = sessionBoundaryFences.get(input.threadId);
+    const recentTerminalTurnIds = input.recentTerminalTurnId
+      ? [
+          input.recentTerminalTurnId,
+          ...(existingFence?.recentTerminalTurnIds ?? []).filter(
+            (turnId) => !sameId(turnId, input.recentTerminalTurnId),
+          ),
+        ].slice(0, SESSION_BOUNDARY_FENCE_TERMINAL_TURN_MAX)
+      : (existingFence?.recentTerminalTurnIds ?? []);
+
+    sessionBoundaryFences.set(input.threadId, {
+      session: {
+        ...input.session,
+        threadId: input.threadId,
+        providerName,
+        runtimeMode,
+      },
+      runtimeStatus: input.runtimeStatus,
+      recentTerminalTurnIds,
+    });
   });
 
   const ensureSessionForThread = Effect.fnUntraced(function* (
@@ -608,6 +690,85 @@ const make = Effect.gen(function* () {
     yield* providerService.interruptTurn({ threadId: event.payload.threadId });
   });
 
+  const processTurnDiffCompleted = Effect.fnUntraced(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-diff-completed" }>,
+  ) {
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread?.session) {
+      return;
+    }
+
+    if (!sameId(thread.session.activeTurnId, event.payload.turnId)) {
+      return;
+    }
+
+    const sessionStatus = event.payload.status === "error" ? "error" : "ready";
+    const lastError =
+      sessionStatus === "error"
+        ? (thread.session.lastError ?? "Turn completed with errors.")
+        : null;
+
+    yield* synchronizeAuthoritativeSessionState({
+      threadId: event.payload.threadId,
+      session: {
+        threadId: event.payload.threadId,
+        status: sessionStatus,
+        providerName: thread.session.providerName ?? thread.modelSelection.provider,
+        runtimeMode: thread.session.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        activeTurnId: null,
+        lastError,
+        updatedAt: event.payload.completedAt,
+      },
+      runtimeStatus: sessionStatus === "error" ? "error" : "stopped",
+      runtimeEvent: "thread.turn-diff-completed",
+      recentTerminalTurnId: event.payload.turnId,
+    });
+  });
+
+  const processObservedSessionSet = Effect.fnUntraced(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.session-set" }>,
+  ) {
+    const fence = sessionBoundaryFences.get(event.payload.threadId);
+    if (!fence) {
+      return;
+    }
+
+    const session = event.payload.session;
+    const isKnownTerminalTurn =
+      session.activeTurnId !== null &&
+      fence.recentTerminalTurnIds.some((turnId) => sameId(turnId, session.activeTurnId));
+    const isOlderThanFence = session.updatedAt < fence.session.updatedAt;
+
+    if (isKnownTerminalTurn || isOlderThanFence) {
+      if (
+        session.status === fence.session.status &&
+        sameId(session.activeTurnId, fence.session.activeTurnId) &&
+        session.updatedAt === fence.session.updatedAt &&
+        (session.lastError ?? null) === (fence.session.lastError ?? null)
+      ) {
+        return;
+      }
+
+      yield* synchronizeAuthoritativeSessionState({
+        threadId: event.payload.threadId,
+        session: fence.session,
+        runtimeStatus: fence.runtimeStatus,
+        runtimeEvent: "provider-command-reactor.session-boundary-fence",
+      });
+      return;
+    }
+
+    if (session.status !== "running" || session.activeTurnId === null) {
+      return;
+    }
+
+    sessionBoundaryFences.set(event.payload.threadId, {
+      session,
+      runtimeStatus: session.status === "error" ? "error" : "running",
+      recentTerminalTurnIds: fence.recentTerminalTurnIds,
+    });
+  });
+
   const processApprovalResponseRequested = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
@@ -724,6 +885,7 @@ const make = Effect.gen(function* () {
       },
       createdAt: now,
     });
+    sessionBoundaryFences.delete(thread.id);
   });
 
   const processThreadArchived = Effect.fnUntraced(function* (
@@ -752,6 +914,7 @@ const make = Effect.gen(function* () {
       },
       createdAt: archivedAt,
     });
+    sessionBoundaryFences.delete(thread.id);
   });
 
   const processDomainEvent = (event: ProviderIntentEvent) =>
@@ -779,11 +942,17 @@ const make = Effect.gen(function* () {
         case "thread.turn-interrupt-requested":
           yield* processTurnInterruptRequested(event);
           return;
+        case "thread.turn-diff-completed":
+          yield* processTurnDiffCompleted(event);
+          return;
         case "thread.approval-response-requested":
           yield* processApprovalResponseRequested(event);
           return;
         case "thread.user-input-response-requested":
           yield* processUserInputResponseRequested(event);
+          return;
+        case "thread.session-set":
+          yield* processObservedSessionSet(event);
           return;
         case "thread.session-stop-requested":
           yield* processSessionStopRequested(event);
@@ -813,8 +982,10 @@ const make = Effect.gen(function* () {
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
+        event.type === "thread.turn-diff-completed" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
+        event.type === "thread.session-set" ||
         event.type === "thread.session-stop-requested"
       ) {
         return yield* worker.enqueue(event);
@@ -832,4 +1003,8 @@ const make = Effect.gen(function* () {
   } satisfies ProviderCommandReactorShape;
 });
 
-export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make);
+export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make).pipe(
+  Layer.provideMerge(
+    ProviderSessionDirectoryLive.pipe(Layer.provideMerge(ProviderSessionRuntimeRepositoryLive)),
+  ),
+);

@@ -177,6 +177,21 @@ function isWorkerWakeActiveState(state: OrchestratorWakeItem["state"]): boolean 
   return state === "pending" || state === "delivering" || state === "delivered";
 }
 
+function findTerminalDeliveryTurn(input: {
+  readonly turns: readonly ProjectionTurn[];
+  readonly deliveryMessageId: MessageId | null | undefined;
+}): ProjectionTurn | undefined {
+  if (input.deliveryMessageId === null || input.deliveryMessageId === undefined) {
+    return undefined;
+  }
+
+  return input.turns.find(
+    (turn) =>
+      turn.pendingMessageId === input.deliveryMessageId &&
+      (turn.state === "completed" || turn.state === "error" || turn.state === "interrupted"),
+  );
+}
+
 function findSupersedingTurnRequestedAt(input: {
   readonly turns: readonly ProjectionTurn[];
   readonly completedTurnId: TurnId;
@@ -324,6 +339,9 @@ const make = Effect.gen(function* () {
     if (!workerThread || workerThread.spawnRole !== "worker") {
       return;
     }
+    if (workerThread.archivedAt !== null || workerThread.deletedAt !== null) {
+      return;
+    }
 
     if (
       workerThread.orchestratorThreadId === undefined ||
@@ -460,7 +478,7 @@ const make = Effect.gen(function* () {
 
   const finalizeDeliveringWakeItemsForOrchestrator = Effect.fn(
     "finalizeDeliveringWakeItemsForOrchestrator",
-  )(function* (input: { readonly orchestratorThreadId: ThreadId; readonly deliveredAt: string }) {
+  )(function* (input: { readonly orchestratorThreadId: ThreadId; readonly settledAt: string }) {
     const rows = yield* wakeRepository.listByOrchestratorThreadId({
       orchestratorThreadId: input.orchestratorThreadId,
     });
@@ -469,19 +487,81 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const turns = yield* projectionTurnRepository.listByThreadId({
+      threadId: input.orchestratorThreadId,
+    });
+
     yield* Effect.forEach(
       deliveringRows,
-      (row) =>
-        dispatchWakeUpsert({
+      (row) => {
+        const deliveryTurn = findTerminalDeliveryTurn({
+          turns,
+          deliveryMessageId: row.deliveryMessageId,
+        });
+        const deliveredAt =
+          row.deliveredAt ??
+          deliveryTurn?.completedAt ??
+          deliveryTurn?.startedAt ??
+          input.settledAt;
+
+        return dispatchWakeUpsert({
           preferredThreadId: input.orchestratorThreadId,
           wakeItem: {
             ...projectionWakeRowToWakeItem(row),
-            state: "delivered",
-            deliveredAt: input.deliveredAt,
+            state: deliveryTurn ? "consumed" : "delivered",
+            deliveredAt,
+            consumedAt: deliveryTurn ? input.settledAt : null,
+            ...(deliveryTurn ? { consumeReason: "worker_rechecked" as const } : {}),
           },
-          createdAt: input.deliveredAt,
-          commandTag: "delivered",
-        }),
+          createdAt: input.settledAt,
+          commandTag: deliveryTurn ? "consumed-reviewed" : "delivered",
+        });
+      },
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+  });
+
+  const consumeReviewedDeliveredWakeItemsForOrchestrator = Effect.fn(
+    "consumeReviewedDeliveredWakeItemsForOrchestrator",
+  )(function* (input: { readonly orchestratorThreadId: ThreadId; readonly consumedAt: string }) {
+    const rows = yield* wakeRepository.listByOrchestratorThreadId({
+      orchestratorThreadId: input.orchestratorThreadId,
+    });
+    const deliveredRows = rows.filter(
+      (row) => row.state === "delivered" && row.consumedAt === null,
+    );
+    if (deliveredRows.length === 0) {
+      return;
+    }
+
+    const turns = yield* projectionTurnRepository.listByThreadId({
+      threadId: input.orchestratorThreadId,
+    });
+
+    yield* Effect.forEach(
+      deliveredRows,
+      (row) => {
+        const deliveryTurn = findTerminalDeliveryTurn({
+          turns,
+          deliveryMessageId: row.deliveryMessageId,
+        });
+        if (!deliveryTurn) {
+          return Effect.void;
+        }
+
+        return dispatchWakeUpsert({
+          preferredThreadId: input.orchestratorThreadId,
+          wakeItem: {
+            ...projectionWakeRowToWakeItem(row),
+            state: "consumed",
+            deliveredAt: row.deliveredAt ?? deliveryTurn.completedAt ?? deliveryTurn.startedAt,
+            consumedAt: input.consumedAt,
+            consumeReason: "worker_rechecked",
+          },
+          createdAt: input.consumedAt,
+          commandTag: "consume-reviewed",
+        });
+      },
       { concurrency: 1 },
     ).pipe(Effect.asVoid);
   });
@@ -549,15 +629,16 @@ const make = Effect.gen(function* () {
               preferredThreadId: orchestratorThreadId,
               wakeItem: {
                 ...projectionWakeRowToWakeItem(row),
-                state: "delivered",
+                state: "consumed",
                 deliveredAt:
                   deliveryTurn.completedAt ??
                   deliveryTurn.startedAt ??
                   orchestratorThread.updatedAt,
+                consumedAt: orchestratorThread.updatedAt,
+                consumeReason: "worker_rechecked",
               },
-              createdAt:
-                deliveryTurn.completedAt ?? deliveryTurn.startedAt ?? orchestratorThread.updatedAt,
-              commandTag: "startup-delivered",
+              createdAt: orchestratorThread.updatedAt,
+              commandTag: "startup-consumed-reviewed",
             });
             return;
           }
@@ -780,7 +861,11 @@ const make = Effect.gen(function* () {
           ) {
             yield* finalizeDeliveringWakeItemsForOrchestrator({
               orchestratorThreadId: event.payload.threadId,
-              deliveredAt: event.payload.session.updatedAt,
+              settledAt: event.payload.session.updatedAt,
+            });
+            yield* consumeReviewedDeliveredWakeItemsForOrchestrator({
+              orchestratorThreadId: event.payload.threadId,
+              consumedAt: event.payload.session.updatedAt,
             });
           }
           yield* evaluateDrainForOrchestrator(event.payload.threadId);

@@ -16,6 +16,7 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
+  shouldMarkThreadVisitedForCompletedTurn,
   threadHasHydratedHistory,
   threadHasStarted,
   threadIsHydratingHistory,
@@ -273,6 +274,42 @@ describe("thread history helpers", () => {
 
     expect(threadHasHydratedHistory(thread)).toBe(true);
     expect(threadIsHydratingHistory(thread)).toBe(false);
+  });
+
+  it("marks completed turns as visited when there is no prior visit timestamp", () => {
+    expect(
+      shouldMarkThreadVisitedForCompletedTurn({
+        latestTurnCompletedAt: "2026-03-29T00:00:05.000Z",
+        lastVisitedAt: undefined,
+      }),
+    ).toBe(true);
+  });
+
+  it("marks completed turns as visited when the prior visit predates completion", () => {
+    expect(
+      shouldMarkThreadVisitedForCompletedTurn({
+        latestTurnCompletedAt: "2026-03-29T00:00:05.000Z",
+        lastVisitedAt: "2026-03-29T00:00:04.000Z",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not re-mark completed turns once the visit timestamp reaches completion", () => {
+    expect(
+      shouldMarkThreadVisitedForCompletedTurn({
+        latestTurnCompletedAt: "2026-03-29T00:00:05.000Z",
+        lastVisitedAt: "2026-03-29T00:00:05.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("treats future-skewed completion timestamps as needing a single completion-based visit mark", () => {
+    expect(
+      shouldMarkThreadVisitedForCompletedTurn({
+        latestTurnCompletedAt: "2026-03-29T00:00:10.000Z",
+        lastVisitedAt: "2026-03-29T00:00:06.000Z",
+      }),
+    ).toBe(true);
   });
 });
 

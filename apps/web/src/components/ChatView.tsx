@@ -199,6 +199,7 @@ import {
   readFileAsDataUrl,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
+  shouldMarkThreadVisitedForCompletedTurn,
   threadHasStarted,
   threadIsHydratingHistory,
   waitForStartedServerThread,
@@ -818,12 +819,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!serverThread?.id) return;
     if (!latestTurnSettled) return;
     if (!activeLatestTurn?.completedAt) return;
-    const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
-    if (Number.isNaN(turnCompletedAt)) return;
-    const lastVisitedAt = activeThreadLastVisitedAt ? Date.parse(activeThreadLastVisitedAt) : NaN;
-    if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= turnCompletedAt) return;
+    if (
+      !shouldMarkThreadVisitedForCompletedTurn({
+        latestTurnCompletedAt: activeLatestTurn.completedAt,
+        lastVisitedAt: activeThreadLastVisitedAt,
+      })
+    ) {
+      return;
+    }
 
-    markThreadVisited(serverThread.id);
+    // Use the server turn timestamp rather than the browser clock so clock skew
+    // cannot trap the view in a repeated "mark visited" update loop.
+    markThreadVisited(serverThread.id, activeLatestTurn.completedAt);
   }, [
     activeLatestTurn?.completedAt,
     activeThreadLastVisitedAt,
