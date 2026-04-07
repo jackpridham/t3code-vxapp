@@ -183,16 +183,22 @@ function findSupersedingTurnRequestedAt(input: {
   readonly completedAt: string;
   readonly activeTurnId: TurnId | null;
 }): string | null {
+  const completedTurnRequestedAt =
+    input.turns.find((turn) => turn.turnId === input.completedTurnId)?.requestedAt ??
+    input.completedAt;
+
   if (input.activeTurnId !== null && input.activeTurnId !== input.completedTurnId) {
     return (
       input.turns.find((turn) => turn.turnId === input.activeTurnId)?.requestedAt ??
-      input.completedAt
+      completedTurnRequestedAt
     );
   }
 
   const supersedingRequestedAts = input.turns
     .filter(
-      (turn) => turn.turnId !== input.completedTurnId && turn.requestedAt >= input.completedAt,
+      (turn) =>
+        turn.turnId !== input.completedTurnId &&
+        turn.requestedAt >= completedTurnRequestedAt,
     )
     .map((turn) => turn.requestedAt)
     .toSorted((left, right) => left.localeCompare(right));

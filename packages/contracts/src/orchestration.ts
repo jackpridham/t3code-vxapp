@@ -1191,6 +1191,7 @@ export const ThreadTurnDiff = TurnCountRange.mapFields(
 export const ProviderSessionRuntimeStatus = Schema.Literals([
   "starting",
   "running",
+  "ready",
   "stopped",
   "error",
 ]);

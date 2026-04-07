@@ -401,7 +401,7 @@ describe("ProviderRuntimeIngestion", () => {
       return;
     }
 
-    expect(bindingOption.value.status).toBe("running");
+    expect(bindingOption.value.status).toBe("ready");
     const payload =
       bindingOption.value.runtimePayload !== null &&
       typeof bindingOption.value.runtimePayload === "object" &&
@@ -413,6 +413,84 @@ describe("ProviderRuntimeIngestion", () => {
     expect(payload?.lastError == null).toBe(true);
     expect(payload?.lastRuntimeEvent).toBe("turn.completed");
     expect(typeof payload?.lastRuntimeEventAt).toBe("string");
+  });
+
+  it("ignores stale lifecycle events that arrive after a turn has already settled", async () => {
+    const harness = await createHarness();
+    const startedAt = "2026-04-08T00:00:01.000Z";
+    const staleRunningAt = "2026-04-08T00:00:02.000Z";
+    const completedAt = "2026-04-08T00:00:03.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-stale-regression"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: startedAt,
+      turnId: asTurnId("turn-stale-regression"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-stale-regression",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-stale-regression"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: completedAt,
+      turnId: asTurnId("turn-stale-regression"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
+    );
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-session-state-waiting-stale-regression"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: staleRunningAt,
+      payload: {
+        state: "waiting",
+        reason: "stale approval prompt",
+      },
+    });
+
+    await harness.drain();
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === asThreadId("thread-1"));
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.activeTurnId).toBeNull();
+
+    const bindingOption = await Effect.runPromise(
+      harness.directory.getBinding(asThreadId("thread-1")),
+    );
+    expect(bindingOption._tag).toBe("Some");
+    if (bindingOption._tag !== "Some") {
+      return;
+    }
+
+    expect(bindingOption.value.status).toBe("ready");
+    const payload =
+      bindingOption.value.runtimePayload !== null &&
+      typeof bindingOption.value.runtimePayload === "object" &&
+      !Array.isArray(bindingOption.value.runtimePayload)
+        ? (bindingOption.value.runtimePayload as Record<string, unknown>)
+        : null;
+    expect(payload?.activeTurnId).toBeNull();
+    expect(payload?.lastRuntimeEvent).toBe("turn.completed");
+    expect(payload?.lastRuntimeEventAt).toBe(completedAt);
   });
 
   it("reconciles a persisted stopped provider binding on startup", async () => {

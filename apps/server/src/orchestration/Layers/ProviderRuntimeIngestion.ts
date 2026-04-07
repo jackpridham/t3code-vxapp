@@ -173,6 +173,17 @@ function orchestrationSessionStatusFromRuntimeState(
   }
 }
 
+function isSettledSessionStatus(
+  status: "starting" | "running" | "ready" | "interrupted" | "stopped" | "error",
+): boolean {
+  return (
+    status === "ready" ||
+    status === "interrupted" ||
+    status === "stopped" ||
+    status === "error"
+  );
+}
+
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
 ): "command" | "file-read" | "file-change" | undefined {
@@ -915,6 +926,21 @@ const make = Effect.fn("make")(function* () {
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
     const activeTurnId = thread.session?.activeTurnId ?? null;
+    const currentSessionUpdatedAt = thread.session?.updatedAt ?? null;
+    const olderThanCurrentSession =
+      currentSessionUpdatedAt !== null && currentSessionUpdatedAt.localeCompare(now) > 0;
+    const settledSessionWouldRegress =
+      olderThanCurrentSession &&
+      thread.session !== null &&
+      thread.session.activeTurnId === null &&
+      isSettledSessionStatus(thread.session.status) &&
+      (event.type === "session.started" ||
+        event.type === "thread.started" ||
+        event.type === "turn.started" ||
+        (event.type === "session.state.changed" &&
+          (event.payload.state === "starting" ||
+            event.payload.state === "running" ||
+            event.payload.state === "waiting")));
 
     const conflictsWithActiveTurn =
       activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -923,6 +949,9 @@ const make = Effect.fn("make")(function* () {
     const shouldApplyThreadLifecycle = (() => {
       if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
         return true;
+      }
+      if (settledSessionWouldRegress) {
+        return false;
       }
       switch (event.type) {
         case "session.exited":
@@ -992,7 +1021,13 @@ const make = Effect.fn("make")(function* () {
               ? null
               : (thread.session?.lastError ?? null);
       const runtimeStatus =
-        event.type === "session.exited" ? "stopped" : status === "error" ? "error" : "running";
+        event.type === "session.exited"
+          ? "stopped"
+          : status === "error"
+            ? "error"
+            : status === "ready"
+              ? "ready"
+              : "running";
 
       if (shouldApplyThreadLifecycle) {
         if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
@@ -1205,7 +1240,8 @@ const make = Effect.fn("make")(function* () {
 
       const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
         ? true
-        : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
+        : !settledSessionWouldRegress &&
+          (activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId));
 
       if (shouldApplyRuntimeError) {
         yield* orchestrationEngine.dispatch({
@@ -1329,7 +1365,11 @@ const make = Effect.fn("make")(function* () {
           }
 
           const binding = bindingOption.value;
-          if (binding.status !== "stopped" && binding.status !== "error") {
+          if (
+            binding.status !== "ready" &&
+            binding.status !== "stopped" &&
+            binding.status !== "error"
+          ) {
             return;
           }
 
@@ -1340,8 +1380,15 @@ const make = Effect.fn("make")(function* () {
 
           const currentSession = thread.session;
           const nextActiveTurnId =
-            binding.status === "stopped" ? null : readRuntimePayloadTurnId(binding.runtimePayload);
-          const nextStatus = binding.status === "stopped" ? "stopped" : "error";
+            binding.status === "ready" || binding.status === "stopped"
+              ? null
+              : readRuntimePayloadTurnId(binding.runtimePayload);
+          const nextStatus =
+            binding.status === "ready"
+              ? "ready"
+              : binding.status === "stopped"
+                ? "stopped"
+                : "error";
           const nextLastError = readRuntimePayloadLastError(binding.runtimePayload);
 
           const alreadyMatches =

@@ -133,6 +133,57 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
       }
     }));
 
+  it("ignores stale runtime lifecycle payload updates", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = ThreadId.makeUnsafe("thread-stale-runtime");
+
+      yield* directory.upsert({
+        provider: "codex",
+        threadId,
+        status: "running",
+        runtimePayload: {
+          activeTurnId: "turn-current",
+          lastRuntimeEvent: "turn.started",
+          lastRuntimeEventAt: "2026-04-08T00:00:05.000Z",
+        },
+      });
+
+      yield* directory.upsert({
+        provider: "codex",
+        threadId,
+        status: "ready",
+        runtimePayload: {
+          activeTurnId: null,
+          lastRuntimeEvent: "turn.completed",
+          lastRuntimeEventAt: "2026-04-08T00:00:10.000Z",
+        },
+      });
+
+      yield* directory.upsert({
+        provider: "codex",
+        threadId,
+        status: "running",
+        runtimePayload: {
+          activeTurnId: "turn-stale",
+          lastRuntimeEvent: "session.state.changed",
+          lastRuntimeEventAt: "2026-04-08T00:00:07.000Z",
+        },
+      });
+
+      const runtime = yield* runtimeRepository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(runtime), true);
+      if (Option.isSome(runtime)) {
+        assert.equal(runtime.value.status, "ready");
+        assert.deepEqual(runtime.value.runtimePayload, {
+          activeTurnId: null,
+          lastRuntimeEvent: "turn.completed",
+          lastRuntimeEventAt: "2026-04-08T00:00:10.000Z",
+        });
+      }
+    }));
+
   it("resets adapterKey to the new provider when provider changes without an explicit adapter key", () =>
     Effect.gen(function* () {
       const directory = yield* ProviderSessionDirectory;

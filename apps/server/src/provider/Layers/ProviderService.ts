@@ -73,7 +73,9 @@ const decodeInputOrValidationError = <S extends Schema.Top>(input: {
     ),
   );
 
-function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "stopped" | "error" {
+function toRuntimeStatus(
+  session: ProviderSession,
+): "starting" | "running" | "ready" | "stopped" | "error" {
   switch (session.status) {
     case "connecting":
       return "starting";
@@ -82,6 +84,7 @@ function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "st
     case "closed":
       return "stopped";
     case "ready":
+      return "ready";
     case "running":
     default:
       return "running";
