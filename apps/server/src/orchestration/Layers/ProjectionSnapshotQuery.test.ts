@@ -485,22 +485,24 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
-  it.effect("bounds heavy collections in operational snapshots and preserves full debug exports", () =>
-    Effect.gen(function* () {
-      const snapshotQuery = yield* ProjectionSnapshotQuery;
-      const sql = yield* SqlClient.SqlClient;
+  it.effect(
+    "bounds heavy collections in operational snapshots and preserves full debug exports",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_state`;
-      yield* sql`DELETE FROM projection_orchestrator_wakes`;
-      yield* sql`DELETE FROM projection_thread_proposed_plans`;
-      yield* sql`DELETE FROM projection_turns`;
-      yield* sql`DELETE FROM projection_thread_messages`;
-      yield* sql`DELETE FROM projection_thread_activities`;
-      yield* sql`DELETE FROM projection_thread_sessions`;
-      yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_projects`;
+        yield* sql`DELETE FROM projection_state`;
+        yield* sql`DELETE FROM projection_orchestrator_wakes`;
+        yield* sql`DELETE FROM projection_thread_proposed_plans`;
+        yield* sql`DELETE FROM projection_turns`;
+        yield* sql`DELETE FROM projection_thread_messages`;
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_thread_sessions`;
+        yield* sql`DELETE FROM projection_threads`;
 
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_projects (
           project_id,
           title,
@@ -523,7 +525,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_threads (
           thread_id,
           project_id,
@@ -550,9 +552,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
-      for (let index = 1; index <= 205; index += 1) {
-        const createdAt = new Date(Date.UTC(2026, 1, 24, 0, 0, index)).toISOString();
-        yield* sql`
+        for (let index = 1; index <= 205; index += 1) {
+          const createdAt = new Date(Date.UTC(2026, 1, 24, 0, 0, index)).toISOString();
+          yield* sql`
           INSERT INTO projection_thread_messages (
             message_id,
             thread_id,
@@ -574,11 +576,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             ${createdAt}
           )
         `;
-      }
+        }
 
-      for (let index = 1; index <= 55; index += 1) {
-        const createdAt = new Date(Date.UTC(2026, 1, 24, 0, 10, index)).toISOString();
-        yield* sql`
+        for (let index = 1; index <= 55; index += 1) {
+          const createdAt = new Date(Date.UTC(2026, 1, 24, 0, 10, index)).toISOString();
+          yield* sql`
           INSERT INTO projection_thread_proposed_plans (
             plan_id,
             thread_id,
@@ -600,11 +602,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             ${createdAt}
           )
         `;
-      }
+        }
 
-      for (let index = 1; index <= 105; index += 1) {
-        const createdAt = new Date(Date.UTC(2026, 1, 24, 0, 20, index)).toISOString();
-        yield* sql`
+        for (let index = 1; index <= 105; index += 1) {
+          const createdAt = new Date(Date.UTC(2026, 1, 24, 0, 20, index)).toISOString();
+          yield* sql`
           INSERT INTO projection_thread_activities (
             activity_id,
             thread_id,
@@ -628,11 +630,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             ${createdAt}
           )
         `;
-      }
+        }
 
-      for (let index = 1; index <= 55; index += 1) {
-        const completedAt = new Date(Date.UTC(2026, 1, 24, 0, 30, index)).toISOString();
-        yield* sql`
+        for (let index = 1; index <= 55; index += 1) {
+          const completedAt = new Date(Date.UTC(2026, 1, 24, 0, 30, index)).toISOString();
+          yield* sql`
           INSERT INTO projection_turns (
             thread_id,
             turn_id,
@@ -666,9 +668,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '[]'
           )
         `;
-      }
+        }
 
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_thread_sessions (
           thread_id,
           status,
@@ -693,9 +695,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
-      for (let index = 1; index <= 105; index += 1) {
-        const queuedAt = new Date(Date.UTC(2026, 1, 24, 0, 40, index)).toISOString();
-        yield* sql`
+        for (let index = 1; index <= 105; index += 1) {
+          const queuedAt = new Date(Date.UTC(2026, 1, 24, 0, 40, index)).toISOString();
+          yield* sql`
           INSERT INTO projection_orchestrator_wakes (
             wake_id,
             orchestrator_thread_id,
@@ -733,11 +735,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             NULL
           )
         `;
-      }
+        }
 
-      let sequence = 10;
-      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
-        yield* sql`
+        let sequence = 10;
+        for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+          yield* sql`
           INSERT INTO projection_state (
             projector,
             last_applied_sequence,
@@ -749,77 +751,77 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '2026-02-24T01:00:00.000Z'
           )
         `;
-        sequence += 1;
-      }
+          sequence += 1;
+        }
 
-      const snapshot = yield* snapshotQuery.getSnapshot();
-      const thread = snapshot.threads[0];
-      assert.isDefined(thread);
-      assert.equal(snapshot.snapshotProfile, "operational");
-      assert.deepEqual(snapshot.snapshotCoverage, {
-        includeArchivedThreads: true,
-        wakeItemCount: 105,
-        wakeItemLimit: 100,
-        wakeItemsTruncated: true,
-      });
-      assert.equal(snapshot.orchestratorWakeItems.length, 100);
-      assert.equal(snapshot.orchestratorWakeItems[0]?.wakeId, "wake-6");
-      assert.equal(snapshot.orchestratorWakeItems[99]?.wakeId, "wake-105");
-      assert.equal(thread?.messages.length, 200);
-      assert.equal(thread?.messages[0]?.id, asMessageId("message-6"));
-      assert.equal(thread?.messages[199]?.id, asMessageId("message-205"));
-      assert.equal(thread?.proposedPlans.length, 50);
-      assert.equal(thread?.proposedPlans[0]?.id, "plan-6");
-      assert.equal(thread?.proposedPlans[49]?.id, "plan-55");
-      assert.equal(thread?.activities.length, 100);
-      assert.equal(thread?.activities[0]?.id, asEventId("activity-6"));
-      assert.equal(thread?.activities[99]?.id, asEventId("activity-105"));
-      assert.equal(thread?.checkpoints.length, 50);
-      assert.equal(thread?.checkpoints[0]?.checkpointRef, asCheckpointRef("checkpoint-6"));
-      assert.equal(thread?.checkpoints[49]?.checkpointRef, asCheckpointRef("checkpoint-55"));
-      assert.deepEqual(thread?.snapshotCoverage, {
-        messageCount: 205,
-        messageLimit: 200,
-        messagesTruncated: true,
-        proposedPlanCount: 55,
-        proposedPlanLimit: 50,
-        proposedPlansTruncated: true,
-        activityCount: 105,
-        activityLimit: 100,
-        activitiesTruncated: true,
-        checkpointCount: 55,
-        checkpointLimit: 50,
-        checkpointsTruncated: true,
-      });
+        const snapshot = yield* snapshotQuery.getSnapshot();
+        const thread = snapshot.threads[0];
+        assert.isDefined(thread);
+        assert.equal(snapshot.snapshotProfile, "operational");
+        assert.deepEqual(snapshot.snapshotCoverage, {
+          includeArchivedThreads: true,
+          wakeItemCount: 105,
+          wakeItemLimit: 100,
+          wakeItemsTruncated: true,
+        });
+        assert.equal(snapshot.orchestratorWakeItems.length, 100);
+        assert.equal(snapshot.orchestratorWakeItems[0]?.wakeId, "wake-6");
+        assert.equal(snapshot.orchestratorWakeItems[99]?.wakeId, "wake-105");
+        assert.equal(thread?.messages.length, 200);
+        assert.equal(thread?.messages[0]?.id, asMessageId("message-6"));
+        assert.equal(thread?.messages[199]?.id, asMessageId("message-205"));
+        assert.equal(thread?.proposedPlans.length, 50);
+        assert.equal(thread?.proposedPlans[0]?.id, "plan-6");
+        assert.equal(thread?.proposedPlans[49]?.id, "plan-55");
+        assert.equal(thread?.activities.length, 100);
+        assert.equal(thread?.activities[0]?.id, asEventId("activity-6"));
+        assert.equal(thread?.activities[99]?.id, asEventId("activity-105"));
+        assert.equal(thread?.checkpoints.length, 50);
+        assert.equal(thread?.checkpoints[0]?.checkpointRef, asCheckpointRef("checkpoint-6"));
+        assert.equal(thread?.checkpoints[49]?.checkpointRef, asCheckpointRef("checkpoint-55"));
+        assert.deepEqual(thread?.snapshotCoverage, {
+          messageCount: 205,
+          messageLimit: 200,
+          messagesTruncated: true,
+          proposedPlanCount: 55,
+          proposedPlanLimit: 50,
+          proposedPlansTruncated: true,
+          activityCount: 105,
+          activityLimit: 100,
+          activitiesTruncated: true,
+          checkpointCount: 55,
+          checkpointLimit: 50,
+          checkpointsTruncated: true,
+        });
 
-      const debugSnapshot = yield* snapshotQuery.getSnapshot({ profile: "debug-export" });
-      const debugThread = debugSnapshot.threads[0];
-      assert.isDefined(debugThread);
-      assert.deepEqual(debugSnapshot.snapshotCoverage, {
-        includeArchivedThreads: true,
-        wakeItemCount: 105,
-        wakeItemLimit: null,
-        wakeItemsTruncated: false,
-      });
-      assert.equal(debugSnapshot.orchestratorWakeItems.length, 105);
-      assert.equal(debugThread?.messages.length, 205);
-      assert.equal(debugThread?.proposedPlans.length, 55);
-      assert.equal(debugThread?.activities.length, 105);
-      assert.equal(debugThread?.checkpoints.length, 55);
-      assert.deepEqual(debugThread?.snapshotCoverage, {
-        messageCount: 205,
-        messageLimit: null,
-        messagesTruncated: false,
-        proposedPlanCount: 55,
-        proposedPlanLimit: null,
-        proposedPlansTruncated: false,
-        activityCount: 105,
-        activityLimit: null,
-        activitiesTruncated: false,
-        checkpointCount: 55,
-        checkpointLimit: null,
-        checkpointsTruncated: false,
-      });
-    }),
+        const debugSnapshot = yield* snapshotQuery.getSnapshot({ profile: "debug-export" });
+        const debugThread = debugSnapshot.threads[0];
+        assert.isDefined(debugThread);
+        assert.deepEqual(debugSnapshot.snapshotCoverage, {
+          includeArchivedThreads: true,
+          wakeItemCount: 105,
+          wakeItemLimit: null,
+          wakeItemsTruncated: false,
+        });
+        assert.equal(debugSnapshot.orchestratorWakeItems.length, 105);
+        assert.equal(debugThread?.messages.length, 205);
+        assert.equal(debugThread?.proposedPlans.length, 55);
+        assert.equal(debugThread?.activities.length, 105);
+        assert.equal(debugThread?.checkpoints.length, 55);
+        assert.deepEqual(debugThread?.snapshotCoverage, {
+          messageCount: 205,
+          messageLimit: null,
+          messagesTruncated: false,
+          proposedPlanCount: 55,
+          proposedPlanLimit: null,
+          proposedPlansTruncated: false,
+          activityCount: 105,
+          activityLimit: null,
+          activitiesTruncated: false,
+          checkpointCount: 55,
+          checkpointLimit: null,
+          checkpointsTruncated: false,
+        });
+      }),
   );
 });

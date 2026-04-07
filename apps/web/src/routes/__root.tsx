@@ -43,6 +43,7 @@ import {
   processEventNotifications,
 } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { isArtifactWindowPath } from "../lib/artifactWindow";
 import { isSidebarWindowPath } from "../lib/sidebarWindow";
 
 export const Route = createRootRouteWithContext<{
@@ -58,6 +59,7 @@ export const Route = createRootRouteWithContext<{
 function RootRouteView() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isSidebarWindowRoute = isSidebarWindowPath(pathname);
+  const isArtifactWindowRoute = isArtifactWindowPath(pathname);
 
   if (!readNativeApi()) {
     return (
@@ -71,20 +73,23 @@ function RootRouteView() {
     );
   }
 
+  if (isArtifactWindowRoute) {
+    return <Outlet />;
+  }
+
   return (
     <ToastProvider>
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
-        <ArtifactPanel />
         {isSidebarWindowRoute ? (
           <Outlet />
         ) : (
           <AppSidebarLayout>
             <Outlet />
+            <ArtifactPanel />
           </AppSidebarLayout>
         )}
-        <ArtifactPanel />
       </AnchoredToastProvider>
     </ToastProvider>
   );

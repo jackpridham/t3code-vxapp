@@ -76,7 +76,9 @@ function mergeProjects(
   incomingProjects: ReadonlyArray<OrchestrationReadModel["projects"][number]>,
 ): Project[] {
   const nextProjects = [...existingProjects];
-  const indexByProjectId = new Map(nextProjects.map((project, index) => [project.id, index] as const));
+  const indexByProjectId = new Map(
+    nextProjects.map((project, index) => [project.id, index] as const),
+  );
 
   for (const project of incomingProjects) {
     const existingIndex = indexByProjectId.get(project.id);

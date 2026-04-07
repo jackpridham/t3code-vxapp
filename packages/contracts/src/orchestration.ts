@@ -313,8 +313,7 @@ export const OrchestrationThreadSnapshotCoverage = Schema.Struct({
   checkpointLimit: Schema.NullOr(NonNegativeInt),
   checkpointsTruncated: Schema.Boolean,
 });
-export type OrchestrationThreadSnapshotCoverage =
-  typeof OrchestrationThreadSnapshotCoverage.Type;
+export type OrchestrationThreadSnapshotCoverage = typeof OrchestrationThreadSnapshotCoverage.Type;
 
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
@@ -363,9 +362,7 @@ export const OrchestrationProjectSummary = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   kind: Schema.NullOr(OrchestrationProjectKind).pipe(Schema.withDecodingDefault(() => null)),
-  defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
-    Schema.withDecodingDefault(() => null),
-  ),
+  defaultModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
@@ -1271,8 +1268,7 @@ export const OrchestrationListProjectThreadsInput = Schema.Struct({
   includeArchived: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   includeDeleted: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
 });
-export type OrchestrationListProjectThreadsInput =
-  typeof OrchestrationListProjectThreadsInput.Type;
+export type OrchestrationListProjectThreadsInput = typeof OrchestrationListProjectThreadsInput.Type;
 export const OrchestrationListProjectThreadsResult = Schema.Array(OrchestrationThreadSummary);
 export type OrchestrationListProjectThreadsResult =
   typeof OrchestrationListProjectThreadsResult.Type;

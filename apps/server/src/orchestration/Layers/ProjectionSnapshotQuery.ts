@@ -751,74 +751,72 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               deletedAt: row.deletedAt,
             }));
 
-          const threads: ReadonlyArray<OrchestrationThread> = scopedThreadRows.map(
-              (row) => {
-                const boundedMessages = takeTailBounded(
-                  messagesByThread.get(row.threadId) ?? [],
-                  bounds.messageLimit,
-                );
-                const boundedProposedPlans = takeTailBounded(
-                  proposedPlansByThread.get(row.threadId) ?? [],
-                  bounds.proposedPlanLimit,
-                );
-                const boundedActivities = takeTailBounded(
-                  activitiesByThread.get(row.threadId) ?? [],
-                  bounds.activityLimit,
-                );
-                const boundedCheckpoints = takeTailBounded(
-                  checkpointsByThread.get(row.threadId) ?? [],
-                  bounds.checkpointLimit,
-                );
-
-                return Object.assign(
-                  {
-                    id: row.threadId,
-                    projectId: row.projectId,
-                    title: row.title,
-                    labels: row.labels,
-                    modelSelection: row.modelSelection,
-                    runtimeMode: row.runtimeMode,
-                    interactionMode: row.interactionMode,
-                    branch: row.branch,
-                    worktreePath: row.worktreePath,
-                    latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                    createdAt: row.createdAt,
-                    updatedAt: row.updatedAt,
-                    archivedAt: row.archivedAt,
-                    deletedAt: row.deletedAt,
-                    messages: boundedMessages.values,
-                    proposedPlans: boundedProposedPlans.values,
-                    activities: boundedActivities.values,
-                    checkpoints: boundedCheckpoints.values,
-                    snapshotCoverage: {
-                      messageCount: boundedMessages.totalCount,
-                      messageLimit: bounds.messageLimit,
-                      messagesTruncated: boundedMessages.truncated,
-                      proposedPlanCount: boundedProposedPlans.totalCount,
-                      proposedPlanLimit: bounds.proposedPlanLimit,
-                      proposedPlansTruncated: boundedProposedPlans.truncated,
-                      activityCount: boundedActivities.totalCount,
-                      activityLimit: bounds.activityLimit,
-                      activitiesTruncated: boundedActivities.truncated,
-                      checkpointCount: boundedCheckpoints.totalCount,
-                      checkpointLimit: bounds.checkpointLimit,
-                      checkpointsTruncated: boundedCheckpoints.truncated,
-                    },
-                    session: sessionsByThread.get(row.threadId) ?? null,
-                  },
-                  row.orchestratorProjectId !== null
-                    ? { orchestratorProjectId: row.orchestratorProjectId }
-                    : undefined,
-                  row.orchestratorThreadId !== null
-                    ? { orchestratorThreadId: row.orchestratorThreadId }
-                    : undefined,
-                  row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
-                  row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
-                  row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
-                  row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
-                ) satisfies OrchestrationThread;
-              },
+          const threads: ReadonlyArray<OrchestrationThread> = scopedThreadRows.map((row) => {
+            const boundedMessages = takeTailBounded(
+              messagesByThread.get(row.threadId) ?? [],
+              bounds.messageLimit,
             );
+            const boundedProposedPlans = takeTailBounded(
+              proposedPlansByThread.get(row.threadId) ?? [],
+              bounds.proposedPlanLimit,
+            );
+            const boundedActivities = takeTailBounded(
+              activitiesByThread.get(row.threadId) ?? [],
+              bounds.activityLimit,
+            );
+            const boundedCheckpoints = takeTailBounded(
+              checkpointsByThread.get(row.threadId) ?? [],
+              bounds.checkpointLimit,
+            );
+
+            return Object.assign(
+              {
+                id: row.threadId,
+                projectId: row.projectId,
+                title: row.title,
+                labels: row.labels,
+                modelSelection: row.modelSelection,
+                runtimeMode: row.runtimeMode,
+                interactionMode: row.interactionMode,
+                branch: row.branch,
+                worktreePath: row.worktreePath,
+                latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                createdAt: row.createdAt,
+                updatedAt: row.updatedAt,
+                archivedAt: row.archivedAt,
+                deletedAt: row.deletedAt,
+                messages: boundedMessages.values,
+                proposedPlans: boundedProposedPlans.values,
+                activities: boundedActivities.values,
+                checkpoints: boundedCheckpoints.values,
+                snapshotCoverage: {
+                  messageCount: boundedMessages.totalCount,
+                  messageLimit: bounds.messageLimit,
+                  messagesTruncated: boundedMessages.truncated,
+                  proposedPlanCount: boundedProposedPlans.totalCount,
+                  proposedPlanLimit: bounds.proposedPlanLimit,
+                  proposedPlansTruncated: boundedProposedPlans.truncated,
+                  activityCount: boundedActivities.totalCount,
+                  activityLimit: bounds.activityLimit,
+                  activitiesTruncated: boundedActivities.truncated,
+                  checkpointCount: boundedCheckpoints.totalCount,
+                  checkpointLimit: bounds.checkpointLimit,
+                  checkpointsTruncated: boundedCheckpoints.truncated,
+                },
+                session: sessionsByThread.get(row.threadId) ?? null,
+              },
+              row.orchestratorProjectId !== null
+                ? { orchestratorProjectId: row.orchestratorProjectId }
+                : undefined,
+              row.orchestratorThreadId !== null
+                ? { orchestratorThreadId: row.orchestratorThreadId }
+                : undefined,
+              row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
+              row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
+              row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
+              row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+            ) satisfies OrchestrationThread;
+          });
 
           const snapshot = {
             snapshotSequence: computeSnapshotSequence(stateRows),

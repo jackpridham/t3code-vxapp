@@ -16,7 +16,10 @@ export interface ProjectionOperationalQueryShape {
     OrchestrationGetReadinessResult,
     ProjectionRepositoryError
   >;
-  readonly listProjects: () => Effect.Effect<OrchestrationListProjectsResult, ProjectionRepositoryError>;
+  readonly listProjects: () => Effect.Effect<
+    OrchestrationListProjectsResult,
+    ProjectionRepositoryError
+  >;
   readonly getProjectByWorkspace: (
     input: OrchestrationGetProjectByWorkspaceInput,
   ) => Effect.Effect<OrchestrationGetProjectByWorkspaceResult, ProjectionRepositoryError>;

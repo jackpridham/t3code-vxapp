@@ -94,6 +94,10 @@ vi.mock("../lib/sidebarWindow", () => ({
   isSidebarWindowPath: vi.fn(() => false),
 }));
 
+vi.mock("../lib/artifactWindow", () => ({
+  isArtifactWindowPath: vi.fn(() => false),
+}));
+
 import { bootstrapOrchestrationState } from "./__root";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 

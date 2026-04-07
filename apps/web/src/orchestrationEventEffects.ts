@@ -190,24 +190,15 @@ export function processEventNotifications(events: ReadonlyArray<OrchestrationEve
       }
 
       case "thread.activity-appended": {
-        if (
-          event.payload.activity.tone === "error" &&
-          /hook/i.test(event.payload.activity.kind)
-        ) {
+        if (event.payload.activity.tone === "error" && /hook/i.test(event.payload.activity.kind)) {
           const context = resolveThreadContext(event.payload.threadId);
-          dispatchNotification(
-            "hook-failure",
-            "error",
-            "Hook failed",
-            undefined,
-            {
-              threadId: event.payload.threadId,
-              projectName: context.projectName,
-              labels: context.labels,
-              occurredAt: event.payload.activity.createdAt,
-              detail: event.payload.activity.summary,
-            },
-          );
+          dispatchNotification("hook-failure", "error", "Hook failed", undefined, {
+            threadId: event.payload.threadId,
+            projectName: context.projectName,
+            labels: context.labels,
+            occurredAt: event.payload.activity.createdAt,
+            detail: event.payload.activity.summary,
+          });
         }
         break;
       }

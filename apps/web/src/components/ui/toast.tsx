@@ -178,9 +178,7 @@ function ThreadToastVisibleAutoDismiss({
   return null;
 }
 
-function renderToastTitle(toast: {
-  title?: unknown;
-}): string | null {
+function renderToastTitle(toast: { title?: unknown }): string | null {
   return typeof toast.title === "string" && toast.title.length > 0 ? toast.title : null;
 }
 
@@ -240,14 +238,18 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
           );
           const notificationMeta = toast.data?.notificationMeta;
           const isNotificationToast = notificationMeta !== undefined;
-          const isNotificationClickable = toast.data?.targetThreadId !== null && toast.data?.targetThreadId !== undefined;
+          const isNotificationClickable =
+            toast.data?.targetThreadId !== null && toast.data?.targetThreadId !== undefined;
           const openToastThread = () => {
             const targetThreadId = toast.data?.targetThreadId;
             if (!targetThreadId) return;
             toastManager.close(toast.id);
             openThreadRoute(targetThreadId);
           };
-          const dismissNotificationToast = (event: { preventDefault(): void; stopPropagation(): void }) => {
+          const dismissNotificationToast = (event: {
+            preventDefault(): void;
+            stopPropagation(): void;
+          }) => {
             event.preventDefault();
             event.stopPropagation();
             toastManager.close(toast.id);
@@ -347,10 +349,7 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                     <div className="flex items-center justify-between gap-1">
                       {notificationMeta ? (
                         <div className="min-w-0 flex-1">
-                          <div
-                            className="min-w-0 break-words font-medium"
-                            data-slot="toast-title"
-                          >
+                          <div className="min-w-0 break-words font-medium" data-slot="toast-title">
                             {renderToastTitle(toast) ?? <Toast.Title />}
                           </div>
                           <div className="min-w-0 break-words text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground/90">
@@ -363,9 +362,9 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                           data-slot="toast-title"
                         />
                       )}
-                      {toast.type === "error" && typeof toast.description === "string" && !notificationMeta && (
-                        <CopyErrorButton text={toast.description} />
-                      )}
+                      {toast.type === "error" &&
+                        typeof toast.description === "string" &&
+                        !notificationMeta && <CopyErrorButton text={toast.description} />}
                     </div>
                     {notificationMeta ? (
                       <div className="flex min-w-0 flex-col gap-0.5 text-muted-foreground">
@@ -490,7 +489,10 @@ function AnchoredToasts() {
                         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                           {toast.data?.notificationMeta ? (
                             <>
-                              <div className="min-w-0 break-words font-medium" data-slot="toast-title">
+                              <div
+                                className="min-w-0 break-words font-medium"
+                                data-slot="toast-title"
+                              >
                                 {renderToastTitle(toast) ?? <Toast.Title />}
                               </div>
                               <div className="min-w-0 break-words text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/90">
@@ -515,9 +517,10 @@ function AnchoredToasts() {
                                   className="min-w-0 break-words font-medium"
                                   data-slot="toast-title"
                                 />
-                                {toast.type === "error" && typeof toast.description === "string" && (
-                                  <CopyErrorButton text={toast.description} />
-                                )}
+                                {toast.type === "error" &&
+                                  typeof toast.description === "string" && (
+                                    <CopyErrorButton text={toast.description} />
+                                  )}
                               </div>
                               <Toast.Description
                                 className="min-w-0 select-text break-words text-muted-foreground"

@@ -24,7 +24,7 @@ import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
 import { cn } from "~/lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { resolvePathLinkTarget } from "../terminal-links";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { parseDiffRouteSearch } from "../diffRouteSearch";
 import { useTheme } from "../hooks/useTheme";
 import { buildPatchCacheKey } from "../lib/diffRendering";
 import { resolveDiffThemeName } from "../lib/diffRendering";
@@ -336,10 +336,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     void navigate({
       to: "/$threadId",
       params: { threadId: activeThread.id },
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1", diffTurnId: turnId };
-      },
+      search: { diff: "1", diffTurnId: turnId },
     });
   };
   const selectWholeConversation = () => {
@@ -347,10 +344,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     void navigate({
       to: "/$threadId",
       params: { threadId: activeThread.id },
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
-      },
+      search: { diff: "1" },
     });
   };
   const closeDiff = useCallback(() => {
@@ -358,7 +352,7 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     void navigate({
       to: "/$threadId",
       params: { threadId: activeThread.id },
-      search: (previous) => stripDiffSearchParams(previous),
+      search: {},
     });
   }, [activeThread, navigate]);
   const updateTurnStripScrollState = useCallback(() => {

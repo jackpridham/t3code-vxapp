@@ -438,20 +438,21 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           "ProjectionOperationalQuery.getProjectByWorkspace:decodeRow",
         ),
       ),
-      Effect.map((row): OrchestrationGetProjectByWorkspaceResult =>
-        Option.match(row, {
-          onNone: () => null,
-          onSome: (project) => ({
-            id: project.projectId,
-            title: project.title,
-            workspaceRoot: project.workspaceRoot,
-            kind: project.kind ?? null,
-            defaultModelSelection: project.defaultModelSelection ?? null,
-            createdAt: project.createdAt,
-            updatedAt: project.updatedAt,
-            deletedAt: project.deletedAt ?? null,
+      Effect.map(
+        (row): OrchestrationGetProjectByWorkspaceResult =>
+          Option.match(row, {
+            onNone: () => null,
+            onSome: (project) => ({
+              id: project.projectId,
+              title: project.title,
+              workspaceRoot: project.workspaceRoot,
+              kind: project.kind ?? null,
+              defaultModelSelection: project.defaultModelSelection ?? null,
+              createdAt: project.createdAt,
+              updatedAt: project.updatedAt,
+              deletedAt: project.deletedAt ?? null,
+            }),
           }),
-        }),
       ),
     );
 

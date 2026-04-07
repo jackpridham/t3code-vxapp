@@ -817,10 +817,14 @@ describe("WebSocket Server", () => {
       }),
     );
 
-    const activeThreadSnapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot, {
-      profile: "active-thread",
-      threadId: bootstrapThreadId,
-    });
+    const activeThreadSnapshotResponse = await sendRequest(
+      ws,
+      ORCHESTRATION_WS_METHODS.getSnapshot,
+      {
+        profile: "active-thread",
+        threadId: bootstrapThreadId,
+      },
+    );
     expect(activeThreadSnapshotResponse.error).toBeUndefined();
     expect(activeThreadSnapshotResponse.result).toEqual(
       expect.objectContaining({

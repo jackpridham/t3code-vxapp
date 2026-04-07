@@ -433,9 +433,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             summary: row.summary,
             queuedAt: row.queuedAt,
             state: row.state,
-            ...(row.deliveryMessageId !== null
-              ? { deliveryMessageId: row.deliveryMessageId }
-              : {}),
+            ...(row.deliveryMessageId !== null ? { deliveryMessageId: row.deliveryMessageId } : {}),
             deliveredAt: row.deliveredAt,
             consumedAt: row.consumedAt,
             ...(row.consumeReason !== null ? { consumeReason: row.consumeReason } : {}),
@@ -462,9 +460,9 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           if (isPersistenceError(error)) {
             return error;
           }
-          return toPersistenceSqlError(
-            "ProjectionBootstrapSummaryQuery.getBootstrapSummary:query",
-          )(error);
+          return toPersistenceSqlError("ProjectionBootstrapSummaryQuery.getBootstrapSummary:query")(
+            error,
+          );
         }),
       );
 

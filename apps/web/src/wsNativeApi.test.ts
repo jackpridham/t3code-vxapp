@@ -371,30 +371,16 @@ describe("wsNativeApi", () => {
       profile: "active-thread",
       threadId: "thread-1",
     });
-    expect(requestMock).toHaveBeenNthCalledWith(
-      3,
-      ORCHESTRATION_WS_METHODS.getReadiness,
-    );
-    expect(requestMock).toHaveBeenNthCalledWith(
-      4,
-      ORCHESTRATION_WS_METHODS.listProjects,
-    );
-    expect(requestMock).toHaveBeenNthCalledWith(
-      5,
-      ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
-      {
-        workspaceRoot: "/tmp/project",
-      },
-    );
-    expect(requestMock).toHaveBeenNthCalledWith(
-      6,
-      ORCHESTRATION_WS_METHODS.listProjectThreads,
-      {
-        projectId: "project-1",
-        includeArchived: false,
-        includeDeleted: false,
-      },
-    );
+    expect(requestMock).toHaveBeenNthCalledWith(3, ORCHESTRATION_WS_METHODS.getReadiness);
+    expect(requestMock).toHaveBeenNthCalledWith(4, ORCHESTRATION_WS_METHODS.listProjects);
+    expect(requestMock).toHaveBeenNthCalledWith(5, ORCHESTRATION_WS_METHODS.getProjectByWorkspace, {
+      workspaceRoot: "/tmp/project",
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(6, ORCHESTRATION_WS_METHODS.listProjectThreads, {
+      projectId: "project-1",
+      includeArchived: false,
+      includeDeleted: false,
+    });
   });
 
   it("forwards workspace file writes to the websocket project method", async () => {

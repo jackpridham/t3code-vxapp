@@ -122,10 +122,7 @@ const WebSocketRequestBody = Schema.Union([
     ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
     OrchestrationGetProjectByWorkspaceInput,
   ),
-  tagRequestBody(
-    ORCHESTRATION_WS_METHODS.listProjectThreads,
-    OrchestrationListProjectThreadsInput,
-  ),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.listProjectThreads, OrchestrationListProjectThreadsInput),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),
