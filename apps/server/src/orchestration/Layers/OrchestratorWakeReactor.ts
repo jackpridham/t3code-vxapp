@@ -343,6 +343,16 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const duplicateWake = readModel.orchestratorWakeItems.find(
+      (wakeItem) =>
+        wakeItem.workerThreadId === workerThread.id &&
+        wakeItem.workerTurnId === turnId &&
+        wakeItem.outcome === outcome,
+    );
+    if (duplicateWake) {
+      return;
+    }
+
     if (
       workerThread.orchestratorThreadId === undefined ||
       workerThread.orchestratorProjectId === undefined
