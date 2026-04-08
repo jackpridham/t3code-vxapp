@@ -228,6 +228,7 @@ export function createWsNativeApi(): NativeApi {
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),
+      getFileDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getFileDiff, input),
       getFullThreadDiff: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getFullThreadDiff, input),
       replayEvents: (fromSequenceExclusive) =>

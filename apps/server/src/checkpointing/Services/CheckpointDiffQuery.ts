@@ -7,6 +7,8 @@
  * @module CheckpointDiffQuery
  */
 import type {
+  OrchestrationGetFileDiffInput,
+  OrchestrationGetFileDiffResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
@@ -29,6 +31,15 @@ export interface CheckpointDiffQueryShape {
   readonly getTurnDiff: (
     input: OrchestrationGetTurnDiffInput,
   ) => Effect.Effect<OrchestrationGetTurnDiffResult, CheckpointServiceError>;
+
+  /**
+   * Read the patch diff for a single file across a checkpoint range.
+   *
+   * Verifies checkpoint availability in both projection state and filesystem.
+   */
+  readonly getFileDiff: (
+    input: OrchestrationGetFileDiffInput,
+  ) => Effect.Effect<OrchestrationGetFileDiffResult, CheckpointServiceError>;
 
   /**
    * Read the full patch diff across a thread range of checkpoints.

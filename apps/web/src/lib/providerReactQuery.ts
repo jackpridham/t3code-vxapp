@@ -1,4 +1,5 @@
 import {
+  OrchestrationGetFileDiffInput,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   ThreadId,
@@ -15,6 +16,10 @@ interface CheckpointDiffQueryInput {
   enabled?: boolean;
 }
 
+interface CheckpointFileDiffQueryInput extends CheckpointDiffQueryInput {
+  path: string | null;
+}
+
 export const providerQueryKeys = {
   all: ["providers"] as const,
   checkpointDiff: (input: CheckpointDiffQueryInput) =>
@@ -22,6 +27,16 @@ export const providerQueryKeys = {
       "providers",
       "checkpointDiff",
       input.threadId,
+      input.fromTurnCount,
+      input.toTurnCount,
+      input.cacheScope ?? null,
+    ] as const,
+  checkpointFileDiff: (input: CheckpointFileDiffQueryInput) =>
+    [
+      "providers",
+      "checkpointFileDiff",
+      input.threadId,
+      input.path,
       input.fromTurnCount,
       input.toTurnCount,
       input.cacheScope ?? null,
@@ -43,6 +58,15 @@ function decodeCheckpointDiffRequest(input: CheckpointDiffQueryInput) {
   }).pipe(Option.map((fields) => ({ kind: "turnDiff" as const, input: fields })));
 }
 
+function decodeCheckpointFileDiffRequest(input: CheckpointFileDiffQueryInput) {
+  return Schema.decodeUnknownOption(OrchestrationGetFileDiffInput)({
+    threadId: input.threadId,
+    path: input.path,
+    fromTurnCount: input.fromTurnCount,
+    toTurnCount: input.toTurnCount,
+  });
+}
+
 function asCheckpointErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -53,10 +77,13 @@ function asCheckpointErrorMessage(error: unknown): string {
   return "";
 }
 
-function normalizeCheckpointErrorMessage(error: unknown): string {
+function normalizeCheckpointErrorMessage(
+  error: unknown,
+  fallbackMessage = "Failed to load checkpoint diff.",
+): string {
   const message = asCheckpointErrorMessage(error).trim();
   if (message.length === 0) {
-    return "Failed to load checkpoint diff.";
+    return fallbackMessage;
   }
 
   const lower = message.toLowerCase();
@@ -109,6 +136,40 @@ export function checkpointDiffQueryOptions(input: CheckpointDiffQueryInput) {
       }
     },
     enabled: (input.enabled ?? true) && !!input.threadId && decodedRequest._tag === "Some",
+    staleTime: Infinity,
+    retry: (failureCount, error) => {
+      if (isCheckpointTemporarilyUnavailable(error)) {
+        return failureCount < 12;
+      }
+      return failureCount < 3;
+    },
+    retryDelay: (attempt, error) =>
+      isCheckpointTemporarilyUnavailable(error)
+        ? Math.min(5_000, 250 * 2 ** (attempt - 1))
+        : Math.min(1_000, 100 * 2 ** (attempt - 1)),
+  });
+}
+
+export function checkpointFileDiffQueryOptions(input: CheckpointFileDiffQueryInput) {
+  const decodedRequest = decodeCheckpointFileDiffRequest(input);
+
+  return queryOptions({
+    queryKey: providerQueryKeys.checkpointFileDiff(input),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      if (!input.threadId || !input.path || decodedRequest._tag === "None") {
+        throw new Error("File diff is unavailable.");
+      }
+      try {
+        return await api.orchestration.getFileDiff(decodedRequest.value);
+      } catch (error) {
+        throw new Error(normalizeCheckpointErrorMessage(error, "Failed to load file diff."), {
+          cause: error,
+        });
+      }
+    },
+    enabled:
+      (input.enabled ?? true) && !!input.threadId && !!input.path && decodedRequest._tag === "Some",
     staleTime: Infinity,
     retry: (failureCount, error) => {
       if (isCheckpointTemporarilyUnavailable(error)) {

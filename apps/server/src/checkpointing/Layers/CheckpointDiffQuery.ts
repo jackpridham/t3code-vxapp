@@ -1,5 +1,8 @@
 import {
+  OrchestrationGetFileDiffResult,
   OrchestrationGetTurnDiffResult,
+  type OrchestrationGetFileDiffInput,
+  type OrchestrationGetFileDiffResult as OrchestrationGetFileDiffResultType,
   type OrchestrationGetFullThreadDiffInput,
   type OrchestrationGetFullThreadDiffResult,
   type OrchestrationGetTurnDiffResult as OrchestrationGetTurnDiffResultType,
@@ -16,36 +19,24 @@ import {
 } from "../Services/CheckpointDiffQuery.ts";
 
 const isTurnDiffResult = Schema.is(OrchestrationGetTurnDiffResult);
+const isFileDiffResult = Schema.is(OrchestrationGetFileDiffResult);
 
 const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const checkpointStore = yield* CheckpointStore;
 
-  const getTurnDiff: CheckpointDiffQueryShape["getTurnDiff"] = (input) =>
+  const resolveDiffContext = (input: {
+    readonly threadId: OrchestrationGetTurnDiffResultType["threadId"];
+    readonly fromTurnCount: number;
+    readonly toTurnCount: number;
+    readonly operation: string;
+  }) =>
     Effect.gen(function* () {
-      const operation = "CheckpointDiffQuery.getTurnDiff";
-
-      if (input.fromTurnCount === input.toTurnCount) {
-        const emptyDiff: OrchestrationGetTurnDiffResultType = {
-          threadId: input.threadId,
-          fromTurnCount: input.fromTurnCount,
-          toTurnCount: input.toTurnCount,
-          diff: "",
-        };
-        if (!isTurnDiffResult(emptyDiff)) {
-          return yield* new CheckpointInvariantError({
-            operation,
-            detail: "Computed turn diff result does not satisfy contract schema.",
-          });
-        }
-        return emptyDiff;
-      }
-
       const snapshot = yield* projectionSnapshotQuery.getSnapshot();
       const thread = snapshot.threads.find((entry) => entry.id === input.threadId);
       if (!thread) {
         return yield* new CheckpointInvariantError({
-          operation,
+          operation: input.operation,
           detail: `Thread '${input.threadId}' not found.`,
         });
       }
@@ -68,7 +59,7 @@ const make = Effect.gen(function* () {
       });
       if (!workspaceCwd) {
         return yield* new CheckpointInvariantError({
-          operation,
+          operation: input.operation,
           detail: `Workspace path missing for thread '${input.threadId}' when computing turn diff.`,
         });
       }
@@ -128,6 +119,40 @@ const make = Effect.gen(function* () {
         });
       }
 
+      return {
+        workspaceCwd,
+        fromCheckpointRef,
+        toCheckpointRef,
+      };
+    });
+
+  const getTurnDiff: CheckpointDiffQueryShape["getTurnDiff"] = (input) =>
+    Effect.gen(function* () {
+      const operation = "CheckpointDiffQuery.getTurnDiff";
+
+      if (input.fromTurnCount === input.toTurnCount) {
+        const emptyDiff: OrchestrationGetTurnDiffResultType = {
+          threadId: input.threadId,
+          fromTurnCount: input.fromTurnCount,
+          toTurnCount: input.toTurnCount,
+          diff: "",
+        };
+        if (!isTurnDiffResult(emptyDiff)) {
+          return yield* new CheckpointInvariantError({
+            operation,
+            detail: "Computed turn diff result does not satisfy contract schema.",
+          });
+        }
+        return emptyDiff;
+      }
+
+      const { workspaceCwd, fromCheckpointRef, toCheckpointRef } = yield* resolveDiffContext({
+        threadId: input.threadId,
+        fromTurnCount: input.fromTurnCount,
+        toTurnCount: input.toTurnCount,
+        operation,
+      });
+
       const diff = yield* checkpointStore.diffCheckpoints({
         cwd: workspaceCwd,
         fromCheckpointRef,
@@ -151,6 +176,61 @@ const make = Effect.gen(function* () {
       return turnDiff;
     });
 
+  const getFileDiff: CheckpointDiffQueryShape["getFileDiff"] = (
+    input: OrchestrationGetFileDiffInput,
+  ) =>
+    Effect.gen(function* () {
+      const operation = "CheckpointDiffQuery.getFileDiff";
+
+      if (input.fromTurnCount === input.toTurnCount) {
+        const emptyDiff: OrchestrationGetFileDiffResultType = {
+          threadId: input.threadId,
+          path: input.path,
+          fromTurnCount: input.fromTurnCount,
+          toTurnCount: input.toTurnCount,
+          diff: "",
+        };
+        if (!isFileDiffResult(emptyDiff)) {
+          return yield* new CheckpointInvariantError({
+            operation,
+            detail: "Computed file diff result does not satisfy contract schema.",
+          });
+        }
+        return emptyDiff;
+      }
+
+      const { workspaceCwd, fromCheckpointRef, toCheckpointRef } = yield* resolveDiffContext({
+        threadId: input.threadId,
+        fromTurnCount: input.fromTurnCount,
+        toTurnCount: input.toTurnCount,
+        operation,
+      });
+
+      const diff = yield* checkpointStore.diffCheckpoints({
+        cwd: workspaceCwd,
+        fromCheckpointRef,
+        toCheckpointRef,
+        fallbackFromToHead: false,
+        pathspecs: [input.path],
+      });
+
+      const fileDiff: OrchestrationGetFileDiffResultType = {
+        threadId: input.threadId,
+        path: input.path,
+        fromTurnCount: input.fromTurnCount,
+        toTurnCount: input.toTurnCount,
+        diff,
+      };
+      if (!isFileDiffResult(fileDiff)) {
+        return yield* new CheckpointInvariantError({
+          operation,
+          detail: "Computed file diff result does not satisfy contract schema.",
+        });
+      }
+
+      return fileDiff;
+    });
+
   const getFullThreadDiff: CheckpointDiffQueryShape["getFullThreadDiff"] = (
     input: OrchestrationGetFullThreadDiffInput,
   ) =>
@@ -162,6 +242,7 @@ const make = Effect.gen(function* () {
 
   return {
     getTurnDiff,
+    getFileDiff,
     getFullThreadDiff,
   } satisfies CheckpointDiffQueryShape;
 });

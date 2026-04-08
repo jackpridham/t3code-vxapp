@@ -96,6 +96,7 @@ describe("CheckpointDiffQueryLive", () => {
       readonly fromCheckpointRef: CheckpointRef;
       readonly toCheckpointRef: CheckpointRef;
       readonly cwd: string;
+      readonly pathspecs?: ReadonlyArray<string>;
     }> = [];
 
     const snapshot = makeSnapshot({
@@ -116,9 +117,14 @@ describe("CheckpointDiffQueryLive", () => {
           return true;
         }),
       restoreCheckpoint: () => Effect.succeed(true),
-      diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd }) =>
+      diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, pathspecs }) =>
         Effect.sync(() => {
-          diffCheckpointsCalls.push({ fromCheckpointRef, toCheckpointRef, cwd });
+          diffCheckpointsCalls.push({
+            fromCheckpointRef,
+            toCheckpointRef,
+            cwd,
+            ...(pathspecs ? { pathspecs } : {}),
+          });
           return "diff patch";
         }),
       deleteCheckpointRefs: () => Effect.void,
@@ -151,6 +157,7 @@ describe("CheckpointDiffQueryLive", () => {
         cwd: "/tmp/workspace",
         fromCheckpointRef: expectedFromRef,
         toCheckpointRef,
+        pathspecs: undefined,
       },
     ]);
     expect(result).toEqual({
@@ -201,5 +208,81 @@ describe("CheckpointDiffQueryLive", () => {
         }).pipe(Effect.provide(layer)),
       ),
     ).rejects.toThrow("Thread 'thread-missing' not found.");
+  });
+
+  it("computes file diffs with a pathspec filter", async () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+    const diffCheckpointsCalls: Array<{
+      readonly fromCheckpointRef: CheckpointRef;
+      readonly toCheckpointRef: CheckpointRef;
+      readonly cwd: string;
+      readonly pathspecs?: ReadonlyArray<string>;
+    }> = [];
+
+    const snapshot = makeSnapshot({
+      projectId,
+      threadId,
+      workspaceRoot: "/tmp/workspace",
+      worktreePath: null,
+      checkpointTurnCount: 1,
+      checkpointRef: toCheckpointRef,
+    });
+
+    const checkpointStore: CheckpointStoreShape = {
+      isGitRepository: () => Effect.succeed(true),
+      captureCheckpoint: () => Effect.void,
+      hasCheckpointRef: () => Effect.succeed(true),
+      restoreCheckpoint: () => Effect.succeed(true),
+      diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, pathspecs }) =>
+        Effect.sync(() => {
+          diffCheckpointsCalls.push({
+            fromCheckpointRef,
+            toCheckpointRef,
+            cwd,
+            ...(pathspecs ? { pathspecs } : {}),
+          });
+          return "file diff patch";
+        }),
+      deleteCheckpointRefs: () => Effect.void,
+    };
+
+    const layer = CheckpointDiffQueryLive.pipe(
+      Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
+      Layer.provideMerge(
+        Layer.succeed(ProjectionSnapshotQuery, {
+          getSnapshot: () => Effect.succeed(snapshot),
+        }),
+      ),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const query = yield* CheckpointDiffQuery;
+        return yield* query.getFileDiff({
+          threadId,
+          path: "src/index.ts",
+          fromTurnCount: 0,
+          toTurnCount: 1,
+        });
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(diffCheckpointsCalls).toEqual([
+      {
+        cwd: "/tmp/workspace",
+        fromCheckpointRef: checkpointRefForThreadTurn(threadId, 0),
+        toCheckpointRef,
+        pathspecs: ["src/index.ts"],
+      },
+    ]);
+    expect(result).toEqual({
+      threadId,
+      path: "src/index.ts",
+      fromTurnCount: 0,
+      toTurnCount: 1,
+      diff: "file diff patch",
+    });
   });
 });

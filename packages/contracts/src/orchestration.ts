@@ -25,6 +25,7 @@ export const ORCHESTRATION_WS_METHODS = {
   listProjectThreads: "orchestration.listProjectThreads",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
+  getFileDiff: "orchestration.getFileDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
 } as const;
@@ -1187,6 +1188,14 @@ export const ThreadTurnDiff = TurnCountRange.mapFields(
   }),
   { unsafePreserveChecks: true },
 );
+export const ThreadFileDiff = TurnCountRange.mapFields(
+  Struct.assign({
+    threadId: ThreadId,
+    path: TrimmedNonEmptyString,
+    diff: Schema.String,
+  }),
+  { unsafePreserveChecks: true },
+);
 
 export const ProviderSessionRuntimeStatus = Schema.Literals([
   "starting",
@@ -1283,6 +1292,26 @@ export type OrchestrationGetTurnDiffInput = typeof OrchestrationGetTurnDiffInput
 export const OrchestrationGetTurnDiffResult = ThreadTurnDiff;
 export type OrchestrationGetTurnDiffResult = typeof OrchestrationGetTurnDiffResult.Type;
 
+export const OrchestrationGetFileDiffInput = Schema.Struct({
+  threadId: ThreadId,
+  path: TrimmedNonEmptyString,
+  fromTurnCount: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 0)),
+  toTurnCount: NonNegativeInt,
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      input.fromTurnCount <= input.toTurnCount ||
+      new SchemaIssue.InvalidValue(Option.some(input.fromTurnCount), {
+        message: "fromTurnCount must be less than or equal to toTurnCount",
+      }),
+    { identifier: "OrchestrationTurnDiffRange" },
+  ),
+);
+export type OrchestrationGetFileDiffInput = typeof OrchestrationGetFileDiffInput.Type;
+
+export const OrchestrationGetFileDiffResult = ThreadFileDiff;
+export type OrchestrationGetFileDiffResult = typeof OrchestrationGetFileDiffResult.Type;
+
 export const OrchestrationGetFullThreadDiffInput = Schema.Struct({
   threadId: ThreadId,
   toTurnCount: NonNegativeInt,
@@ -1332,6 +1361,10 @@ export const OrchestrationRpcSchemas = {
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,
     output: OrchestrationGetTurnDiffResult,
+  },
+  getFileDiff: {
+    input: OrchestrationGetFileDiffInput,
+    output: OrchestrationGetFileDiffResult,
   },
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,

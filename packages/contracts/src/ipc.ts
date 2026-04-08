@@ -48,6 +48,8 @@ import type {
   OrchestrationGetSnapshotInput,
   OrchestrationGetProjectByWorkspaceInput,
   OrchestrationGetProjectByWorkspaceResult,
+  OrchestrationGetFileDiffInput,
+  OrchestrationGetFileDiffResult,
   OrchestrationGetReadinessResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
@@ -200,6 +202,7 @@ export interface NativeApi {
     ) => Promise<OrchestrationListProjectThreadsResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
+    getFileDiff: (input: OrchestrationGetFileDiffInput) => Promise<OrchestrationGetFileDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;

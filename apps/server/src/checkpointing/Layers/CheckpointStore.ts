@@ -240,10 +240,22 @@ const makeCheckpointStore = Effect.gen(function* () {
         });
       }
 
+      if (input.pathspecs && input.pathspecs.length === 0) {
+        return yield* new CheckpointInvariantError({
+          operation,
+          detail: "Checkpoint diff pathspecs must not be empty when provided.",
+        });
+      }
+
+      const diffArgs = ["diff", "--patch", "--minimal", "--no-color", fromCommitOid, toCommitOid];
+      if (input.pathspecs && input.pathspecs.length > 0) {
+        diffArgs.push("--", ...input.pathspecs);
+      }
+
       const result = yield* git.execute({
         operation,
         cwd: input.cwd,
-        args: ["diff", "--patch", "--minimal", "--no-color", fromCommitOid, toCommitOid],
+        args: diffArgs,
       });
 
       return result.stdout;

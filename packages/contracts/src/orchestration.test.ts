@@ -8,6 +8,8 @@ import {
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationGetBootstrapSummaryResult,
+  OrchestrationGetFileDiffInput,
+  OrchestrationGetFileDiffResult,
   OrchestrationGetSnapshotInput,
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetReadinessResult,
@@ -32,7 +34,9 @@ import {
 } from "./orchestration";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
+const decodeFileDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFileDiffInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
+const decodeFileDiffResult = Schema.decodeUnknownEffect(OrchestrationGetFileDiffResult);
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand);
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
 const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
@@ -99,6 +103,58 @@ it.effect("rejects thread turn diff when fromTurnCount > toTurnCount", () =>
     const result = yield* Effect.exit(
       decodeThreadTurnDiff({
         threadId: "thread-1",
+        fromTurnCount: 3,
+        toTurnCount: 2,
+        diff: "patch",
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("parses file diff input and defaults fromTurnCount to zero", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeFileDiffInput({
+      threadId: "thread-1",
+      path: "src/index.ts",
+      toTurnCount: 2,
+    });
+    assert.strictEqual(parsed.path, "src/index.ts");
+    assert.strictEqual(parsed.fromTurnCount, 0);
+    assert.strictEqual(parsed.toTurnCount, 2);
+  }),
+);
+
+it.effect("rejects file diff input when path is empty or range is inverted", () =>
+  Effect.gen(function* () {
+    const emptyPathResult = yield* Effect.exit(
+      decodeFileDiffInput({
+        threadId: "thread-1",
+        path: "   ",
+        fromTurnCount: 0,
+        toTurnCount: 1,
+      }),
+    );
+    assert.strictEqual(emptyPathResult._tag, "Failure");
+
+    const invertedRangeResult = yield* Effect.exit(
+      decodeFileDiffInput({
+        threadId: "thread-1",
+        path: "src/index.ts",
+        fromTurnCount: 3,
+        toTurnCount: 2,
+      }),
+    );
+    assert.strictEqual(invertedRangeResult._tag, "Failure");
+  }),
+);
+
+it.effect("rejects file diff results when fromTurnCount > toTurnCount", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeFileDiffResult({
+        threadId: "thread-1",
+        path: "src/index.ts",
         fromTurnCount: 3,
         toTurnCount: 2,
         diff: "patch",

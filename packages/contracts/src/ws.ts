@@ -5,6 +5,7 @@ import {
   ClientOrchestrationCommand,
   OrchestrationEvent,
   OrchestrationGetBootstrapSummaryInput,
+  OrchestrationGetFileDiffInput,
   OrchestrationGetProjectByWorkspaceInput,
   ORCHESTRATION_WS_CHANNELS,
   OrchestrationGetReadinessInput,
@@ -129,6 +130,7 @@ const WebSocketRequestBody = Schema.Union([
   ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getSnapshot, OrchestrationGetSnapshotInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getTurnDiff, OrchestrationGetTurnDiffInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getFileDiff, OrchestrationGetFileDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getFullThreadDiff, OrchestrationGetFullThreadDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.replayEvents, OrchestrationReplayEventsInput),
 

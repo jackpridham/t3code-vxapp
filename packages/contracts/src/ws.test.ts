@@ -22,6 +22,24 @@ it.effect("accepts getTurnDiff requests when fromTurnCount <= toTurnCount", () =
   }),
 );
 
+it.effect(
+  "accepts getFileDiff requests when path is present and fromTurnCount <= toTurnCount",
+  () =>
+    Effect.gen(function* () {
+      const parsed = yield* decodeWebSocketRequest({
+        id: "req-file-diff-1",
+        body: {
+          _tag: ORCHESTRATION_WS_METHODS.getFileDiff,
+          threadId: "thread-1",
+          path: "src/index.ts",
+          fromTurnCount: 0,
+          toTurnCount: 2,
+        },
+      });
+      assert.strictEqual(parsed.body._tag, ORCHESTRATION_WS_METHODS.getFileDiff);
+    }),
+);
+
 it.effect("accepts bounded orchestration read requests", () =>
   Effect.gen(function* () {
     const bootstrapSummaryRequest = yield* decodeWebSocketRequest({
@@ -58,6 +76,24 @@ it.effect("rejects getTurnDiff requests when fromTurnCount > toTurnCount", () =>
         body: {
           _tag: ORCHESTRATION_WS_METHODS.getTurnDiff,
           threadId: "thread-1",
+          fromTurnCount: 3,
+          toTurnCount: 2,
+        },
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("rejects getFileDiff requests when fromTurnCount > toTurnCount", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeWebSocketRequest({
+        id: "req-file-diff-invalid-1",
+        body: {
+          _tag: ORCHESTRATION_WS_METHODS.getFileDiff,
+          threadId: "thread-1",
+          path: "src/index.ts",
           fromTurnCount: 3,
           toTurnCount: 2,
         },

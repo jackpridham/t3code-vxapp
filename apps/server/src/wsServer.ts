@@ -732,6 +732,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* checkpointDiffQuery.getTurnDiff(body);
       }
 
+      case ORCHESTRATION_WS_METHODS.getFileDiff: {
+        const body = stripRequestTag(request.body);
+        return yield* checkpointDiffQuery.getFileDiff(body);
+      }
+
       case ORCHESTRATION_WS_METHODS.getFullThreadDiff: {
         const body = stripRequestTag(request.body);
         return yield* checkpointDiffQuery.getFullThreadDiff(body);

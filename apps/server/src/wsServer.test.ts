@@ -1345,6 +1345,24 @@ describe("WebSocket Server", () => {
     expect(response.error?.message).toContain("Thread 'thread-missing' not found.");
   });
 
+  it("returns error when requesting file diff for unknown thread", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getFileDiff, {
+      threadId: "thread-missing",
+      path: "src/index.ts",
+      fromTurnCount: 0,
+      toTurnCount: 2,
+    });
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain("Thread 'thread-missing' not found.");
+  });
+
   it("returns retryable error when requested turn exceeds current checkpoint turn count", async () => {
     server = await createTestServer({ cwd: "/test" });
     const addr = server.address();

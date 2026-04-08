@@ -1,18 +1,24 @@
 import { ThreadId, type NativeApi } from "@t3tools/contracts";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checkpointDiffQueryOptions, providerQueryKeys } from "./providerReactQuery";
+import {
+  checkpointDiffQueryOptions,
+  checkpointFileDiffQueryOptions,
+  providerQueryKeys,
+} from "./providerReactQuery";
 import * as nativeApi from "../nativeApi";
 
 const threadId = ThreadId.makeUnsafe("thread-id");
 
 function mockNativeApi(input: {
   getTurnDiff: ReturnType<typeof vi.fn>;
+  getFileDiff: ReturnType<typeof vi.fn>;
   getFullThreadDiff: ReturnType<typeof vi.fn>;
 }) {
   vi.spyOn(nativeApi, "ensureNativeApi").mockReturnValue({
     orchestration: {
       getTurnDiff: input.getTurnDiff,
+      getFileDiff: input.getFileDiff,
       getFullThreadDiff: input.getFullThreadDiff,
     },
   } as unknown as NativeApi);
@@ -47,8 +53,9 @@ describe("providerQueryKeys.checkpointDiff", () => {
 describe("checkpointDiffQueryOptions", () => {
   it("forwards checkpoint range to the provider API", async () => {
     const getTurnDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const getFileDiff = vi.fn().mockResolvedValue({ diff: "patch" });
     const getFullThreadDiff = vi.fn().mockResolvedValue({ diff: "patch" });
-    mockNativeApi({ getTurnDiff, getFullThreadDiff });
+    mockNativeApi({ getTurnDiff, getFileDiff, getFullThreadDiff });
 
     const options = checkpointDiffQueryOptions({
       threadId,
@@ -70,8 +77,9 @@ describe("checkpointDiffQueryOptions", () => {
 
   it("uses explicit full thread diff API when range starts from zero", async () => {
     const getTurnDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const getFileDiff = vi.fn().mockResolvedValue({ diff: "patch" });
     const getFullThreadDiff = vi.fn().mockResolvedValue({ diff: "patch" });
-    mockNativeApi({ getTurnDiff, getFullThreadDiff });
+    mockNativeApi({ getTurnDiff, getFileDiff, getFullThreadDiff });
 
     const options = checkpointDiffQueryOptions({
       threadId,
@@ -92,8 +100,9 @@ describe("checkpointDiffQueryOptions", () => {
 
   it("fails fast on invalid range and does not call provider RPC", async () => {
     const getTurnDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const getFileDiff = vi.fn().mockResolvedValue({ diff: "patch" });
     const getFullThreadDiff = vi.fn().mockResolvedValue({ diff: "patch" });
-    mockNativeApi({ getTurnDiff, getFullThreadDiff });
+    mockNativeApi({ getTurnDiff, getFileDiff, getFullThreadDiff });
 
     const options = checkpointDiffQueryOptions({
       threadId,
@@ -108,6 +117,7 @@ describe("checkpointDiffQueryOptions", () => {
       "Checkpoint diff is unavailable.",
     );
     expect(getTurnDiff).not.toHaveBeenCalled();
+    expect(getFileDiff).not.toHaveBeenCalled();
     expect(getFullThreadDiff).not.toHaveBeenCalled();
   });
 
@@ -157,5 +167,92 @@ describe("checkpointDiffQueryOptions", () => {
     expect(typeof checkpointDelay).toBe("number");
     expect(typeof genericDelay).toBe("number");
     expect((checkpointDelay ?? 0) > (genericDelay ?? 0)).toBe(true);
+  });
+});
+
+describe("providerQueryKeys.checkpointFileDiff", () => {
+  it("includes path and cacheScope so file-scoped queries do not collide", () => {
+    const baseInput = {
+      threadId,
+      path: "src/index.ts",
+      fromTurnCount: 0,
+      toTurnCount: 2,
+    } as const;
+
+    expect(
+      providerQueryKeys.checkpointFileDiff({
+        ...baseInput,
+        cacheScope: "thread:old-turn",
+      }),
+    ).not.toEqual(
+      providerQueryKeys.checkpointFileDiff({
+        ...baseInput,
+        cacheScope: "thread:new-turn",
+      }),
+    );
+
+    expect(
+      providerQueryKeys.checkpointFileDiff({
+        ...baseInput,
+        cacheScope: "thread:same",
+      }),
+    ).not.toEqual(
+      providerQueryKeys.checkpointFileDiff({
+        ...baseInput,
+        path: "src/other.ts",
+        cacheScope: "thread:same",
+      }),
+    );
+  });
+});
+
+describe("checkpointFileDiffQueryOptions", () => {
+  it("forwards file diff requests to the provider API", async () => {
+    const getTurnDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const getFileDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const getFullThreadDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    mockNativeApi({ getTurnDiff, getFileDiff, getFullThreadDiff });
+
+    const options = checkpointFileDiffQueryOptions({
+      threadId,
+      path: "src/index.ts",
+      fromTurnCount: 0,
+      toTurnCount: 4,
+      cacheScope: "file:src/index.ts",
+    });
+
+    const queryClient = new QueryClient();
+    await queryClient.fetchQuery(options);
+
+    expect(getFileDiff).toHaveBeenCalledWith({
+      threadId,
+      path: "src/index.ts",
+      fromTurnCount: 0,
+      toTurnCount: 4,
+    });
+    expect(getTurnDiff).not.toHaveBeenCalled();
+    expect(getFullThreadDiff).not.toHaveBeenCalled();
+  });
+
+  it("fails fast when file diff input is invalid", async () => {
+    const getTurnDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const getFileDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    const getFullThreadDiff = vi.fn().mockResolvedValue({ diff: "patch" });
+    mockNativeApi({ getTurnDiff, getFileDiff, getFullThreadDiff });
+
+    const options = checkpointFileDiffQueryOptions({
+      threadId,
+      path: "   ",
+      fromTurnCount: 2,
+      toTurnCount: 1,
+      cacheScope: "file:invalid",
+    });
+
+    const queryClient = new QueryClient();
+
+    await expect(queryClient.fetchQuery(options)).rejects.toThrow("File diff is unavailable.");
+    expect(getTurnDiff).not.toHaveBeenCalled();
+    expect(getFileDiff).not.toHaveBeenCalled();
+    expect(getFullThreadDiff).not.toHaveBeenCalled();
   });
 });

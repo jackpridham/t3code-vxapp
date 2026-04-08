@@ -445,6 +445,26 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards file diff requests to the orchestration websocket method", async () => {
+    requestMock.mockResolvedValue({ diff: "patch" });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.orchestration.getFileDiff({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      path: "src/index.ts",
+      fromTurnCount: 0,
+      toTurnCount: 1,
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(ORCHESTRATION_WS_METHODS.getFileDiff, {
+      threadId: "thread-1",
+      path: "src/index.ts",
+      fromTurnCount: 0,
+      toTurnCount: 1,
+    });
+  });
+
   it("forwards context menu metadata to desktop bridge", async () => {
     const showContextMenu = vi.fn().mockResolvedValue("delete");
     Object.defineProperty(getWindowForTest(), "desktopBridge", {
