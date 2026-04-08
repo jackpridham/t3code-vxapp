@@ -464,31 +464,39 @@ export function projectEvent(
           event.type,
           "session",
         );
+        const latestTurn =
+          session.status === "running" && session.activeTurnId !== null
+            ? {
+                turnId: session.activeTurnId,
+                state: "running" as const,
+                requestedAt:
+                  thread.latestTurn?.turnId === session.activeTurnId
+                    ? thread.latestTurn.requestedAt
+                    : session.updatedAt,
+                startedAt:
+                  thread.latestTurn?.turnId === session.activeTurnId
+                    ? (thread.latestTurn.startedAt ?? session.updatedAt)
+                    : session.updatedAt,
+                completedAt: null,
+                assistantMessageId:
+                  thread.latestTurn?.turnId === session.activeTurnId
+                    ? thread.latestTurn.assistantMessageId
+                    : null,
+              }
+            : thread.latestTurn &&
+                (thread.latestTurn.state === "running" || thread.latestTurn.state === "pending")
+              ? {
+                  ...thread.latestTurn,
+                  state: session.status === "error" ? "error" : "completed",
+                  completedAt: thread.latestTurn.completedAt ?? session.updatedAt,
+                }
+              : thread.latestTurn;
 
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
-            latestTurn:
-              session.status === "running" && session.activeTurnId !== null
-                ? {
-                    turnId: session.activeTurnId,
-                    state: "running",
-                    requestedAt:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? thread.latestTurn.requestedAt
-                        : session.updatedAt,
-                    startedAt:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? (thread.latestTurn.startedAt ?? session.updatedAt)
-                        : session.updatedAt,
-                    completedAt: null,
-                    assistantMessageId:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? thread.latestTurn.assistantMessageId
-                        : null,
-                  }
-                : thread.latestTurn,
+            latestTurn,
             updatedAt: event.occurredAt,
           }),
         };
