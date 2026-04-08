@@ -98,8 +98,14 @@ vi.mock("../lib/artifactWindow", () => ({
   isArtifactWindowPath: vi.fn(() => false),
 }));
 
-import { bootstrapOrchestrationState } from "./__root";
+vi.mock("../lib/changesWindow", () => ({
+  isChangesWindowPath: vi.fn(() => false),
+}));
+
+import { bootstrapOrchestrationState, isStandaloneRootRoutePath } from "./__root";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { isArtifactWindowPath } from "../lib/artifactWindow";
+import { isChangesWindowPath } from "../lib/changesWindow";
 
 function makeReadModel(snapshotSequence: number): OrchestrationReadModel {
   return {
@@ -209,5 +215,19 @@ describe("bootstrapOrchestrationState", () => {
     expect(syncServerReadModel).toHaveBeenCalledTimes(1);
     expect(syncServerReadModel).toHaveBeenCalledWith(bootstrapSummary);
     expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isStandaloneRootRoutePath", () => {
+  it("returns true for artifact and changes standalone routes", () => {
+    vi.mocked(isArtifactWindowPath).mockReturnValueOnce(true);
+    expect(isStandaloneRootRoutePath("/artifact")).toBe(true);
+
+    vi.mocked(isChangesWindowPath).mockReturnValueOnce(true);
+    expect(isStandaloneRootRoutePath("/changes/thread-1")).toBe(true);
+  });
+
+  it("returns false for normal app routes", () => {
+    expect(isStandaloneRootRoutePath("/")).toBe(false);
   });
 });

@@ -28,11 +28,24 @@ export const ChangesPanelFilesChangedViewType = Schema.Literals(["list", "tree"]
 export type ChangesPanelFilesChangedViewType = typeof ChangesPanelFilesChangedViewType.Type;
 export const DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE: ChangesPanelFilesChangedViewType =
   "list";
+export const ChangesPanelWindowNavigationMode = Schema.Literals(["dynamic", "static"]);
+export type ChangesPanelWindowNavigationMode = typeof ChangesPanelWindowNavigationMode.Type;
+export const DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE: ChangesPanelWindowNavigationMode =
+  "dynamic";
+export const ChangesDrawerVisibility = Schema.Literals(["always_show", "always_hide"]);
+export type ChangesDrawerVisibility = typeof ChangesDrawerVisibility.Type;
+export const DEFAULT_CHANGES_DRAWER_VISIBILITY: ChangesDrawerVisibility = "always_show";
 
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   changesPanelFilesChangedViewType: ChangesPanelFilesChangedViewType.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE),
+  ),
+  changesDrawerVisibility: ChangesDrawerVisibility.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_CHANGES_DRAWER_VISIBILITY),
+  ),
+  changesPanelWindowNavigationMode: ChangesPanelWindowNavigationMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE),
   ),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),

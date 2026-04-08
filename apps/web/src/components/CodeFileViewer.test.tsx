@@ -48,6 +48,7 @@ describe("annotateHighlightedCodeHtml", () => {
     expect(result.html).toContain('data-line-number="2"');
     expect(result.html).toContain('data-line-marker="modified"');
     expect(result.html).toContain("code-file-viewer__line");
+    expect(result.html).not.toContain("</span>\n<span");
   });
 });
 

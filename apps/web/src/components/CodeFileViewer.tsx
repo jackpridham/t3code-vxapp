@@ -22,6 +22,8 @@ export interface CodeFileViewerProps {
 }
 
 const HIGHLIGHTED_LINE_OPENING_TAG_PATTERN = /<span class="([^"]*\bline\b[^"]*)">/g;
+const HIGHLIGHTED_LINE_SEPARATOR_PATTERN =
+  /<\/span>\r?\n(?=<span class="[^"]*\bline\b[^"]*\bcode-file-viewer__line\b)/g;
 
 export function annotateHighlightedCodeHtml(
   html: string,
@@ -38,7 +40,9 @@ export function annotateHighlightedCodeHtml(
     return `<span class="${className} code-file-viewer__line" data-line-number="${lineCount}"${markerAttribute}>`;
   });
 
-  return { html: annotatedHtml, lineCount };
+  const normalizedHtml = annotatedHtml.replace(HIGHLIGHTED_LINE_SEPARATOR_PATTERN, "</span>");
+
+  return { html: normalizedHtml, lineCount };
 }
 
 function resolveCodeLanguage(path: string): string {

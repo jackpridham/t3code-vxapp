@@ -6,6 +6,14 @@
  */
 
 import type { ChatMessage } from "./types";
+import {
+  basenameOfChangesPath,
+  canonicalizeChangesPathForLookup,
+  cleanDiscoveredChangesRawRef,
+  isAbsoluteChangesPath,
+  normalizeChangesPath,
+  resolveChangesAbsolutePath,
+} from "./lib/changesPath";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,58 +87,13 @@ const MD_LINK_PATTERN = /\[[^\]]*\]\(([^)]+\.[A-Za-z0-9_-]+(?:[^)]*)?)\)/gi;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Strip query string and fragment from a path or URL. */
-function cleanRawRef(raw: string): string {
-  let cleaned = raw;
-  // If it's a file:// URL, extract the path portion
-  if (cleaned.toLowerCase().startsWith("file:///")) {
-    try {
-      const parsed = new URL(cleaned);
-      cleaned = decodeURIComponent(parsed.pathname);
-      // Browser URL parser encodes "C:/foo" as "/C:/foo"
-      if (/^\/[A-Za-z]:[\\/]/.test(cleaned)) {
-        cleaned = cleaned.slice(1);
-      }
-    } catch {
-      cleaned = cleaned.slice(7); // "file:///" length
-    }
-  }
-  // Strip query and fragment
-  const queryIdx = cleaned.indexOf("?");
-  if (queryIdx >= 0) cleaned = cleaned.slice(0, queryIdx);
-  const hashIdx = cleaned.indexOf("#");
-  if (hashIdx >= 0) cleaned = cleaned.slice(0, hashIdx);
-
-  cleaned = cleaned.trim();
-
-  // Strip common surrounding markdown/code-format punctuation that can cling
-  // to plain-text paths in assistant messages.
-  while (/^[`"'([]/.test(cleaned)) {
-    cleaned = cleaned.slice(1).trimStart();
-  }
-  while (/[`"',.:;!?)\]]$/.test(cleaned)) {
-    cleaned = cleaned.slice(0, -1).trimEnd();
-  }
-
-  return cleaned;
-}
-
-/** Extract the basename from a path. */
-function basenameOf(path: string): string {
-  const lastSlash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
-}
-
-function isAbsolutePath(path: string): boolean {
-  return /^([A-Za-z]:[\\/]|[\\/]{2}|\/)/.test(path);
-}
-
 function resolveReferencePath(rawPath: string, cwd: string | undefined): string {
-  if (!cwd || isAbsolutePath(rawPath)) {
-    return rawPath;
+  const normalizedRawPath = normalizeChangesPath(rawPath);
+  if (!cwd || isAbsoluteChangesPath(normalizedRawPath)) {
+    return normalizedRawPath;
   }
 
-  return `${cwd.replace(/[/\\]+$/, "").replaceAll("\\", "/")}/${rawPath.replaceAll("\\", "/")}`;
+  return resolveChangesAbsolutePath(cwd, normalizedRawPath);
 }
 
 // ── Extraction ───────────────────────────────────────────────────────────────
@@ -187,7 +150,7 @@ export function extractFileReferences(messageText: string): string[] {
 /** Determine which section a file reference belongs to. */
 export function categorizeReference(cleanedPath: string): ChangesSectionKind {
   const lower = cleanedPath.toLowerCase();
-  const filename = basenameOf(cleanedPath).toLowerCase();
+  const filename = basenameOfChangesPath(cleanedPath).toLowerCase();
 
   // Plans: files in @TODO directories, or matching PLAN_*.md / TODO_*.md / PHASE_*.md patterns
   if (lower.includes("@todo/") || lower.includes("/@todo/")) {
@@ -261,15 +224,14 @@ export function discoverChangesReferences(
     const rawRefs = extractFileReferences(message.text);
 
     for (const rawRef of rawRefs) {
-      const cleaned = cleanRawRef(rawRef);
+      const cleaned = cleanDiscoveredChangesRawRef(rawRef);
       if (cleaned.length === 0) continue;
 
       const resolvedPath = resolveReferencePath(cleaned, _cwd);
-      const filename = basenameOf(resolvedPath);
+      const filename = basenameOfChangesPath(resolvedPath);
       if (filename.length === 0) continue;
 
-      // Use cleaned path as dedup key
-      const dedupeKey = resolvedPath.toLowerCase();
+      const dedupeKey = canonicalizeChangesPathForLookup(resolvedPath);
       if (seenPaths.has(dedupeKey)) continue;
 
       const section = categorizeReference(cleaned);

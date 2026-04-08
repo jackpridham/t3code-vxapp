@@ -18,6 +18,8 @@ import {
   type ChangesExplorerStat,
   type ChangesExplorerTreeNode,
 } from "../lib/changesExplorerTree";
+import { getChangeKindTextClass } from "../lib/changeKindColor";
+import { canonicalizeChangesPathForLookup, stripChangesBasePath } from "../lib/changesPath";
 import { cn } from "~/lib/utils";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { DiffStatLabel, hasNonZeroStat } from "./chat/DiffStatLabel";
@@ -46,24 +48,8 @@ interface ChangesExplorerTreeProps {
   basePath: string | null;
   resolvedTheme: "light" | "dark";
   fileStatsByPath?: ReadonlyMap<string, ChangesExplorerStat | null>;
+  fileKindsByPath: ReadonlyMap<string, string | undefined> | undefined;
   onSelectItem: (item: DiscoveredFileReference) => void;
-}
-
-function normalizePathValue(pathValue: string): string {
-  return pathValue.replaceAll("\\", "/");
-}
-
-function stripBasePath(pathValue: string, basePath: string | null): string {
-  const normalizedPath = normalizePathValue(pathValue);
-  const normalizedBase = basePath ? normalizePathValue(basePath).replace(/\/+$/, "") : null;
-  if (!normalizedBase) {
-    return normalizedPath;
-  }
-  if (normalizedPath === normalizedBase) {
-    return "";
-  }
-  const prefix = `${normalizedBase}/`;
-  return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : normalizedPath;
 }
 
 function collectAncestorDirectoryPaths(
@@ -74,7 +60,7 @@ function collectAncestorDirectoryPaths(
     return new Set();
   }
 
-  const relativePath = stripBasePath(pathValue, basePath).replace(/^\/+/, "");
+  const relativePath = stripChangesBasePath(pathValue, basePath).replace(/^\/+/, "");
   const segments = relativePath.split("/").filter((segment) => segment.length > 0);
   const paths = new Set<string>();
   for (let index = 1; index < segments.length; index += 1) {
@@ -100,6 +86,7 @@ function renderTreeNode(
     onToggleDirectory: (directoryPath: string) => void;
     onSelectItem: (item: DiscoveredFileReference) => void;
     resolvedTheme: "light" | "dark";
+    fileKindsByPath: ReadonlyMap<string, string | undefined> | undefined;
   },
 ): ReactNode {
   const leftPadding = 8 + depth * 14;
@@ -141,6 +128,7 @@ function renderTreeNode(
                 renderTreeNode(child, depth + 1, {
                   ...options,
                   collapsedSections: options.collapsedSections,
+                  fileKindsByPath: options.fileKindsByPath,
                 }),
               )}
             </div>
@@ -189,6 +177,7 @@ function renderTreeNode(
               renderTreeNode(child, depth + 1, {
                 ...options,
                 collapsedSections: options.collapsedSections,
+                fileKindsByPath: options.fileKindsByPath,
               }),
             )}
           </div>
@@ -216,7 +205,14 @@ function renderTreeNode(
         theme={options.resolvedTheme}
         className="size-3.5 text-muted-foreground/70"
       />
-      <span className="truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90">
+      <span
+        className={cn(
+          "truncate font-mono text-[11px]",
+          getChangeKindTextClass(
+            options.fileKindsByPath?.get(canonicalizeChangesPathForLookup(node.item.resolvedPath)),
+          ),
+        )}
+      >
         {node.name}
       </span>
       {node.stat && hasNonZeroStat(node.stat) ? (
@@ -235,6 +231,7 @@ export const ChangesExplorerTree = memo(function ChangesExplorerTree({
   basePath,
   resolvedTheme,
   fileStatsByPath,
+  fileKindsByPath,
   onSelectItem,
 }: ChangesExplorerTreeProps) {
   const tree = useMemo(
@@ -295,6 +292,7 @@ export const ChangesExplorerTree = memo(function ChangesExplorerTree({
           onToggleDirectory: handleToggleDirectory,
           onSelectItem,
           resolvedTheme,
+          fileKindsByPath,
         }),
       )}
     </div>

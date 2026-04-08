@@ -21,10 +21,14 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import {
+  ChangesDrawerVisibility,
   ChangesPanelFilesChangedViewType,
+  ChangesPanelWindowNavigationMode,
   type ClientSettings,
   ClientSettingsSchema,
   DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE,
+  DEFAULT_CHANGES_DRAWER_VISIBILITY,
+  DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   SidebarProjectSortOrder,
@@ -215,6 +219,20 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.changesPanelFilesChangedViewType = legacySettings.changesPanelFilesChangedViewType;
   } else if (legacySettings.changesPanelFilesChangedViewType === undefined) {
     patch.changesPanelFilesChangedViewType = DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE;
+  }
+
+  if (Schema.is(ChangesDrawerVisibility)(legacySettings.changesDrawerVisibility)) {
+    patch.changesDrawerVisibility = legacySettings.changesDrawerVisibility;
+  } else if (legacySettings.changesDrawerVisibility === undefined) {
+    patch.changesDrawerVisibility = DEFAULT_CHANGES_DRAWER_VISIBILITY;
+  }
+
+  if (
+    Schema.is(ChangesPanelWindowNavigationMode)(legacySettings.changesPanelWindowNavigationMode)
+  ) {
+    patch.changesPanelWindowNavigationMode = legacySettings.changesPanelWindowNavigationMode;
+  } else if (legacySettings.changesPanelWindowNavigationMode === undefined) {
+    patch.changesPanelWindowNavigationMode = DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE;
   }
 
   if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {

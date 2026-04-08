@@ -44,6 +44,7 @@ import {
 } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { isArtifactWindowPath } from "../lib/artifactWindow";
+import { isChangesWindowPath } from "../lib/changesWindow";
 import { isSidebarWindowPath } from "../lib/sidebarWindow";
 
 export const Route = createRootRouteWithContext<{
@@ -56,10 +57,14 @@ export const Route = createRootRouteWithContext<{
   }),
 });
 
+export function isStandaloneRootRoutePath(pathname: string): boolean {
+  return isArtifactWindowPath(pathname) || isChangesWindowPath(pathname);
+}
+
 function RootRouteView() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isSidebarWindowRoute = isSidebarWindowPath(pathname);
-  const isArtifactWindowRoute = isArtifactWindowPath(pathname);
+  const isStandaloneWindowRoute = isStandaloneRootRoutePath(pathname);
 
   if (!readNativeApi()) {
     return (
@@ -73,16 +78,14 @@ function RootRouteView() {
     );
   }
 
-  if (isArtifactWindowRoute) {
-    return <Outlet />;
-  }
-
   return (
     <ToastProvider>
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
-        {isSidebarWindowRoute ? (
+        {isStandaloneWindowRoute ? (
+          <Outlet />
+        ) : isSidebarWindowRoute ? (
           <Outlet />
         ) : (
           <AppSidebarLayout>

@@ -1,78 +1,50 @@
-import {
-  type EditorId,
-  type ProjectHook,
-  type ProjectScript,
-  type ResolvedKeybindingsConfig,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { type ProjectHook } from "@t3tools/contracts";
 import { memo } from "react";
-import GitActionsControl from "../GitActionsControl";
-import { FolderOpenIcon, TerminalSquareIcon } from "lucide-react";
+import { ArrowUpRightIcon, FolderOpenIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import ProjectHooksControl, { type NewProjectHookInput } from "../ProjectHooksControl";
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
-import { OpenInPicker } from "./OpenInPicker";
+import { Button } from "../ui/button";
 
 interface ChatHeaderProps {
-  activeThreadId: ThreadId;
   activeThreadTitle: string;
   activeThreadLabels?: string[] | undefined;
   activeProjectName: string | undefined;
-  isGitRepo: boolean;
-  openInCwd: string | null;
   activeProjectHooks: ProjectHook[] | undefined;
-  activeProjectScripts: ProjectScript[] | undefined;
-  preferredScriptId: string | null;
-  keybindings: ResolvedKeybindingsConfig;
-  availableEditors: ReadonlyArray<EditorId>;
   terminalAvailable: boolean;
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
   changesPanelShortcutLabel: string | null;
   changesPanelOpen: boolean;
-  gitCwd: string | null;
-  onRunProjectScript: (script: ProjectScript) => void;
-  onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
-  onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
-  onDeleteProjectScript: (scriptId: string) => Promise<void>;
+  showChangesDrawerToggle: boolean;
   onAddProjectHook: (input: NewProjectHookInput) => Promise<void>;
   onUpdateProjectHook: (hookId: string, input: NewProjectHookInput) => Promise<void>;
   onDeleteProjectHook: (hookId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleChangesPanel: () => void;
+  onOpenChangesWindow: () => void;
   onLabelClick?: (label: string) => void;
 }
 
 export const ChatHeader = memo(function ChatHeader({
-  activeThreadId,
   activeThreadTitle,
   activeThreadLabels,
   activeProjectName,
-  isGitRepo,
-  openInCwd,
   activeProjectHooks,
-  activeProjectScripts,
-  preferredScriptId,
-  keybindings,
-  availableEditors,
   terminalAvailable,
   terminalOpen,
   terminalToggleShortcutLabel,
   changesPanelShortcutLabel,
   changesPanelOpen,
-  gitCwd,
-  onRunProjectScript,
-  onAddProjectScript,
-  onUpdateProjectScript,
-  onDeleteProjectScript,
+  showChangesDrawerToggle,
   onAddProjectHook,
   onUpdateProjectHook,
   onDeleteProjectHook,
   onToggleTerminal,
   onToggleChangesPanel,
+  onOpenChangesWindow,
   onLabelClick,
 }: ChatHeaderProps) {
   return (
@@ -88,11 +60,6 @@ export const ChatHeader = memo(function ChatHeader({
         {activeProjectName && (
           <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
             <span className="min-w-0 truncate">{activeProjectName}</span>
-          </Badge>
-        )}
-        {activeProjectName && !isGitRepo && (
-          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
-            No Git
           </Badge>
         )}
         {activeThreadLabels && activeThreadLabels.length > 0 && (
@@ -112,17 +79,6 @@ export const ChatHeader = memo(function ChatHeader({
         )}
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
-        {activeProjectScripts && (
-          <ProjectScriptsControl
-            scripts={activeProjectScripts}
-            keybindings={keybindings}
-            preferredScriptId={preferredScriptId}
-            onRunScript={onRunProjectScript}
-            onAddScript={onAddProjectScript}
-            onUpdateScript={onUpdateProjectScript}
-            onDeleteScript={onDeleteProjectScript}
-          />
-        )}
         {activeProjectHooks && (
           <ProjectHooksControl
             hooks={activeProjectHooks}
@@ -131,14 +87,6 @@ export const ChatHeader = memo(function ChatHeader({
             onDeleteHook={onDeleteProjectHook}
           />
         )}
-        {activeProjectName && (
-          <OpenInPicker
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            openInCwd={openInCwd}
-          />
-        )}
-        {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -166,24 +114,42 @@ export const ChatHeader = memo(function ChatHeader({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Toggle
+              <Button
                 className="shrink-0"
-                pressed={changesPanelOpen}
-                onPressedChange={onToggleChangesPanel}
-                aria-label="Toggle changes panel"
+                onClick={onOpenChangesWindow}
+                aria-label="Open changes in separate window"
                 variant="outline"
-                size="xs"
+                size="icon-xs"
               >
-                <FolderOpenIcon className="size-3" />
-              </Toggle>
+                <ArrowUpRightIcon className="size-3.5" />
+              </Button>
             }
           />
-          <TooltipPopup side="bottom">
-            {changesPanelShortcutLabel
-              ? `Toggle changes panel (${changesPanelShortcutLabel})`
-              : "Toggle changes panel"}
-          </TooltipPopup>
+          <TooltipPopup side="bottom">Open changes in separate window</TooltipPopup>
         </Tooltip>
+        {showChangesDrawerToggle ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  className="shrink-0"
+                  pressed={changesPanelOpen}
+                  onPressedChange={onToggleChangesPanel}
+                  aria-label="Toggle changes panel"
+                  variant="outline"
+                  size="xs"
+                >
+                  <FolderOpenIcon className="size-3" />
+                </Toggle>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {changesPanelShortcutLabel
+                ? `Toggle changes panel (${changesPanelShortcutLabel})`
+                : "Toggle changes panel"}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
       </div>
     </div>
   );

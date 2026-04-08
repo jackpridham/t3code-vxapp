@@ -19,6 +19,7 @@ import { Route as SettingsThreadsRouteImport } from './routes/settings.threads'
 import { Route as SettingsNotificationsRouteImport } from './routes/settings.notifications'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as ChangesThreadIdRouteImport } from './routes/changes.$threadId'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
 
 const SidebarRoute = SidebarRouteImport.update({
@@ -70,6 +71,11 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   path: '/archived',
   getParentRoute: () => SettingsRoute,
 } as any)
+const ChangesThreadIdRoute = ChangesThreadIdRouteImport.update({
+  id: '/changes/$threadId',
+  path: '/changes/$threadId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
+  '/changes/$threadId': typeof ChangesThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
+  '/changes/$threadId': typeof ChangesThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
+  '/changes/$threadId': typeof ChangesThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sidebar'
     | '/$threadId'
+    | '/changes/$threadId'
     | '/settings/archived'
     | '/settings/general'
     | '/settings/notifications'
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sidebar'
     | '/$threadId'
+    | '/changes/$threadId'
     | '/settings/archived'
     | '/settings/general'
     | '/settings/notifications'
@@ -146,6 +157,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sidebar'
     | '/_chat/$threadId'
+    | '/changes/$threadId'
     | '/settings/archived'
     | '/settings/general'
     | '/settings/notifications'
@@ -159,6 +171,7 @@ export interface RootRouteChildren {
   ArtifactRoute: typeof ArtifactRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   SidebarRoute: typeof SidebarRouteWithChildren
+  ChangesThreadIdRoute: typeof ChangesThreadIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -233,6 +246,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/changes/$threadId': {
+      id: '/changes/$threadId'
+      path: '/changes/$threadId'
+      fullPath: '/changes/$threadId'
+      preLoaderRoute: typeof ChangesThreadIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat/$threadId': {
       id: '/_chat/$threadId'
       path: '/$threadId'
@@ -289,6 +309,7 @@ const rootRouteChildren: RootRouteChildren = {
   ArtifactRoute: ArtifactRoute,
   SettingsRoute: SettingsRouteWithChildren,
   SidebarRoute: SidebarRouteWithChildren,
+  ChangesThreadIdRoute: ChangesThreadIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

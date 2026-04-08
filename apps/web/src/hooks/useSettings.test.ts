@@ -6,6 +6,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     expect(
       buildLegacyClientSettingsMigrationPatch({
         allowActiveThreadsInFold: true,
+        changesPanelWindowNavigationMode: "static",
         confirmThreadArchive: true,
         confirmThreadDelete: false,
         maxProjectThreadsBeforeFolding: 3,
@@ -14,11 +15,21 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       }),
     ).toEqual({
       allowActiveThreadsInFold: true,
+      changesDrawerVisibility: "always_show",
+      changesPanelFilesChangedViewType: "list",
+      changesPanelWindowNavigationMode: "static",
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       maxProjectThreadsBeforeFolding: 3,
       sidebarProjectSortOrder: "manual",
       showGitignoredFilesInMentions: true,
+    });
+  });
+
+  it("defaults the changes window navigation mode during legacy migration", () => {
+    expect(buildLegacyClientSettingsMigrationPatch({})).toMatchObject({
+      changesDrawerVisibility: "always_show",
+      changesPanelWindowNavigationMode: "dynamic",
     });
   });
 });

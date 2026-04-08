@@ -7,7 +7,9 @@ import { discoverChangesReferences, type ChangesPanelGroup } from "../changesDis
 
 const state = vi.hoisted(() => ({
   settings: {
+    changesDrawerVisibility: "always_show" as "always_show" | "always_hide",
     changesPanelFilesChangedViewType: "list" as "list" | "tree",
+    changesPanelWindowNavigationMode: "dynamic" as "dynamic" | "static",
   },
   uiState: {
     changesPanelOpen: true,
@@ -29,6 +31,8 @@ const state = vi.hoisted(() => ({
     error: null as Error | null,
     isLoading: false,
   },
+  navigate: vi.fn(),
+  setChangesWindowTarget: vi.fn(),
 }));
 
 vi.mock("../uiStateStore", () => ({
@@ -55,6 +59,12 @@ vi.mock("../hooks/useSettings", () => ({
 vi.mock("@tanstack/react-router", () => ({
   useParams: (options: { select: (value: { threadId?: string }) => unknown }) =>
     options.select({ threadId: "thread-1" }),
+  useNavigate: () => state.navigate,
+}));
+
+vi.mock("../lib/changesWindowSync", () => ({
+  buildChangesWindowTarget: (input: unknown) => input,
+  useChangesWindowTarget: () => [null, state.setChangesWindowTarget] as const,
 }));
 
 vi.mock("../editorPreferences", () => ({
@@ -66,6 +76,7 @@ vi.mock("../nativeApi", () => ({
 }));
 
 vi.mock("../lib/providerReactQuery", () => ({
+  checkpointDiffQueryOptions: vi.fn(() => ({ queryKey: ["mock-diff"] })),
   checkpointFileDiffQueryOptions: vi.fn(() => ({ queryKey: ["mock-file-diff"] })),
 }));
 
@@ -81,7 +92,7 @@ vi.mock("@pierre/diffs/react", () => ({
   FileDiff: () => <div data-testid="single-file-diff" />,
 }));
 
-import { ChangesPanel } from "./ChangesPanel";
+import { ChangesPanel, ChangesWindow } from "./ChangesPanel";
 
 // ── Test helpers ────────────────────────────────────────────────────────────
 
@@ -105,7 +116,9 @@ function renderPanel() {
 
 beforeEach(() => {
   state.settings = {
+    changesDrawerVisibility: "always_show",
     changesPanelFilesChangedViewType: "list",
+    changesPanelWindowNavigationMode: "dynamic",
   };
   state.uiState = {
     changesPanelOpen: true,
@@ -127,6 +140,8 @@ beforeEach(() => {
     error: null,
     isLoading: false,
   };
+  state.navigate = vi.fn();
+  state.setChangesWindowTarget = vi.fn();
 });
 
 // ── useChangesDiscovery logic (tested via pure functions) ────────────────────
@@ -193,7 +208,7 @@ describe("ChangesPanel discovery integration", () => {
 });
 
 describe("ChangesPanel component", () => {
-  it("shows code preview mode with a Show diff action for file changes", () => {
+  it("renders the drawer as a file browser without the preview pane", () => {
     state.groups = [
       {
         section: "files_changed",
@@ -247,16 +262,17 @@ index 1111111..2222222 100644
 
     const html = renderPanel();
 
-    expect(html).toContain("Show diff");
-    expect(html).not.toContain("Show file");
-    expect(html).toContain("code-file-viewer__plain");
     expect(html).toContain("example.ts");
-    expect(html).not.toContain(">src<");
+    expect(html).not.toContain("Code viewer");
+    expect(html).not.toContain("Markdown viewer");
+    expect(html).not.toContain("Open changes in separate window");
   });
 
   it("renders the files changed section as a tree when configured", () => {
     state.settings = {
+      changesDrawerVisibility: "always_show",
       changesPanelFilesChangedViewType: "tree",
+      changesPanelWindowNavigationMode: "dynamic",
     };
     state.groups = [
       {
@@ -300,7 +316,7 @@ index 1111111..2222222 100644
     expect(html).toContain("example.ts");
   });
 
-  it("switches to inline diff mode for the same code file", () => {
+  it("switches to inline diff mode in the standalone window", () => {
     state.groups = [
       {
         section: "files_changed",
@@ -352,13 +368,81 @@ index 1111111..2222222 100644
       isLoading: false,
     };
 
-    const html = renderPanel();
+    const html = renderToStaticMarkup(
+      <ChangesWindow
+        threadId={ThreadId.makeUnsafe("thread-1")}
+        initialPath="/repo/src/example.ts"
+        initialMode="diff"
+      />,
+    );
 
     expect(html).toContain("Show file");
     expect(html).toContain('data-testid="single-file-diff"');
   });
 
-  it("keeps markdown selections in preview mode", () => {
+  it("still enables file diff rendering when checkpoint turn counts must be inferred", () => {
+    state.groups = [
+      {
+        section: "files_changed",
+        label: "Files Changed",
+        items: [
+          {
+            rawRef: "/repo/src/example.ts",
+            resolvedPath: "/repo/src/example.ts",
+            filename: "example.ts",
+            section: "files_changed",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [
+            {
+              turnId: TurnId.makeUnsafe("turn-1"),
+              completedAt: "2026-04-07T00:00:00.000Z",
+              files: [],
+            },
+          ],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+    state.queryResult = {
+      data: {
+        diff: `
+diff --git a/src/example.ts b/src/example.ts
+index 1111111..2222222 100644
+--- a/src/example.ts
++++ b/src/example.ts
+@@ -1,1 +1,2 @@
+ const first = 1;
++const second = 2;
+`,
+      },
+      error: null,
+      isLoading: false,
+    };
+
+    const html = renderToStaticMarkup(
+      <ChangesWindow
+        threadId={ThreadId.makeUnsafe("thread-1")}
+        initialPath="/repo/src/example.ts"
+        initialMode="diff"
+      />,
+    );
+
+    expect(html).toContain('data-testid="single-file-diff"');
+  });
+
+  it("keeps markdown selections in preview mode in the standalone window", () => {
     state.groups = [
       {
         section: "artifacts",
@@ -395,10 +479,99 @@ index 1111111..2222222 100644
       changesPanelContentMode: "preview",
     };
 
-    const html = renderPanel();
+    const html = renderToStaticMarkup(
+      <ChangesWindow
+        threadId={ThreadId.makeUnsafe("thread-1")}
+        initialPath="/repo/@Docs/@Scratch/repo/notes.md"
+        initialMode="preview"
+      />,
+    );
 
     expect(html).not.toContain("Show diff");
     expect(html).toContain("Markdown viewer");
+  });
+
+  it("shows the pop-out action in the drawer when a file is selected", () => {
+    state.groups = [
+      {
+        section: "plans",
+        label: "Plans",
+        items: [
+          {
+            rawRef: "/repo/@Docs/@TODO/repo/PLAN_repo.md",
+            resolvedPath: "/repo/@Docs/@TODO/repo/PLAN_repo.md",
+            filename: "PLAN_repo.md",
+            section: "plans",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+    state.uiState = {
+      ...state.uiState,
+      changesPanelActivePath: "/repo/@Docs/@TODO/repo/PLAN_repo.md",
+      changesPanelActiveSection: "plans",
+    };
+
+    const html = renderPanel();
+
+    expect(html).not.toContain("Open changes in separate window");
+  });
+
+  it("shows the thread title and hides the pop-out action in the standalone window", () => {
+    state.groups = [
+      {
+        section: "plans",
+        label: "Plans",
+        items: [
+          {
+            rawRef: "/repo/@Docs/@TODO/repo/PLAN_repo.md",
+            resolvedPath: "/repo/@Docs/@TODO/repo/PLAN_repo.md",
+            filename: "PLAN_repo.md",
+            section: "plans",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          title: "Thread title",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+
+    const html = renderToStaticMarkup(
+      <ChangesWindow
+        threadId={ThreadId.makeUnsafe("thread-1")}
+        initialPath="/repo/@Docs/@TODO/repo/PLAN_repo.md"
+        initialMode="preview"
+      />,
+    );
+
+    expect(html).toContain("Thread title");
+    expect(html).not.toContain("Open changes in separate window");
   });
 });
 

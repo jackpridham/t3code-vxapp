@@ -17,8 +17,6 @@ import {
   type ServerProvider,
   type ThreadId,
   type TurnId,
-  type EditorId,
-  type KeybindingCommand,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
@@ -32,11 +30,13 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
-import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
+import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
 import { projectSkillEntriesQueryOptions } from "~/lib/skillReactQuery";
 import type { ProjectSkillEntry } from "~/lib/skillReferences";
 import { isElectron } from "../env";
 import { stripDiffSearchParams } from "../diffRouteSearch";
+import { buildChangesWindowHref } from "../lib/changesWindow";
+import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -121,12 +121,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { cn, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { toastManager } from "./ui/toast";
-import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
-import { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import { type NewProjectHookInput } from "./ProjectHooksControl";
 import {
-  commandForProjectScript,
-  nextProjectScriptId,
   projectScriptCwd,
   projectScriptRuntimeEnv,
   projectScriptIdFromCommand,
@@ -214,7 +210,6 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_SKILL_ENTRIES: ProjectSkillEntry[] = [];
-const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
@@ -555,7 +550,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [composerTrigger, setComposerTrigger] = useState<ComposerTrigger | null>(() =>
     detectComposerTrigger(prompt, prompt.length),
   );
-  const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
+  const [, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
     LastInvokedScriptByProjectSchema,
@@ -1253,7 +1248,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const effectiveReferenceQuery = referenceTriggerQuery.length > 0 ? debouncedReferenceQuery : "";
   const branchesQuery = useQuery(gitBranchesQueryOptions(gitCwd));
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
-  const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
   const modelOptionsByProvider = useMemo(
     () => ({
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
@@ -1450,6 +1444,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const toggleChangesPanel = useUiStateStore((s) => s.toggleChangesPanel);
   const changesPanelOpen = useUiStateStore((s) => s.changesPanelOpen);
+  const changesPanelActivePath = useUiStateStore((s) => s.changesPanelActivePath);
+  const changesPanelContentMode = useUiStateStore((s) => s.changesPanelContentMode);
+  const closeChangesPanel = useUiStateStore((s) => s.closeChangesPanel);
+  const [, setChangesWindowTarget] = useChangesWindowTarget();
+  const showChangesDrawerToggle = settings.changesDrawerVisibility === "always_show";
 
   const envLocked = Boolean(activeThread && threadHasStarted(activeThread));
   const activeTerminalGroup =
@@ -1550,6 +1549,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!activeThreadId) return;
     setTerminalOpen(!terminalState.terminalOpen);
   }, [activeThreadId, setTerminalOpen, terminalState.terminalOpen]);
+  const openChangesWindow = useCallback(() => {
+    if (!activeThreadId || typeof window === "undefined") {
+      return;
+    }
+
+    setChangesWindowTarget(
+      buildChangesWindowTarget({
+        threadId: activeThreadId,
+        path: changesPanelActivePath,
+        mode: changesPanelContentMode,
+      }),
+    );
+    const href = buildChangesWindowHref({
+      threadId: activeThreadId,
+      path: changesPanelActivePath,
+      mode: changesPanelContentMode,
+    });
+    window.open(href, "_blank", "noopener,noreferrer,popup=yes,width=1320,height=960");
+    closeChangesPanel();
+  }, [
+    activeThreadId,
+    changesPanelActivePath,
+    changesPanelContentMode,
+    closeChangesPanel,
+    setChangesWindowTarget,
+  ]);
   const splitTerminal = useCallback(() => {
     if (!activeThreadId || hasReachedSplitLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
@@ -1731,13 +1756,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     runProjectScript,
   ]);
   const persistProjectMeta = useCallback(
-    async (input: {
-      projectId: ProjectId;
-      scripts?: ProjectScript[];
-      hooks?: ProjectHook[];
-      keybinding?: string | null;
-      keybindingCommand?: KeybindingCommand;
-    }) => {
+    async (input: { projectId: ProjectId; scripts?: ProjectScript[]; hooks?: ProjectHook[] }) => {
       const api = readNativeApi();
       if (!api) return;
 
@@ -1748,113 +1767,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ...(input.scripts !== undefined ? { scripts: input.scripts } : {}),
         ...(input.hooks !== undefined ? { hooks: input.hooks } : {}),
       });
-
-      const keybindingRule =
-        input.keybindingCommand === undefined
-          ? null
-          : decodeProjectScriptKeybindingRule({
-              keybinding: input.keybinding,
-              command: input.keybindingCommand,
-            });
-
-      if (isElectron && keybindingRule) {
-        await api.server.upsertKeybinding(keybindingRule);
-        await queryClient.invalidateQueries({ queryKey: serverQueryKeys.all });
-      }
     },
-    [queryClient],
-  );
-  const saveProjectScript = useCallback(
-    async (input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const nextId = nextProjectScriptId(
-        input.name,
-        activeProject.scripts.map((script) => script.id),
-      );
-      const nextScript: ProjectScript = {
-        id: nextId,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = input.runOnWorktreeCreate
-        ? [
-            ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-            ),
-            nextScript,
-          ]
-        : [...activeProject.scripts, nextScript];
-
-      await persistProjectMeta({
-        projectId: activeProject.id,
-        scripts: nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(nextId),
-      });
-    },
-    [activeProject, persistProjectMeta],
-  );
-  const updateProjectScript = useCallback(
-    async (scriptId: string, input: NewProjectScriptInput) => {
-      if (!activeProject) return;
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
-      if (!existingScript) {
-        throw new Error("Script not found.");
-      }
-
-      const updatedScript: ProjectScript = {
-        ...existingScript,
-        name: input.name,
-        command: input.command,
-        icon: input.icon,
-        runOnWorktreeCreate: input.runOnWorktreeCreate,
-      };
-      const nextScripts = activeProject.scripts.map((script) =>
-        script.id === scriptId
-          ? updatedScript
-          : input.runOnWorktreeCreate
-            ? { ...script, runOnWorktreeCreate: false }
-            : script,
-      );
-
-      await persistProjectMeta({
-        projectId: activeProject.id,
-        scripts: nextScripts,
-        keybinding: input.keybinding,
-        keybindingCommand: commandForProjectScript(scriptId),
-      });
-    },
-    [activeProject, persistProjectMeta],
-  );
-  const deleteProjectScript = useCallback(
-    async (scriptId: string) => {
-      if (!activeProject) return;
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
-
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
-
-      try {
-        await persistProjectMeta({
-          projectId: activeProject.id,
-          scripts: nextScripts,
-          keybinding: null,
-          keybindingCommand: commandForProjectScript(scriptId),
-        });
-        toastManager.add({
-          type: "success",
-          title: `Deleted action "${deletedName ?? "Unknown"}"`,
-        });
-      } catch (error) {
-        toastManager.add({
-          type: "error",
-          title: "Could not delete action",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        });
-      }
-    },
-    [activeProject, persistProjectMeta],
+    [],
   );
   const saveProjectHook = useCallback(
     async (input: NewProjectHookInput) => {
@@ -2513,6 +2427,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (command === "diff.toggle") {
         event.preventDefault();
         event.stopPropagation();
+        if (!showChangesDrawerToggle) {
+          return;
+        }
         toggleChangesPanel();
         return;
       }
@@ -2538,6 +2455,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
+    showChangesDrawerToggle,
     toggleChangesPanel,
     toggleTerminalVisibility,
   ]);
@@ -3853,36 +3771,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
         )}
       >
         <ChatHeader
-          activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}
           activeThreadLabels={activeThread.labels}
           activeProjectName={activeProject?.name}
-          isGitRepo={isGitRepo}
-          openInCwd={gitCwd}
           activeProjectHooks={activeProject?.hooks}
-          activeProjectScripts={activeProject?.scripts}
-          preferredScriptId={
-            activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-          }
-          keybindings={keybindings}
-          availableEditors={availableEditors}
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           changesPanelShortcutLabel={changesPanelShortcutLabel}
           changesPanelOpen={changesPanelOpen}
-          gitCwd={gitCwd}
-          onRunProjectScript={(script) => {
-            void runProjectScript(script);
-          }}
-          onAddProjectScript={saveProjectScript}
-          onUpdateProjectScript={updateProjectScript}
-          onDeleteProjectScript={deleteProjectScript}
+          showChangesDrawerToggle={showChangesDrawerToggle}
           onAddProjectHook={saveProjectHook}
           onUpdateProjectHook={updateProjectHook}
           onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleChangesPanel={toggleChangesPanel}
+          onOpenChangesWindow={openChangesWindow}
           onLabelClick={(label) => {
             if (activeProject) {
               toggleProjectLabelFilter(activeProject.id, label);

@@ -13,6 +13,8 @@ import {
 } from "../components/DiffPanelShell";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { type DiffRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
+import { useSettings } from "../hooks/useSettings";
+import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
@@ -65,8 +67,8 @@ const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
 };
 
 const CHANGES_PANEL_WIDTH_STORAGE_KEY = "chat_changes_panel_width";
-const CHANGES_PANEL_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
-const CHANGES_PANEL_MIN_WIDTH = 26 * 16;
+const CHANGES_PANEL_DEFAULT_WIDTH = "clamp(18rem,24vw,24rem)";
+const CHANGES_PANEL_MIN_WIDTH = 16 * 16;
 
 const ChangesPanelInlineSidebar = (props: {
   changesPanelOpen: boolean;
@@ -109,6 +111,30 @@ const ChangesPanelInlineSidebar = (props: {
   );
 };
 
+const ChangesWindowNavigationPublisher = (props: { threadId: ThreadId }) => {
+  const [, setChangesWindowTarget] = useChangesWindowTarget();
+
+  useEffect(() => {
+    setChangesWindowTarget((current) => {
+      if (
+        current?.threadId === props.threadId &&
+        current.path === null &&
+        current.mode === "preview"
+      ) {
+        return current;
+      }
+
+      return buildChangesWindowTarget({
+        threadId: props.threadId,
+        path: null,
+        mode: "preview",
+      });
+    });
+  }, [props.threadId, setChangesWindowTarget]);
+
+  return null;
+};
+
 function ChatThreadRouteView() {
   const bootstrapComplete = useStore((store) => store.bootstrapComplete);
   const navigate = useNavigate();
@@ -126,6 +152,9 @@ function ChatThreadRouteView() {
   const changesPanelOpen = useUiStateStore((s) => s.changesPanelOpen);
   const openChangesPanel = useUiStateStore((s) => s.openChangesPanel);
   const closeChangesPanel = useUiStateStore((s) => s.closeChangesPanel);
+  const settings = useSettings();
+  const changesDrawerVisibility = settings.changesDrawerVisibility;
+  const showChangesDrawer = changesDrawerVisibility === "always_show";
 
   // Diff search params (retained for deep-linking to specific file diffs)
   const diffOpen = search.diff === "1";
@@ -143,6 +172,12 @@ function ChatThreadRouteView() {
       setHasOpenedDiff(true);
     }
   }, [diffOpen]);
+
+  useEffect(() => {
+    if (!showChangesDrawer && changesPanelOpen) {
+      closeChangesPanel();
+    }
+  }, [changesPanelOpen, closeChangesPanel, showChangesDrawer]);
 
   useEffect(() => {
     if (!bootstrapComplete) {
@@ -163,14 +198,17 @@ function ChatThreadRouteView() {
 
   return (
     <>
+      <ChangesWindowNavigationPublisher threadId={threadId} />
       <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
         <ChatView key={threadId} threadId={threadId} />
       </SidebarInset>
-      <ChangesPanelInlineSidebar
-        changesPanelOpen={changesPanelOpen}
-        onClose={closeChangesPanel}
-        onOpen={() => openChangesPanel()}
-      />
+      {showChangesDrawer ? (
+        <ChangesPanelInlineSidebar
+          changesPanelOpen={changesPanelOpen}
+          onClose={closeChangesPanel}
+          onOpen={() => openChangesPanel()}
+        />
+      ) : null}
       {/* Diff panel overlay for when a specific file diff is requested */}
       {diffOpen && (
         <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>

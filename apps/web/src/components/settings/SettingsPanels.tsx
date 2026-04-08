@@ -21,7 +21,9 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_UNIFIED_SETTINGS,
+  type ChangesDrawerVisibility,
   type ChangesPanelFilesChangedViewType,
+  type ChangesPanelWindowNavigationMode,
   type SidebarProjectSortOrder,
 } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
@@ -488,6 +490,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.changesPanelFilesChangedViewType
         ? ["Changes panel file view"]
         : []),
+      ...(settings.changesDrawerVisibility !== DEFAULT_UNIFIED_SETTINGS.changesDrawerVisibility
+        ? ["Changes drawer visibility"]
+        : []),
+      ...(settings.changesPanelWindowNavigationMode !==
+      DEFAULT_UNIFIED_SETTINGS.changesPanelWindowNavigationMode
+        ? ["Changes window navigation"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -515,6 +524,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       isGitWritingModelDirty,
       settings.allowActiveThreadsInFold,
       settings.changesPanelFilesChangedViewType,
+      settings.changesDrawerVisibility,
+      settings.changesPanelWindowNavigationMode,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.defaultThreadEnvMode,
@@ -555,6 +566,19 @@ const CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE_LABELS: Record<
 > = {
   list: "File List",
   tree: "File Tree",
+};
+
+const CHANGES_PANEL_WINDOW_NAVIGATION_MODE_LABELS: Record<
+  ChangesPanelWindowNavigationMode,
+  string
+> = {
+  dynamic: "Dynamic",
+  static: "Static",
+};
+
+const CHANGES_DRAWER_VISIBILITY_LABELS: Record<ChangesDrawerVisibility, string> = {
+  always_show: "Always show",
+  always_hide: "Always hide",
 };
 
 export function GeneralSettingsPanel() {
@@ -1627,6 +1651,47 @@ export function ThreadsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection title="Changes Panel">
         <SettingsRow
+          title="Changes Drawer"
+          description="Control whether the top-level Changes drawer toggle is visible in the thread header. Mobile uses the same responsive drawer pattern when the toggle is shown."
+          resetAction={
+            settings.changesDrawerVisibility !==
+            DEFAULT_UNIFIED_SETTINGS.changesDrawerVisibility ? (
+              <SettingResetButton
+                label="changes drawer visibility"
+                onClick={() =>
+                  updateSettings({
+                    changesDrawerVisibility: DEFAULT_UNIFIED_SETTINGS.changesDrawerVisibility,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.changesDrawerVisibility}
+              onValueChange={(value) => {
+                if (value === "always_show" || value === "always_hide") {
+                  updateSettings({ changesDrawerVisibility: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Changes drawer visibility">
+                <SelectValue>
+                  {CHANGES_DRAWER_VISIBILITY_LABELS[settings.changesDrawerVisibility]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="always_show">
+                  {CHANGES_DRAWER_VISIBILITY_LABELS.always_show}
+                </SelectItem>
+                <SelectItem hideIndicator value="always_hide">
+                  {CHANGES_DRAWER_VISIBILITY_LABELS.always_hide}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
           title="Files Changed view type"
           description="Choose whether changed code files render as a flat filename list or a directory tree. Plans, artifacts, working memory, changelog, and reports always stay as flat file lists."
           resetAction={
@@ -1667,6 +1732,52 @@ export function ThreadsSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="tree">
                   {CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE_LABELS.tree}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          title="Changes window navigation"
+          description="Choose whether the standalone Changes window follows thread navigation in the main app or stays pinned to the thread it was opened for."
+          resetAction={
+            settings.changesPanelWindowNavigationMode !==
+            DEFAULT_UNIFIED_SETTINGS.changesPanelWindowNavigationMode ? (
+              <SettingResetButton
+                label="changes window navigation"
+                onClick={() =>
+                  updateSettings({
+                    changesPanelWindowNavigationMode:
+                      DEFAULT_UNIFIED_SETTINGS.changesPanelWindowNavigationMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.changesPanelWindowNavigationMode}
+              onValueChange={(value) => {
+                if (value === "dynamic" || value === "static") {
+                  updateSettings({ changesPanelWindowNavigationMode: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Changes window navigation">
+                <SelectValue>
+                  {
+                    CHANGES_PANEL_WINDOW_NAVIGATION_MODE_LABELS[
+                      settings.changesPanelWindowNavigationMode
+                    ]
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="dynamic">
+                  {CHANGES_PANEL_WINDOW_NAVIGATION_MODE_LABELS.dynamic}
+                </SelectItem>
+                <SelectItem hideIndicator value="static">
+                  {CHANGES_PANEL_WINDOW_NAVIGATION_MODE_LABELS.static}
                 </SelectItem>
               </SelectPopup>
             </Select>
