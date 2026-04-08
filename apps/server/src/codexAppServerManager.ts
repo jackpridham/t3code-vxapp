@@ -105,6 +105,10 @@ interface JsonRpcNotification {
   params?: unknown;
 }
 
+function sameId(left: string | null | undefined, right: string | null | undefined): boolean {
+  return left !== undefined && left !== null && right !== undefined && right !== null && left === right;
+}
+
 export interface CodexAppServerSendTurnInput {
   readonly threadId: ThreadId;
   readonly input?: string;
@@ -1045,6 +1049,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const rawRoute = this.readRouteFields(notification.params);
     this.rememberCollabReceiverTurns(context, notification.params, rawRoute.turnId);
     const childParentTurnId = this.readChildParentTurnId(context, notification.params);
+    const effectiveTopLevelTurnId = this.resolveTopLevelTurnId(
+      context,
+      rawRoute.turnId,
+      notification.method,
+    );
     const isChildConversation = childParentTurnId !== undefined;
     if (
       isChildConversation &&
@@ -1064,8 +1073,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
       method: notification.method,
-      ...((childParentTurnId ?? rawRoute.turnId)
-        ? { turnId: childParentTurnId ?? rawRoute.turnId }
+      ...((childParentTurnId ?? effectiveTopLevelTurnId)
+        ? { turnId: childParentTurnId ?? effectiveTopLevelTurnId }
         : {}),
       ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       textDelta,
@@ -1127,7 +1136,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private handleServerRequest(context: CodexSessionContext, request: JsonRpcRequest): void {
     const rawRoute = this.readRouteFields(request.params);
     const childParentTurnId = this.readChildParentTurnId(context, request.params);
-    const effectiveTurnId = childParentTurnId ?? rawRoute.turnId;
+    const effectiveTurnId =
+      childParentTurnId ??
+      this.resolveTopLevelTurnId(context, rawRoute.turnId, request.method);
     const requestKind = this.requestKindForMethod(request.method);
     let requestId: ApprovalRequestId | undefined;
     if (requestKind) {
@@ -1467,6 +1478,24 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       method === "turn/plan/updated" ||
       method === "item/plan/delta"
     );
+  }
+
+  private resolveTopLevelTurnId(
+    context: CodexSessionContext,
+    rawTurnId: TurnId | undefined,
+    method: string,
+  ): TurnId | undefined {
+    const activeTurnId = context.session.activeTurnId;
+    if (!activeTurnId) {
+      return rawTurnId;
+    }
+    if (!method.startsWith("item/")) {
+      return rawTurnId;
+    }
+    if (!rawTurnId || !sameId(rawTurnId, activeTurnId)) {
+      return activeTurnId;
+    }
+    return rawTurnId;
   }
 
   private readObject(value: unknown, key?: string): Record<string, unknown> | undefined {

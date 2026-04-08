@@ -994,6 +994,67 @@ describe("collab child conversation routing", () => {
       }),
     );
   });
+
+  it("rewrites stale top-level item notifications onto the active session turn", () => {
+    const { manager, context, emitEvent } = createCollabNotificationHarness();
+    context.session.activeTurnId = "turn_active";
+
+    (
+      manager as unknown as {
+        handleServerNotification: (context: unknown, notification: Record<string, unknown>) => void;
+      }
+    ).handleServerNotification(context, {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "provider_parent",
+        turnId: "turn_stale",
+        itemId: "msg_1",
+        delta: "hello",
+      },
+    });
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "item/agentMessage/delta",
+        turnId: "turn_active",
+        itemId: "msg_1",
+      }),
+    );
+  });
+
+  it("rewrites stale top-level item requests onto the active session turn", () => {
+    const { manager, context, emitEvent } = createCollabNotificationHarness();
+    context.session.activeTurnId = "turn_active";
+
+    (
+      manager as unknown as {
+        handleServerRequest: (context: unknown, request: Record<string, unknown>) => void;
+      }
+    ).handleServerRequest(context, {
+      id: 42,
+      method: "item/commandExecution/requestApproval",
+      params: {
+        threadId: "provider_parent",
+        turnId: "turn_stale",
+        itemId: "call_1",
+        command: "git status",
+      },
+    });
+
+    expect(Array.from(context.pendingApprovals.values())[0]).toEqual(
+      expect.objectContaining({
+        turnId: "turn_active",
+        itemId: "call_1",
+      }),
+    );
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "item/commandExecution/requestApproval",
+        turnId: "turn_active",
+        itemId: "call_1",
+      }),
+    );
+  });
 });
 
 describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume", () => {
