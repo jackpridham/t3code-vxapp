@@ -508,22 +508,23 @@ const make = Effect.gen(function* () {
           : requestedModelSelection
         : input.modelSelection;
 
-    yield* providerService.sendTurn({
+    const startedTurn = yield* providerService.sendTurn({
       threadId: input.threadId,
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     });
+    const authoritativeTurnId = startedTurn.turnId;
 
     const refreshedThread = yield* resolveThread(input.threadId);
     const currentSession = refreshedThread?.session ?? thread.session;
     if (
       currentSession?.status === "running" &&
-      ((requestedTurnId === null && currentSession.activeTurnId === null) ||
-        (requestedTurnId !== null &&
+      ((authoritativeTurnId === null && currentSession.activeTurnId === null) ||
+        (authoritativeTurnId !== null &&
           currentSession.activeTurnId !== null &&
-          sameId(currentSession.activeTurnId, requestedTurnId)))
+          sameId(currentSession.activeTurnId, authoritativeTurnId)))
     ) {
       return;
     }
@@ -534,12 +535,9 @@ const make = Effect.gen(function* () {
         threadId: input.threadId,
         status: "running",
         providerName:
-          currentSession?.providerName ??
-          activeSession?.provider ??
-          thread.modelSelection.provider,
-        runtimeMode:
-          currentSession?.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-        activeTurnId: requestedTurnId,
+          currentSession?.providerName ?? activeSession?.provider ?? thread.modelSelection.provider,
+        runtimeMode: currentSession?.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        activeTurnId: authoritativeTurnId,
         lastError: null,
         updatedAt: input.createdAt,
       },

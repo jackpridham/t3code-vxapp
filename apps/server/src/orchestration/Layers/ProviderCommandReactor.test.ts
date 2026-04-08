@@ -105,6 +105,7 @@ describe("ProviderCommandReactor", () => {
     createdStateDirs.add(stateDir);
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     let nextSessionIndex = 1;
+    let nextTurnIndex = 1;
     const runtimeSessions: Array<ProviderSession> = [];
     const modelSelection = input?.threadModelSelection ?? {
       provider: "codex",
@@ -145,7 +146,7 @@ describe("ProviderCommandReactor", () => {
     const sendTurn = vi.fn((_: unknown) =>
       Effect.succeed({
         threadId: ThreadId.makeUnsafe("thread-1"),
-        turnId: asTurnId("turn-1"),
+        turnId: asTurnId(`turn-${nextTurnIndex++}`),
       }),
     );
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
@@ -412,9 +413,8 @@ describe("ProviderCommandReactor", () => {
       (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
     );
     expect(secondThread?.session?.status).toBe("running");
-    if (firstTurnId !== null) {
-      expect(secondThread?.session?.activeTurnId).not.toEqual(firstTurnId);
-    }
+    expect(firstTurnId).toEqual(asTurnId("turn-1"));
+    expect(secondThread?.session?.activeTurnId).toEqual(asTurnId("turn-2"));
   });
 
   it("does not resurrect a completed turn id when a fresh turn start is requested", async () => {
@@ -492,7 +492,7 @@ describe("ProviderCommandReactor", () => {
       (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
     );
     expect(restartedThread?.session?.status).toBe("running");
-    expect(restartedThread?.session?.activeTurnId).toBeNull();
+    expect(restartedThread?.session?.activeTurnId).toBe(asTurnId("turn-1"));
     expect(restartedThread?.session?.activeTurnId).not.toBe(completedTurnId);
   });
 
