@@ -417,6 +417,85 @@ describe("ProviderCommandReactor", () => {
     }
   });
 
+  it("does not resurrect a completed turn id when a fresh turn start is requested", async () => {
+    const harness = await createHarness();
+    const runningNow = new Date().toISOString();
+    const completedTurnId = asTurnId("turn-completed-old");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-running-old-turn"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: completedTurnId,
+          lastError: null,
+          updatedAt: runningNow,
+        },
+        createdAt: runningNow,
+      }),
+    );
+
+    const readyNow = new Date(Date.now() + 1_000).toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-ready-old-turn"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: readyNow,
+        },
+        createdAt: readyNow,
+      }),
+    );
+
+    const afterCompletion = await Effect.runPromise(harness.engine.getReadModel());
+    const completedThread = afterCompletion.threads.find(
+      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    );
+    expect(completedThread?.latestTurn?.turnId).toBe(completedTurnId);
+    expect(completedThread?.session?.status).toBe("ready");
+    expect(completedThread?.session?.activeTurnId).toBeNull();
+
+    const nextNow = new Date(Date.now() + 2_000).toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-after-completed-turn"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-after-completed-turn"),
+          role: "user",
+          text: "start a fresh turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: nextNow,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    const afterRestart = await Effect.runPromise(harness.engine.getReadModel());
+    const restartedThread = afterRestart.threads.find(
+      (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
+    );
+    expect(restartedThread?.session?.status).toBe("running");
+    expect(restartedThread?.session?.activeTurnId).toBeNull();
+    expect(restartedThread?.session?.activeTurnId).not.toBe(completedTurnId);
+  });
+
   it("generates a thread title on the first turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
