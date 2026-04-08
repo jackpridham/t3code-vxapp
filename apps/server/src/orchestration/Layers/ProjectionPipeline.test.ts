@@ -1474,6 +1474,173 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("does not mark a turn completed from assistant messages before a terminal turn event arrives", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.makeUnsafe("thread-assistant-turn-open");
+      const turnId = TurnId.makeUnsafe("turn-assistant-turn-open");
+      const pendingMessageId = MessageId.makeUnsafe("message-assistant-turn-open");
+
+      yield* eventStore.append({
+        type: "thread.turn-start-requested",
+        eventId: EventId.makeUnsafe("evt-assistant-turn-open-1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:00:00.000Z",
+        commandId: CommandId.makeUnsafe("cmd-assistant-turn-open-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-assistant-turn-open-1"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: pendingMessageId,
+          runtimeMode: "full-access",
+          createdAt: "2026-02-26T16:00:00.000Z",
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-assistant-turn-open-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:00:01.000Z",
+        commandId: CommandId.makeUnsafe("cmd-assistant-turn-open-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-assistant-turn-open-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-02-26T16:00:01.000Z",
+          },
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.message-sent",
+        eventId: EventId.makeUnsafe("evt-assistant-turn-open-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:00:02.000Z",
+        commandId: CommandId.makeUnsafe("cmd-assistant-turn-open-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-assistant-turn-open-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.makeUnsafe("assistant-turn-open-1"),
+          role: "assistant",
+          text: "First response.",
+          turnId,
+          streaming: false,
+          createdAt: "2026-02-26T16:00:02.000Z",
+          updatedAt: "2026-02-26T16:00:02.000Z",
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.message-sent",
+        eventId: EventId.makeUnsafe("evt-assistant-turn-open-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:00:03.000Z",
+        commandId: CommandId.makeUnsafe("cmd-assistant-turn-open-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-assistant-turn-open-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.makeUnsafe("assistant-turn-open-2"),
+          role: "assistant",
+          text: "More output.",
+          turnId,
+          streaming: false,
+          createdAt: "2026-02-26T16:00:03.000Z",
+          updatedAt: "2026-02-26T16:00:03.000Z",
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      let turnRows = yield* sql<{
+        readonly state: string;
+        readonly assistantMessageId: string | null;
+        readonly completedAt: string | null;
+      }>`
+        SELECT
+          state,
+          assistant_message_id AS "assistantMessageId",
+          completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+
+      assert.equal(turnRows.length, 1);
+      assert.deepEqual(turnRows[0], {
+        state: "running",
+        assistantMessageId: "assistant-turn-open-2",
+        completedAt: null,
+      });
+
+      yield* eventStore.append({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.makeUnsafe("evt-assistant-turn-open-5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:00:04.000Z",
+        commandId: CommandId.makeUnsafe("cmd-assistant-turn-open-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-assistant-turn-open-5"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.makeUnsafe(
+            "refs/t3/checkpoints/thread-assistant-turn-open/turn/1",
+          ),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.makeUnsafe("assistant-turn-open-2"),
+          completedAt: "2026-02-26T16:00:04.000Z",
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      turnRows = yield* sql<{
+        readonly state: string;
+        readonly assistantMessageId: string | null;
+        readonly completedAt: string | null;
+      }>`
+        SELECT
+          state,
+          assistant_message_id AS "assistantMessageId",
+          completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+
+      assert.equal(turnRows.length, 1);
+      assert.deepEqual(turnRows[0], {
+        state: "completed",
+        assistantMessageId: "assistant-turn-open-2",
+        completedAt: "2026-02-26T16:00:04.000Z",
+      });
+    }),
+  );
+
   it.effect(
     "resolves turn-count conflicts when checkpoint completion rewrites provisional turns",
     () =>
