@@ -1,8 +1,79 @@
-import { describe, expect, it } from "vitest";
-import { MessageId, TurnId } from "@t3tools/contracts";
+import { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { discoverChangesReferences, type ChangesPanelGroup } from "../changesDiscovery";
 import type { ChatMessage, PersistedFileChange } from "../types";
+import { discoverChangesReferences, type ChangesPanelGroup } from "../changesDiscovery";
+
+const state = vi.hoisted(() => ({
+  uiState: {
+    changesPanelOpen: true,
+    changesPanelActivePath: null as string | null,
+    changesPanelActiveSection: null as string | null,
+    changesPanelContentMode: "preview" as "preview" | "diff",
+    closeChangesPanel: vi.fn(),
+    setChangesPanelActivePath: vi.fn(),
+    setChangesPanelActiveSection: vi.fn(),
+    setChangesPanelContentMode: vi.fn(),
+  },
+  appState: {
+    threads: [] as any[],
+    projects: [] as any[],
+  },
+  groups: [] as ChangesPanelGroup[],
+  queryResult: {
+    data: null as { diff: string } | null,
+    error: null as Error | null,
+    isLoading: false,
+  },
+}));
+
+vi.mock("../uiStateStore", () => ({
+  useUiStateStore: (selector: (value: typeof state.uiState) => unknown) => selector(state.uiState),
+}));
+
+vi.mock("../store", () => ({
+  useStore: (selector: (value: typeof state.appState) => unknown) => selector(state.appState),
+}));
+
+vi.mock("../hooks/useChangesDiscovery", () => ({
+  useChangesDiscovery: () => state.groups,
+}));
+
+vi.mock("../hooks/useTheme", () => ({
+  useTheme: () => ({ resolvedTheme: "light" }),
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  useParams: (options: { select: (value: { threadId?: string }) => unknown }) =>
+    options.select({ threadId: "thread-1" }),
+}));
+
+vi.mock("../editorPreferences", () => ({
+  openInPreferredEditor: vi.fn(),
+}));
+
+vi.mock("../nativeApi", () => ({
+  readNativeApi: () => null,
+}));
+
+vi.mock("../lib/providerReactQuery", () => ({
+  checkpointFileDiffQueryOptions: vi.fn(() => ({ queryKey: ["mock-file-diff"] })),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => state.queryResult,
+}));
+
+vi.mock("./DiffWorkerPoolProvider", () => ({
+  DiffWorkerPoolProvider: ({ children }: { children?: unknown }) => <>{children}</>,
+}));
+
+vi.mock("@pierre/diffs/react", () => ({
+  FileDiff: () => <div data-testid="single-file-diff" />,
+}));
+
+import { ChangesPanel } from "./ChangesPanel";
 
 // ── Test helpers ────────────────────────────────────────────────────────────
 
@@ -19,6 +90,33 @@ function makeMessage(text: string, id = "msg-1"): ChatMessage {
 function filesChangedGroup(groups: ChangesPanelGroup[]): ChangesPanelGroup | undefined {
   return groups.find((g) => g.section === "files_changed");
 }
+
+function renderPanel() {
+  return renderToStaticMarkup(<ChangesPanel />);
+}
+
+beforeEach(() => {
+  state.uiState = {
+    changesPanelOpen: true,
+    changesPanelActivePath: null,
+    changesPanelActiveSection: null,
+    changesPanelContentMode: "preview",
+    closeChangesPanel: vi.fn(),
+    setChangesPanelActivePath: vi.fn(),
+    setChangesPanelActiveSection: vi.fn(),
+    setChangesPanelContentMode: vi.fn(),
+  };
+  state.appState = {
+    threads: [],
+    projects: [],
+  };
+  state.groups = [];
+  state.queryResult = {
+    data: null,
+    error: null,
+    isLoading: false,
+  };
+});
 
 // ── useChangesDiscovery logic (tested via pure functions) ────────────────────
 
@@ -74,6 +172,171 @@ describe("ChangesPanel discovery integration", () => {
     }
   });
 });
+
+describe("ChangesPanel component", () => {
+  it("shows code preview mode with a Show diff action for file changes", () => {
+    state.groups = [
+      {
+        section: "files_changed",
+        label: "Files Changed",
+        items: [
+          {
+            rawRef: "/repo/src/example.ts",
+            resolvedPath: "/repo/src/example.ts",
+            filename: "example.ts",
+            section: "files_changed",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [{ checkpointTurnCount: 4 }],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+    state.uiState = {
+      ...state.uiState,
+      changesPanelOpen: true,
+      changesPanelActivePath: "/repo/src/example.ts",
+      changesPanelActiveSection: "files_changed",
+      changesPanelContentMode: "preview",
+    };
+    state.queryResult = {
+      data: {
+        diff: `
+diff --git a/src/example.ts b/src/example.ts
+index 1111111..2222222 100644
+--- a/src/example.ts
++++ b/src/example.ts
+@@ -1,1 +1,2 @@
+ const first = 1;
++const second = 2;
+`,
+      },
+      error: null,
+      isLoading: false,
+    };
+
+    const html = renderPanel();
+
+    expect(html).toContain("Show diff");
+    expect(html).not.toContain("Show file");
+    expect(html).toContain("code-file-viewer__plain");
+    expect(html).toContain("example.ts");
+  });
+
+  it("switches to inline diff mode for the same code file", () => {
+    state.groups = [
+      {
+        section: "files_changed",
+        label: "Files Changed",
+        items: [
+          {
+            rawRef: "/repo/src/example.ts",
+            resolvedPath: "/repo/src/example.ts",
+            filename: "example.ts",
+            section: "files_changed",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [{ checkpointTurnCount: 4 }],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+    state.uiState = {
+      ...state.uiState,
+      changesPanelOpen: true,
+      changesPanelActivePath: "/repo/src/example.ts",
+      changesPanelActiveSection: "files_changed",
+      changesPanelContentMode: "diff",
+    };
+    state.queryResult = {
+      data: {
+        diff: `
+diff --git a/src/example.ts b/src/example.ts
+index 1111111..2222222 100644
+--- a/src/example.ts
++++ b/src/example.ts
+@@ -1,1 +1,2 @@
+ const first = 1;
++const second = 2;
+`,
+      },
+      error: null,
+      isLoading: false,
+    };
+
+    const html = renderPanel();
+
+    expect(html).toContain("Show file");
+    expect(html).toContain('data-testid="single-file-diff"');
+  });
+
+  it("keeps markdown selections in preview mode", () => {
+    state.groups = [
+      {
+        section: "artifacts",
+        label: "Artifacts",
+        items: [
+          {
+            rawRef: "/repo/@Docs/@Scratch/repo/notes.md",
+            resolvedPath: "/repo/@Docs/@Scratch/repo/notes.md",
+            filename: "notes.md",
+            section: "artifacts",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+    state.uiState = {
+      ...state.uiState,
+      changesPanelOpen: true,
+      changesPanelActivePath: "/repo/@Docs/@Scratch/repo/notes.md",
+      changesPanelActiveSection: "artifacts",
+      changesPanelContentMode: "preview",
+    };
+
+    const html = renderPanel();
+
+    expect(html).not.toContain("Show diff");
+    expect(html).toContain("Markdown viewer");
+  });
+});
+
+// ── Persisted file changes merge ────────────────────────────────────────────
 
 describe("persisted file changes merge", () => {
   it("persisted changes appear in files_changed group when not already discovered", () => {

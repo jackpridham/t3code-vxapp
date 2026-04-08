@@ -3,6 +3,7 @@ import { type ProjectId, type ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 
 import type { DiscoveredArtifact } from "./artifactDiscovery";
+import type { ChangesSectionKind } from "./changesDiscovery";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   mergeNotificationPreferences,
@@ -58,8 +59,12 @@ export interface UiChangesPanelState {
   /** Currently active/selected file path in the panel, or null. */
   changesPanelActivePath: string | null;
   /** Which section is currently expanded. Null means default (all expanded). */
-  changesPanelActiveSection: string | null;
+  changesPanelActiveSection: ChangesSectionKind | null;
+  /** Current content mode for the Changes preview pane. */
+  changesPanelContentMode: ChangesPanelContentMode;
 }
+
+export type ChangesPanelContentMode = "preview" | "diff";
 
 export interface UiState
   extends UiProjectState, UiThreadState, UiArtifactPanelState, UiChangesPanelState {
@@ -88,6 +93,7 @@ const initialState: UiState = {
   changesPanelOpen: false,
   changesPanelActivePath: null,
   changesPanelActiveSection: null,
+  changesPanelContentMode: "preview",
   notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
 };
 
@@ -555,11 +561,21 @@ export function setChangesPanelActivePath(state: UiState, path: string | null): 
   return { ...state, changesPanelActivePath: path };
 }
 
-export function setChangesPanelActiveSection(state: UiState, section: string | null): UiState {
+export function setChangesPanelActiveSection(
+  state: UiState,
+  section: ChangesSectionKind | null,
+): UiState {
   if (state.changesPanelActiveSection === section) {
     return state;
   }
   return { ...state, changesPanelActiveSection: section };
+}
+
+export function setChangesPanelContentMode(state: UiState, mode: ChangesPanelContentMode): UiState {
+  if (state.changesPanelContentMode === mode) {
+    return state;
+  }
+  return { ...state, changesPanelContentMode: mode };
 }
 
 export function reorderProjects(
@@ -631,7 +647,8 @@ interface UiStateStore extends UiState {
   closeChangesPanel: () => void;
   toggleChangesPanel: () => void;
   setChangesPanelActivePath: (path: string | null) => void;
-  setChangesPanelActiveSection: (section: string | null) => void;
+  setChangesPanelActiveSection: (section: ChangesSectionKind | null) => void;
+  setChangesPanelContentMode: (mode: ChangesPanelContentMode) => void;
   setNotificationPreferences: (prefs: Partial<NotificationPreferences>) => void;
   toggleNotificationEvent: (eventType: NotificationEventType, enabled: boolean) => void;
 }
@@ -666,6 +683,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setChangesPanelActivePath: (path) => set((state) => setChangesPanelActivePath(state, path)),
   setChangesPanelActiveSection: (section) =>
     set((state) => setChangesPanelActiveSection(state, section)),
+  setChangesPanelContentMode: (mode) => set((state) => setChangesPanelContentMode(state, mode)),
   setNotificationPreferences: (prefs) => set((state) => setNotificationPreferences(state, prefs)),
   toggleNotificationEvent: (eventType, enabled) =>
     set((state) => toggleNotificationEvent(state, eventType, enabled)),

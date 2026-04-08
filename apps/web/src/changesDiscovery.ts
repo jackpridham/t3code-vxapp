@@ -99,6 +99,18 @@ function basenameOf(path: string): string {
   return lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
 }
 
+function isAbsolutePath(path: string): boolean {
+  return /^([A-Za-z]:[\\/]|[\\/]{2}|\/)/.test(path);
+}
+
+function resolveReferencePath(rawPath: string, cwd: string | undefined): string {
+  if (!cwd || isAbsolutePath(rawPath)) {
+    return rawPath;
+  }
+
+  return `${cwd.replace(/[/\\]+$/, "").replaceAll("\\", "/")}/${rawPath.replaceAll("\\", "/")}`;
+}
+
 // ── Extraction ───────────────────────────────────────────────────────────────
 
 /**
@@ -221,18 +233,19 @@ export function discoverChangesReferences(
       const cleaned = cleanRawRef(rawRef);
       if (cleaned.length === 0) continue;
 
-      const filename = basenameOf(cleaned);
+      const resolvedPath = resolveReferencePath(cleaned, _cwd);
+      const filename = basenameOf(resolvedPath);
       if (filename.length === 0) continue;
 
       // Use cleaned path as dedup key
-      const dedupeKey = cleaned.toLowerCase();
+      const dedupeKey = resolvedPath.toLowerCase();
       if (seenPaths.has(dedupeKey)) continue;
 
       const section = categorizeReference(cleaned);
 
       seenPaths.set(dedupeKey, {
         rawRef,
-        resolvedPath: cleaned,
+        resolvedPath,
         filename,
         section,
         firstSeenMessageId: message.id,

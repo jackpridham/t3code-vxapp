@@ -13,6 +13,7 @@ import {
   reorderProjects,
   setChangesPanelActivePath,
   setChangesPanelActiveSection,
+  setChangesPanelContentMode,
   setDiscoveredArtifacts,
   setProjectExpanded,
   setProjectLabelFilter,
@@ -36,6 +37,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     changesPanelOpen: false,
     changesPanelActivePath: null,
     changesPanelActiveSection: null,
+    changesPanelContentMode: "preview",
     notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
     ...overrides,
   };
@@ -398,20 +400,24 @@ describe("changes panel pure functions", () => {
     const state = makeUiState({
       changesPanelOpen: false,
       changesPanelActivePath: "/repo/last.md",
+      changesPanelContentMode: "diff",
     });
     const next = openChangesPanel(state);
     expect(next.changesPanelOpen).toBe(true);
     expect(next.changesPanelActivePath).toBe("/repo/last.md");
+    expect(next.changesPanelContentMode).toBe("diff");
   });
 
   it("closeChangesPanel sets open=false but preserves activePath", () => {
     const state = makeUiState({
       changesPanelOpen: true,
       changesPanelActivePath: "/repo/plan.md",
+      changesPanelContentMode: "diff",
     });
     const next = closeChangesPanel(state);
     expect(next.changesPanelOpen).toBe(false);
     expect(next.changesPanelActivePath).toBe("/repo/plan.md");
+    expect(next.changesPanelContentMode).toBe("diff");
   });
 
   it("closeChangesPanel returns same reference when already closed", () => {
@@ -457,5 +463,16 @@ describe("changes panel pure functions", () => {
     const state = makeUiState({ changesPanelActiveSection: "plans" });
     const next = setChangesPanelActiveSection(state, null);
     expect(next.changesPanelActiveSection).toBeNull();
+  });
+
+  it("setChangesPanelContentMode updates the mode", () => {
+    const state = makeUiState();
+    const next = setChangesPanelContentMode(state, "diff");
+    expect(next.changesPanelContentMode).toBe("diff");
+  });
+
+  it("setChangesPanelContentMode returns same reference when mode unchanged", () => {
+    const state = makeUiState({ changesPanelContentMode: "preview" });
+    expect(setChangesPanelContentMode(state, "preview")).toBe(state);
   });
 });

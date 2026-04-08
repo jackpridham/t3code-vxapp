@@ -12,11 +12,7 @@ import {
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
 import { useComposerDraftStore } from "../composerDraftStore";
-import {
-  type DiffRouteSearch,
-  parseDiffRouteSearch,
-  stripDiffSearchParams,
-} from "../diffRouteSearch";
+import { type DiffRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
@@ -76,9 +72,8 @@ const ChangesPanelInlineSidebar = (props: {
   changesPanelOpen: boolean;
   onClose: () => void;
   onOpen: () => void;
-  onOpenFileDiff: (filePath: string) => void;
 }) => {
-  const { changesPanelOpen, onClose, onOpen, onOpenFileDiff } = props;
+  const { changesPanelOpen, onClose, onOpen } = props;
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -107,7 +102,7 @@ const ChangesPanelInlineSidebar = (props: {
           storageKey: CHANGES_PANEL_WIDTH_STORAGE_KEY,
         }}
       >
-        <ChangesPanel onOpenFileDiff={onOpenFileDiff} />
+        <ChangesPanel />
         <SidebarRail />
       </Sidebar>
     </SidebarProvider>
@@ -143,21 +138,6 @@ function ChatThreadRouteView() {
     });
   }, [navigate, threadId]);
 
-  const handleOpenFileDiff = useCallback(
-    (filePath: string) => {
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-        search: (previous) => ({
-          ...stripDiffSearchParams(previous),
-          diff: "1",
-          diffFilePath: filePath,
-        }),
-      });
-    },
-    [navigate, threadId],
-  );
-
   useEffect(() => {
     if (diffOpen) {
       setHasOpenedDiff(true);
@@ -190,7 +170,6 @@ function ChatThreadRouteView() {
         changesPanelOpen={changesPanelOpen}
         onClose={closeChangesPanel}
         onOpen={() => openChangesPanel()}
-        onOpenFileDiff={handleOpenFileDiff}
       />
       {/* Diff panel overlay for when a specific file diff is requested */}
       {diffOpen && (
