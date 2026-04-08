@@ -704,6 +704,25 @@ describe("WebSocket Server", () => {
     expect(await response.text()).toContain("static-root");
   });
 
+  it("serves lightweight liveness and readiness endpoints", async () => {
+    const baseDir = makeTempDir("t3code-state-health-");
+    const staticDir = makeTempDir("t3code-static-health-");
+    fs.writeFileSync(path.join(staticDir, "index.html"), "<h1>health</h1>", "utf8");
+
+    server = await createTestServer({ cwd: "/test/project", baseDir, staticDir });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const liveResponse = await fetch(`http://127.0.0.1:${port}/health/live`);
+    expect(liveResponse.status).toBe(200);
+    expect(await liveResponse.text()).toBe("ok");
+
+    const readyResponse = await fetch(`http://127.0.0.1:${port}/health/ready`);
+    expect(readyResponse.status).toBe(200);
+    expect(await readyResponse.text()).toBe("ready");
+  });
+
   it("rejects static path traversal attempts", async () => {
     const baseDir = makeTempDir("t3code-state-static-traversal-");
     const staticDir = makeTempDir("t3code-static-traversal-");

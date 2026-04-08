@@ -13,6 +13,7 @@ PORT="${T3CODE_PORT:-7421}"
 NO_BROWSER_FLAG="--no-browser"
 LOG_FILE="${DEPLOY_LOG_FILE:-/tmp/t3code-vxapp-deploy.log}"
 PID_FILE="${DEPLOY_PID_FILE:-/tmp/t3code-vxapp-deploy.pid}"
+READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-120}"
 
 export PATH="$(dirname "$BUN_BIN"):$PATH"
 
@@ -60,17 +61,31 @@ can_use_sudo_systemctl() {
 }
 
 wait_for_http() {
-    local url="http://127.0.0.1:${PORT}/"
+    local url="http://127.0.0.1:${PORT}/health/ready"
     local attempt
 
-    for attempt in $(seq 1 30); do
+    for attempt in $(seq 1 "$READY_TIMEOUT_SECONDS"); do
         if curl -fsS --max-time 3 "$url" >/dev/null; then
             return 0
         fi
         sleep 1
     done
 
-    printf 'Server did not respond at %s after 30 seconds.\n' "$url" >&2
+    printf 'Server did not respond at %s after %s seconds.\n' "$url" "$READY_TIMEOUT_SECONDS" >&2
+    return 1
+}
+
+verify_systemd_service() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        return 0
+    fi
+
+    printf 'Systemd reports %s is not active after restart.\n' "$SERVICE_NAME" >&2
+    systemctl status "$SERVICE_NAME" --no-pager || true
     return 1
 }
 
@@ -90,13 +105,15 @@ restart_via_systemd() {
     step "Restarting systemd service"
 
     if can_use_sudo_systemctl; then
-        sudo -n systemctl restart "$SERVICE_NAME" --no-block
-        wait_for_http
+        sudo -n systemctl restart "$SERVICE_NAME"
+        wait_for_http || return 1
+        verify_systemd_service || return 1
         return 0
     fi
 
-    if systemctl restart "$SERVICE_NAME" --no-block >/dev/null 2>&1; then
-        wait_for_http
+    if systemctl restart "$SERVICE_NAME" >/dev/null 2>&1; then
+        wait_for_http || return 1
+        verify_systemd_service || return 1
         return 0
     fi
 
@@ -135,10 +152,10 @@ show_status() {
         log "Service: ${SERVICE_NAME} inactive"
     fi
 
-    if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/" >/dev/null; then
-        log "HTTP:    http://127.0.0.1:${PORT}/ responding"
+    if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health/ready" >/dev/null; then
+        log "Ready:   http://127.0.0.1:${PORT}/health/ready responding"
     else
-        log "HTTP:    http://127.0.0.1:${PORT}/ not responding"
+        log "Ready:   http://127.0.0.1:${PORT}/health/ready not responding"
     fi
 }
 

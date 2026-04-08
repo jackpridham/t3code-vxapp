@@ -397,6 +397,31 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     void runPromise(
       Effect.gen(function* () {
         const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+        if (url.pathname === "/health/live") {
+          respond(
+            200,
+            {
+              "Cache-Control": "no-store",
+              "Content-Type": "text/plain; charset=utf-8",
+            },
+            "ok",
+          );
+          return;
+        }
+
+        if (url.pathname === "/health/ready") {
+          const isReady = yield* readiness.isServerReady;
+          respond(
+            isReady ? 200 : 503,
+            {
+              "Cache-Control": "no-store",
+              "Content-Type": "text/plain; charset=utf-8",
+            },
+            isReady ? "ready" : "not ready",
+          );
+          return;
+        }
+
         if (yield* tryHandleProjectFaviconRequest(url, res)) {
           return;
         }
