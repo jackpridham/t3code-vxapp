@@ -417,9 +417,10 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("ignores stale lifecycle events that arrive after a turn has already settled", async () => {
     const harness = await createHarness();
-    const startedAt = "2026-04-08T00:00:01.000Z";
-    const staleRunningAt = "2026-04-08T00:00:02.000Z";
-    const completedAt = "2026-04-08T00:00:03.000Z";
+    const baseMs = Date.now() + 1_000;
+    const startedAt = new Date(baseMs).toISOString();
+    const staleRunningAt = new Date(baseMs + 1_000).toISOString();
+    const completedAt = new Date(baseMs + 2_000).toISOString();
 
     harness.emit({
       type: "turn.started",

@@ -476,6 +476,104 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const recheckWakeItemsForArchivedWorker = Effect.fn("recheckWakeItemsForArchivedWorker")(
+    function* (input: {
+      readonly workerThreadId: ThreadId;
+      readonly archivedAt: string;
+    }) {
+      const readModel = yield* orchestrationEngine.getReadModel();
+      const workerThread = readModel.threads.find((entry) => entry.id === input.workerThreadId);
+      const wakeItems = readModel.orchestratorWakeItems
+        .filter(
+          (wakeItem) =>
+            wakeItem.workerThreadId === input.workerThreadId &&
+            isWorkerWakeActiveState(wakeItem.state),
+        )
+        .toSorted(compareWakeItems);
+
+      const orchestratorThreadIds = [
+        ...new Set(
+          [
+            workerThread?.orchestratorThreadId ?? null,
+            ...wakeItems.map((wakeItem) => wakeItem.orchestratorThreadId),
+          ].filter((value): value is ThreadId => value !== null),
+        ),
+      ];
+
+      const turnsByOrchestratorThreadId = new Map<ThreadId, ReadonlyArray<ProjectionTurn>>();
+      const getTurnsForOrchestrator = (orchestratorThreadId: ThreadId) =>
+        Effect.gen(function* () {
+          const cachedTurns = turnsByOrchestratorThreadId.get(orchestratorThreadId);
+          if (cachedTurns !== undefined) {
+            return cachedTurns;
+          }
+          const turns = yield* projectionTurnRepository.listByThreadId({
+            threadId: orchestratorThreadId,
+          });
+          turnsByOrchestratorThreadId.set(orchestratorThreadId, turns);
+          return turns;
+        });
+
+      yield* Effect.forEach(
+        wakeItems,
+        (wakeItem) =>
+          Effect.gen(function* () {
+            if (wakeItem.state === "pending") {
+              return;
+            }
+
+            if (wakeItem.state === "delivering") {
+              const turns = yield* getTurnsForOrchestrator(wakeItem.orchestratorThreadId);
+              const deliveryTurn = findTerminalDeliveryTurn({
+                turns,
+                deliveryMessageId: wakeItem.deliveryMessageId,
+              });
+              if (!deliveryTurn) {
+                return;
+              }
+
+              yield* dispatchWakeUpsert({
+                preferredThreadId: wakeItem.orchestratorThreadId,
+                wakeItem: {
+                  ...wakeItem,
+                  state: "consumed",
+                  deliveredAt:
+                    wakeItem.deliveredAt ??
+                    deliveryTurn.completedAt ??
+                    deliveryTurn.startedAt ??
+                    input.archivedAt,
+                  consumedAt: input.archivedAt,
+                  consumeReason: "worker_rechecked",
+                },
+                createdAt: input.archivedAt,
+                commandTag: "archive-reviewed-consume",
+              });
+              return;
+            }
+
+            yield* dispatchWakeUpsert({
+              preferredThreadId: wakeItem.orchestratorThreadId,
+              wakeItem: {
+                ...wakeItem,
+                state: "consumed",
+                consumedAt: input.archivedAt,
+                consumeReason: "worker_rechecked",
+              },
+              createdAt: input.archivedAt,
+              commandTag: "archive-delivered-consume",
+            });
+          }),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+
+      yield* Effect.forEach(
+        orchestratorThreadIds,
+        (orchestratorThreadId) => evaluateDrainForOrchestrator(orchestratorThreadId),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+    },
+  );
+
   const finalizeDeliveringWakeItemsForOrchestrator = Effect.fn(
     "finalizeDeliveringWakeItemsForOrchestrator",
   )(function* (input: { readonly orchestratorThreadId: ThreadId; readonly settledAt: string }) {
@@ -828,13 +926,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       switch (event.type) {
         case "thread.archived":
-          yield* consumeActiveWakeItemsForWorker({
+          yield* recheckWakeItemsForArchivedWorker({
             workerThreadId: event.payload.threadId,
-            consumedAt: event.payload.archivedAt,
-            consumeReason: "worker_rechecked",
-            commandTag: "archive-consume",
+            archivedAt: event.payload.archivedAt,
           });
-          yield* evaluateDrainForOrchestrator(event.payload.threadId);
           return;
         case "thread.deleted":
           yield* consumeActiveWakeItemsForWorker({
