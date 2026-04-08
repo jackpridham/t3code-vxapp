@@ -24,8 +24,16 @@ export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 export const DEFAULT_MAX_PROJECT_THREADS_BEFORE_FOLDING = 6;
 
+export const ChangesPanelFilesChangedViewType = Schema.Literals(["list", "tree"]);
+export type ChangesPanelFilesChangedViewType = typeof ChangesPanelFilesChangedViewType.Type;
+export const DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE: ChangesPanelFilesChangedViewType =
+  "list";
+
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  changesPanelFilesChangedViewType: ChangesPanelFilesChangedViewType.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE),
+  ),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),

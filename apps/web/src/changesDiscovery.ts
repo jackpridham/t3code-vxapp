@@ -2,7 +2,7 @@
  * changesDiscovery — Scan chat messages for file references and categorize
  * them into groups for the Changes panel.
  *
- * Groups: Plans, Artifacts, Files Changed, Changelog, Reports.
+ * Groups: Plans, Artifacts, Working Memory, Files Changed, Changelog, Reports.
  */
 
 import type { ChatMessage } from "./types";
@@ -10,7 +10,13 @@ import type { ChatMessage } from "./types";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /** Which section a discovered file belongs to. */
-export type ChangesSectionKind = "plans" | "artifacts" | "files_changed" | "changelog" | "reports";
+export type ChangesSectionKind =
+  | "plans"
+  | "artifacts"
+  | "working_memory"
+  | "files_changed"
+  | "changelog"
+  | "reports";
 
 /** A single file reference discovered in chat messages. */
 export interface DiscoveredFileReference {
@@ -42,6 +48,7 @@ const SECTION_CONFIG: ReadonlyArray<{
 }> = [
   { section: "plans", label: "Plans" },
   { section: "artifacts", label: "Artifacts" },
+  { section: "working_memory", label: "Working Memory" },
   { section: "files_changed", label: "Files Changed" },
   { section: "changelog", label: "Changelog" },
   { section: "reports", label: "Reports" },
@@ -50,19 +57,22 @@ const SECTION_CONFIG: ReadonlyArray<{
 // ── Extraction patterns ──────────────────────────────────────────────────────
 
 /** file:/// URLs with any extension. */
-const FILE_URL_PATTERN = /file:\/\/\/[^\s)"'>\]]+\.[A-Za-z0-9_-]+/gi;
+const FILE_URL_PATTERN = /file:\/\/\/[^\s)"'>`\]]+\.[A-Za-z0-9_-]+/gi;
 
 /** @Docs/@TODO/ paths (plans, TODOs). */
-const TODO_PATH_PATTERN = /@Docs\/@TODO\/[^\s)"'>\]]+/gi;
+const TODO_PATH_PATTERN = /@Docs\/@TODO\/[^\s)"'>`\]]+/gi;
 
 /** @Docs/@Scratch/ paths (artifacts). */
-const SCRATCH_PATH_PATTERN = /@Docs\/@Scratch\/[^\s)"'>\]]+/gi;
+const SCRATCH_PATH_PATTERN = /@Docs\/@Scratch\/[^\s)"'>`\]]+/gi;
 
 /** @Docs/@CHANGELOG/ paths. */
-const CHANGELOG_PATH_PATTERN = /@Docs\/@CHANGELOG\/[^\s)"'>\]]+/gi;
+const CHANGELOG_PATH_PATTERN = /@Docs\/@CHANGELOG\/[^\s)"'>`\]]+/gi;
 
 /** @Docs/@Reports/ paths. */
-const REPORTS_PATH_PATTERN = /@Docs\/@Reports\/[^\s)"'>\]]+/gi;
+const REPORTS_PATH_PATTERN = /@Docs\/@Reports\/[^\s)"'>`\]]+/gi;
+
+/** Working memory markdown files. */
+const WORKING_MEMORY_PATH_PATTERN = /[^\s)"'>`\]]*memory\/working_[^\s)"'>`\]]+\.md/gi;
 
 /** Markdown link targets: [text](path.ext) */
 const MD_LINK_PATTERN = /\[[^\]]*\]\(([^)]+\.[A-Za-z0-9_-]+(?:[^)]*)?)\)/gi;
@@ -90,7 +100,19 @@ function cleanRawRef(raw: string): string {
   if (queryIdx >= 0) cleaned = cleaned.slice(0, queryIdx);
   const hashIdx = cleaned.indexOf("#");
   if (hashIdx >= 0) cleaned = cleaned.slice(0, hashIdx);
-  return cleaned.trim();
+
+  cleaned = cleaned.trim();
+
+  // Strip common surrounding markdown/code-format punctuation that can cling
+  // to plain-text paths in assistant messages.
+  while (/^[`"'([]/.test(cleaned)) {
+    cleaned = cleaned.slice(1).trimStart();
+  }
+  while (/[`"',.:;!?)\]]$/.test(cleaned)) {
+    cleaned = cleaned.slice(0, -1).trimEnd();
+  }
+
+  return cleaned;
 }
 
 /** Extract the basename from a path. */
@@ -141,6 +163,11 @@ export function extractFileReferences(messageText: string): string[] {
   }
 
   for (const match of messageText.matchAll(REPORTS_PATH_PATTERN)) {
+    const raw = match[0].trim();
+    if (raw) found.add(raw);
+  }
+
+  for (const match of messageText.matchAll(WORKING_MEMORY_PATH_PATTERN)) {
     const raw = match[0].trim();
     if (raw) found.add(raw);
   }
@@ -198,6 +225,10 @@ export function categorizeReference(cleanedPath: string): ChangesSectionKind {
   // Artifacts: files in @Scratch directory
   if (lower.includes("@scratch/") || lower.includes("/@scratch/")) {
     return "artifacts";
+  }
+
+  if (lower.includes("/memory/working_") && filename.endsWith(".md")) {
+    return "working_memory";
   }
 
   // Other .md files that don't match above patterns — artifacts (loose docs)

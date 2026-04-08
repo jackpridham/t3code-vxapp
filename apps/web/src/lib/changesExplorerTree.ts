@@ -56,6 +56,7 @@ interface MutableDirectoryNode {
 const SECTION_ORDER: ChangesSectionKind[] = [
   "plans",
   "artifacts",
+  "working_memory",
   "files_changed",
   "changelog",
   "reports",

@@ -50,6 +50,13 @@ describe("extractFileReferences", () => {
     expect(refs).toContain("./PLAN_feat-changes-panel.md");
   });
 
+  it("ignores trailing backticks around plain-text paths", () => {
+    const text = "Open `@Docs/@TODO/repo/PLAN_feat-repo-versioning.md`` next.";
+    const refs = extractFileReferences(text);
+    expect(refs).toContain("@Docs/@TODO/repo/PLAN_feat-repo-versioning.md");
+    expect(refs.some((ref) => ref.endsWith("`"))).toBe(false);
+  });
+
   it("ignores http/https URLs in markdown links", () => {
     const text = "See [docs](https://example.com/readme.md) for details.";
     const refs = extractFileReferences(text);
@@ -88,6 +95,7 @@ describe("categorizeReference", () => {
     ["@Docs/@Reports/REPORT_audit.md", "reports"],
     ["REPORT_review.md", "reports"],
     ["@Docs/@Scratch/t3code-vxapp/analysis.md", "artifacts"],
+    ["/repo/memory/working_session.md", "working_memory"],
     ["README.md", "artifacts"],
     ["some-doc.md", "artifacts"],
     ["src/components/ChatView.tsx", "files_changed"],
@@ -130,9 +138,9 @@ describe("discoverChangesReferences", () => {
     expect(artifacts?.items[0]?.filename).toBe("notes.md");
   });
 
-  it("returns all five sections even when empty", () => {
+  it("returns all six sections even when empty", () => {
     const groups = discoverChangesReferences([], undefined);
-    expect(groups).toHaveLength(5);
+    expect(groups).toHaveLength(6);
     expect(groups.every((g) => g.items.length === 0)).toBe(true);
   });
 
@@ -141,6 +149,7 @@ describe("discoverChangesReferences", () => {
     expect(groups.map((g) => g.section)).toEqual([
       "plans",
       "artifacts",
+      "working_memory",
       "files_changed",
       "changelog",
       "reports",
@@ -161,7 +170,14 @@ describe("discoverChangesReferences", () => {
   it("assigns correct section labels", () => {
     const groups = discoverChangesReferences([], undefined);
     const labels = groups.map((g) => g.label);
-    expect(labels).toEqual(["Plans", "Artifacts", "Files Changed", "Changelog", "Reports"]);
+    expect(labels).toEqual([
+      "Plans",
+      "Artifacts",
+      "Working Memory",
+      "Files Changed",
+      "Changelog",
+      "Reports",
+    ]);
   });
 
   it("categorizes changelog and report references", () => {
@@ -176,5 +192,16 @@ describe("discoverChangesReferences", () => {
 
     const reports = groups.find((g) => g.section === "reports");
     expect(reports?.items).toHaveLength(1);
+  });
+
+  it("strips trailing backticks from discovered plan references", () => {
+    const messages = [
+      makeMessage("m1", "Review `@Docs/@TODO/repo/PLAN_feat-repo-versioning.md`` before ship."),
+    ];
+    const groups = discoverChangesReferences(messages, "/repo");
+    const plans = groups.find((g) => g.section === "plans");
+    expect(plans?.items).toHaveLength(1);
+    expect(plans?.items[0]?.filename).toBe("PLAN_feat-repo-versioning.md");
+    expect(plans?.items[0]?.resolvedPath.endsWith("`")).toBe(false);
   });
 });

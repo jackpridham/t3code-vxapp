@@ -8,6 +8,7 @@ import {
   FolderClosedIcon,
   FolderIcon,
   ListTodoIcon,
+  NotebookTextIcon,
 } from "lucide-react";
 import { memo, useMemo, useState, type ComponentType, type ReactNode } from "react";
 
@@ -22,9 +23,13 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsi
 import { DiffStatLabel, hasNonZeroStat } from "./chat/DiffStatLabel";
 import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
 
-const SECTION_ICON: Record<ChangesSectionKind, ComponentType<{ className?: string }>> = {
+export const CHANGES_SECTION_ICON: Record<
+  ChangesSectionKind,
+  ComponentType<{ className?: string }>
+> = {
   plans: ListTodoIcon,
   artifacts: BookOpenIcon,
+  working_memory: NotebookTextIcon,
   files_changed: DiffIcon,
   changelog: ClipboardListIcon,
   reports: FileIcon,
@@ -79,7 +84,7 @@ function collectAncestorDirectoryPaths(
 }
 
 function getSectionIcon(section: ChangesSectionKind) {
-  return SECTION_ICON[section];
+  return CHANGES_SECTION_ICON[section];
 }
 
 function renderTreeNode(
@@ -107,7 +112,7 @@ function renderTreeNode(
       <div key={`section:${node.section}`}>
         <Collapsible open={isExpanded}>
           <CollapsibleTrigger
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/40"
+            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/40"
             onClick={() => options.onToggleSection(node.section)}
           >
             <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/70">
@@ -153,7 +158,7 @@ function renderTreeNode(
       <div key={`dir:${node.path}`}>
         <button
           type="button"
-          className="group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
+          className="group flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
           style={{ paddingLeft: `${leftPadding}px` }}
           onClick={() => options.onToggleDirectory(node.path)}
         >
@@ -197,7 +202,7 @@ function renderTreeNode(
       key={`file:${node.path}`}
       type="button"
       className={cn(
-        "group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80",
+        "group flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80",
         options.activePath === node.item.resolvedPath && "bg-primary/8 text-foreground",
       )}
       style={{ paddingLeft: `${leftPadding}px` }}

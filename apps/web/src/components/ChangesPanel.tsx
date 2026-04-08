@@ -10,9 +10,15 @@
 import {
   ArrowUpRightIcon,
   BookOpenIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ClipboardListIcon,
   DiffIcon,
+  FileIcon,
   FileTextIcon,
   FolderOpenIcon,
+  ListTodoIcon,
+  NotebookTextIcon,
   XIcon,
 } from "lucide-react";
 import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
@@ -27,10 +33,12 @@ import CodeFileViewer from "./CodeFileViewer";
 import { ArtifactContent, type ContentState } from "./ArtifactPanel";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { Button } from "./ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { ScrollArea } from "./ui/scroll-area";
 import { openInPreferredEditor } from "../editorPreferences";
-import type { DiscoveredFileReference } from "../changesDiscovery";
+import type { ChangesPanelGroup, DiscoveredFileReference } from "../changesDiscovery";
 import { useChangesDiscovery } from "../hooks/useChangesDiscovery";
+import { useSettings } from "../hooks/useSettings";
 import { useStore } from "../store";
 import { checkpointFileDiffQueryOptions } from "../lib/providerReactQuery";
 import { readWorkspaceFileContent } from "../lib/workspaceFileContent";
@@ -39,7 +47,35 @@ import { parseCodeDiffMarkers, type CodeLineMarkerKind } from "../lib/codeDiffMa
 import { useTheme } from "../hooks/useTheme";
 import { useUiStateStore } from "../uiStateStore";
 import type { ChangesExplorerStat } from "../lib/changesExplorerTree";
+import { cn } from "../lib/utils";
 import { readNativeApi } from "~/nativeApi";
+
+const LIST_SECTION_ICON = {
+  plans: ListTodoIcon,
+  artifacts: BookOpenIcon,
+  working_memory: NotebookTextIcon,
+  files_changed: DiffIcon,
+  changelog: ClipboardListIcon,
+  reports: FileIcon,
+} as const;
+
+const LIST_SECTION_ACCENT = {
+  plans: "text-blue-400",
+  artifacts: "text-purple-400",
+  working_memory: "text-cyan-400",
+  files_changed: "text-emerald-400",
+  changelog: "text-amber-400",
+  reports: "text-orange-400",
+} as const;
+
+const LIST_SECTION_COUNT_BG = {
+  plans: "bg-blue-500/10 text-blue-400",
+  artifacts: "bg-purple-500/10 text-purple-400",
+  working_memory: "bg-cyan-500/10 text-cyan-400",
+  files_changed: "bg-emerald-500/10 text-emerald-400",
+  changelog: "bg-amber-500/10 text-amber-400",
+  reports: "bg-orange-500/10 text-orange-400",
+} as const;
 
 function normalizePathValue(pathValue: string): string {
   return pathValue.replaceAll("\\", "/");
@@ -267,6 +303,72 @@ function useChangesPanelFileDiffState(input: {
   return { query, diffMetadata, markers };
 }
 
+function ChangesFlatGroup(props: {
+  group: ChangesPanelGroup;
+  activePath: string | null;
+  onSelectItem: (item: DiscoveredFileReference) => void;
+}) {
+  const Icon = LIST_SECTION_ICON[props.group.section];
+  const accentClass = LIST_SECTION_ACCENT[props.group.section];
+  const countClass = LIST_SECTION_COUNT_BG[props.group.section];
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <Collapsible open={!collapsed}>
+      <CollapsibleTrigger
+        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/40"
+        onClick={() => setCollapsed((value) => !value)}
+      >
+        <span className={cn("flex size-5 shrink-0 items-center justify-center", accentClass)}>
+          {collapsed ? (
+            <ChevronRightIcon className="size-3.5" />
+          ) : (
+            <ChevronDownIcon className="size-3.5" />
+          )}
+        </span>
+        <Icon className={cn("size-3.5 shrink-0", accentClass)} />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground/80">
+          {props.group.label}
+        </span>
+        {props.group.items.length > 0 ? (
+          <span
+            className={cn(
+              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+              countClass,
+            )}
+          >
+            {props.group.items.length}
+          </span>
+        ) : null}
+      </CollapsibleTrigger>
+      <CollapsiblePanel>
+        <div className="space-y-0.5 pb-1 pl-3">
+          {props.group.items.map((item) => {
+            const isActive = props.activePath === item.resolvedPath;
+            return (
+              <button
+                key={`${item.section}:${item.resolvedPath}`}
+                type="button"
+                className={cn(
+                  "group flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-left transition-colors",
+                  isActive
+                    ? "bg-primary/8 text-foreground"
+                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground/80",
+                )}
+                onClick={() => props.onSelectItem(item)}
+                title={item.resolvedPath}
+              >
+                <FileTextIcon className="size-3 shrink-0 opacity-50" />
+                <span className="min-w-0 flex-1 truncate text-[12px]">{item.filename}</span>
+              </button>
+            );
+          })}
+        </div>
+      </CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
 function ChangesPanelHeader(props: { title: string; count: number; onClose: () => void }) {
   return (
     <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/70 px-4">
@@ -479,6 +581,8 @@ interface ChangesPanelProps {}
 
 export const ChangesPanel = memo(function ChangesPanel(_: ChangesPanelProps) {
   const { resolvedTheme } = useTheme();
+  const settings = useSettings();
+  const filesChangedViewType = settings.changesPanelFilesChangedViewType;
   const changesPanelOpen = useUiStateStore((state) => state.changesPanelOpen);
   const activePath = useUiStateStore((state) => state.changesPanelActivePath);
   const activeSection = useUiStateStore((state) => state.changesPanelActiveSection);
@@ -628,15 +732,27 @@ export const ChangesPanel = memo(function ChangesPanel(_: ChangesPanelProps) {
                   </p>
                 </div>
               ) : (
-                <ChangesExplorerTree
-                  groups={nonEmptyGroups}
-                  activePath={activePath}
-                  activeSection={activeSection}
-                  basePath={cwd}
-                  resolvedTheme={resolvedTheme}
-                  fileStatsByPath={fileStatsByPath}
-                  onSelectItem={handleSelectItem}
-                />
+                nonEmptyGroups.map((group) =>
+                  group.section === "files_changed" && filesChangedViewType === "tree" ? (
+                    <ChangesExplorerTree
+                      key={group.section}
+                      groups={[group]}
+                      activePath={activePath}
+                      activeSection={activeSection}
+                      basePath={cwd}
+                      resolvedTheme={resolvedTheme}
+                      fileStatsByPath={fileStatsByPath}
+                      onSelectItem={handleSelectItem}
+                    />
+                  ) : (
+                    <ChangesFlatGroup
+                      key={group.section}
+                      group={group}
+                      activePath={activePath}
+                      onSelectItem={handleSelectItem}
+                    />
+                  ),
+                )
               )}
             </div>
           </ScrollArea>

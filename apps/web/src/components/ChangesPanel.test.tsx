@@ -6,6 +6,9 @@ import type { ChatMessage, PersistedFileChange } from "../types";
 import { discoverChangesReferences, type ChangesPanelGroup } from "../changesDiscovery";
 
 const state = vi.hoisted(() => ({
+  settings: {
+    changesPanelFilesChangedViewType: "list" as "list" | "tree",
+  },
   uiState: {
     changesPanelOpen: true,
     changesPanelActivePath: null as string | null,
@@ -42,6 +45,11 @@ vi.mock("../hooks/useChangesDiscovery", () => ({
 
 vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
+}));
+
+vi.mock("../hooks/useSettings", () => ({
+  useSettings: (selector?: (value: typeof state.settings) => unknown) =>
+    selector ? selector(state.settings) : state.settings,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -96,6 +104,9 @@ function renderPanel() {
 }
 
 beforeEach(() => {
+  state.settings = {
+    changesPanelFilesChangedViewType: "list",
+  };
   state.uiState = {
     changesPanelOpen: true,
     changesPanelActivePath: null,
@@ -134,6 +145,14 @@ describe("ChangesPanel discovery integration", () => {
     const groups = discoverChangesReferences(messages, undefined);
     const artifactsGroup = groups.find((g) => g.section === "artifacts");
     expect(artifactsGroup?.items).toHaveLength(1);
+  });
+
+  it("discovers working memory references", () => {
+    const messages = [makeMessage("Saved repo/memory/working_session.md for later.")];
+    const groups = discoverChangesReferences(messages, undefined);
+    const memoryGroup = groups.find((g) => g.section === "working_memory");
+    expect(memoryGroup?.items).toHaveLength(1);
+    expect(memoryGroup?.items[0]?.filename).toBe("working_session.md");
   });
 
   it("discovers code file references in files_changed", () => {
@@ -231,6 +250,53 @@ index 1111111..2222222 100644
     expect(html).toContain("Show diff");
     expect(html).not.toContain("Show file");
     expect(html).toContain("code-file-viewer__plain");
+    expect(html).toContain("example.ts");
+    expect(html).not.toContain(">src<");
+  });
+
+  it("renders the files changed section as a tree when configured", () => {
+    state.settings = {
+      changesPanelFilesChangedViewType: "tree",
+    };
+    state.groups = [
+      {
+        section: "files_changed",
+        label: "Files Changed",
+        items: [
+          {
+            rawRef: "/repo/src/example.ts",
+            resolvedPath: "/repo/src/example.ts",
+            filename: "example.ts",
+            section: "files_changed",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+    state.uiState = {
+      ...state.uiState,
+      changesPanelOpen: true,
+      changesPanelActivePath: "/repo/src/example.ts",
+      changesPanelActiveSection: "files_changed",
+      changesPanelContentMode: "preview",
+    };
+
+    const html = renderPanel();
+
+    expect(html).toContain(">src<");
     expect(html).toContain("example.ts");
   });
 

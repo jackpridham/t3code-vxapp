@@ -21,6 +21,7 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_UNIFIED_SETTINGS,
+  type ChangesPanelFilesChangedViewType,
   type SidebarProjectSortOrder,
 } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
@@ -483,6 +484,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.allowActiveThreadsInFold !== DEFAULT_UNIFIED_SETTINGS.allowActiveThreadsInFold
         ? ["Active threads in fold"]
         : []),
+      ...(settings.changesPanelFilesChangedViewType !==
+      DEFAULT_UNIFIED_SETTINGS.changesPanelFilesChangedViewType
+        ? ["Changes panel file view"]
+        : []),
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
@@ -509,6 +514,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       areProviderSettingsDirty,
       isGitWritingModelDirty,
       settings.allowActiveThreadsInFold,
+      settings.changesPanelFilesChangedViewType,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.defaultThreadEnvMode,
@@ -542,6 +548,14 @@ export function useSettingsRestore(onRestored?: () => void) {
     restoreDefaults,
   };
 }
+
+const CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE_LABELS: Record<
+  ChangesPanelFilesChangedViewType,
+  string
+> = {
+  list: "File List",
+  tree: "File Tree",
+};
 
 export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
@@ -1600,6 +1614,64 @@ export function GeneralSettingsPanel() {
             description="Current version of the application."
           />
         )}
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function ThreadsSettingsPanel() {
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Changes Panel">
+        <SettingsRow
+          title="Files Changed view type"
+          description="Choose whether changed code files render as a flat filename list or a directory tree. Plans, artifacts, working memory, changelog, and reports always stay as flat file lists."
+          resetAction={
+            settings.changesPanelFilesChangedViewType !==
+            DEFAULT_UNIFIED_SETTINGS.changesPanelFilesChangedViewType ? (
+              <SettingResetButton
+                label="files changed view type"
+                onClick={() =>
+                  updateSettings({
+                    changesPanelFilesChangedViewType:
+                      DEFAULT_UNIFIED_SETTINGS.changesPanelFilesChangedViewType,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.changesPanelFilesChangedViewType}
+              onValueChange={(value) => {
+                if (value === "list" || value === "tree") {
+                  updateSettings({ changesPanelFilesChangedViewType: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Files changed view type">
+                <SelectValue>
+                  {
+                    CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE_LABELS[
+                      settings.changesPanelFilesChangedViewType
+                    ]
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="list">
+                  {CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE_LABELS.list}
+                </SelectItem>
+                <SelectItem hideIndicator value="tree">
+                  {CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE_LABELS.tree}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
       </SettingsSection>
     </SettingsPageContainer>
   );

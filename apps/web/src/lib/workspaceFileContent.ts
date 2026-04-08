@@ -1,5 +1,10 @@
 import { readNativeApi } from "../nativeApi";
 
+function basenameOf(pathValue: string): string {
+  const lastSlash = Math.max(pathValue.lastIndexOf("/"), pathValue.lastIndexOf("\\"));
+  return lastSlash >= 0 ? pathValue.slice(lastSlash + 1) : pathValue;
+}
+
 /**
  * Load the text content of a file given its absolute path.
  *
@@ -35,6 +40,13 @@ export async function readWorkspaceFileContent(input: {
     relativePath = lastSlash > 0 ? input.absolutePath.slice(lastSlash + 1) : input.absolutePath;
   }
 
-  const result = await api.projects.readFile({ cwd, relativePath });
-  return result.content;
+  try {
+    const result = await api.projects.readFile({ cwd, relativePath });
+    return result.content;
+  } catch {
+    const fileName = basenameOf(input.absolutePath);
+    throw new Error(
+      `Unable to load ${fileName || "this file"}. The referenced path may be invalid or no longer exists.`,
+    );
+  }
 }

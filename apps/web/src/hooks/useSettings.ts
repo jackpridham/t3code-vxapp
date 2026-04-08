@@ -21,8 +21,10 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import {
+  ChangesPanelFilesChangedViewType,
   type ClientSettings,
   ClientSettingsSchema,
+  DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   SidebarProjectSortOrder,
@@ -205,6 +207,14 @@ export function buildLegacyClientSettingsMigrationPatch(
 
   if (Predicate.isBoolean(legacySettings.allowActiveThreadsInFold)) {
     patch.allowActiveThreadsInFold = legacySettings.allowActiveThreadsInFold;
+  }
+
+  if (
+    Schema.is(ChangesPanelFilesChangedViewType)(legacySettings.changesPanelFilesChangedViewType)
+  ) {
+    patch.changesPanelFilesChangedViewType = legacySettings.changesPanelFilesChangedViewType;
+  } else if (legacySettings.changesPanelFilesChangedViewType === undefined) {
+    patch.changesPanelFilesChangedViewType = DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE;
   }
 
   if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {
