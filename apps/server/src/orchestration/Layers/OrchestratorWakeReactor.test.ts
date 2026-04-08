@@ -427,6 +427,91 @@ describe("OrchestratorWakeReactor", () => {
     expect(readModel.orchestratorWakeItems).toHaveLength(0);
   });
 
+  it("ignores duplicate worker completions when a wake already exists for the same turn", async () => {
+    const harness = await createHarness({ autoStart: false });
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-thread-worker-duplicate"),
+        threadId: asThreadId("thread-worker-duplicate"),
+        projectId: asProjectId("project-worker"),
+        title: "Worker thread-worker-duplicate",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        spawnRole: "worker",
+        createdAt: "2026-04-05T12:02:30.000Z",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.orchestrator-wake.upsert",
+        commandId: CommandId.makeUnsafe("cmd-seed-duplicate-worker-wake"),
+        threadId: asThreadId("thread-orch"),
+        wakeItem: {
+          wakeId: "wake:thread-worker-duplicate:turn-duplicate:completed",
+          orchestratorThreadId: asThreadId("thread-orch"),
+          orchestratorProjectId: asProjectId("project-orch"),
+          workerThreadId: asThreadId("thread-worker-duplicate"),
+          workerProjectId: asProjectId("project-worker"),
+          workerTurnId: asTurnId("turn-duplicate"),
+          workerTitleSnapshot: "Worker thread-worker-duplicate",
+          outcome: "completed",
+          summary: "Worker thread-worker-duplicate completed its assigned turn",
+          queuedAt: "2026-04-05T12:02:40.000Z",
+          state: "consumed",
+          deliveredAt: "2026-04-05T12:02:41.000Z",
+          consumedAt: "2026-04-05T12:02:41.000Z",
+          consumeReason: "worker_rechecked",
+        },
+        createdAt: "2026-04-05T12:02:41.000Z",
+      }),
+    );
+
+    await harness.startReactor();
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-duplicate-completion"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:03:00.000Z",
+      threadId: asThreadId("thread-worker-duplicate"),
+      turnId: asTurnId("turn-duplicate"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const worker = readModel.threads.find(
+      (thread) => thread.id === asThreadId("thread-worker-duplicate"),
+    );
+    const wakeItems = readModel.orchestratorWakeItems.filter(
+      (item) => item.workerTurnId === asTurnId("turn-duplicate"),
+    );
+
+    expect(
+      worker?.activities.some((activity) => activity.kind === "orchestrator.wake.rejected"),
+    ).toBe(false);
+    expect(wakeItems).toHaveLength(1);
+    expect(wakeItems[0]).toMatchObject({
+      wakeId: "wake:thread-worker-duplicate:turn-duplicate:completed",
+      state: "consumed",
+      consumeReason: "worker_rechecked",
+    });
+  });
+
   it("consumes undelivered wake items when the worker starts another turn", async () => {
     const harness = await createHarness();
     runtime = harness.runtime;
