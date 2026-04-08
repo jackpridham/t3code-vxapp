@@ -907,7 +907,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
-          if (turnId === null || event.payload.session.status !== "running") {
+          const isTerminalSessionSet =
+            event.payload.session.status !== "running" &&
+            event.payload.session.status !== "starting";
+          if (turnId === null && !isTerminalSessionSet) {
+            return;
+          }
+          if (turnId === null || isTerminalSessionSet) {
             const existingThread = yield* projectionThreadRepository.getById({
               threadId: event.payload.threadId,
             });

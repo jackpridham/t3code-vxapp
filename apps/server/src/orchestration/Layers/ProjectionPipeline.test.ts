@@ -2434,6 +2434,160 @@ it.layer(BaseTestLayer)("Projection late-turn reconciliation", (it) => {
       assert.deepEqual(threadRows, [{ latestTurnId: "turn-terminal-session" }]);
     }),
   );
+
+  it.effect("does not settle a running turn when session-set stays running but temporarily drops the active turn id", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+
+      const threadId = ThreadId.makeUnsafe("thread-running-null-active-turn");
+      const projectId = ProjectId.makeUnsafe("project-running-null-active-turn");
+      const turnId = TurnId.makeUnsafe("turn-running-null-active-turn");
+      const userMessageId = MessageId.makeUnsafe("message-running-null-active-turn");
+
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-running-null-active-turn-1"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: "2026-02-26T16:30:00.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-null-active-turn-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-null-active-turn-1"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Project Running Null Active Turn",
+          workspaceRoot: "/tmp/project-running-null-active-turn",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: "2026-02-26T16:30:00.000Z",
+          updatedAt: "2026-02-26T16:30:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-running-null-active-turn-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:30:01.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-null-active-turn-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-null-active-turn-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Thread Running Null Active Turn",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T16:30:01.000Z",
+          updatedAt: "2026-02-26T16:30:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-start-requested",
+        eventId: EventId.makeUnsafe("evt-running-null-active-turn-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:30:02.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-null-active-turn-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-null-active-turn-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: userMessageId,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: "2026-02-26T16:30:02.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-running-null-active-turn-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:30:03.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-null-active-turn-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-null-active-turn-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-02-26T16:30:03.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-running-null-active-turn-5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T16:30:03.500Z",
+        commandId: CommandId.makeUnsafe("cmd-running-null-active-turn-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-null-active-turn-5"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-26T16:30:03.500Z",
+          },
+        },
+      });
+
+      const turnRows = yield* sql<{
+        readonly turnId: string;
+        readonly state: string;
+        readonly completedAt: string | null;
+      }>`
+        SELECT
+          turn_id AS "turnId",
+          state,
+          completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(turnRows, [
+        {
+          turnId: "turn-running-null-active-turn",
+          state: "running",
+          completedAt: null,
+        },
+      ]);
+    }),
+  );
 });
 
 const engineLayer = it.layer(

@@ -99,6 +99,19 @@ function readRuntimePayloadLastError(value: unknown): string | null {
   return typeof record.lastError === "string" ? record.lastError : null;
 }
 
+function isLifecycleStateEvent(
+  event: ProviderRuntimeEvent,
+): event is Extract<
+  ProviderRuntimeEvent,
+  { type: "session.started" | "thread.started" | "session.state.changed" }
+> {
+  return (
+    event.type === "session.started" ||
+    event.type === "thread.started" ||
+    event.type === "session.state.changed"
+  );
+}
+
 function runtimeModeForThread(thread: OrchestrationReadModel["threads"][number]) {
   return thread.session?.runtimeMode ?? thread.runtimeMode ?? "full-access";
 }
@@ -925,7 +938,10 @@ const make = Effect.fn("make")(function* () {
 
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
-    const activeTurnId = thread.session?.activeTurnId ?? null;
+    const bindingOption = yield* providerSessionDirectory.getBinding(thread.id);
+    const runtimeBinding = Option.getOrUndefined(bindingOption);
+    const runtimeBindingActiveTurnId = readRuntimePayloadTurnId(runtimeBinding?.runtimePayload);
+    const activeTurnId = thread.session?.activeTurnId ?? runtimeBindingActiveTurnId ?? null;
     const currentSessionUpdatedAt = thread.session?.updatedAt ?? null;
     const olderThanCurrentSession =
       currentSessionUpdatedAt !== null && currentSessionUpdatedAt.localeCompare(now) > 0;
@@ -993,7 +1009,9 @@ const make = Effect.fn("make")(function* () {
           ? (eventTurnId ?? null)
           : event.type === "turn.completed" || event.type === "session.exited"
             ? null
-            : activeTurnId;
+            : isLifecycleStateEvent(event)
+              ? (activeTurnId ?? runtimeBindingActiveTurnId ?? null)
+              : activeTurnId;
       const status = (() => {
         switch (event.type) {
           case "session.state.changed":
@@ -1008,7 +1026,7 @@ const make = Effect.fn("make")(function* () {
           case "thread.started":
             // Provider thread/session start notifications can arrive during an
             // active turn; preserve turn-running state in that case.
-            return activeTurnId !== null ? "running" : "ready";
+            return (activeTurnId ?? runtimeBindingActiveTurnId) !== null ? "running" : "ready";
         }
       })();
       const lastError =
