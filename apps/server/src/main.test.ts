@@ -10,13 +10,62 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { beforeEach } from "vitest";
 import { NetService } from "@t3tools/shared/Net";
 
-import { CliConfig, recordStartupHeartbeat, t3Cli, type CliConfigShape } from "./main";
+import {
+  CheckpointDiffQuery,
+  type CheckpointDiffQueryShape,
+} from "./checkpointing/Services/CheckpointDiffQuery";
+import {
+  CliConfig,
+  makeT3Cli,
+  recordStartupHeartbeat,
+  ServerConfigLive,
+  type CliConfigShape,
+} from "./main";
 import { ServerConfig, type ServerConfigShape } from "./config";
+import { GitCore, type GitCoreShape } from "./git/Services/GitCore.ts";
+import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
+import { Keybindings, type KeybindingsShape } from "./keybindings";
 import { Open, type OpenShape } from "./open";
+import {
+  OrchestrationEngineService,
+  type OrchestrationEngineShape,
+} from "./orchestration/Services/OrchestrationEngine";
+import {
+  OrchestrationReactor,
+  type OrchestrationReactorShape,
+} from "./orchestration/Services/OrchestrationReactor";
+import {
+  ProjectionBootstrapSummaryQuery,
+  type ProjectionBootstrapSummaryQueryShape,
+} from "./orchestration/Services/ProjectionBootstrapSummaryQuery";
 import { ProjectionOperationalQuery } from "./orchestration/Services/ProjectionOperationalQuery";
+import {
+  ProjectionSnapshotQuery,
+  type ProjectionSnapshotQueryShape,
+} from "./orchestration/Services/ProjectionSnapshotQuery";
+import {
+  ProjectFaviconResolver,
+  type ProjectFaviconResolverShape,
+} from "./project/Services/ProjectFaviconResolver.ts";
+import {
+  ProjectHooksService,
+  type ProjectHooksShape,
+} from "./projectHooks/Services/ProjectHooksService.ts";
+import { ProviderRegistry, type ProviderRegistryShape } from "./provider/Services/ProviderRegistry";
+import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
+import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
 import { ServerSettingsService } from "./serverSettings";
+import {
+  WorkspaceEntries,
+  type WorkspaceEntriesShape,
+} from "./workspace/Services/WorkspaceEntries.ts";
+import {
+  WorkspaceFileSystem,
+  type WorkspaceFileSystemShape,
+} from "./workspace/Services/WorkspaceFileSystem.ts";
+import { WorkspacePaths, type WorkspacePathsShape } from "./workspace/Services/WorkspacePaths.ts";
 
 const start = vi.fn(() => undefined);
 const stop = vi.fn(() => undefined);
@@ -31,6 +80,7 @@ const serverStart = Effect.acquireRelease(
   () => Effect.sync(() => stop()),
 );
 const findAvailablePort = vi.fn((preferred: number) => Effect.succeed(preferred));
+const unusedRuntimeService = <Service>(): Service => ({}) as unknown as Service;
 
 // Shared service layer used by this CLI test suite.
 const testLayer = Layer.mergeAll(
@@ -54,7 +104,40 @@ const testLayer = Layer.mergeAll(
     openInEditor: () => Effect.void,
   } satisfies OpenShape),
   ServerSettingsService.layerTest(),
+  Layer.succeed(CheckpointDiffQuery, unusedRuntimeService<CheckpointDiffQueryShape>()),
+  Layer.succeed(GitCore, unusedRuntimeService<GitCoreShape>()),
+  Layer.succeed(GitManager, unusedRuntimeService<GitManagerShape>()),
+  Layer.succeed(Keybindings, unusedRuntimeService<KeybindingsShape>()),
+  Layer.succeed(OrchestrationEngineService, unusedRuntimeService<OrchestrationEngineShape>()),
+  Layer.succeed(OrchestrationReactor, unusedRuntimeService<OrchestrationReactorShape>()),
+  Layer.succeed(
+    ProjectionBootstrapSummaryQuery,
+    unusedRuntimeService<ProjectionBootstrapSummaryQueryShape>(),
+  ),
+  Layer.succeed(ProjectionOperationalQuery, {
+    getReadiness: () =>
+      Effect.succeed({
+        snapshotSequence: 0,
+        projectCount: 0,
+        threadCount: 0,
+      }),
+    listProjects: () => Effect.die("unexpected listProjects"),
+    getProjectByWorkspace: () => Effect.die("unexpected getProjectByWorkspace"),
+    listProjectThreads: () => Effect.die("unexpected listProjectThreads"),
+  }),
+  Layer.succeed(ProjectionSnapshotQuery, unusedRuntimeService<ProjectionSnapshotQueryShape>()),
+  Layer.succeed(ProjectFaviconResolver, unusedRuntimeService<ProjectFaviconResolverShape>()),
+  Layer.succeed(ProjectHooksService, {
+    prepareTurnStartCommand: (command) => Effect.succeed(command),
+    handleTurnCompleted: () => Effect.void,
+  } satisfies ProjectHooksShape),
+  Layer.succeed(ProviderRegistry, unusedRuntimeService<ProviderRegistryShape>()),
+  Layer.succeed(ProviderService, unusedRuntimeService<ProviderServiceShape>()),
+  Layer.succeed(TerminalManager, unusedRuntimeService<TerminalManagerShape>()),
   AnalyticsService.layerTest,
+  Layer.succeed(WorkspaceEntries, unusedRuntimeService<WorkspaceEntriesShape>()),
+  Layer.succeed(WorkspaceFileSystem, unusedRuntimeService<WorkspaceFileSystemShape>()),
+  Layer.succeed(WorkspacePaths, unusedRuntimeService<WorkspacePathsShape>()),
   FetchHttpClient.layer,
   NodeServices.layer,
 );
@@ -63,7 +146,8 @@ const runCli = (
   args: ReadonlyArray<string>,
   env: Record<string, string> = { T3CODE_NO_BROWSER: "true" },
 ) => {
-  return Command.runWith(t3Cli, { version: "0.0.0-test" })(args).pipe(
+  const testCli = makeT3Cli(ServerConfigLive);
+  return Command.runWith(testCli, { version: "0.0.0-test" })(args).pipe(
     Effect.provide(
       ConfigProvider.layer(
         ConfigProvider.fromEnv({

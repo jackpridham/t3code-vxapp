@@ -106,7 +106,9 @@ interface JsonRpcNotification {
 }
 
 function sameId(left: string | null | undefined, right: string | null | undefined): boolean {
-  return left !== undefined && left !== null && right !== undefined && right !== null && left === right;
+  return (
+    left !== undefined && left !== null && right !== undefined && right !== null && left === right
+  );
 }
 
 export interface CodexAppServerSendTurnInput {
@@ -1137,8 +1139,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const rawRoute = this.readRouteFields(request.params);
     const childParentTurnId = this.readChildParentTurnId(context, request.params);
     const effectiveTurnId =
-      childParentTurnId ??
-      this.resolveTopLevelTurnId(context, rawRoute.turnId, request.method);
+      childParentTurnId ?? this.resolveTopLevelTurnId(context, rawRoute.turnId, request.method);
     const requestKind = this.requestKindForMethod(request.method);
     let requestId: ApprovalRequestId | undefined;
     if (requestKind) {

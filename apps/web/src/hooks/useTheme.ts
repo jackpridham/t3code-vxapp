@@ -8,6 +8,7 @@ type ThemeSnapshot = {
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+const DEFAULT_SNAPSHOT: ThemeSnapshot = { theme: "system", systemDark: false };
 
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
@@ -17,16 +18,25 @@ function emitChange() {
 }
 
 function getSystemDark(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
   return window.matchMedia(MEDIA_QUERY).matches;
 }
 
 function getStored(): Theme {
+  if (typeof localStorage === "undefined") {
+    return "system";
+  }
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
   return "system";
 }
 
 function applyTheme(theme: Theme, suppressTransitions = false) {
+  if (typeof document === "undefined") {
+    return;
+  }
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
@@ -44,6 +54,9 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
 }
 
 function syncDesktopTheme(theme: Theme) {
+  if (typeof window === "undefined") {
+    return;
+  }
   const bridge = window.desktopBridge;
   if (!bridge || lastDesktopTheme === theme) {
     return;
@@ -58,7 +71,9 @@ function syncDesktopTheme(theme: Theme) {
 }
 
 // Apply immediately on module load to prevent flash
-applyTheme(getStored());
+if (typeof document !== "undefined") {
+  applyTheme(getStored());
+}
 
 function getSnapshot(): ThemeSnapshot {
   const theme = getStored();
@@ -70,6 +85,10 @@ function getSnapshot(): ThemeSnapshot {
 
   lastSnapshot = { theme, systemDark };
   return lastSnapshot;
+}
+
+function getServerSnapshot(): ThemeSnapshot {
+  return lastSnapshot ?? DEFAULT_SNAPSHOT;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -100,7 +119,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useTheme() {
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const theme = snapshot.theme;
 
   const resolvedTheme: "light" | "dark" =

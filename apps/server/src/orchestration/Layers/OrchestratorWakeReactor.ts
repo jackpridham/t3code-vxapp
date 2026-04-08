@@ -212,8 +212,7 @@ function findSupersedingTurnRequestedAt(input: {
   const supersedingRequestedAts = input.turns
     .filter(
       (turn) =>
-        turn.turnId !== input.completedTurnId &&
-        turn.requestedAt >= completedTurnRequestedAt,
+        turn.turnId !== input.completedTurnId && turn.requestedAt >= completedTurnRequestedAt,
     )
     .map((turn) => turn.requestedAt)
     .toSorted((left, right) => left.localeCompare(right));
@@ -477,10 +476,7 @@ const make = Effect.gen(function* () {
   );
 
   const recheckWakeItemsForArchivedWorker = Effect.fn("recheckWakeItemsForArchivedWorker")(
-    function* (input: {
-      readonly workerThreadId: ThreadId;
-      readonly archivedAt: string;
-    }) {
+    function* (input: { readonly workerThreadId: ThreadId; readonly archivedAt: string }) {
       const readModel = yield* orchestrationEngine.getReadModel();
       const workerThread = readModel.threads.find((entry) => entry.id === input.workerThreadId);
       const wakeItems = readModel.orchestratorWakeItems

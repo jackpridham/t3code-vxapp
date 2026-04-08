@@ -1202,8 +1202,7 @@ describe("OrchestratorWakeReactor", () => {
     const deliveringModel = await waitForReadModel(harness.engine, (model) =>
       model.orchestratorWakeItems.some(
         (item) =>
-          item.workerTurnId === asTurnId("turn-archive-delivering") &&
-          item.state === "delivering",
+          item.workerTurnId === asTurnId("turn-archive-delivering") && item.state === "delivering",
       ),
     );
 
@@ -1275,8 +1274,7 @@ describe("OrchestratorWakeReactor", () => {
     const consumedModel = await waitForReadModel(harness.engine, (model) =>
       model.orchestratorWakeItems.some(
         (item) =>
-          item.workerTurnId === asTurnId("turn-archive-delivering") &&
-          item.state === "consumed",
+          item.workerTurnId === asTurnId("turn-archive-delivering") && item.state === "consumed",
       ),
     );
 
@@ -1395,8 +1393,9 @@ describe("OrchestratorWakeReactor", () => {
       const activeBatchCount = model.orchestratorWakeItems.filter(
         (item) => item.state === "delivered" || item.state === "delivering",
       ).length;
-      const remainingCount = model.orchestratorWakeItems.filter((item) => item.state === "pending")
-        .length;
+      const remainingCount = model.orchestratorWakeItems.filter(
+        (item) => item.state === "pending",
+      ).length;
       const userMessageCount =
         orchestratorThread?.messages.filter((message) => message.role === "user").length ?? 0;
       return activeBatchCount === 5 && remainingCount === 1 && userMessageCount >= 1;

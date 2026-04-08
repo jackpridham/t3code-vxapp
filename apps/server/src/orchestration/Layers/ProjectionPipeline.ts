@@ -622,7 +622,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
           const nextLatestTurnId =
-            event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
+            event.payload.session.status === "running" &&
+            event.payload.session.activeTurnId !== null
               ? event.payload.session.activeTurnId
               : existingRow.value.latestTurnId;
           yield* projectionThreadRepository.upsert({
@@ -1078,7 +1079,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionTurnRepository.upsertByTurnId({
             turnId: event.payload.turnId,
             threadId: event.payload.threadId,
-            pendingMessageId: Option.isSome(pendingTurnStart) ? pendingTurnStart.value.messageId : null,
+            pendingMessageId: Option.isSome(pendingTurnStart)
+              ? pendingTurnStart.value.messageId
+              : null,
             sourceProposedPlanThreadId: Option.isSome(pendingTurnStart)
               ? pendingTurnStart.value.sourceProposedPlanThreadId
               : null,

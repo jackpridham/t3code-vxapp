@@ -187,13 +187,10 @@ function orchestrationSessionStatusFromRuntimeState(
 }
 
 function isSettledSessionStatus(
-  status: "starting" | "running" | "ready" | "interrupted" | "stopped" | "error",
+  status: "idle" | "starting" | "running" | "ready" | "interrupted" | "stopped" | "error",
 ): boolean {
   return (
-    status === "ready" ||
-    status === "interrupted" ||
-    status === "stopped" ||
-    status === "error"
+    status === "ready" || status === "interrupted" || status === "stopped" || status === "error"
   );
 }
 

@@ -148,7 +148,7 @@ const isValidPort = (value: number): boolean => value >= 1 && value <= 65_535;
 const isRuntimeMode = (value: string): value is RuntimeMode =>
   value === "web" || value === "desktop";
 
-const ServerConfigLive = (input: CliInput) =>
+export const ServerConfigLive = (input: CliInput) =>
   Layer.effect(
     ServerConfig,
     Effect.gen(function* () {
@@ -290,7 +290,7 @@ const ServerConfigLive = (input: CliInput) =>
     }),
   );
 
-const LayerLive = (input: CliInput) =>
+const ServerRuntimeSupportLive = (input: CliInput) =>
   Layer.empty.pipe(
     Layer.provideMerge(makeServerRuntimeServicesLayer()),
     Layer.provideMerge(makeServerProviderLayer()),
@@ -333,7 +333,10 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
   });
 });
 
-const makeServerRuntimeProgram = (input: CliInput) =>
+const makeServerRuntimeProgram = <Services, Error, Requirements>(
+  input: CliInput,
+  makeRuntimeSupportLayer: (input: CliInput) => Layer.Layer<Services, Error, Requirements>,
+) =>
   Effect.gen(function* () {
     const { start, stopSignal } = yield* Server;
     const openDeps = yield* Open;
@@ -376,13 +379,16 @@ const makeServerRuntimeProgram = (input: CliInput) =>
     }
 
     return yield* stopSignal;
-  }).pipe(Effect.provide(LayerLive(input)));
+  }).pipe(Effect.provide(makeRuntimeSupportLayer(input)));
 
-const makeServerProgram = (input: CliInput) =>
+const makeServerProgram = <Services, Error, Requirements>(
+  input: CliInput,
+  makeRuntimeSupportLayer: (input: CliInput) => Layer.Layer<Services, Error, Requirements>,
+) =>
   Effect.gen(function* () {
     const cliConfig = yield* CliConfig;
     yield* cliConfig.fixPath;
-    return yield* makeServerRuntimeProgram(input);
+    return yield* makeServerRuntimeProgram(input, makeRuntimeSupportLayer);
   });
 
 /**
@@ -439,18 +445,25 @@ const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.optional,
 );
 
-export const t3Cli = Command.make("t3", {
-  mode: modeFlag,
-  port: portFlag,
-  host: hostFlag,
-  t3Home: t3HomeFlag,
-  devUrl: devUrlFlag,
-  noBrowser: noBrowserFlag,
-  authToken: authTokenFlag,
-  bootstrapFd: bootstrapFdFlag,
-  autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
-  logWebSocketEvents: logWebSocketEventsFlag,
-}).pipe(
-  Command.withDescription("Run the T3 Code server."),
-  Command.withHandler((input) => Effect.scoped(makeServerProgram(input))),
-);
+export const makeT3Cli = <Services, Error, Requirements>(
+  makeRuntimeSupportLayer: (input: CliInput) => Layer.Layer<Services, Error, Requirements>,
+) =>
+  Command.make("t3", {
+    mode: modeFlag,
+    port: portFlag,
+    host: hostFlag,
+    t3Home: t3HomeFlag,
+    devUrl: devUrlFlag,
+    noBrowser: noBrowserFlag,
+    authToken: authTokenFlag,
+    bootstrapFd: bootstrapFdFlag,
+    autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
+    logWebSocketEvents: logWebSocketEventsFlag,
+  }).pipe(
+    Command.withDescription("Run the T3 Code server."),
+    Command.withHandler((input) =>
+      Effect.scoped(makeServerProgram(input, makeRuntimeSupportLayer)),
+    ),
+  );
+
+export const t3Cli = makeT3Cli(ServerRuntimeSupportLive);

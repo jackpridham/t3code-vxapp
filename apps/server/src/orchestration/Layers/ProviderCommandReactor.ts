@@ -274,7 +274,9 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const providerName = thread.session?.providerName ?? thread.modelSelection.provider;
+    const providerName: ProviderKind = Schema.is(ProviderKind)(thread.session?.providerName)
+      ? thread.session.providerName
+      : thread.modelSelection.provider;
     const runtimeMode = input.session.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE;
 
     yield* setThreadSession({
@@ -534,11 +536,8 @@ const make = Effect.gen(function* () {
         threadId: input.threadId,
         status: "running",
         providerName:
-          currentSession?.providerName ??
-          activeSession?.provider ??
-          thread.modelSelection.provider,
-        runtimeMode:
-          currentSession?.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+          currentSession?.providerName ?? activeSession?.provider ?? thread.modelSelection.provider,
+        runtimeMode: currentSession?.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         activeTurnId: requestedTurnId,
         lastError: null,
         updatedAt: input.createdAt,
@@ -819,7 +818,7 @@ const make = Effect.gen(function* () {
 
     sessionBoundaryFences.set(event.payload.threadId, {
       session,
-      runtimeStatus: session.status === "error" ? "error" : "running",
+      runtimeStatus: "running",
       recentTerminalTurnIds: fence.recentTerminalTurnIds,
     });
   });
