@@ -939,6 +939,8 @@ const make = Effect.fn("make")(function* () {
     const runtimeBinding = Option.getOrUndefined(bindingOption);
     const runtimeBindingActiveTurnId = readRuntimePayloadTurnId(runtimeBinding?.runtimePayload);
     const activeTurnId = thread.session?.activeTurnId ?? runtimeBindingActiveTurnId ?? null;
+    const lifecycleEventTurnId =
+      event.type === "turn.completed" && eventTurnId === undefined ? activeTurnId ?? undefined : eventTurnId;
     const currentSessionUpdatedAt = thread.session?.updatedAt ?? null;
     const olderThanCurrentSession =
       currentSessionUpdatedAt !== null && currentSessionUpdatedAt.localeCompare(now) > 0;
@@ -956,8 +958,11 @@ const make = Effect.fn("make")(function* () {
             event.payload.state === "waiting")));
 
     const conflictsWithActiveTurn =
-      activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
-    const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
+      activeTurnId !== null &&
+      lifecycleEventTurnId !== undefined &&
+      !sameId(activeTurnId, lifecycleEventTurnId);
+    const missingTurnForActiveTurn =
+      activeTurnId !== null && lifecycleEventTurnId === undefined;
 
     const shouldApplyThreadLifecycle = (() => {
       if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
@@ -979,8 +984,8 @@ const make = Effect.fn("make")(function* () {
             return false;
           }
           // Only the active turn may close the lifecycle state.
-          if (activeTurnId !== null && eventTurnId !== undefined) {
-            return sameId(activeTurnId, eventTurnId);
+          if (activeTurnId !== null && lifecycleEventTurnId !== undefined) {
+            return sameId(activeTurnId, lifecycleEventTurnId);
           }
           // If no active turn is tracked, accept completion scoped to this thread.
           return true;
@@ -1115,10 +1120,10 @@ const make = Effect.fn("make")(function* () {
       const assistantMessageId = MessageId.makeUnsafe(
         `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
       );
-      const turnId = toTurnId(event.turnId);
-      if (turnId) {
-        yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
-      }
+        const turnId = lifecycleEventTurnId;
+        if (turnId) {
+          yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+        }
 
       const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
         serverSettingsService.getSettings,
@@ -1216,7 +1221,7 @@ const make = Effect.fn("make")(function* () {
     }
 
     if (event.type === "turn.completed") {
-      const turnId = toTurnId(event.turnId);
+      const turnId = lifecycleEventTurnId;
       if (turnId) {
         const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
         yield* Effect.forEach(
