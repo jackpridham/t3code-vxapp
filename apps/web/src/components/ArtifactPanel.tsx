@@ -20,10 +20,10 @@ import { openInPreferredEditor } from "../editorPreferences";
 import { buildArtifactWindowHref } from "../lib/artifactWindow";
 import {
   discoverThreadArtifacts,
-  readArtifactContent,
   titleFromFilename,
   type DiscoveredArtifact,
 } from "../artifactDiscovery";
+import { readWorkspaceFileContent } from "../lib/workspaceFileContent";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import ChatMarkdown from "./ChatMarkdown";
@@ -62,7 +62,7 @@ function useArtifactContentState(
     setContentState({ status: "loading" });
 
     let cancelled = false;
-    void readArtifactContent(worktreePath, path)
+    void readWorkspaceFileContent({ worktreePath, absolutePath: path })
       .then((content) => {
         if (!cancelled) {
           setContentState({ status: "loaded", content, path });
