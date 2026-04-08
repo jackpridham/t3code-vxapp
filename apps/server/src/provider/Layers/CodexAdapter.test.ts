@@ -921,6 +921,68 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("reuses the in-flight continuation turn for stale Codex turn completion notifications", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-item-started-continuation"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-continuation"),
+        itemId: asItemId("msg_continuation"),
+        createdAt: new Date().toISOString(),
+        method: "item/started",
+        payload: {
+          item: {
+            type: "agentMessage",
+            id: "msg_continuation",
+            text: "",
+          },
+          threadId: "provider-thread-1",
+          turnId: "turn-stale",
+        },
+      } satisfies ProviderEvent);
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-turn-completed-stale"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-stale"),
+        createdAt: new Date().toISOString(),
+        method: "turn/completed",
+        payload: {
+          threadId: "provider-thread-1",
+          turn: {
+            id: "turn-stale",
+            items: [],
+            status: "completed",
+            error: null,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.equal(events[0]?.type, "item.started");
+      if (events[0]?.type === "item.started") {
+        assert.equal(events[0].turnId, "turn-continuation");
+      }
+
+      assert.equal(events[1]?.type, "turn.completed");
+      if (events[1]?.type === "turn.completed") {
+        assert.equal(events[1].turnId, "turn-continuation");
+        assert.equal(events[1].providerRefs?.providerTurnId, "turn-continuation");
+        assert.equal(events[1].payload.state, "completed");
+      }
+    }),
+  );
+
   it.effect("unwraps Codex token usage payloads for context window events", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;

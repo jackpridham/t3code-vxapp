@@ -531,6 +531,23 @@ function runtimeEventBase(
   };
 }
 
+function overrideRuntimeEventTurnId(
+  base: Omit<ProviderRuntimeEvent, "type" | "payload">,
+  turnId: TurnId | undefined,
+): Omit<ProviderRuntimeEvent, "type" | "payload"> {
+  const { turnId: _previousTurnId, providerRefs: previousProviderRefs, ...rest } = base;
+  const providerRefs = {
+    ...(previousProviderRefs ?? {}),
+    ...(turnId ? { providerTurnId: turnId } : {}),
+  };
+
+  return {
+    ...rest,
+    ...(turnId ? { turnId } : {}),
+    ...(Object.keys(providerRefs).length > 0 ? { providerRefs } : {}),
+  };
+}
+
 function mapItemLifecycle(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
@@ -572,6 +589,7 @@ function mapItemLifecycle(
 function mapToRuntimeEvents(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
+  inFlightTurnId: TurnId | undefined,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   const payload = asObject(event.payload);
   const turn = asObject(payload?.turn);
@@ -789,9 +807,15 @@ function mapToRuntimeEvents(
 
   if (event.method === "turn/completed") {
     const errorMessage = asString(asObject(turn?.error)?.message);
+    const reportedTurnId = event.turnId ?? toTurnId(asString(turn?.id));
+    // Codex continuation closeout can emit a stale raw turn/completed for the
+    // previous turn even though the in-flight item stream is already scoped to
+    // the active continuation turn. Prefer the tracked in-flight turn when it
+    // exists so downstream lifecycle reactors settle the correct turn.
+    const effectiveTurnId = inFlightTurnId ?? reportedTurnId;
     return [
       {
-        ...runtimeEventBase(event, canonicalThreadId),
+        ...overrideRuntimeEventTurnId(runtimeEventBase(event, canonicalThreadId), effectiveTurnId),
         type: "turn.completed",
         payload: {
           state: toTurnStatus(turn?.status),
@@ -1556,6 +1580,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     });
 
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const inFlightTurnIdsByThread = new Map<ThreadId, TurnId>();
 
   const writeNativeEvent = Effect.fn("writeNativeEvent")(function* (event: ProviderEvent) {
     if (!nativeEventLogger) {
@@ -1568,7 +1593,11 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     const services = yield* Effect.services<never>();
     const listenerEffect = Effect.fn("listener")(function* (event: ProviderEvent) {
       yield* writeNativeEvent(event);
-      const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+      const runtimeEvents = mapToRuntimeEvents(
+        event,
+        event.threadId,
+        inFlightTurnIdsByThread.get(event.threadId),
+      );
       if (runtimeEvents.length === 0) {
         yield* Effect.logDebug("ignoring unhandled Codex provider event", {
           method: event.method,
@@ -1578,6 +1607,24 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         });
         return;
       }
+
+      const hasTerminalLifecycle = runtimeEvents.some(
+        (runtimeEvent) =>
+          runtimeEvent.type === "turn.completed" ||
+          runtimeEvent.type === "turn.aborted" ||
+          runtimeEvent.type === "session.exited",
+      );
+      if (hasTerminalLifecycle) {
+        inFlightTurnIdsByThread.delete(event.threadId);
+      } else {
+        const latestTurnScopedEvent = [...runtimeEvents]
+          .reverse()
+          .find((runtimeEvent) => runtimeEvent.turnId !== undefined);
+        if (latestTurnScopedEvent?.turnId) {
+          inFlightTurnIdsByThread.set(event.threadId, latestTurnScopedEvent.turnId);
+        }
+      }
+
       yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
     });
     const listener = (event: ProviderEvent) =>
