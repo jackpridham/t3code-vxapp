@@ -687,6 +687,44 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("preserves the active turn when turn.started and later lifecycle events arrive in the same burst", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-burst-lifecycle"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-burst-lifecycle"),
+    });
+    harness.emit({
+      type: "thread.started",
+      eventId: asEventId("evt-thread-started-burst-lifecycle"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+    });
+    harness.emit({
+      type: "session.started",
+      eventId: asEventId("evt-session-started-burst-lifecycle"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.session?.status === "running" &&
+        entry.session?.activeTurnId === "turn-burst-lifecycle",
+    );
+
+    expect(thread.session?.status).toBe("running");
+    expect(thread.session?.activeTurnId).toBe("turn-burst-lifecycle");
+  });
+
   it("accepts claude turn lifecycle when seeded thread id is a synthetic placeholder", async () => {
     const harness = await createHarness();
     const seededAt = new Date().toISOString();
