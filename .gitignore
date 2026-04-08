@@ -58,3 +58,4 @@ __screenshots__/
 .claude/skills/vx-agents-feedback
 .agents/
 .claude/skills/api-runtime-diagnostics
+.claude/skills/vx-dev-server
