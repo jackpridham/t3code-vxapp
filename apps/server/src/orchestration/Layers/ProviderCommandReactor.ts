@@ -453,6 +453,7 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
+    const requestedTurnId = thread.latestTurn?.turnId ?? null;
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,
@@ -490,6 +491,37 @@ const make = Effect.gen(function* () {
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+    });
+
+    const refreshedThread = yield* resolveThread(input.threadId);
+    const currentSession = refreshedThread?.session ?? thread.session;
+    if (
+      currentSession?.status === "running" &&
+      ((requestedTurnId === null && currentSession.activeTurnId === null) ||
+        (requestedTurnId !== null &&
+          currentSession.activeTurnId !== null &&
+          sameId(currentSession.activeTurnId, requestedTurnId)))
+    ) {
+      return;
+    }
+
+    yield* synchronizeAuthoritativeSessionState({
+      threadId: input.threadId,
+      session: {
+        threadId: input.threadId,
+        status: "running",
+        providerName:
+          currentSession?.providerName ??
+          activeSession?.provider ??
+          thread.modelSelection.provider,
+        runtimeMode:
+          currentSession?.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        activeTurnId: requestedTurnId,
+        lastError: null,
+        updatedAt: input.createdAt,
+      },
+      runtimeStatus: "running",
+      runtimeEvent: "provider-command-reactor.sendTurn",
     });
   });
 
