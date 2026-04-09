@@ -70,6 +70,13 @@ function normalizeWakeOutcome(
   }
 }
 
+function sameId(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (left === null || left === undefined || right === null || right === undefined) {
+    return false;
+  }
+  return left === right;
+}
+
 function toWakeItem(input: {
   readonly wakeId: string;
   readonly orchestratorThreadId: ThreadId;
@@ -443,6 +450,62 @@ const make = Effect.gen(function* () {
       createdAt: supersededAt ?? event.createdAt,
       commandTag: supersededAt === null ? "upsert" : "upsert-superseded",
     });
+  });
+
+  const consumeDeliveringWakeItemsForCompletedReviewTurn = Effect.fn(
+    "consumeDeliveringWakeItemsForCompletedReviewTurn",
+  )(function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
+    const turnId = event.turnId;
+    if (turnId === undefined) {
+      return;
+    }
+
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const orchestratorThread = readModel.threads.find((entry) => entry.id === event.threadId);
+    if (!orchestratorThread || orchestratorThread.spawnRole === "worker") {
+      return;
+    }
+    if (orchestratorThread.archivedAt !== null || orchestratorThread.deletedAt !== null) {
+      return;
+    }
+
+    const turns = yield* projectionTurnRepository.listByThreadId({
+      threadId: orchestratorThread.id,
+    });
+    const completedTurn = turns.find((turn) => turn.turnId === turnId);
+    if (!completedTurn || completedTurn.pendingMessageId === null) {
+      return;
+    }
+
+    const matchedWakeItems = readModel.orchestratorWakeItems
+      .filter(
+        (wakeItem) =>
+          wakeItem.orchestratorThreadId === orchestratorThread.id &&
+          wakeItem.state === "delivering" &&
+          sameId(wakeItem.deliveryMessageId, completedTurn.pendingMessageId),
+      )
+      .toSorted(compareWakeItems);
+    if (matchedWakeItems.length === 0) {
+      return;
+    }
+
+    yield* Effect.forEach(
+      matchedWakeItems,
+      (wakeItem) =>
+        dispatchWakeUpsert({
+          preferredThreadId: orchestratorThread.id,
+          wakeItem: {
+            ...wakeItem,
+            state: "consumed",
+            deliveredAt: wakeItem.deliveredAt ?? event.createdAt,
+            consumedAt: event.createdAt,
+            consumeReason: "worker_rechecked",
+          },
+          createdAt: event.createdAt,
+          commandTag: "runtime-consume-reviewed",
+        }),
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
   });
 
   const consumeActiveWakeItemsForWorker = Effect.fn("consumeActiveWakeItemsForWorker")(
@@ -988,7 +1051,9 @@ const make = Effect.gen(function* () {
 
   const processInput = (input: WakeReactorInput) =>
     input.source === "runtime"
-      ? enqueueWakeFromCompletedTurn(input.event)
+      ? consumeDeliveringWakeItemsForCompletedReviewTurn(input.event).pipe(
+          Effect.flatMap(() => enqueueWakeFromCompletedTurn(input.event)),
+        )
       : processDomainEvent(input.event);
 
   const processInputSafely = (input: WakeReactorInput) =>

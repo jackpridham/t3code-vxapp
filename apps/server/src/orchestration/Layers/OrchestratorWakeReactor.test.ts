@@ -1074,6 +1074,103 @@ describe("OrchestratorWakeReactor", () => {
     });
   });
 
+  it("consumes a delivering wake when the orchestrator review turn completes even if session lifecycle is stale", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await createWorkerThread(harness.engine);
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "running",
+      activeTurnId: asTurnId("turn-stale-active"),
+      updatedAt: "2026-04-05T12:08:40.000Z",
+    });
+
+    await Effect.runPromise(
+      harness.projectionTurns.upsertByTurnId({
+        threadId: asThreadId("thread-orch"),
+        turnId: asTurnId("turn-review-complete"),
+        pendingMessageId: MessageId.makeUnsafe("msg-review-complete"),
+        sourceProposedPlanThreadId: null,
+        sourceProposedPlanId: null,
+        assistantMessageId: MessageId.makeUnsafe("assistant:msg-review-complete"),
+        state: "running",
+        requestedAt: "2026-04-05T12:08:41.000Z",
+        startedAt: "2026-04-05T12:08:42.000Z",
+        completedAt: null,
+        checkpointTurnCount: null,
+        checkpointRef: null,
+        checkpointStatus: null,
+        checkpointFiles: [],
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.orchestrator-wake.upsert",
+        commandId: CommandId.makeUnsafe("cmd-seed-runtime-delivering-wake"),
+        threadId: asThreadId("thread-orch"),
+        wakeItem: {
+          wakeId: "wake:thread-worker:turn-runtime-delivering:completed",
+          orchestratorThreadId: asThreadId("thread-orch"),
+          orchestratorProjectId: asProjectId("project-orch"),
+          workerThreadId: asThreadId("thread-worker"),
+          workerProjectId: asProjectId("project-worker"),
+          workerTurnId: asTurnId("turn-runtime-delivering"),
+          workerTitleSnapshot: "Worker thread-worker",
+          outcome: "completed",
+          summary: "Worker thread-worker completed its assigned turn",
+          queuedAt: "2026-04-05T12:08:39.000Z",
+          state: "delivering",
+          deliveryMessageId: MessageId.makeUnsafe("msg-review-complete"),
+          deliveredAt: null,
+          consumedAt: null,
+        },
+        createdAt: "2026-04-05T12:08:43.000Z",
+      }),
+    );
+
+    await waitForReadModel(harness.engine, (model) =>
+      model.orchestratorWakeItems.some(
+        (item) => item.wakeId === "wake:thread-worker:turn-runtime-delivering:completed",
+      ),
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-runtime-review-complete"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:08:44.000Z",
+      threadId: asThreadId("thread-orch"),
+      turnId: asTurnId("turn-review-complete"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const readModel = await waitForReadModel(harness.engine, (model) =>
+      model.orchestratorWakeItems.some(
+        (item) =>
+          item.wakeId === "wake:thread-worker:turn-runtime-delivering:completed" &&
+          item.state === "consumed",
+      ),
+    );
+
+    expect(
+      readModel.orchestratorWakeItems.find(
+        (item) => item.wakeId === "wake:thread-worker:turn-runtime-delivering:completed",
+      ),
+    ).toMatchObject({
+      state: "consumed",
+      consumeReason: "worker_rechecked",
+      deliveryMessageId: MessageId.makeUnsafe("msg-review-complete"),
+      deliveredAt: "2026-04-05T12:08:44.000Z",
+      consumedAt: "2026-04-05T12:08:44.000Z",
+    });
+  });
+
   it("consumes delivered wake items when the orchestrator review turn settles", async () => {
     const harness = await createHarness();
     runtime = harness.runtime;
