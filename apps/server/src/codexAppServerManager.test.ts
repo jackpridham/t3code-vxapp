@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
+import { ApprovalRequestId, ThreadId, TurnId } from "@t3tools/contracts";
 
 import {
   buildCodexInitializeParams,
@@ -649,6 +649,49 @@ describe("sendTurn", () => {
 });
 
 describe("thread checkpoint control", () => {
+  it("interrupts turns with a short provider timeout", async () => {
+    const { manager, context, requireSession, sendRequest } = createThreadControlHarness();
+    sendRequest.mockResolvedValue(undefined);
+
+    await manager.interruptTurn(asThreadId("thread_1"), TurnId.makeUnsafe("turn_1"));
+
+    expect(requireSession).toHaveBeenCalledWith("thread_1");
+    expect(sendRequest).toHaveBeenCalledWith(
+      context,
+      "turn/interrupt",
+      {
+        threadId: "thread_1",
+        turnId: "turn_1",
+      },
+      5_000,
+    );
+  });
+
+  it("skips interrupt when no active turn is bound", async () => {
+    const { manager, sendRequest } = createThreadControlHarness();
+    vi.spyOn(
+      manager as unknown as { requireSession: (sessionId: string) => unknown },
+      "requireSession",
+    ).mockReturnValue({
+      session: {
+        provider: "codex",
+        status: "ready",
+        threadId: "thread_1",
+        runtimeMode: "full-access",
+        model: "gpt-5.3-codex",
+        resumeCursor: { threadId: "thread_1" },
+        activeTurnId: undefined,
+        createdAt: "2026-02-10T00:00:00.000Z",
+        updatedAt: "2026-02-10T00:00:00.000Z",
+      },
+      collabReceiverTurns: new Map(),
+    });
+
+    await manager.interruptTurn(asThreadId("thread_1"));
+
+    expect(sendRequest).not.toHaveBeenCalled();
+  });
+
   it("reads thread turns from thread/read", async () => {
     const { manager, context, requireSession, sendRequest } = createThreadControlHarness();
     sendRequest.mockResolvedValue({

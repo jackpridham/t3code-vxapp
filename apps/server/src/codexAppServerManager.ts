@@ -83,6 +83,8 @@ interface CodexSessionContext {
   stopping: boolean;
 }
 
+const TURN_INTERRUPT_TIMEOUT_MS = 5_000;
+
 interface JsonRpcError {
   code?: number;
   message?: string;
@@ -774,10 +776,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       return;
     }
 
-    await this.sendRequest(context, "turn/interrupt", {
-      threadId: providerThreadId,
-      turnId: effectiveTurnId,
-    });
+    await this.sendRequest(
+      context,
+      "turn/interrupt",
+      {
+        threadId: providerThreadId,
+        turnId: effectiveTurnId,
+      },
+      TURN_INTERRUPT_TIMEOUT_MS,
+    );
   }
 
   async readThread(threadId: ThreadId): Promise<CodexThreadSnapshot> {
