@@ -983,6 +983,101 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect(
+    "synthesizes continuation completion from idle thread status and ignores the late stale duplicate",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 4)).pipe(
+          Effect.forkChild,
+        );
+
+        lifecycleManager.emit("event", {
+          id: asEventId("evt-codex-turn-started-synthetic"),
+          kind: "notification",
+          provider: "codex",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-continuation"),
+          createdAt: new Date().toISOString(),
+          method: "turn/started",
+          payload: {
+            threadId: "provider-thread-1",
+            turn: {
+              id: "turn-continuation",
+              items: [],
+              status: "inProgress",
+              error: null,
+            },
+          },
+        } satisfies ProviderEvent);
+
+        lifecycleManager.emit("event", {
+          id: asEventId("evt-codex-assistant-completed-synthetic"),
+          kind: "notification",
+          provider: "codex",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-continuation"),
+          itemId: asItemId("msg_continuation"),
+          createdAt: new Date().toISOString(),
+          method: "item/completed",
+          payload: {
+            item: {
+              type: "agentMessage",
+              id: "msg_continuation",
+              text: "done",
+            },
+            threadId: "provider-thread-1",
+            turnId: "turn-stale",
+          },
+        } satisfies ProviderEvent);
+
+        lifecycleManager.emit("event", {
+          id: asEventId("evt-codex-thread-idle-synthetic"),
+          kind: "notification",
+          provider: "codex",
+          threadId: asThreadId("thread-1"),
+          createdAt: new Date().toISOString(),
+          method: "thread/status/changed",
+          payload: {
+            threadId: "provider-thread-1",
+            status: { type: "idle" },
+          },
+        } satisfies ProviderEvent);
+
+        lifecycleManager.emit("event", {
+          id: asEventId("evt-codex-turn-completed-stale-after-idle"),
+          kind: "notification",
+          provider: "codex",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-stale"),
+          createdAt: new Date().toISOString(),
+          method: "turn/completed",
+          payload: {
+            threadId: "provider-thread-1",
+            turn: {
+              id: "turn-stale",
+              items: [],
+              status: "completed",
+              error: null,
+            },
+          },
+        } satisfies ProviderEvent);
+
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+
+        assert.deepEqual(
+          events.map((event) => event.type),
+          ["turn.started", "item.completed", "thread.state.changed", "turn.completed"],
+        );
+        assert.equal(events[3]?.type, "turn.completed");
+        if (events[3]?.type === "turn.completed") {
+          assert.equal(events[3].turnId, "turn-continuation");
+          assert.equal(events[3].providerRefs?.providerTurnId, "turn-continuation");
+          assert.equal(events[3].payload.state, "completed");
+        }
+      }),
+  );
+
   it.effect("unwraps Codex token usage payloads for context window events", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;

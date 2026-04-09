@@ -1098,6 +1098,31 @@ describe("collab child conversation routing", () => {
       }),
     );
   });
+
+  it("clears the active turn when Codex reports the thread idle", () => {
+    const { manager, context, updateSession } = createCollabNotificationHarness();
+    context.session.activeTurnId = "turn_active";
+
+    (
+      manager as unknown as {
+        handleServerNotification: (context: unknown, notification: Record<string, unknown>) => void;
+      }
+    ).handleServerNotification(context, {
+      method: "thread/status/changed",
+      params: {
+        threadId: "provider_parent",
+        status: { type: "idle" },
+      },
+    });
+
+    expect(updateSession).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({
+        status: "ready",
+        activeTurnId: undefined,
+      }),
+    );
+  });
 });
 
 describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume", () => {

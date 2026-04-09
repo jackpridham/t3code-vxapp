@@ -1100,6 +1100,20 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       return;
     }
 
+    if (notification.method === "thread/status/changed") {
+      if (isChildConversation) {
+        return;
+      }
+      const statusType = this.readString(this.readObject(notification.params, "status"), "type");
+      if (statusType === "idle" && context.session.activeTurnId) {
+        this.updateSession(context, {
+          status: "ready",
+          activeTurnId: undefined,
+        });
+      }
+      return;
+    }
+
     if (notification.method === "turn/started") {
       if (isChildConversation) {
         return;
