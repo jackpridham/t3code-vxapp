@@ -181,6 +181,7 @@ describe("ProviderRuntimeIngestion", () => {
   }
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     if (scope) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
@@ -413,6 +414,82 @@ describe("ProviderRuntimeIngestion", () => {
     expect(payload?.lastError == null).toBe(true);
     expect(payload?.lastRuntimeEvent).toBe("turn.completed");
     expect(typeof payload?.lastRuntimeEventAt).toBe("string");
+  });
+
+  it("reconciles a running turn when the provider session is already ready but runtime completion was missed", async () => {
+    vi.stubEnv("T3CODE_ACTIVE_TURN_RECONCILE_MS", "10");
+    vi.stubEnv("T3CODE_ACTIVE_TURN_RECONCILE_POLL_MS", "10");
+    const harness = await createHarness();
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-reconcile-runtime-gap"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("msg-reconcile-runtime-gap"),
+          role: "user",
+          text: "continue",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-running-reconcile-runtime-gap"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-reconcile-runtime-gap"),
+          updatedAt: createdAt,
+          lastError: null,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.setProviderSession({
+      provider: "codex",
+      status: "ready",
+      runtimeMode: "approval-required",
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "ready" && entry.session?.activeTurnId === null,
+      2_000,
+    );
+    expect(thread.session?.status).toBe("ready");
+
+    const bindingOption = await Effect.runPromise(
+      harness.directory.getBinding(asThreadId("thread-1")),
+    );
+    expect(bindingOption._tag).toBe("Some");
+    if (bindingOption._tag !== "Some") {
+      return;
+    }
+
+    expect(bindingOption.value.status).toBe("ready");
+    const payload =
+      bindingOption.value.runtimePayload !== null &&
+      typeof bindingOption.value.runtimePayload === "object" &&
+      !Array.isArray(bindingOption.value.runtimePayload)
+        ? (bindingOption.value.runtimePayload as Record<string, unknown>)
+        : null;
+    expect(payload?.activeTurnId == null).toBe(true);
+    expect(payload?.lastRuntimeEvent).toBe("turn.completed");
   });
 
   it("ignores stale lifecycle events that arrive after a turn has already settled", async () => {
