@@ -213,6 +213,10 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.allowActiveThreadsInFold = legacySettings.allowActiveThreadsInFold;
   }
 
+  if (Predicate.isBoolean(legacySettings.sidebarOrchestrationModeEnabled)) {
+    patch.sidebarOrchestrationModeEnabled = legacySettings.sidebarOrchestrationModeEnabled;
+  }
+
   if (
     Schema.is(ChangesPanelFilesChangedViewType)(legacySettings.changesPanelFilesChangedViewType)
   ) {

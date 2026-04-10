@@ -483,6 +483,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
         ? ["Project sidebar order"]
         : []),
+      ...(settings.sidebarOrchestrationModeEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled
+        ? ["Sidebar orchestration mode"]
+        : []),
       ...(settings.allowActiveThreadsInFold !== DEFAULT_UNIFIED_SETTINGS.allowActiveThreadsInFold
         ? ["Active threads in fold"]
         : []),
@@ -532,6 +536,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.maxProjectThreadsBeforeFolding,
+      settings.sidebarOrchestrationModeEnabled,
       settings.sidebarProjectSortOrder,
       settings.showGitignoredFilesInMentions,
       settings.timestampFormat,
@@ -985,6 +990,34 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Sidebar orchestration mode"
+          description="Show orchestrator projects as session-scoped worker navigation grouped by core project."
+          resetAction={
+            settings.sidebarOrchestrationModeEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled ? (
+              <SettingResetButton
+                label="sidebar orchestration mode"
+                onClick={() =>
+                  updateSettings({
+                    sidebarOrchestrationModeEnabled:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarOrchestrationModeEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarOrchestrationModeEnabled: Boolean(checked) })
+              }
+              aria-label="Enable sidebar orchestration mode"
+            />
           }
         />
 

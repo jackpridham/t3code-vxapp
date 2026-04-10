@@ -659,6 +659,12 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         activities: [],
         checkpoints: [],
         session: null,
+        orchestratorProjectId: event.payload.orchestratorProjectId,
+        orchestratorThreadId: event.payload.orchestratorThreadId,
+        parentThreadId: event.payload.parentThreadId,
+        spawnRole: event.payload.spawnRole,
+        spawnedBy: event.payload.spawnedBy,
+        workflowId: event.payload.workflowId,
       });
       const threads = existing
         ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))

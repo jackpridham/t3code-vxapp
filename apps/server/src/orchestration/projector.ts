@@ -483,11 +483,10 @@ export function projectEvent(
                     ? thread.latestTurn.assistantMessageId
                     : null,
               }
-            : thread.latestTurn &&
-                (thread.latestTurn.state === "running" || thread.latestTurn.state === "pending")
+            : thread.latestTurn && thread.latestTurn.state === "running"
               ? {
                   ...thread.latestTurn,
-                  state: session.status === "error" ? "error" : "completed",
+                  state: session.status === "error" ? ("error" as const) : ("completed" as const),
                   completedAt: thread.latestTurn.completedAt ?? session.updatedAt,
                 }
               : thread.latestTurn;

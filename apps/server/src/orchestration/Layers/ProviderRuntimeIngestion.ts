@@ -15,11 +15,15 @@ import {
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
-import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
+import { Cache, Cause, Duration, Effect, Layer, Option, Stream, type Scope } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
-import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
+import {
+  ProviderSessionDirectory,
+  type ProviderSessionDirectoryReadError,
+  type ProviderSessionDirectoryWriteError,
+} from "../../provider/Services/ProviderSessionDirectory.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProviderSessionDirectoryLive } from "../../provider/Layers/ProviderSessionDirectory.ts";
@@ -32,7 +36,9 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ServerSettingsError } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
+import type { OrchestrationDispatchError } from "../Errors.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -587,7 +593,7 @@ function runtimeEventToActivities(
   return [];
 }
 
-const make = Effect.fn("make")(function* () {
+const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const providerSessionDirectory = yield* ProviderSessionDirectory;
@@ -950,20 +956,17 @@ const make = Effect.fn("make")(function* () {
       return;
     }
 
-    yield* worker.enqueue({
-      source: "runtime",
-      event: {
-        type: "turn.completed",
-        eventId: EventId.makeUnsafe(`provider:reconcile-turn-completed:${crypto.randomUUID()}`),
-        provider: providerSession.provider,
-        createdAt: new Date().toISOString(),
-        threadId,
-        turnId: thread.session.activeTurnId,
-        payload: {
-          state: providerSession.status === "error" ? "failed" : "completed",
-          stopReason: "provider_session_reconciled_without_runtime_event",
-          ...(providerSession.lastError ? { errorMessage: providerSession.lastError } : {}),
-        },
+    yield* processRuntimeEvent({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe(`provider:reconcile-turn-completed:${crypto.randomUUID()}`),
+      provider: providerSession.provider,
+      createdAt: new Date().toISOString(),
+      threadId,
+      turnId: thread.session.activeTurnId,
+      payload: {
+        state: providerSession.status === "error" ? "failed" : "completed",
+        stopReason: "provider_session_reconciled_without_runtime_event",
+        ...(providerSession.lastError ? { errorMessage: providerSession.lastError } : {}),
       },
     });
   });
@@ -1073,7 +1076,9 @@ const make = Effect.fn("make")(function* () {
     const runtimeBindingActiveTurnId = readRuntimePayloadTurnId(runtimeBinding?.runtimePayload);
     const activeTurnId = thread.session?.activeTurnId ?? runtimeBindingActiveTurnId ?? null;
     const lifecycleEventTurnId =
-      event.type === "turn.completed" && eventTurnId === undefined ? activeTurnId ?? undefined : eventTurnId;
+      event.type === "turn.completed" && eventTurnId === undefined
+        ? (activeTurnId ?? undefined)
+        : eventTurnId;
     const currentSessionUpdatedAt = thread.session?.updatedAt ?? null;
     const olderThanCurrentSession =
       currentSessionUpdatedAt !== null && currentSessionUpdatedAt.localeCompare(now) > 0;
@@ -1094,8 +1099,7 @@ const make = Effect.fn("make")(function* () {
       activeTurnId !== null &&
       lifecycleEventTurnId !== undefined &&
       !sameId(activeTurnId, lifecycleEventTurnId);
-    const missingTurnForActiveTurn =
-      activeTurnId !== null && lifecycleEventTurnId === undefined;
+    const missingTurnForActiveTurn = activeTurnId !== null && lifecycleEventTurnId === undefined;
 
     const shouldApplyThreadLifecycle = (() => {
       if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
@@ -1253,10 +1257,10 @@ const make = Effect.fn("make")(function* () {
       const assistantMessageId = MessageId.makeUnsafe(
         `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
       );
-        const turnId = lifecycleEventTurnId;
-        if (turnId) {
-          yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
-        }
+      const turnId = lifecycleEventTurnId;
+      if (turnId) {
+        yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+      }
 
       const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
         serverSettingsService.getSettings,
@@ -1482,35 +1486,56 @@ const make = Effect.fn("make")(function* () {
     ).pipe(Effect.asVoid);
   });
 
-  const processDomainEvent = (event: TurnStartRequestedDomainEvent) =>
-    reconcileActiveTurnAfterStart(event.threadId).pipe(
+  const processDomainEvent = (
+    event: TurnStartRequestedDomainEvent,
+  ): Effect.Effect<void, never, Scope.Scope> =>
+    reconcileActiveTurnAfterStart(event.payload.threadId).pipe(
       Effect.catchCause((cause) =>
-        Effect.logWarning("provider runtime ingestion failed to reconcile active turn after start", {
-          threadId: event.threadId,
-          cause: Cause.pretty(cause),
-        }),
+        Effect.logWarning(
+          "provider runtime ingestion failed to reconcile active turn after start",
+          {
+            threadId: event.payload.threadId,
+            cause: Cause.pretty(cause),
+          },
+        ),
       ),
       Effect.forkScoped,
       Effect.asVoid,
     );
 
-  const processInput = (input: RuntimeIngestionInput) =>
+  const processInput = (
+    input: RuntimeIngestionInput,
+  ): Effect.Effect<
+    void,
+    | OrchestrationDispatchError
+    | ProviderSessionDirectoryReadError
+    | ProviderSessionDirectoryWriteError
+    | ServerSettingsError,
+    Scope.Scope
+  > =>
     input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);
 
-  const processInputSafely = (input: RuntimeIngestionInput) =>
-    processInput(input).pipe(
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause)) {
-          return Effect.failCause(cause);
-        }
-        return Effect.logWarning("provider runtime ingestion failed to process event", {
-          source: input.source,
-          eventId: input.event.eventId,
-          eventType: input.event.type,
-          cause: Cause.pretty(cause),
-        });
-      }),
-    );
+  const processInputSafely = (
+    input: RuntimeIngestionInput,
+  ): Effect.Effect<
+    void,
+    | OrchestrationDispatchError
+    | ProviderSessionDirectoryReadError
+    | ProviderSessionDirectoryWriteError
+    | ServerSettingsError,
+    Scope.Scope
+  > =>
+    Effect.catchCause(processInput(input), (cause) => {
+      if (Cause.hasInterruptsOnly(cause)) {
+        return Effect.failCause(cause);
+      }
+      return Effect.logWarning("provider runtime ingestion failed to process event", {
+        source: input.source,
+        eventId: input.event.eventId,
+        eventType: input.event.type,
+        cause: Cause.pretty(cause),
+      });
+    });
 
   const worker = yield* makeDrainableWorker(processInputSafely);
 
@@ -1591,36 +1616,37 @@ const make = Effect.fn("make")(function* () {
     ),
   );
 
-  const start: ProviderRuntimeIngestionShape["start"] = Effect.fn("start")(function* () {
-    yield* Effect.forkScoped(
-      Stream.runForEach(providerService.streamEvents, (event) =>
-        worker.enqueue({ source: "runtime", event }),
-      ),
-    );
-    yield* Effect.forkScoped(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.turn-start-requested") {
-          return Effect.void;
-        }
-        return worker.enqueue({ source: "domain", event });
-      }),
-    );
-    yield* Effect.forkScoped(
-      Effect.forever(
-        Effect.gen(function* () {
-          yield* Effect.sleep(Duration.millis(getActiveTurnReconcilePollMs()));
-          yield* reconcileRunningTurnsFromProviderSessions().pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("provider runtime ingestion failed to reconcile running turns", {
-                cause: Cause.pretty(cause),
-              }),
-            ),
-          );
+  const start: ProviderRuntimeIngestionShape["start"] = () =>
+    Effect.gen(function* () {
+      yield* Effect.forkScoped(
+        Stream.runForEach(providerService.streamEvents, (event) =>
+          worker.enqueue({ source: "runtime", event }),
+        ),
+      );
+      yield* Effect.forkScoped(
+        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+          if (event.type !== "thread.turn-start-requested") {
+            return Effect.void;
+          }
+          return worker.enqueue({ source: "domain", event });
         }),
-      ),
-    );
-    yield* reconcilePersistedSessionsOnStart;
-  });
+      );
+      yield* Effect.forkScoped(
+        Effect.forever(
+          Effect.gen(function* () {
+            yield* Effect.sleep(Duration.millis(getActiveTurnReconcilePollMs()));
+            yield* reconcileRunningTurnsFromProviderSessions().pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("provider runtime ingestion failed to reconcile running turns", {
+                  cause: Cause.pretty(cause),
+                }),
+              ),
+            );
+          }),
+        ),
+      );
+      yield* reconcilePersistedSessionsOnStart;
+    });
 
   return {
     start,
@@ -1630,7 +1656,7 @@ const make = Effect.fn("make")(function* () {
 
 export const ProviderRuntimeIngestionLive = Layer.effect(
   ProviderRuntimeIngestionService,
-  make(),
+  make,
 ).pipe(
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(

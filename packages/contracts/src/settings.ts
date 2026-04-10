@@ -38,6 +38,7 @@ export const DEFAULT_CHANGES_DRAWER_VISIBILITY: ChangesDrawerVisibility = "alway
 
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   changesPanelFilesChangedViewType: ChangesPanelFilesChangedViewType.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE),
   ),
