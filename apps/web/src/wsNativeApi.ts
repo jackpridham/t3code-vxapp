@@ -183,6 +183,7 @@ export function createWsNativeApi(): NativeApi {
       runStackedAction: (input) =>
         transport.request(WS_METHODS.gitRunStackedAction, input, { timeoutMs: null }),
       listBranches: (input) => transport.request(WS_METHODS.gitListBranches, input),
+      resolveRepoIdentity: (input) => transport.request(WS_METHODS.gitResolveRepoIdentity, input),
       createWorktree: (input) => transport.request(WS_METHODS.gitCreateWorktree, input),
       removeWorktree: (input) => transport.request(WS_METHODS.gitRemoveWorktree, input),
       createBranch: (input) => transport.request(WS_METHODS.gitCreateBranch, input),
@@ -225,6 +226,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(ORCHESTRATION_WS_METHODS.getProjectByWorkspace, input),
       listProjectThreads: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.listProjectThreads, input),
+      listSessionThreads: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.listSessionThreads, input),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),

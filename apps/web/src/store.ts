@@ -294,6 +294,8 @@ function mapProject(project: OrchestrationReadModel["projects"][number]): Projec
     name: project.title,
     cwd: project.workspaceRoot,
     kind: project.kind,
+    sidebarParentProjectId: project.sidebarParentProjectId,
+    currentSessionRootThreadId: project.currentSessionRootThreadId,
     defaultModelSelection: project.defaultModelSelection
       ? normalizeModelSelection(project.defaultModelSelection)
       : null,
@@ -591,6 +593,8 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         title: event.payload.title,
         workspaceRoot: event.payload.workspaceRoot,
         kind: event.payload.kind,
+        sidebarParentProjectId: event.payload.sidebarParentProjectId,
+        currentSessionRootThreadId: event.payload.currentSessionRootThreadId,
         defaultModelSelection: event.payload.defaultModelSelection,
         scripts: event.payload.scripts,
         hooks: event.payload.hooks,
@@ -613,6 +617,12 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         ...(event.payload.title !== undefined ? { name: event.payload.title } : {}),
         ...(event.payload.workspaceRoot !== undefined ? { cwd: event.payload.workspaceRoot } : {}),
         ...(event.payload.kind !== undefined ? { kind: event.payload.kind } : {}),
+        ...(event.payload.sidebarParentProjectId !== undefined
+          ? { sidebarParentProjectId: event.payload.sidebarParentProjectId }
+          : {}),
+        ...(event.payload.currentSessionRootThreadId !== undefined
+          ? { currentSessionRootThreadId: event.payload.currentSessionRootThreadId }
+          : {}),
         ...(event.payload.defaultModelSelection !== undefined
           ? {
               defaultModelSelection: event.payload.defaultModelSelection

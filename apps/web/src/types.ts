@@ -104,6 +104,8 @@ export interface Project {
   name: string;
   cwd: string;
   kind?: ProjectKind | undefined;
+  sidebarParentProjectId?: ProjectId | null | undefined;
+  currentSessionRootThreadId?: ThreadId | null | undefined;
   defaultModelSelection: ModelSelection | null;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;

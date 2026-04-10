@@ -8,6 +8,9 @@ import {
   buildOrchestrationSessionCatalog,
   collapseThreadToCanonicalProject,
   collectSessionThreadIds,
+  filterProjectThreadsForOrchestrationMode,
+  resolveConfiguredProjectBuckets,
+  resolveThreadSessionRootId,
 } from "./orchestrationMode";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
@@ -154,6 +157,109 @@ describe("collectSessionThreadIds", () => {
   });
 });
 
+describe("filterProjectThreadsForOrchestrationMode", () => {
+  it("hides linked workers from non-selected orchestration sessions", () => {
+    const threadsForResolution = [
+      makeThread({
+        id: ThreadId.makeUnsafe("root-current"),
+        spawnRole: "orchestrator",
+        workflowId: "wf-current",
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-current"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
+        parentThreadId: ThreadId.makeUnsafe("root-current"),
+        workflowId: "wf-current",
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("root-old"),
+        spawnRole: "orchestrator",
+        workflowId: "wf-old",
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-old"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-old"),
+        parentThreadId: ThreadId.makeUnsafe("root-old"),
+        workflowId: "wf-old",
+      }),
+    ];
+    const threads = threadsForResolution.filter((thread) => thread.spawnRole === "worker");
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads,
+        selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
+        threadsForResolution,
+      }).map((thread) => thread.id),
+    ).toEqual(["worker-current"]);
+  });
+
+  it("keeps malformed workers visible so broken orchestration lineage is inspectable", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.makeUnsafe("root-current"),
+        spawnRole: "orchestrator",
+        workflowId: "wf-current",
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-malformed"),
+        spawnRole: "worker",
+        orchestratorThreadId: undefined,
+        parentThreadId: undefined,
+        workflowId: undefined,
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("custom-thread"),
+        spawnRole: undefined,
+      }),
+    ];
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads,
+        selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
+        threadsForResolution: threads,
+      }).map((thread) => thread.id),
+    ).toEqual(["worker-malformed", "custom-thread"]);
+  });
+
+  it("hides workers with an explicit non-current orchestratorThreadId even when resolution data is incomplete", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-current"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
+        parentThreadId: undefined,
+        workflowId: undefined,
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-stale"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-old"),
+        parentThreadId: undefined,
+        workflowId: undefined,
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-malformed"),
+        spawnRole: "worker",
+        orchestratorThreadId: undefined,
+        parentThreadId: undefined,
+        workflowId: undefined,
+      }),
+    ];
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads,
+        selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
+        threadsForResolution: threads,
+      }).map((thread) => thread.id),
+    ).toEqual(["worker-current", "worker-malformed"]);
+  });
+});
+
 describe("collapseThreadToCanonicalProject", () => {
   it("keeps same-project worktrees under their real project bucket", () => {
     const projects = [
@@ -255,5 +361,211 @@ describe("buildOrchestrationModeRowDescriptor", () => {
     });
 
     expect(descriptor.visibleBadges.map((badge) => badge.label)).toEqual(["worker", "gpt-5.4"]);
+  });
+
+  it("hides provider labels and strips model prefixes from visible badges", () => {
+    const descriptor = buildOrchestrationModeRowDescriptor({
+      thread: makeThread({
+        labels: ["provider:codex", "model:gpt-5.4", "needs-review"],
+      }),
+    });
+
+    expect(descriptor.visibleBadges.map((badge) => badge.label)).toEqual([
+      "gpt-5.4",
+      "needs-review",
+    ]);
+  });
+});
+
+describe("resolveConfiguredProjectBuckets", () => {
+  it("collapses git-linked worktrees under the configured main worktree project", () => {
+    const parentProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue"),
+      name: "vue-vxapp",
+      cwd: "/repos/vue-vxapp",
+    });
+    const childProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue-feature"),
+      name: "vue-datatable-product-alpha",
+      cwd: "/worktrees/vue-datatable-product-alpha",
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [parentProject, childProject],
+      repoIdentityByProjectId: new Map([
+        [
+          parentProject.id,
+          {
+            isRepo: true,
+            commonGitDir: "/repos/vue-vxapp/.git",
+            gitDir: "/repos/vue-vxapp/.git",
+            worktreeRoot: "/repos/vue-vxapp",
+            isMainWorktree: true,
+          },
+        ],
+        [
+          childProject.id,
+          {
+            isRepo: true,
+            commonGitDir: "/repos/vue-vxapp/.git",
+            gitDir: "/repos/vue-vxapp/.git/worktrees/vue-datatable-product-alpha",
+            worktreeRoot: "/worktrees/vue-datatable-product-alpha",
+            isMainWorktree: false,
+          },
+        ],
+      ]),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(childProject.id)).toBe(parentProject.id);
+    expect(result.visibleProjectIds.has(parentProject.id)).toBe(true);
+    expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
+  });
+
+  it("falls back to configured parent name aliases when git identity is unavailable", () => {
+    const parentProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue"),
+      name: "vue-vxapp",
+      cwd: "/repos/vue-vxapp",
+    });
+    const childProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue-feature"),
+      name: "vue-datatable-product-alpha",
+      cwd: "/missing/worktree/vue-datatable-product-alpha",
+    });
+    const scriptsParent = makeProject({
+      id: ProjectId.makeUnsafe("project-scripts"),
+      name: "vortex-scripts",
+      cwd: "/repos/vortex-scripts",
+    });
+    const scriptsChild = makeProject({
+      id: ProjectId.makeUnsafe("project-scripts-feature"),
+      name: "vortex-scripts-vx-plan-json",
+      cwd: "/missing/worktree/vortex-scripts-vx-plan-json",
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [parentProject, childProject, scriptsParent, scriptsChild],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(childProject.id)).toBe(parentProject.id);
+    expect(result.bucketProjectIdByProjectId.get(scriptsChild.id)).toBe(scriptsParent.id);
+    expect(result.visibleProjectIds.has(parentProject.id)).toBe(true);
+    expect(result.visibleProjectIds.has(scriptsParent.id)).toBe(true);
+    expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
+    expect(result.visibleProjectIds.has(scriptsChild.id)).toBe(false);
+  });
+
+  it("does not synthesize parents when only the child project is configured", () => {
+    const childProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue-feature"),
+      name: "vue-datatable-product-alpha",
+      cwd: "/missing/worktree/vue-datatable-product-alpha",
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [childProject],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(childProject.id)).toBe(childProject.id);
+    expect(result.visibleProjectIds.has(childProject.id)).toBe(true);
+  });
+
+  it("prefers an explicit sidebar parent override over automatic matching", () => {
+    const parentProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue"),
+      name: "vue-vxapp",
+      cwd: "/repos/vue-vxapp",
+    });
+    const manualParent = makeProject({
+      id: ProjectId.makeUnsafe("project-kb"),
+      name: "kb-vxapp",
+      cwd: "/repos/kb-vxapp",
+    });
+    const childProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue-feature"),
+      name: "vue-datatable-product-alpha",
+      cwd: "/missing/worktree/vue-datatable-product-alpha",
+      sidebarParentProjectId: manualParent.id,
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [parentProject, manualParent, childProject],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(childProject.id)).toBe(manualParent.id);
+    expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
+  });
+
+  it("keeps a project top-level when sidebarParentProjectId is explicitly null", () => {
+    const parentProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue"),
+      name: "vue-vxapp",
+      cwd: "/repos/vue-vxapp",
+    });
+    const childProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue-feature"),
+      name: "vue-datatable-product-alpha",
+      cwd: "/missing/worktree/vue-datatable-product-alpha",
+      sidebarParentProjectId: null,
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [parentProject, childProject],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(childProject.id)).toBe(childProject.id);
+    expect(result.visibleProjectIds.has(childProject.id)).toBe(true);
+  });
+});
+
+describe("resolveThreadSessionRootId", () => {
+  it("resolves worker threads back to their orchestrator root", () => {
+    const rootThreadId = ThreadId.makeUnsafe("root-1");
+    const workerThreadId = ThreadId.makeUnsafe("worker-1");
+
+    expect(
+      resolveThreadSessionRootId({
+        threadId: workerThreadId,
+        threads: [
+          makeThread({
+            id: rootThreadId,
+            spawnRole: "orchestrator",
+            workflowId: "wf-1",
+          }),
+          makeThread({
+            id: workerThreadId,
+            parentThreadId: rootThreadId,
+            spawnedBy: rootThreadId,
+            workflowId: "wf-1",
+          }),
+        ],
+      }),
+    ).toBe(rootThreadId);
+  });
+
+  it("falls back to workflow roots when direct lineage links are missing", () => {
+    const rootThreadId = ThreadId.makeUnsafe("root-1");
+    const workerThreadId = ThreadId.makeUnsafe("worker-1");
+
+    expect(
+      resolveThreadSessionRootId({
+        threadId: workerThreadId,
+        threads: [
+          makeThread({
+            id: rootThreadId,
+            spawnRole: "orchestrator",
+            workflowId: "wf-1",
+          }),
+          makeThread({
+            id: workerThreadId,
+            workflowId: "wf-1",
+          }),
+        ],
+      }),
+    ).toBe(rootThreadId);
   });
 });

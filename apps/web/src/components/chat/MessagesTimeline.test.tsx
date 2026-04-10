@@ -165,7 +165,7 @@ describe("MessagesTimeline", () => {
           },
         ]}
         completionDividerBeforeEntryId={null}
-        completionSummary={null}
+        completionDuration={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
@@ -211,7 +211,7 @@ describe("MessagesTimeline", () => {
           },
         ]}
         completionDividerBeforeEntryId={null}
-        completionSummary={null}
+        completionDuration={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
@@ -257,7 +257,7 @@ describe("MessagesTimeline", () => {
           },
         ]}
         completionDividerBeforeEntryId={null}
-        completionSummary={null}
+        completionDuration={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
@@ -290,7 +290,7 @@ describe("MessagesTimeline", () => {
         scrollContainer={null}
         timelineEntries={[]}
         completionDividerBeforeEntryId={null}
-        completionSummary={null}
+        completionDuration={null}
         turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}

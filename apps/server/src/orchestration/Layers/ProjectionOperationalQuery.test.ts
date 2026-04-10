@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -269,6 +269,226 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
       assert.equal(threads[0]?.session?.status, "ready");
       assert.equal(threads[0]?.latestTurn?.turnId, "turn-active");
       assert.equal(threads[0]?.latestTurn?.completedAt, "2026-04-06T00:00:09.000Z");
+    }),
+  );
+
+  it.effect("lists full session families across projects and excludes unrelated roots", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionOperationalQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'project-orchestrator',
+            'Orchestrator',
+            '/tmp/orchestrator',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '[]',
+            '2026-04-06T00:00:00.000Z',
+            '2026-04-06T00:00:01.000Z',
+            NULL
+          ),
+          (
+            'project-worker',
+            'Worker',
+            '/tmp/worker',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '[]',
+            '2026-04-06T00:00:00.000Z',
+            '2026-04-06T00:00:01.000Z',
+            NULL
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          labels_json,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at,
+          orchestrator_project_id,
+          orchestrator_thread_id,
+          parent_thread_id,
+          spawn_role,
+          spawned_by,
+          workflow_id
+        )
+        VALUES
+          (
+            'root-1',
+            'project-orchestrator',
+            'Root One',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:02.000Z',
+            '2026-04-06T00:00:03.000Z',
+            NULL,
+            NULL,
+            'project-orchestrator',
+            NULL,
+            NULL,
+            'orchestrator',
+            NULL,
+            'workflow-1'
+          ),
+          (
+            'worker-1',
+            'project-orchestrator',
+            'Worker One',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:04.000Z',
+            '2026-04-06T00:00:05.000Z',
+            NULL,
+            NULL,
+            'project-orchestrator',
+            'root-1',
+            NULL,
+            'worker',
+            'root-1',
+            'workflow-1'
+          ),
+          (
+            'worker-2',
+            'project-worker',
+            'Worker Two',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:06.000Z',
+            '2026-04-06T00:00:07.000Z',
+            NULL,
+            NULL,
+            'project-orchestrator',
+            'root-1',
+            'worker-1',
+            'worker',
+            'worker-1',
+            'workflow-1'
+          ),
+          (
+            'worker-3',
+            'project-worker',
+            'Worker Three',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:08.000Z',
+            '2026-04-06T00:00:09.000Z',
+            '2026-04-06T00:00:10.000Z',
+            NULL,
+            'project-orchestrator',
+            NULL,
+            NULL,
+            'worker',
+            NULL,
+            'workflow-1'
+          ),
+          (
+            'root-2',
+            'project-orchestrator',
+            'Root Two',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:11.000Z',
+            '2026-04-06T00:00:12.000Z',
+            NULL,
+            NULL,
+            'project-orchestrator',
+            NULL,
+            NULL,
+            'orchestrator',
+            NULL,
+            'workflow-2'
+          ),
+          (
+            'worker-4',
+            'project-worker',
+            'Worker Four',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:13.000Z',
+            '2026-04-06T00:00:14.000Z',
+            NULL,
+            NULL,
+            'project-orchestrator',
+            'root-2',
+            NULL,
+            'worker',
+            'root-2',
+            'workflow-2'
+          )
+      `;
+
+      const sessionThreads = yield* query.listSessionThreads({
+        rootThreadId: ThreadId.makeUnsafe("root-1"),
+        includeArchived: true,
+        includeDeleted: false,
+      });
+
+      assert.deepEqual(
+        sessionThreads.map((thread) => thread.id),
+        ["root-1", "worker-1", "worker-2", "worker-3"],
+      );
+      assert.equal(sessionThreads[2]?.projectId, "project-worker");
+      assert.equal(sessionThreads[3]?.archivedAt, "2026-04-06T00:00:10.000Z");
     }),
   );
 });

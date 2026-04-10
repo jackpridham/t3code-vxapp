@@ -34,6 +34,8 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         title: "Null options project",
         workspaceRoot: "/tmp/project-null-options",
         kind: "orchestrator",
+        sidebarParentProjectId: null,
+        currentSessionRootThreadId: null,
         defaultModelSelection: {
           provider: "codex",
           model: "gpt-5.4",

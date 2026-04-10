@@ -124,6 +124,7 @@ const testLayer = Layer.mergeAll(
     listProjects: () => Effect.die("unexpected listProjects"),
     getProjectByWorkspace: () => Effect.die("unexpected getProjectByWorkspace"),
     listProjectThreads: () => Effect.die("unexpected listProjectThreads"),
+    listSessionThreads: () => Effect.die("unexpected listSessionThreads"),
   }),
   Layer.succeed(ProjectionSnapshotQuery, unusedRuntimeService<ProjectionSnapshotQueryShape>()),
   Layer.succeed(ProjectFaviconResolver, unusedRuntimeService<ProjectFaviconResolverShape>()),
@@ -448,6 +449,7 @@ it.layer(testLayer)("server CLI command", (it) => {
           listProjects: () => Effect.die("unexpected listProjects"),
           getProjectByWorkspace: () => Effect.die("unexpected getProjectByWorkspace"),
           listProjectThreads: () => Effect.die("unexpected listProjectThreads"),
+          listSessionThreads: () => Effect.die("unexpected listSessionThreads"),
         }),
         Effect.provideService(AnalyticsService, {
           record: recordTelemetry,

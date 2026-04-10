@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildCopyThreadIdErrorDescription,
   createThreadJumpHintVisibilityController,
+  filterThreadsByLabels,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
+  resolveCurrentOrchestrationSessionRootId,
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
@@ -15,11 +17,13 @@ import {
   partitionProjectsForSidebar,
   resolveProjectStatusIndicator,
   getSidebarThreadLabels,
+  getUniqueLabelsFromThreads,
   resolveSidebarProjectKind,
   resolveSidebarNewThreadEnvMode,
   resolveLatestActiveThreadForProject,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  resolveSelectedOrchestrationSessionRootId,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
@@ -207,6 +211,89 @@ describe("resolveSidebarProjectKind", () => {
         orchestratorProjectCwds: ["/home/gizmo/agents-vxapp/Jasper"],
       }),
     ).toBe("orchestrator");
+  });
+});
+
+describe("resolveCurrentOrchestrationSessionRootId", () => {
+  it("prefers the persisted current session root when it is still active", () => {
+    expect(
+      resolveCurrentOrchestrationSessionRootId({
+        storedCurrentSessionRootId: ThreadId.makeUnsafe("root-stored"),
+        projectRootThreads: [
+          makeThread({
+            id: ThreadId.makeUnsafe("root-stored"),
+            spawnRole: "orchestrator",
+            archivedAt: null,
+            updatedAt: "2026-04-10T10:00:00.000Z",
+          }),
+          makeThread({
+            id: ThreadId.makeUnsafe("root-other"),
+            spawnRole: "orchestrator",
+            archivedAt: null,
+            updatedAt: "2026-04-10T09:00:00.000Z",
+          }),
+        ],
+      }),
+    ).toBe("root-stored");
+  });
+
+  it("falls back to the latest active root when the persisted root is archived", () => {
+    expect(
+      resolveCurrentOrchestrationSessionRootId({
+        storedCurrentSessionRootId: ThreadId.makeUnsafe("root-archived"),
+        projectRootThreads: [
+          makeThread({
+            id: ThreadId.makeUnsafe("root-archived"),
+            spawnRole: "orchestrator",
+            archivedAt: "2026-04-10T11:00:00.000Z",
+            updatedAt: "2026-04-10T11:00:00.000Z",
+          }),
+          makeThread({
+            id: ThreadId.makeUnsafe("root-current"),
+            spawnRole: "orchestrator",
+            archivedAt: null,
+            updatedAt: "2026-04-10T12:00:00.000Z",
+          }),
+        ],
+      }),
+    ).toBe("root-current");
+  });
+});
+
+describe("resolveSelectedOrchestrationSessionRootId", () => {
+  it("still lets the current route temporarily select a matching orchestration root", () => {
+    const projectRootThreads = [
+      makeThread({
+        id: ThreadId.makeUnsafe("root-current"),
+        spawnRole: "orchestrator",
+        archivedAt: null,
+        workflowId: "wf-current",
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("root-old"),
+        spawnRole: "orchestrator",
+        archivedAt: "2026-04-10T12:00:00.000Z",
+        workflowId: "wf-old",
+      }),
+    ];
+
+    expect(
+      resolveSelectedOrchestrationSessionRootId({
+        routeThreadId: ThreadId.makeUnsafe("worker-old"),
+        storedSelectedSessionRootId: ThreadId.makeUnsafe("root-current"),
+        projectRootThreads,
+        threadsForResolution: [
+          ...projectRootThreads,
+          makeThread({
+            id: ThreadId.makeUnsafe("worker-old"),
+            spawnRole: "worker",
+            orchestratorThreadId: ThreadId.makeUnsafe("root-old"),
+            parentThreadId: ThreadId.makeUnsafe("root-old"),
+            workflowId: "wf-old",
+          }),
+        ],
+      }),
+    ).toBe("root-old");
   });
 });
 
@@ -901,6 +988,126 @@ describe("getSidebarThreadLabels", () => {
       "alpha",
       "beta",
     ]);
+  });
+
+  it("uses the default preview limit when one is not provided", () => {
+    expect(getSidebarThreadLabels(["alpha", "beta", "gamma"])).toEqual(["alpha", "beta"]);
+  });
+
+  it("preserves first-seen order after trimming and deduping labels", () => {
+    expect(getSidebarThreadLabels(["  beta", "alpha  ", "beta", "alpha", "gamma"], 3)).toEqual([
+      "beta",
+      "alpha",
+      "gamma",
+    ]);
+  });
+
+  it("returns all unique trimmed labels when under the preview limit", () => {
+    expect(getSidebarThreadLabels([" worker ", "model:gpt-5.4", "worker"], 5)).toEqual([
+      "worker",
+      "gpt-5.4",
+    ]);
+  });
+
+  it("hides provider labels from the sidebar preview", () => {
+    expect(getSidebarThreadLabels(["provider:codex", "worker", "provider:claudeAgent"], 5)).toEqual(
+      ["worker"],
+    );
+  });
+
+  it("returns an empty array for missing labels", () => {
+    expect(getSidebarThreadLabels(undefined)).toEqual([]);
+    expect(getSidebarThreadLabels(null)).toEqual([]);
+  });
+});
+
+describe("filterThreadsByLabels", () => {
+  it("returns a shallow copy of all threads when no labels are selected", () => {
+    const threads = [
+      makeThread({ id: ThreadId.makeUnsafe("thread-1"), labels: ["worker"] }),
+      makeThread({ id: ThreadId.makeUnsafe("thread-2"), labels: ["review"] }),
+    ];
+
+    const filtered = filterThreadsByLabels(threads, []);
+
+    expect(filtered).toEqual(threads);
+    expect(filtered).not.toBe(threads);
+  });
+
+  it("filters threads by a single selected label", () => {
+    const filtered = filterThreadsByLabels(
+      [
+        makeThread({ id: ThreadId.makeUnsafe("thread-1"), labels: ["worker", "model:gpt-5.4"] }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-2"), labels: ["model:gpt-5.4"] }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-3"), labels: ["worker"] }),
+      ],
+      ["worker"],
+    );
+
+    expect(filtered.map((thread) => thread.id)).toEqual([
+      ThreadId.makeUnsafe("thread-1"),
+      ThreadId.makeUnsafe("thread-3"),
+    ]);
+  });
+
+  it("requires threads to include every selected label", () => {
+    const filtered = filterThreadsByLabels(
+      [
+        makeThread({ id: ThreadId.makeUnsafe("thread-1"), labels: ["worker", "model:gpt-5.4"] }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-2"), labels: ["worker"] }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-3"), labels: ["model:gpt-5.4"] }),
+      ],
+      ["worker", "model:gpt-5.4"],
+    );
+
+    expect(filtered.map((thread) => thread.id)).toEqual([ThreadId.makeUnsafe("thread-1")]);
+  });
+
+  it("excludes threads without labels when filters are active", () => {
+    const filtered = filterThreadsByLabels(
+      [
+        makeThread({ id: ThreadId.makeUnsafe("thread-1"), labels: undefined }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-2"), labels: [] }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-3"), labels: ["worker"] }),
+      ],
+      ["worker"],
+    );
+
+    expect(filtered.map((thread) => thread.id)).toEqual([ThreadId.makeUnsafe("thread-3")]);
+  });
+
+  it("matches selected labels exactly rather than trimming source labels during filtering", () => {
+    const filtered = filterThreadsByLabels(
+      [
+        makeThread({ id: ThreadId.makeUnsafe("thread-1"), labels: [" worker "] }),
+        makeThread({ id: ThreadId.makeUnsafe("thread-2"), labels: ["worker"] }),
+      ],
+      ["worker"],
+    );
+
+    expect(filtered.map((thread) => thread.id)).toEqual([ThreadId.makeUnsafe("thread-2")]);
+  });
+});
+
+describe("getUniqueLabelsFromThreads", () => {
+  it("trims, dedupes, and sorts labels across threads", () => {
+    expect(
+      getUniqueLabelsFromThreads([
+        makeThread({ labels: [" worker ", "model:gpt-5.4"] }),
+        makeThread({ labels: ["review", "worker", ""] }),
+        makeThread({ labels: ["  model:gpt-5.4  ", "alpha"] }),
+      ]),
+    ).toEqual(["alpha", "model:gpt-5.4", "review", "worker"]);
+  });
+
+  it("ignores missing and empty label arrays", () => {
+    expect(
+      getUniqueLabelsFromThreads([
+        makeThread({ labels: undefined }),
+        makeThread({ labels: [] }),
+        makeThread({ labels: ["   "] }),
+      ]),
+    ).toEqual([]);
   });
 });
 

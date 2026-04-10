@@ -4,9 +4,11 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_NOTIFICATION_PREFERENCES } from "./notificationSettings";
 import {
   clearProjectLabelFilters,
+  clearSelectedOrchestrationSessionRoot,
   clearThreadUi,
   closeArtifactPanel,
   closeChangesPanel,
+  initializeChangesPanelFromSettings,
   markThreadUnread,
   openArtifactPanel,
   openChangesPanel,
@@ -17,6 +19,7 @@ import {
   setDiscoveredArtifacts,
   setProjectExpanded,
   setProjectLabelFilter,
+  setSelectedOrchestrationSessionRoot,
   syncProjects,
   syncThreads,
   toggleChangesPanel,
@@ -31,10 +34,12 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     orchestratorProjectCwds: [],
     threadLastVisitedAtById: {},
     labelFiltersByProject: {},
+    selectedOrchestrationSessionRootByProjectId: {},
     artifactPanelOpen: false,
     artifactPanelPath: null,
     artifactPanelArtifacts: [],
     changesPanelOpen: false,
+    changesPanelInitializedFromSettings: false,
     changesPanelActivePath: null,
     changesPanelActiveSection: null,
     changesPanelContentMode: "preview",
@@ -200,6 +205,30 @@ describe("uiStateStore pure functions", () => {
     expect(next.projectOrder).toEqual([project1]);
   });
 
+  it("syncProjects prunes selected orchestration roots for removed projects", () => {
+    const project1 = ProjectId.makeUnsafe("project-1");
+    const project2 = ProjectId.makeUnsafe("project-2");
+    const root1 = ThreadId.makeUnsafe("root-1");
+    const root2 = ThreadId.makeUnsafe("root-2");
+    const initialState = makeUiState({
+      projectExpandedById: {
+        [project1]: true,
+        [project2]: true,
+      },
+      projectOrder: [project1, project2],
+      selectedOrchestrationSessionRootByProjectId: {
+        [project1]: root1,
+        [project2]: root2,
+      },
+    });
+
+    const next = syncProjects(initialState, [{ id: project1, cwd: "/tmp/project-1" }]);
+
+    expect(next.selectedOrchestrationSessionRootByProjectId).toEqual({
+      [project1]: root1,
+    });
+  });
+
   it("clearThreadUi removes visit state for deleted threads", () => {
     const thread1 = ThreadId.makeUnsafe("thread-1");
     const initialState = makeUiState({
@@ -233,6 +262,28 @@ describe("uiStateStore pure functions", () => {
     expect(next.labelFiltersByProject[projectId]).toEqual([]);
   });
 
+  it("toggleProjectLabelFilter appends new labels in selection order", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState({
+      labelFiltersByProject: { [projectId]: ["worker"] },
+    });
+
+    const next = toggleProjectLabelFilter(initialState, projectId, "model:gpt-5.4");
+
+    expect(next.labelFiltersByProject[projectId]).toEqual(["worker", "model:gpt-5.4"]);
+  });
+
+  it("toggleProjectLabelFilter removes only the targeted active label", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState({
+      labelFiltersByProject: { [projectId]: ["worker", "model:gpt-5.4", "review"] },
+    });
+
+    const next = toggleProjectLabelFilter(initialState, projectId, "model:gpt-5.4");
+
+    expect(next.labelFiltersByProject[projectId]).toEqual(["worker", "review"]);
+  });
+
   it("clearProjectLabelFilters removes all filters for a project", () => {
     const projectId = ProjectId.makeUnsafe("project-a");
     const initialState = makeUiState({
@@ -262,6 +313,30 @@ describe("uiStateStore pure functions", () => {
     const next = setProjectLabelFilter(initialState, projectId, ["new"]);
 
     expect(next.labelFiltersByProject[projectId]).toEqual(["new"]);
+  });
+
+  it("setSelectedOrchestrationSessionRoot stores the active root per project", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const next = setSelectedOrchestrationSessionRoot(
+      makeUiState(),
+      projectId,
+      ThreadId.makeUnsafe("root-1"),
+    );
+
+    expect(next.selectedOrchestrationSessionRootByProjectId[projectId]).toBe("root-1");
+  });
+
+  it("clearSelectedOrchestrationSessionRoot removes the selected root for a project", () => {
+    const projectId = ProjectId.makeUnsafe("project-a");
+    const initialState = makeUiState({
+      selectedOrchestrationSessionRootByProjectId: {
+        [projectId]: ThreadId.makeUnsafe("root-1"),
+      },
+    });
+
+    const next = clearSelectedOrchestrationSessionRoot(initialState, projectId);
+
+    expect(next.selectedOrchestrationSessionRootByProjectId[projectId]).toBeUndefined();
   });
 
   it("filter state persists in store reference (not lost across reads)", () => {
@@ -367,6 +442,7 @@ describe("changes panel pure functions", () => {
     const state = makeUiState();
     const next = openChangesPanel(state);
     expect(next.changesPanelOpen).toBe(true);
+    expect(next.changesPanelInitializedFromSettings).toBe(true);
     expect(next.changesPanelActivePath).toBeNull();
   });
 
@@ -374,6 +450,7 @@ describe("changes panel pure functions", () => {
     const state = makeUiState();
     const next = openChangesPanel(state, "/repo/src/index.ts");
     expect(next.changesPanelOpen).toBe(true);
+    expect(next.changesPanelInitializedFromSettings).toBe(true);
     expect(next.changesPanelActivePath).toBe("/repo/src/index.ts");
   });
 
@@ -416,6 +493,7 @@ describe("changes panel pure functions", () => {
     });
     const next = closeChangesPanel(state);
     expect(next.changesPanelOpen).toBe(false);
+    expect(next.changesPanelInitializedFromSettings).toBe(true);
     expect(next.changesPanelActivePath).toBe("/repo/plan.md");
     expect(next.changesPanelContentMode).toBe("diff");
   });
@@ -435,6 +513,28 @@ describe("changes panel pure functions", () => {
     const state = makeUiState({ changesPanelOpen: true });
     const next = toggleChangesPanel(state);
     expect(next.changesPanelOpen).toBe(false);
+  });
+
+  it("initializeChangesPanelFromSettings opens once when default is open", () => {
+    const state = makeUiState();
+    const next = initializeChangesPanelFromSettings(state, true);
+    expect(next.changesPanelOpen).toBe(true);
+    expect(next.changesPanelInitializedFromSettings).toBe(true);
+  });
+
+  it("initializeChangesPanelFromSettings closes once when default is closed", () => {
+    const state = makeUiState({ changesPanelOpen: true });
+    const next = initializeChangesPanelFromSettings(state, false);
+    expect(next.changesPanelOpen).toBe(false);
+    expect(next.changesPanelInitializedFromSettings).toBe(true);
+  });
+
+  it("initializeChangesPanelFromSettings does not overwrite an explicit user choice", () => {
+    const state = makeUiState({
+      changesPanelOpen: false,
+      changesPanelInitializedFromSettings: true,
+    });
+    expect(initializeChangesPanelFromSettings(state, true)).toBe(state);
   });
 
   it("setChangesPanelActivePath updates the path", () => {

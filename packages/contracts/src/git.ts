@@ -87,6 +87,11 @@ export const GitListBranchesInput = Schema.Struct({
 });
 export type GitListBranchesInput = typeof GitListBranchesInput.Type;
 
+export const GitResolveRepoIdentityInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type GitResolveRepoIdentityInput = typeof GitResolveRepoIdentityInput.Type;
+
 export const GitCreateWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   branch: TrimmedNonEmptyStringSchema,
@@ -170,6 +175,15 @@ export const GitListBranchesResult = Schema.Struct({
   hasOriginRemote: Schema.Boolean,
 });
 export type GitListBranchesResult = typeof GitListBranchesResult.Type;
+
+export const GitResolveRepoIdentityResult = Schema.Struct({
+  isRepo: Schema.Boolean,
+  commonGitDir: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  gitDir: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  worktreeRoot: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  isMainWorktree: Schema.Boolean,
+});
+export type GitResolveRepoIdentityResult = typeof GitResolveRepoIdentityResult.Type;
 
 export const GitCreateWorktreeResult = Schema.Struct({
   worktree: GitWorktree,

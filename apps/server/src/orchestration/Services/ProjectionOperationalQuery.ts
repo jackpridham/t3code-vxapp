@@ -4,6 +4,8 @@ import type {
   OrchestrationGetReadinessResult,
   OrchestrationListProjectThreadsInput,
   OrchestrationListProjectThreadsResult,
+  OrchestrationListSessionThreadsInput,
+  OrchestrationListSessionThreadsResult,
   OrchestrationListProjectsResult,
 } from "@t3tools/contracts";
 import type { Effect } from "effect";
@@ -26,6 +28,9 @@ export interface ProjectionOperationalQueryShape {
   readonly listProjectThreads: (
     input: OrchestrationListProjectThreadsInput,
   ) => Effect.Effect<OrchestrationListProjectThreadsResult, ProjectionRepositoryError>;
+  readonly listSessionThreads: (
+    input: OrchestrationListSessionThreadsInput,
+  ) => Effect.Effect<OrchestrationListSessionThreadsResult, ProjectionRepositoryError>;
 }
 
 export class ProjectionOperationalQuery extends ServiceMap.Service<

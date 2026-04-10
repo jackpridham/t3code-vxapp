@@ -38,6 +38,7 @@ export interface UiProjectState {
   projectOrder: ProjectId[];
   orchestratorProjectCwds: string[];
   labelFiltersByProject: Record<string, string[]>;
+  selectedOrchestrationSessionRootByProjectId: Record<string, ThreadId>;
 }
 
 export interface UiThreadState {
@@ -56,6 +57,8 @@ export interface UiArtifactPanelState {
 export interface UiChangesPanelState {
   /** Whether the Changes panel is open. */
   changesPanelOpen: boolean;
+  /** Whether the changes panel default has been initialized from settings this page load. */
+  changesPanelInitializedFromSettings: boolean;
   /** Currently active/selected file path in the panel, or null. */
   changesPanelActivePath: string | null;
   /** Which section is currently expanded. Null means default (all expanded). */
@@ -87,10 +90,12 @@ const initialState: UiState = {
   orchestratorProjectCwds: [],
   threadLastVisitedAtById: {},
   labelFiltersByProject: {},
+  selectedOrchestrationSessionRootByProjectId: {},
   artifactPanelOpen: false,
   artifactPanelPath: null,
   artifactPanelArtifacts: [],
   changesPanelOpen: false,
+  changesPanelInitializedFromSettings: false,
   changesPanelActivePath: null,
   changesPanelActiveSection: null,
   changesPanelContentMode: "preview",
@@ -326,15 +331,25 @@ export function syncProjects(state: UiState, projects: readonly SyncProjectInput
   if (
     recordsEqual(state.projectExpandedById, nextExpandedById) &&
     projectOrdersEqual(state.projectOrder, nextProjectOrder) &&
+    Object.keys(state.selectedOrchestrationSessionRootByProjectId).every(
+      (projectId) => projectId in nextExpandedById,
+    ) &&
     !cwdMappingChanged
   ) {
     return state;
   }
 
+  const nextSelectedOrchestrationSessionRootByProjectId = Object.fromEntries(
+    Object.entries(state.selectedOrchestrationSessionRootByProjectId).filter(
+      ([projectId]) => projectId in nextExpandedById,
+    ),
+  ) as Record<string, ThreadId>;
+
   return {
     ...state,
     projectExpandedById: nextExpandedById,
     projectOrder: nextProjectOrder,
+    selectedOrchestrationSessionRootByProjectId: nextSelectedOrchestrationSessionRootByProjectId,
   };
 }
 
@@ -465,6 +480,37 @@ export function setProjectLabelFilter(
   };
 }
 
+export function setSelectedOrchestrationSessionRoot(
+  state: UiState,
+  projectId: ProjectId,
+  rootThreadId: ThreadId,
+): UiState {
+  if (state.selectedOrchestrationSessionRootByProjectId[projectId] === rootThreadId) {
+    return state;
+  }
+  return {
+    ...state,
+    selectedOrchestrationSessionRootByProjectId: {
+      ...state.selectedOrchestrationSessionRootByProjectId,
+      [projectId]: rootThreadId,
+    },
+  };
+}
+
+export function clearSelectedOrchestrationSessionRoot(
+  state: UiState,
+  projectId: ProjectId,
+): UiState {
+  if (!(projectId in state.selectedOrchestrationSessionRootByProjectId)) {
+    return state;
+  }
+  const { [projectId]: _, ...rest } = state.selectedOrchestrationSessionRootByProjectId;
+  return {
+    ...state,
+    selectedOrchestrationSessionRootByProjectId: rest,
+  };
+}
+
 export function clearThreadUi(state: UiState, threadId: ThreadId): UiState {
   if (!(threadId in state.threadLastVisitedAtById)) {
     return state;
@@ -535,6 +581,7 @@ export function openChangesPanel(state: UiState, path?: string | null): UiState 
   return {
     ...state,
     changesPanelOpen: true,
+    changesPanelInitializedFromSettings: true,
     changesPanelActivePath: nextPath ?? null,
   };
 }
@@ -546,12 +593,24 @@ export function closeChangesPanel(state: UiState): UiState {
   return {
     ...state,
     changesPanelOpen: false,
+    changesPanelInitializedFromSettings: true,
     // Preserve activePath so reopening returns to last viewed item
   };
 }
 
 export function toggleChangesPanel(state: UiState): UiState {
   return state.changesPanelOpen ? closeChangesPanel(state) : openChangesPanel(state);
+}
+
+export function initializeChangesPanelFromSettings(state: UiState, defaultOpen: boolean): UiState {
+  if (state.changesPanelInitializedFromSettings) {
+    return state;
+  }
+  return {
+    ...state,
+    changesPanelInitializedFromSettings: true,
+    changesPanelOpen: defaultOpen,
+  };
 }
 
 export function setChangesPanelActivePath(state: UiState, path: string | null): UiState {
@@ -640,12 +699,15 @@ interface UiStateStore extends UiState {
   toggleProjectLabelFilter: (projectId: string, label: string) => void;
   clearProjectLabelFilters: (projectId: string) => void;
   setProjectLabelFilter: (projectId: string, labels: string[]) => void;
+  setSelectedOrchestrationSessionRoot: (projectId: ProjectId, rootThreadId: ThreadId) => void;
+  clearSelectedOrchestrationSessionRoot: (projectId: ProjectId) => void;
   openArtifactPanel: (path: string) => void;
   closeArtifactPanel: () => void;
   setDiscoveredArtifacts: (artifacts: DiscoveredArtifact[]) => void;
   openChangesPanel: (path?: string | null) => void;
   closeChangesPanel: () => void;
   toggleChangesPanel: () => void;
+  initializeChangesPanelFromSettings: (defaultOpen: boolean) => void;
   setChangesPanelActivePath: (path: string | null) => void;
   setChangesPanelActiveSection: (section: ChangesSectionKind | null) => void;
   setChangesPanelContentMode: (mode: ChangesPanelContentMode) => void;
@@ -674,12 +736,18 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => clearProjectLabelFilters(state, projectId)),
   setProjectLabelFilter: (projectId, labels) =>
     set((state) => setProjectLabelFilter(state, projectId, labels)),
+  setSelectedOrchestrationSessionRoot: (projectId, rootThreadId) =>
+    set((state) => setSelectedOrchestrationSessionRoot(state, projectId, rootThreadId)),
+  clearSelectedOrchestrationSessionRoot: (projectId) =>
+    set((state) => clearSelectedOrchestrationSessionRoot(state, projectId)),
   openArtifactPanel: (path) => set((state) => openArtifactPanel(state, path)),
   closeArtifactPanel: () => set((state) => closeArtifactPanel(state)),
   setDiscoveredArtifacts: (artifacts) => set((state) => setDiscoveredArtifacts(state, artifacts)),
   openChangesPanel: (path) => set((state) => openChangesPanel(state, path)),
   closeChangesPanel: () => set((state) => closeChangesPanel(state)),
   toggleChangesPanel: () => set((state) => toggleChangesPanel(state)),
+  initializeChangesPanelFromSettings: (defaultOpen) =>
+    set((state) => initializeChangesPanelFromSettings(state, defaultOpen)),
   setChangesPanelActivePath: (path) => set((state) => setChangesPanelActivePath(state, path)),
   setChangesPanelActiveSection: (section) =>
     set((state) => setChangesPanelActiveSection(state, section)),

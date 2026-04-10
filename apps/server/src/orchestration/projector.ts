@@ -187,6 +187,7 @@ export function projectEvent(
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             kind: payload.kind ?? "project",
+            sidebarParentProjectId: payload.sidebarParentProjectId,
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
             hooks: payload.hooks,
@@ -219,6 +220,9 @@ export function projectEvent(
                     ? { workspaceRoot: payload.workspaceRoot }
                     : {}),
                   ...(payload.kind !== undefined ? { kind: payload.kind } : {}),
+                  ...(payload.sidebarParentProjectId !== undefined
+                    ? { sidebarParentProjectId: payload.sidebarParentProjectId }
+                    : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
@@ -464,6 +468,8 @@ export function projectEvent(
           event.type,
           "session",
         );
+        // Imported from the active-branch continuation settlement review.
+        // See active-branch-runtime-fixes-review.md.
         const latestTurn =
           session.status === "running" && session.activeTurnId !== null
             ? {

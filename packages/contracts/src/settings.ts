@@ -35,15 +35,25 @@ export const DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE: ChangesPanelWindowNav
 export const ChangesDrawerVisibility = Schema.Literals(["always_show", "always_hide"]);
 export type ChangesDrawerVisibility = typeof ChangesDrawerVisibility.Type;
 export const DEFAULT_CHANGES_DRAWER_VISIBILITY: ChangesDrawerVisibility = "always_show";
+export const DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH = true;
+export const ChatViewInputWhenScrolling = Schema.Literals(["hide", "show", "compact"]);
+export type ChatViewInputWhenScrolling = typeof ChatViewInputWhenScrolling.Type;
+export const DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING: ChatViewInputWhenScrolling = "compact";
 
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  chatViewInputWhenScrolling: ChatViewInputWhenScrolling.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING),
+  ),
   changesPanelFilesChangedViewType: ChangesPanelFilesChangedViewType.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE),
   ),
   changesDrawerVisibility: ChangesDrawerVisibility.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHANGES_DRAWER_VISIBILITY),
+  ),
+  rememberChangesDrawerWidth: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH),
   ),
   changesPanelWindowNavigationMode: ChangesPanelWindowNavigationMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE),

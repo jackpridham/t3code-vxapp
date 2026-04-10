@@ -83,8 +83,6 @@ interface CodexSessionContext {
   stopping: boolean;
 }
 
-const TURN_INTERRUPT_TIMEOUT_MS = 5_000;
-
 interface JsonRpcError {
   code?: number;
   message?: string;
@@ -776,15 +774,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       return;
     }
 
-    await this.sendRequest(
-      context,
-      "turn/interrupt",
-      {
-        threadId: providerThreadId,
-        turnId: effectiveTurnId,
-      },
-      TURN_INTERRUPT_TIMEOUT_MS,
-    );
+    await this.sendRequest(context, "turn/interrupt", {
+      threadId: providerThreadId,
+      turnId: effectiveTurnId,
+    });
   }
 
   async readThread(threadId: ThreadId): Promise<CodexThreadSnapshot> {
@@ -1096,20 +1089,6 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       );
       if (providerThreadId) {
         this.updateSession(context, { resumeCursor: { threadId: providerThreadId } });
-      }
-      return;
-    }
-
-    if (notification.method === "thread/status/changed") {
-      if (isChildConversation) {
-        return;
-      }
-      const statusType = this.readString(this.readObject(notification.params, "status"), "type");
-      if (statusType === "idle" && context.session.activeTurnId) {
-        this.updateSession(context, {
-          status: "ready",
-          activeTurnId: undefined,
-        });
       }
       return;
     }

@@ -13,6 +13,7 @@ import {
   OrchestrationProjectKind,
   ProjectId,
   ProjectScript,
+  ThreadId,
 } from "@t3tools/contracts";
 import { Option, Schema, ServiceMap } from "effect";
 import type { Effect } from "effect";
@@ -24,6 +25,8 @@ export const ProjectionProject = Schema.Struct({
   title: Schema.String,
   workspaceRoot: Schema.String,
   kind: Schema.optional(OrchestrationProjectKind),
+  sidebarParentProjectId: Schema.NullOr(ProjectId),
+  currentSessionRootThreadId: Schema.NullOr(ThreadId),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   hooks: ProjectHooks,

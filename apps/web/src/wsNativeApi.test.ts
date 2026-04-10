@@ -365,6 +365,11 @@ describe("wsNativeApi", () => {
       includeArchived: false,
       includeDeleted: false,
     });
+    await api.orchestration.listSessionThreads({
+      rootThreadId: ThreadId.makeUnsafe("thread-1"),
+      includeArchived: true,
+      includeDeleted: false,
+    });
 
     expect(requestMock).toHaveBeenNthCalledWith(1, ORCHESTRATION_WS_METHODS.getBootstrapSummary);
     expect(requestMock).toHaveBeenNthCalledWith(2, ORCHESTRATION_WS_METHODS.getSnapshot, {
@@ -379,6 +384,11 @@ describe("wsNativeApi", () => {
     expect(requestMock).toHaveBeenNthCalledWith(6, ORCHESTRATION_WS_METHODS.listProjectThreads, {
       projectId: "project-1",
       includeArchived: false,
+      includeDeleted: false,
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(7, ORCHESTRATION_WS_METHODS.listSessionThreads, {
+      rootThreadId: "thread-1",
+      includeArchived: true,
       includeDeleted: false,
     });
   });

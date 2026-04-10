@@ -274,9 +274,11 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const providerName: ProviderKind = Schema.is(ProviderKind)(thread.session?.providerName)
-      ? thread.session.providerName
-      : thread.modelSelection.provider;
+    const providerName = thread.session?.providerName ?? thread.modelSelection.provider;
+    const runtimeProvider =
+      providerName === "claudeAgent" || thread.modelSelection.provider === "claudeAgent"
+        ? "claudeAgent"
+        : "codex";
     const runtimeMode = input.session.runtimeMode ?? thread.runtimeMode ?? DEFAULT_RUNTIME_MODE;
 
     yield* setThreadSession({
@@ -292,7 +294,7 @@ const make = Effect.gen(function* () {
 
     yield* providerSessionDirectory.upsert({
       threadId: input.threadId,
-      provider: providerName ?? thread.modelSelection.provider,
+      provider: runtimeProvider,
       runtimeMode,
       status: input.runtimeStatus,
       runtimePayload: {

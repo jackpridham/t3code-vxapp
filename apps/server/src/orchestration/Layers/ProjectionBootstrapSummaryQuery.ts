@@ -4,6 +4,7 @@ import {
   ModelSelection,
   OrchestrationProjectKind,
   OrchestrationReadModel,
+  ProjectId,
   ProjectHooks,
   ProjectScript,
   ThreadId,
@@ -40,6 +41,8 @@ const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     kind: Schema.NullOr(OrchestrationProjectKind),
+    sidebarParentProjectId: Schema.NullOr(ProjectId),
+    currentSessionRootThreadId: Schema.NullOr(ThreadId),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     hooks: Schema.fromJsonString(ProjectHooks),
@@ -132,6 +135,8 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           kind,
+          sidebar_parent_project_id AS "sidebarParentProjectId",
+          current_session_root_thread_id AS "currentSessionRootThreadId",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           hooks_json AS "hooks",
@@ -375,6 +380,12 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             title: row.title,
             workspaceRoot: row.workspaceRoot,
             kind: row.kind ?? "project",
+            ...(row.sidebarParentProjectId !== null
+              ? { sidebarParentProjectId: row.sidebarParentProjectId }
+              : {}),
+            ...(row.currentSessionRootThreadId !== null
+              ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
+              : {}),
             defaultModelSelection: row.defaultModelSelection,
             scripts: row.scripts,
             hooks: row.hooks,

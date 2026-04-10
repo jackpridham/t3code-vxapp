@@ -1,4 +1,6 @@
+import type { GitResolveRepoIdentityResult } from "@t3tools/contracts";
 import type { Project, Thread } from "../types";
+import { getDisplayThreadLabelEntries } from "./threadLabels";
 
 export interface OrchestrationSessionRoot {
   rootThreadId: Thread["id"];
@@ -25,6 +27,11 @@ export interface OrchestrationModeProjectBucket {
   canonicalProjectName: string;
 }
 
+export interface OrchestrationModeConfiguredProjectBuckets {
+  bucketProjectIdByProjectId: Map<Project["id"], Project["id"]>;
+  visibleProjectIds: Set<Project["id"]>;
+}
+
 export interface OrchestrationModeRowBadge {
   key: string;
   label: string;
@@ -38,11 +45,6 @@ export interface OrchestrationModeRowDescriptor {
 
 function isNonEmptyString(value: string | null | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-function trimLabel(label: string): string | null {
-  const trimmed = label.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 function normalizePath(path: string): string {
@@ -59,33 +61,278 @@ function pathStartsWith(path: string, prefix: string): boolean {
   );
 }
 
-function collectUniqueLabels(
-  labels: readonly string[] | null | undefined,
-  maxLabels: number,
-): string[] {
-  const resolvedLabels: string[] = [];
-  const seenLabels = new Set<string>();
-
-  for (const label of labels ?? []) {
-    const trimmedLabel = trimLabel(label);
-    if (trimmedLabel === null || seenLabels.has(trimmedLabel)) {
-      continue;
-    }
-    seenLabels.add(trimmedLabel);
-    resolvedLabels.push(trimmedLabel);
-    if (resolvedLabels.length >= maxLabels) {
-      break;
-    }
-  }
-
-  return resolvedLabels;
-}
-
 function createBadge(label: string): OrchestrationModeRowBadge {
   return {
     key: label,
     label,
   };
+}
+
+function hasRepoIdentity(
+  value:
+    | Pick<
+        GitResolveRepoIdentityResult,
+        "isRepo" | "commonGitDir" | "worktreeRoot" | "isMainWorktree"
+      >
+    | null
+    | undefined,
+): value is Pick<GitResolveRepoIdentityResult, "isRepo" | "worktreeRoot" | "isMainWorktree"> & {
+  commonGitDir: string;
+} {
+  return value?.isRepo === true && isNonEmptyString(value.commonGitDir);
+}
+
+export function resolveConfiguredProjectBuckets(input: {
+  projects: readonly Pick<Project, "id" | "name" | "cwd" | "sidebarParentProjectId">[];
+  repoIdentityByProjectId: ReadonlyMap<
+    Project["id"],
+    | Pick<
+        GitResolveRepoIdentityResult,
+        "isRepo" | "commonGitDir" | "worktreeRoot" | "isMainWorktree"
+      >
+    | null
+    | undefined
+  >;
+}): OrchestrationModeConfiguredProjectBuckets {
+  const bucketProjectIdByProjectId = new Map<Project["id"], Project["id"]>();
+  const visibleProjectIds = new Set<Project["id"]>();
+  const projectsByCommonGitDir = new Map<string, Array<Pick<Project, "id" | "name" | "cwd">>>();
+
+  for (const project of input.projects) {
+    bucketProjectIdByProjectId.set(project.id, project.id);
+    visibleProjectIds.add(project.id);
+
+    const repoIdentity = input.repoIdentityByProjectId.get(project.id);
+    if (!hasRepoIdentity(repoIdentity)) {
+      continue;
+    }
+
+    const normalizedCommonGitDir = normalizePath(repoIdentity.commonGitDir);
+    const family = projectsByCommonGitDir.get(normalizedCommonGitDir) ?? [];
+    family.push(project);
+    projectsByCommonGitDir.set(normalizedCommonGitDir, family);
+  }
+
+  for (const familyProjects of projectsByCommonGitDir.values()) {
+    const bucketProject =
+      familyProjects.find((project) => {
+        const repoIdentity = input.repoIdentityByProjectId.get(project.id);
+        if (!hasRepoIdentity(repoIdentity) || !repoIdentity.isMainWorktree) {
+          return false;
+        }
+        const worktreeRoot = repoIdentity.worktreeRoot;
+        if (!isNonEmptyString(worktreeRoot)) {
+          return false;
+        }
+        return normalizePath(project.cwd) === normalizePath(worktreeRoot);
+      }) ?? null;
+
+    if (!bucketProject) {
+      continue;
+    }
+
+    for (const project of familyProjects) {
+      bucketProjectIdByProjectId.set(project.id, bucketProject.id);
+      if (project.id !== bucketProject.id) {
+        visibleProjectIds.delete(project.id);
+      }
+    }
+  }
+
+  for (const project of input.projects) {
+    if (project.sidebarParentProjectId === undefined) {
+      continue;
+    }
+
+    if (project.sidebarParentProjectId === null || project.sidebarParentProjectId === project.id) {
+      bucketProjectIdByProjectId.set(project.id, project.id);
+      visibleProjectIds.add(project.id);
+      continue;
+    }
+
+    if (
+      !input.projects.some(
+        (candidateProject) => candidateProject.id === project.sidebarParentProjectId,
+      )
+    ) {
+      continue;
+    }
+
+    bucketProjectIdByProjectId.set(project.id, project.sidebarParentProjectId);
+    visibleProjectIds.delete(project.id);
+  }
+
+  const parentProjectAliases = input.projects
+    .map((project) => ({
+      projectId: project.id,
+      aliases: buildProjectNameAliases(project.name),
+    }))
+    .filter((entry) => entry.aliases.length > 0)
+    .toSorted((left, right) => {
+      const leftLongestAlias = Math.max(...left.aliases.map((alias) => alias.length));
+      const rightLongestAlias = Math.max(...right.aliases.map((alias) => alias.length));
+      return rightLongestAlias - leftLongestAlias;
+    });
+
+  for (const project of input.projects) {
+    if (project.sidebarParentProjectId !== undefined) {
+      continue;
+    }
+
+    if ((bucketProjectIdByProjectId.get(project.id) ?? project.id) !== project.id) {
+      continue;
+    }
+
+    const normalizedProjectName = normalizeProjectName(project.name);
+    if (normalizedProjectName === null) {
+      continue;
+    }
+
+    const matchedParent = parentProjectAliases.find(
+      (candidate) =>
+        candidate.projectId !== project.id &&
+        candidate.aliases.some((alias) => normalizedProjectName.startsWith(`${alias}-`)),
+    );
+    if (!matchedParent) {
+      continue;
+    }
+
+    bucketProjectIdByProjectId.set(project.id, matchedParent.projectId);
+    visibleProjectIds.delete(project.id);
+  }
+
+  return {
+    bucketProjectIdByProjectId,
+    visibleProjectIds,
+  };
+}
+
+function normalizeProjectName(name: string): string | null {
+  const trimmed = name.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function buildProjectNameAliases(name: string): string[] {
+  const normalizedName = normalizeProjectName(name);
+  if (normalizedName === null) {
+    return [];
+  }
+
+  const aliases = new Set<string>([normalizedName]);
+  if (normalizedName.endsWith("-vxapp")) {
+    const baseName = normalizedName.slice(0, "-vxapp".length * -1);
+    if (baseName.length > 0) {
+      aliases.add(baseName);
+    }
+  }
+
+  return [...aliases];
+}
+
+export function filterProjectThreadsForOrchestrationMode<
+  TThread extends Pick<
+    Thread,
+    "id" | "spawnRole" | "parentThreadId" | "spawnedBy" | "orchestratorThreadId" | "workflowId"
+  >,
+>(input: {
+  threads: readonly TThread[];
+  selectedSessionRootIds: ReadonlySet<Thread["id"]> | readonly Thread["id"][];
+  threadsForResolution: readonly Pick<
+    Thread,
+    "id" | "parentThreadId" | "spawnRole" | "spawnedBy" | "orchestratorThreadId" | "workflowId"
+  >[];
+}): TThread[] {
+  const selectedSessionRootIds =
+    input.selectedSessionRootIds instanceof Set
+      ? input.selectedSessionRootIds
+      : new Set(input.selectedSessionRootIds);
+
+  return input.threads.filter((thread) => {
+    if (thread.spawnRole === "orchestrator") {
+      return false;
+    }
+
+    if (
+      thread.spawnRole === "worker" &&
+      isNonEmptyString(thread.orchestratorThreadId) &&
+      !selectedSessionRootIds.has(thread.orchestratorThreadId)
+    ) {
+      return false;
+    }
+
+    const sessionRootId = resolveThreadSessionRootId({
+      threadId: thread.id,
+      threads: input.threadsForResolution,
+    });
+
+    if (sessionRootId === null) {
+      return true;
+    }
+
+    return selectedSessionRootIds.has(sessionRootId);
+  });
+}
+
+export function resolveThreadSessionRootId(input: {
+  threadId: Thread["id"];
+  threads: readonly Pick<
+    Thread,
+    "id" | "parentThreadId" | "spawnRole" | "spawnedBy" | "orchestratorThreadId" | "workflowId"
+  >[];
+}): Thread["id"] | null {
+  const threadsById = new Map(input.threads.map((thread) => [thread.id, thread] as const));
+  const thread = threadsById.get(input.threadId);
+  if (!thread) {
+    return null;
+  }
+
+  if (thread.spawnRole === "orchestrator") {
+    return thread.id;
+  }
+
+  for (const candidateId of [thread.spawnedBy, thread.orchestratorThreadId]) {
+    if (!candidateId) {
+      continue;
+    }
+    const candidateThread = threadsById.get(candidateId as Thread["id"]);
+    if (candidateThread?.spawnRole === "orchestrator") {
+      return candidateThread.id;
+    }
+  }
+
+  const visited = new Set<Thread["id"]>([thread.id]);
+  let currentParentId = thread.parentThreadId as Thread["id"] | undefined;
+  while (currentParentId && !visited.has(currentParentId)) {
+    visited.add(currentParentId);
+    const parentThread = threadsById.get(currentParentId);
+    if (!parentThread) {
+      break;
+    }
+    if (parentThread.spawnRole === "orchestrator") {
+      return parentThread.id;
+    }
+    for (const candidateId of [parentThread.spawnedBy, parentThread.orchestratorThreadId]) {
+      if (!candidateId) {
+        continue;
+      }
+      const candidateThread = threadsById.get(candidateId as Thread["id"]);
+      if (candidateThread?.spawnRole === "orchestrator") {
+        return candidateThread.id;
+      }
+    }
+    currentParentId = parentThread.parentThreadId as Thread["id"] | undefined;
+  }
+
+  if (!isNonEmptyString(thread.workflowId)) {
+    return null;
+  }
+
+  const workflowRoot = input.threads.find(
+    (candidateThread) =>
+      candidateThread.workflowId === thread.workflowId &&
+      candidateThread.spawnRole === "orchestrator",
+  );
+  return workflowRoot?.id ?? null;
 }
 
 function collectFallbackRootIds(
@@ -264,14 +511,16 @@ export function collapseThreadToCanonicalProject(input: {
 export function buildOrchestrationModeRowDescriptor(input: {
   thread: Pick<Thread, "id" | "title" | "labels" | "spawnRole" | "modelSelection">;
 }): OrchestrationModeRowDescriptor {
-  const visibleBadges = collectUniqueLabels(input.thread.labels, 3).map(createBadge);
+  const normalizedLabels = getDisplayThreadLabelEntries(input.thread.labels, 3).map(
+    (label) => label.displayLabel,
+  );
+
+  const visibleBadges = normalizedLabels.map(createBadge);
   const hasRoleBadge = input.thread.spawnRole
     ? visibleBadges.some((badge) => badge.label === input.thread.spawnRole)
     : false;
   const hasModelBadge = visibleBadges.some(
-    (badge) =>
-      badge.label === input.thread.modelSelection.model ||
-      badge.label === `model:${input.thread.modelSelection.model}`,
+    (badge) => badge.label === input.thread.modelSelection.model,
   );
 
   if (input.thread.spawnRole && !hasRoleBadge && visibleBadges.length === 0) {

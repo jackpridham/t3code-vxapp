@@ -389,6 +389,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
             kind: event.payload.kind ?? "project",
+            sidebarParentProjectId: event.payload.sidebarParentProjectId ?? null,
+            currentSessionRootThreadId: event.payload.currentSessionRootThreadId ?? null,
             defaultModelSelection: event.payload.defaultModelSelection,
             scripts: event.payload.scripts,
             hooks: event.payload.hooks,
@@ -412,6 +414,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ? { workspaceRoot: event.payload.workspaceRoot }
               : {}),
             ...(event.payload.kind !== undefined ? { kind: event.payload.kind } : {}),
+            ...(event.payload.sidebarParentProjectId !== undefined
+              ? { sidebarParentProjectId: event.payload.sidebarParentProjectId }
+              : {}),
+            ...(event.payload.currentSessionRootThreadId !== undefined
+              ? { currentSessionRootThreadId: event.payload.currentSessionRootThreadId }
+              : {}),
             ...(event.payload.defaultModelSelection !== undefined
               ? { defaultModelSelection: event.payload.defaultModelSelection }
               : {}),
@@ -915,6 +923,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
           if (turnId === null || isTerminalSessionSet) {
+            // Imported from the active-branch continuation settlement review.
+            // See active-branch-runtime-fixes-review.md.
             const existingThread = yield* projectionThreadRepository.getById({
               threadId: event.payload.threadId,
             });

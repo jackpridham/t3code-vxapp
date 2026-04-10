@@ -497,6 +497,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.changesDrawerVisibility !== DEFAULT_UNIFIED_SETTINGS.changesDrawerVisibility
         ? ["Changes drawer visibility"]
         : []),
+      ...(settings.rememberChangesDrawerWidth !==
+      DEFAULT_UNIFIED_SETTINGS.rememberChangesDrawerWidth
+        ? ["Remember changes drawer width"]
+        : []),
       ...(settings.changesPanelWindowNavigationMode !==
       DEFAULT_UNIFIED_SETTINGS.changesPanelWindowNavigationMode
         ? ["Changes window navigation"]
@@ -529,6 +533,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.allowActiveThreadsInFold,
       settings.changesPanelFilesChangedViewType,
       settings.changesDrawerVisibility,
+      settings.rememberChangesDrawerWidth,
       settings.changesPanelWindowNavigationMode,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -582,8 +587,8 @@ const CHANGES_PANEL_WINDOW_NAVIGATION_MODE_LABELS: Record<
 };
 
 const CHANGES_DRAWER_VISIBILITY_LABELS: Record<ChangesDrawerVisibility, string> = {
-  always_show: "Always show",
-  always_hide: "Always hide",
+  always_show: "Show by default",
+  always_hide: "Hide by default",
 };
 
 export function GeneralSettingsPanel() {
@@ -1685,7 +1690,7 @@ export function ThreadsSettingsPanel() {
       <SettingsSection title="Changes Panel">
         <SettingsRow
           title="Changes Drawer"
-          description="Control whether the top-level Changes drawer toggle is visible in the thread header. Mobile uses the same responsive drawer pattern when the toggle is shown."
+          description="Choose whether the inline Changes drawer starts open or closed on a fresh page load. After that, the user can still open or close it manually."
           resetAction={
             settings.changesDrawerVisibility !==
             DEFAULT_UNIFIED_SETTINGS.changesDrawerVisibility ? (
@@ -1722,6 +1727,30 @@ export function ThreadsSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+        <SettingsRow
+          title="Remember drawer width"
+          description="Persist the inline Changes drawer width between sessions. When disabled, the drawer starts at its default width."
+          resetAction={
+            settings.rememberChangesDrawerWidth !==
+            DEFAULT_UNIFIED_SETTINGS.rememberChangesDrawerWidth ? (
+              <SettingResetButton
+                label="remember changes drawer width"
+                onClick={() =>
+                  updateSettings({
+                    rememberChangesDrawerWidth: DEFAULT_UNIFIED_SETTINGS.rememberChangesDrawerWidth,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.rememberChangesDrawerWidth}
+              onCheckedChange={(checked) => updateSettings({ rememberChangesDrawerWidth: checked })}
+              aria-label="Remember changes drawer width"
+            />
           }
         />
         <SettingsRow

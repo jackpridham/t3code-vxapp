@@ -18,6 +18,8 @@ import type {
   GitListBranchesResult,
   GitPullResult,
   GitRemoveWorktreeInput,
+  GitResolveRepoIdentityInput,
+  GitResolveRepoIdentityResult,
   GitStatusInput,
   GitStatusResult,
 } from "@t3tools/contracts";
@@ -229,6 +231,13 @@ export interface GitCoreShape {
   readonly listBranches: (
     input: GitListBranchesInput,
   ) => Effect.Effect<GitListBranchesResult, GitCommandError>;
+
+  /**
+   * Resolve the canonical git family identity for a repository/worktree.
+   */
+  readonly resolveRepoIdentity: (
+    input: GitResolveRepoIdentityInput,
+  ) => Effect.Effect<GitResolveRepoIdentityResult, GitCommandError>;
 
   /**
    * Pull current branch from upstream using fast-forward only.

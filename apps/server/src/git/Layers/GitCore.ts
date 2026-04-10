@@ -29,6 +29,7 @@ import {
 } from "../Services/GitCore.ts";
 import { ServerConfig } from "../../config.ts";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+import type { GitResolveRepoIdentityResult } from "@t3tools/contracts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
@@ -304,6 +305,10 @@ function createGitCommandError(
 
 function quoteGitCommand(args: ReadonlyArray<string>): string {
   return `git ${args.join(" ")}`;
+}
+
+function normalizeComparablePath(path: string): string {
+  return path.replace(/[\\/]+$/g, "");
 }
 
 function toGitCommandError(
@@ -1757,6 +1762,75 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     return { branches, isRepo: true, hasOriginRemote: remoteNames.includes("origin") };
   });
 
+  const resolveRepoIdentity: GitCoreShape["resolveRepoIdentity"] = Effect.fn("resolveRepoIdentity")(
+    function* (input) {
+      const topLevelResult = yield* executeGit(
+        "GitCore.resolveRepoIdentity.showTopLevel",
+        input.cwd,
+        ["rev-parse", "--path-format=absolute", "--show-toplevel"],
+        {
+          timeoutMs: 5_000,
+          allowNonZeroExit: true,
+        },
+      );
+
+      if (topLevelResult.code !== 0) {
+        const stderr = topLevelResult.stderr.trim().toLowerCase();
+        if (
+          stderr.includes("not a git repository") ||
+          stderr.includes("outside repository") ||
+          stderr.includes("not a work tree")
+        ) {
+          return {
+            isRepo: false,
+            commonGitDir: null,
+            gitDir: null,
+            worktreeRoot: null,
+            isMainWorktree: false,
+          } satisfies GitResolveRepoIdentityResult;
+        }
+
+        return yield* createGitCommandError(
+          "GitCore.resolveRepoIdentity",
+          input.cwd,
+          ["rev-parse", "--path-format=absolute", "--show-toplevel"],
+          topLevelResult.stderr.trim() || "git rev-parse --show-toplevel failed",
+        );
+      }
+
+      const [commonGitDir, gitDir] = yield* Effect.all(
+        [
+          runGitStdout("GitCore.resolveRepoIdentity.commonGitDir", input.cwd, [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+          ]),
+          runGitStdout("GitCore.resolveRepoIdentity.gitDir", input.cwd, [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+          ]),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      const worktreeRoot = topLevelResult.stdout.trim();
+      const normalizedCommonGitDir = normalizeComparablePath(commonGitDir.trim());
+      const normalizedGitDir = normalizeComparablePath(gitDir.trim());
+
+      return {
+        isRepo: true,
+        commonGitDir: normalizedCommonGitDir.length > 0 ? normalizedCommonGitDir : null,
+        gitDir: normalizedGitDir.length > 0 ? normalizedGitDir : null,
+        worktreeRoot: worktreeRoot.length > 0 ? normalizeComparablePath(worktreeRoot) : null,
+        isMainWorktree:
+          normalizedCommonGitDir.length > 0 &&
+          normalizedGitDir.length > 0 &&
+          normalizedCommonGitDir === normalizedGitDir,
+      } satisfies GitResolveRepoIdentityResult;
+    },
+  );
+
   const createWorktree: GitCoreShape["createWorktree"] = Effect.fn("createWorktree")(
     function* (input) {
       const targetBranch = input.newBranch ?? input.branch;
@@ -1993,6 +2067,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     listWorkspaceFiles,
     filterIgnoredPaths,
     listBranches,
+    resolveRepoIdentity,
     createWorktree,
     fetchPullRequestBranch,
     ensureRemote,

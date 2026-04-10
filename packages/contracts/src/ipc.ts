@@ -13,6 +13,8 @@ import type {
   GitPullInput,
   GitPullResult,
   GitRemoveWorktreeInput,
+  GitResolveRepoIdentityInput,
+  GitResolveRepoIdentityResult,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
   GitRunStackedActionResult,
@@ -53,6 +55,8 @@ import type {
   OrchestrationGetReadinessResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationListSessionThreadsInput,
+  OrchestrationListSessionThreadsResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
@@ -161,6 +165,9 @@ export interface NativeApi {
   git: {
     // Existing branch/worktree API
     listBranches: (input: GitListBranchesInput) => Promise<GitListBranchesResult>;
+    resolveRepoIdentity: (
+      input: GitResolveRepoIdentityInput,
+    ) => Promise<GitResolveRepoIdentityResult>;
     createWorktree: (input: GitCreateWorktreeInput) => Promise<GitCreateWorktreeResult>;
     removeWorktree: (input: GitRemoveWorktreeInput) => Promise<void>;
     createBranch: (input: GitCreateBranchInput) => Promise<void>;
@@ -200,6 +207,9 @@ export interface NativeApi {
     listProjectThreads: (
       input: OrchestrationListProjectThreadsInput,
     ) => Promise<OrchestrationListProjectThreadsResult>;
+    listSessionThreads: (
+      input: OrchestrationListSessionThreadsInput,
+    ) => Promise<OrchestrationListSessionThreadsResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFileDiff: (input: OrchestrationGetFileDiffInput) => Promise<OrchestrationGetFileDiffResult>;
