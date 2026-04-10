@@ -100,6 +100,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           workspaceRoot: command.workspaceRoot,
           kind: command.kind ?? "project",
+          sidebarParentProjectId: undefined,
+          currentSessionRootThreadId: undefined,
           defaultModelSelection: command.defaultModelSelection ?? null,
           scripts: [],
           hooks: [],
@@ -143,6 +145,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               ? { workspaceRoot: command.workspaceRoot }
               : {}),
             ...(command.kind !== undefined ? { kind: command.kind } : {}),
+            ...(command.sidebarParentProjectId !== undefined
+              ? { sidebarParentProjectId: command.sidebarParentProjectId }
+              : {}),
+            ...(command.currentSessionRootThreadId !== undefined
+              ? { currentSessionRootThreadId: command.currentSessionRootThreadId }
+              : {}),
             ...(command.defaultModelSelection !== undefined
               ? { defaultModelSelection: command.defaultModelSelection }
               : {}),

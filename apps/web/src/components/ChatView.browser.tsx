@@ -711,6 +711,13 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   );
 }
 
+async function waitForMessageScrollContainer(): Promise<HTMLDivElement> {
+  return waitForElement(
+    () => document.querySelector<HTMLDivElement>("div.overflow-y-auto.overscroll-y-contain"),
+    "Unable to find ChatView message scroll container.",
+  );
+}
+
 async function waitForSendButton(): Promise<HTMLButtonElement> {
   return waitForElement(
     () => document.querySelector<HTMLButtonElement>('button[aria-label="Send message"]'),
@@ -2356,6 +2363,240 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         activeProvider: "codex",
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("supports persistent composer hide/show and restores it while scrolled", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-scroll-hide-composer-test" as MessageId,
+        targetText: "scroll hide composer test",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      const toggleButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('[data-testid="composer-visibility-toggle"]'),
+        "Unable to find composer visibility toggle.",
+      );
+      expect(toggleButton.getAttribute("aria-label")).toBe("Hide chat input");
+      toggleButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-testid="chat-composer-region"]')).toBeNull();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const showToggleButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('[data-testid="composer-visibility-toggle"]'),
+        "Unable to find composer visibility toggle after hiding composer.",
+      );
+      expect(showToggleButton.getAttribute("aria-label")).toBe("Show chat input");
+
+      const scrollContainer = await waitForMessageScrollContainer();
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+
+      const scrollToggleButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('[data-testid="composer-visibility-toggle"]'),
+        "Unable to find composer visibility toggle while scrolled.",
+      );
+      expect(scrollToggleButton.getAttribute("aria-label")).toBe("Show chat input");
+      scrollToggleButton.click();
+
+      await vi.waitFor(
+        () => {
+          const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form]");
+          expect(composerForm).toBeTruthy();
+          expect(composerForm?.dataset.composerCollapsed).toBe("true");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await vi.waitFor(
+        () => {
+          const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form]");
+          expect(composerForm).toBeTruthy();
+          const activeScrollToggle = document.querySelector<HTMLButtonElement>(
+            '[data-testid="composer-visibility-toggle"]',
+          );
+          expect(activeScrollToggle).toBeTruthy();
+          expect(activeScrollToggle?.getAttribute("aria-label")).toBe("Hide chat input");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const hideWhileScrolledButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('[data-testid="composer-visibility-toggle"]'),
+        "Unable to find composer visibility toggle while visible.",
+      );
+      hideWhileScrolledButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-testid="chat-composer-region"]')).toBeNull();
+          const hiddenScrollToggle = document.querySelector<HTMLButtonElement>(
+            '[data-testid="composer-visibility-toggle"]',
+          );
+          expect(hiddenScrollToggle).toBeTruthy();
+          expect(hiddenScrollToggle?.getAttribute("aria-label")).toBe("Show chat input");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const showWhileScrolledButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('[data-testid="composer-visibility-toggle"]'),
+        "Unable to find composer visibility toggle while hidden.",
+      );
+      showWhileScrolledButton.click();
+
+      const scrollToBottomButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Scroll to bottom",
+          ) as HTMLButtonElement | null,
+        "Unable to find scroll to bottom button.",
+      );
+      scrollToBottomButton.click();
+
+      await vi.waitFor(
+        () => {
+          const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form]");
+          expect(composerForm).toBeTruthy();
+          expect(composerForm?.dataset.composerCollapsed).toBe("false");
+          const bottomToggle = document.querySelector<HTMLButtonElement>(
+            '[data-testid="composer-visibility-toggle"]',
+          );
+          expect(bottomToggle).toBeTruthy();
+          expect(bottomToggle?.getAttribute("aria-label")).toBe("Hide chat input");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides the composer automatically while scrolled when configured to hide", async () => {
+    localStorage.setItem(
+      "t3code:client-settings:v1",
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        chatViewInputWhenScrolling: "hide",
+      }),
+    );
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-scroll-setting-hide" as MessageId,
+        targetText: "scroll setting hide",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      const scrollContainer = await waitForMessageScrollContainer();
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+
+      await vi.waitFor(
+        () => {
+          expect(document.querySelector('[data-testid="chat-composer-region"]')).toBeNull();
+          const toggle = document.querySelector<HTMLButtonElement>(
+            '[data-testid="composer-visibility-toggle"]',
+          );
+          expect(toggle?.getAttribute("aria-label")).toBe("Show chat input");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the composer fully visible while scrolled when configured to show", async () => {
+    localStorage.setItem(
+      "t3code:client-settings:v1",
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        chatViewInputWhenScrolling: "show",
+      }),
+    );
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-scroll-setting-show" as MessageId,
+        targetText: "scroll setting show",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      const scrollContainer = await waitForMessageScrollContainer();
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+
+      await vi.waitFor(
+        () => {
+          const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form]");
+          expect(composerForm).toBeTruthy();
+          expect(composerForm?.dataset.composerCollapsed).toBe("false");
+          const toggle = document.querySelector<HTMLButtonElement>(
+            '[data-testid="composer-visibility-toggle"]',
+          );
+          expect(toggle?.getAttribute("aria-label")).toBe("Hide chat input");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("uses the compact composer while scrolled when configured to compact", async () => {
+    localStorage.setItem(
+      "t3code:client-settings:v1",
+      JSON.stringify({
+        ...DEFAULT_CLIENT_SETTINGS,
+        chatViewInputWhenScrolling: "compact",
+      }),
+    );
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-scroll-setting-compact" as MessageId,
+        targetText: "scroll setting compact",
+      }),
+    });
+
+    try {
+      await waitForComposerEditor();
+      const scrollContainer = await waitForMessageScrollContainer();
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event("scroll"));
+
+      await vi.waitFor(
+        () => {
+          const composerForm = document.querySelector<HTMLElement>("[data-chat-composer-form]");
+          expect(composerForm).toBeTruthy();
+          expect(composerForm?.dataset.composerCollapsed).toBe("true");
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
     }

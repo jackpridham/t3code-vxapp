@@ -162,6 +162,17 @@ export function buildExpiredTerminalContextToastCopy(
   };
 }
 
+export function resolveChatHeaderBadgeLabel(input: {
+  activeThread: Pick<Thread, "spawnRole" | "title"> | null | undefined;
+  activeProjectName: string | undefined;
+}): string | undefined {
+  if (input.activeThread?.spawnRole === "orchestrator") {
+    return input.activeThread.title;
+  }
+
+  return input.activeProjectName;
+}
+
 export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(
     thread &&

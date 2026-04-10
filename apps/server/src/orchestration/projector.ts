@@ -187,6 +187,7 @@ export function projectEvent(
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             kind: payload.kind ?? "project",
+            sidebarParentProjectId: payload.sidebarParentProjectId,
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
             hooks: payload.hooks,
@@ -219,6 +220,9 @@ export function projectEvent(
                     ? { workspaceRoot: payload.workspaceRoot }
                     : {}),
                   ...(payload.kind !== undefined ? { kind: payload.kind } : {}),
+                  ...(payload.sidebarParentProjectId !== undefined
+                    ? { sidebarParentProjectId: payload.sidebarParentProjectId }
+                    : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
@@ -464,6 +468,8 @@ export function projectEvent(
           event.type,
           "session",
         );
+        // Imported from the active-branch continuation settlement review.
+        // See active-branch-runtime-fixes-review.md.
         const latestTurn =
           session.status === "running" && session.activeTurnId !== null
             ? {
@@ -483,11 +489,10 @@ export function projectEvent(
                     ? thread.latestTurn.assistantMessageId
                     : null,
               }
-            : thread.latestTurn &&
-                (thread.latestTurn.state === "running" || thread.latestTurn.state === "pending")
+            : thread.latestTurn && thread.latestTurn.state === "running"
               ? {
                   ...thread.latestTurn,
-                  state: session.status === "error" ? "error" : "completed",
+                  state: session.status === "error" ? ("error" as const) : ("completed" as const),
                   completedAt: thread.latestTurn.completedAt ?? session.updatedAt,
                 }
               : thread.latestTurn;

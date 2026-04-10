@@ -902,6 +902,22 @@ describe("WebSocket Server", () => {
       }),
     ]);
 
+    const sessionThreadsResponse = await sendRequest(
+      ws,
+      ORCHESTRATION_WS_METHODS.listSessionThreads,
+      {
+        rootThreadId: bootstrapThreadId,
+      },
+    );
+    expect(sessionThreadsResponse.error).toBeUndefined();
+    expect(sessionThreadsResponse.result).toEqual([
+      expect.objectContaining({
+        id: bootstrapThreadId,
+        projectId: bootstrapProjectId,
+        title: "New thread",
+      }),
+    ]);
+
     const bootstrapSummaryResponse = await sendRequest(
       ws,
       ORCHESTRATION_WS_METHODS.getBootstrapSummary,

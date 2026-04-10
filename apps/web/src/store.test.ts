@@ -635,6 +635,43 @@ describe("lineage metadata mapping", () => {
     expect(next.threads[0]?.spawnRole).toBe("worker");
     expect(next.threads[0]?.orchestratorProjectId).toBeUndefined();
   });
+
+  it("thread.created maps lineage fields immediately for live-created workers", () => {
+    const next = applyOrchestrationEvent(
+      makeState(makeThread()),
+      makeEvent("thread.created", {
+        threadId: ThreadId.makeUnsafe("thread-worker"),
+        projectId: ProjectId.makeUnsafe("project-worker"),
+        title: "Worker thread",
+        labels: ["worker", "model:gpt-5.4"],
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.4",
+        },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        branch: "feature/worker",
+        worktreePath: "/tmp/project-worker",
+        orchestratorProjectId: ProjectId.makeUnsafe("project-orchestrator"),
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-orchestrator"),
+        parentThreadId: ThreadId.makeUnsafe("thread-parent"),
+        spawnRole: "worker",
+        spawnedBy: "thread-orchestrator",
+        workflowId: "wf-2026-04-10",
+        createdAt: "2026-04-10T00:00:00.000Z",
+        updatedAt: "2026-04-10T00:00:00.000Z",
+      }),
+    );
+
+    const createdThread = next.threads.find((thread) => thread.id === "thread-worker");
+
+    expect(createdThread?.orchestratorProjectId).toBe("project-orchestrator");
+    expect(createdThread?.orchestratorThreadId).toBe("thread-orchestrator");
+    expect(createdThread?.parentThreadId).toBe("thread-parent");
+    expect(createdThread?.spawnRole).toBe("worker");
+    expect(createdThread?.spawnedBy).toBe("thread-orchestrator");
+    expect(createdThread?.workflowId).toBe("wf-2026-04-10");
+  });
 });
 
 describe("incremental orchestration updates", () => {

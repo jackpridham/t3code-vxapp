@@ -4,6 +4,7 @@ import {
   NonNegativeInt,
   OrchestrationLatestTurn,
   OrchestrationProjectKind,
+  ProjectId,
   ProjectHooks,
   ProjectScript,
   ThreadId,
@@ -13,6 +14,7 @@ import {
   type OrchestrationGetProjectByWorkspaceResult,
   type OrchestrationGetReadinessResult,
   type OrchestrationListProjectThreadsResult,
+  type OrchestrationListSessionThreadsResult,
   type OrchestrationListProjectsResult,
   type OrchestrationSession,
   type OrchestrationThreadSummary,
@@ -39,6 +41,7 @@ import {
 const ProjectionProjectSummaryDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     kind: Schema.NullOr(OrchestrationProjectKind),
+    sidebarParentProjectId: Schema.NullOr(ProjectId),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     hooks: Schema.fromJsonString(ProjectHooks),
@@ -53,6 +56,8 @@ const ProjectionThreadSummaryDbRowSchema = ProjectionThread.mapFields(
 );
 
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
+type ProjectionThreadSummaryDbRow = typeof ProjectionThreadSummaryDbRowSchema.Type;
+type ProjectionThreadSessionDbRow = typeof ProjectionThreadSessionDbRowSchema.Type;
 
 const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   threadId: ThreadId,
@@ -65,6 +70,7 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(Schema.String),
 });
+type ProjectionLatestTurnDbRow = typeof ProjectionLatestTurnDbRowSchema.Type;
 
 const ProjectionStateDbRowSchema = ProjectionState;
 
@@ -114,6 +120,69 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
       : toPersistenceSqlError(sqlOperation)(cause);
 }
 
+function mapThreadSummaryRows(input: {
+  threads: ReadonlyArray<ProjectionThreadSummaryDbRow>;
+  sessions: ReadonlyArray<ProjectionThreadSessionDbRow>;
+  latestTurns: ReadonlyArray<ProjectionLatestTurnDbRow>;
+}): OrchestrationThreadSummary[] {
+  const sessionByThreadId = new Map<string, OrchestrationSession>();
+  for (const row of input.sessions) {
+    sessionByThreadId.set(row.threadId, {
+      threadId: row.threadId,
+      status: row.status,
+      providerName: row.providerName,
+      runtimeMode: row.runtimeMode,
+      activeTurnId: row.activeTurnId,
+      lastError: row.lastError,
+      updatedAt: row.updatedAt,
+    });
+  }
+
+  const latestTurnByThreadId = new Map<string, OrchestrationThreadSummary["latestTurn"]>();
+  for (const row of input.latestTurns) {
+    latestTurnByThreadId.set(row.threadId, {
+      turnId: row.turnId,
+      state: row.state,
+      requestedAt: row.requestedAt,
+      startedAt: row.startedAt,
+      completedAt: row.completedAt,
+      assistantMessageId: row.assistantMessageId,
+      ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
+        ? {
+            sourceProposedPlan: {
+              threadId: row.sourceProposedPlanThreadId,
+              planId: row.sourceProposedPlanId,
+            },
+          }
+        : {}),
+    });
+  }
+
+  return input.threads.map((row) => ({
+    id: row.threadId,
+    projectId: row.projectId,
+    title: row.title,
+    labels: row.labels,
+    modelSelection: row.modelSelection,
+    runtimeMode: row.runtimeMode,
+    interactionMode: row.interactionMode,
+    branch: row.branch,
+    worktreePath: row.worktreePath,
+    latestTurn: latestTurnByThreadId.get(row.threadId) ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    archivedAt: row.archivedAt ?? null,
+    deletedAt: row.deletedAt ?? null,
+    session: sessionByThreadId.get(row.threadId) ?? null,
+    orchestratorProjectId: row.orchestratorProjectId ?? undefined,
+    orchestratorThreadId: row.orchestratorThreadId ?? undefined,
+    parentThreadId: row.parentThreadId ?? undefined,
+    spawnRole: row.spawnRole ?? undefined,
+    spawnedBy: row.spawnedBy ?? undefined,
+    workflowId: row.workflowId ?? undefined,
+  }));
+}
+
 const makeProjectionOperationalQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -127,6 +196,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           kind,
+          sidebar_parent_project_id AS "sidebarParentProjectId",
+          current_session_root_thread_id AS "currentSessionRootThreadId",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           hooks_json AS "hooks",
@@ -149,6 +220,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           title,
           workspace_root AS "workspaceRoot",
           kind,
+          sidebar_parent_project_id AS "sidebarParentProjectId",
+          current_session_root_thread_id AS "currentSessionRootThreadId",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
           hooks_json AS "hooks",
@@ -281,6 +354,259 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           workflow_id AS "workflowId"
         FROM projection_threads
         WHERE project_id = ${projectId}
+          AND archived_at IS NULL
+          AND deleted_at IS NULL
+        ORDER BY created_at ASC, thread_id ASC
+      `;
+    },
+  });
+
+  const listSessionThreadRows = SqlSchema.findAll({
+    Request: Schema.Struct({
+      rootThreadId: ThreadId,
+      includeArchived: Schema.Boolean,
+      includeDeleted: Schema.Boolean,
+    }),
+    Result: ProjectionThreadSummaryDbRowSchema,
+    execute: ({ rootThreadId, includeArchived, includeDeleted }) => {
+      if (includeArchived && includeDeleted) {
+        return sql`
+          WITH RECURSIVE
+            root AS (
+              SELECT
+                thread_id AS root_thread_id,
+                workflow_id AS root_workflow_id
+              FROM projection_threads
+              WHERE thread_id = ${rootThreadId}
+              LIMIT 1
+            ),
+            family(thread_id) AS (
+              SELECT root_thread_id FROM root
+              UNION
+              SELECT t.thread_id
+              FROM projection_threads t
+              INNER JOIN family f
+                ON t.parent_thread_id = f.thread_id
+                OR t.spawned_by = f.thread_id
+                OR t.orchestrator_thread_id = f.thread_id
+            ),
+            family_with_workflow(thread_id) AS (
+              SELECT thread_id FROM family
+              UNION
+              SELECT t.thread_id
+              FROM projection_threads t
+              INNER JOIN root r
+                ON r.root_workflow_id IS NOT NULL
+                AND t.workflow_id = r.root_workflow_id
+              WHERE COALESCE(t.spawn_role, '') <> 'orchestrator'
+            )
+          SELECT DISTINCT
+            thread_id AS "threadId",
+            project_id AS "projectId",
+            title,
+            labels_json AS "labels",
+            model_selection_json AS "modelSelection",
+            runtime_mode AS "runtimeMode",
+            interaction_mode AS "interactionMode",
+            branch,
+            worktree_path AS "worktreePath",
+            latest_turn_id AS "latestTurnId",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt",
+            archived_at AS "archivedAt",
+            deleted_at AS "deletedAt",
+            orchestrator_project_id AS "orchestratorProjectId",
+            orchestrator_thread_id AS "orchestratorThreadId",
+            parent_thread_id AS "parentThreadId",
+            spawn_role AS "spawnRole",
+            spawned_by AS "spawnedBy",
+            workflow_id AS "workflowId"
+          FROM projection_threads
+          WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
+          ORDER BY created_at ASC, thread_id ASC
+        `;
+      }
+      if (includeArchived) {
+        return sql`
+          WITH RECURSIVE
+            root AS (
+              SELECT
+                thread_id AS root_thread_id,
+                workflow_id AS root_workflow_id
+              FROM projection_threads
+              WHERE thread_id = ${rootThreadId}
+                AND deleted_at IS NULL
+              LIMIT 1
+            ),
+            family(thread_id) AS (
+              SELECT root_thread_id FROM root
+              UNION
+              SELECT t.thread_id
+              FROM projection_threads t
+              INNER JOIN family f
+                ON t.parent_thread_id = f.thread_id
+                OR t.spawned_by = f.thread_id
+                OR t.orchestrator_thread_id = f.thread_id
+              WHERE t.deleted_at IS NULL
+            ),
+            family_with_workflow(thread_id) AS (
+              SELECT thread_id FROM family
+              UNION
+              SELECT t.thread_id
+              FROM projection_threads t
+              INNER JOIN root r
+                ON r.root_workflow_id IS NOT NULL
+                AND t.workflow_id = r.root_workflow_id
+              WHERE t.deleted_at IS NULL
+                AND COALESCE(t.spawn_role, '') <> 'orchestrator'
+            )
+          SELECT DISTINCT
+            thread_id AS "threadId",
+            project_id AS "projectId",
+            title,
+            labels_json AS "labels",
+            model_selection_json AS "modelSelection",
+            runtime_mode AS "runtimeMode",
+            interaction_mode AS "interactionMode",
+            branch,
+            worktree_path AS "worktreePath",
+            latest_turn_id AS "latestTurnId",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt",
+            archived_at AS "archivedAt",
+            deleted_at AS "deletedAt",
+            orchestrator_project_id AS "orchestratorProjectId",
+            orchestrator_thread_id AS "orchestratorThreadId",
+            parent_thread_id AS "parentThreadId",
+            spawn_role AS "spawnRole",
+            spawned_by AS "spawnedBy",
+            workflow_id AS "workflowId"
+          FROM projection_threads
+          WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
+            AND deleted_at IS NULL
+          ORDER BY created_at ASC, thread_id ASC
+        `;
+      }
+      if (includeDeleted) {
+        return sql`
+          WITH RECURSIVE
+            root AS (
+              SELECT
+                thread_id AS root_thread_id,
+                workflow_id AS root_workflow_id
+              FROM projection_threads
+              WHERE thread_id = ${rootThreadId}
+                AND archived_at IS NULL
+              LIMIT 1
+            ),
+            family(thread_id) AS (
+              SELECT root_thread_id FROM root
+              UNION
+              SELECT t.thread_id
+              FROM projection_threads t
+              INNER JOIN family f
+                ON t.parent_thread_id = f.thread_id
+                OR t.spawned_by = f.thread_id
+                OR t.orchestrator_thread_id = f.thread_id
+              WHERE t.archived_at IS NULL
+            ),
+            family_with_workflow(thread_id) AS (
+              SELECT thread_id FROM family
+              UNION
+              SELECT t.thread_id
+              FROM projection_threads t
+              INNER JOIN root r
+                ON r.root_workflow_id IS NOT NULL
+                AND t.workflow_id = r.root_workflow_id
+              WHERE t.archived_at IS NULL
+                AND COALESCE(t.spawn_role, '') <> 'orchestrator'
+            )
+          SELECT DISTINCT
+            thread_id AS "threadId",
+            project_id AS "projectId",
+            title,
+            labels_json AS "labels",
+            model_selection_json AS "modelSelection",
+            runtime_mode AS "runtimeMode",
+            interaction_mode AS "interactionMode",
+            branch,
+            worktree_path AS "worktreePath",
+            latest_turn_id AS "latestTurnId",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt",
+            archived_at AS "archivedAt",
+            deleted_at AS "deletedAt",
+            orchestrator_project_id AS "orchestratorProjectId",
+            orchestrator_thread_id AS "orchestratorThreadId",
+            parent_thread_id AS "parentThreadId",
+            spawn_role AS "spawnRole",
+            spawned_by AS "spawnedBy",
+            workflow_id AS "workflowId"
+          FROM projection_threads
+          WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
+            AND archived_at IS NULL
+          ORDER BY created_at ASC, thread_id ASC
+        `;
+      }
+      return sql`
+        WITH RECURSIVE
+          root AS (
+            SELECT
+              thread_id AS root_thread_id,
+              workflow_id AS root_workflow_id
+            FROM projection_threads
+            WHERE thread_id = ${rootThreadId}
+              AND archived_at IS NULL
+              AND deleted_at IS NULL
+            LIMIT 1
+          ),
+          family(thread_id) AS (
+            SELECT root_thread_id FROM root
+            UNION
+            SELECT t.thread_id
+            FROM projection_threads t
+            INNER JOIN family f
+              ON t.parent_thread_id = f.thread_id
+              OR t.spawned_by = f.thread_id
+              OR t.orchestrator_thread_id = f.thread_id
+            WHERE t.archived_at IS NULL
+              AND t.deleted_at IS NULL
+          ),
+          family_with_workflow(thread_id) AS (
+            SELECT thread_id FROM family
+            UNION
+            SELECT t.thread_id
+            FROM projection_threads t
+            INNER JOIN root r
+              ON r.root_workflow_id IS NOT NULL
+              AND t.workflow_id = r.root_workflow_id
+            WHERE t.archived_at IS NULL
+              AND t.deleted_at IS NULL
+              AND COALESCE(t.spawn_role, '') <> 'orchestrator'
+          )
+        SELECT DISTINCT
+          thread_id AS "threadId",
+          project_id AS "projectId",
+          title,
+          labels_json AS "labels",
+          model_selection_json AS "modelSelection",
+          runtime_mode AS "runtimeMode",
+          interaction_mode AS "interactionMode",
+          branch,
+          worktree_path AS "worktreePath",
+          latest_turn_id AS "latestTurnId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          archived_at AS "archivedAt",
+          deleted_at AS "deletedAt",
+          orchestrator_project_id AS "orchestratorProjectId",
+          orchestrator_thread_id AS "orchestratorThreadId",
+          parent_thread_id AS "parentThreadId",
+          spawn_role AS "spawnRole",
+          spawned_by AS "spawnedBy",
+          workflow_id AS "workflowId"
+        FROM projection_threads
+        WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
           AND archived_at IS NULL
           AND deleted_at IS NULL
         ORDER BY created_at ASC, thread_id ASC
@@ -422,6 +748,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             title: row.title,
             workspaceRoot: row.workspaceRoot,
             kind: row.kind ?? null,
+            sidebarParentProjectId: row.sidebarParentProjectId ?? null,
+            currentSessionRootThreadId: row.currentSessionRootThreadId ?? null,
             defaultModelSelection: row.defaultModelSelection ?? null,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
@@ -447,6 +775,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               title: project.title,
               workspaceRoot: project.workspaceRoot,
               kind: project.kind ?? null,
+              sidebarParentProjectId: project.sidebarParentProjectId ?? null,
+              currentSessionRootThreadId: project.currentSessionRootThreadId ?? null,
               defaultModelSelection: project.defaultModelSelection ?? null,
               createdAt: project.createdAt,
               updatedAt: project.updatedAt,
@@ -489,63 +819,75 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
         ),
       ),
     }).pipe(
-      Effect.map(({ threads, sessions, latestTurns }): OrchestrationListProjectThreadsResult => {
-        const sessionByThreadId = new Map<string, OrchestrationSession>();
-        for (const row of sessions) {
-          sessionByThreadId.set(row.threadId, {
-            threadId: row.threadId,
-            status: row.status,
-            providerName: row.providerName,
-            runtimeMode: row.runtimeMode,
-            activeTurnId: row.activeTurnId,
-            lastError: row.lastError,
-            updatedAt: row.updatedAt,
-          });
+      Effect.map(
+        ({ threads, sessions, latestTurns }): OrchestrationListProjectThreadsResult =>
+          mapThreadSummaryRows({ threads, sessions, latestTurns }),
+      ),
+    );
+  };
+
+  const listSessionThreads: ProjectionOperationalQueryShape["listSessionThreads"] = (input) => {
+    const includeArchived = input.includeArchived ?? true;
+    const includeDeleted = input.includeDeleted ?? false;
+    return listSessionThreadRows({
+      rootThreadId: input.rootThreadId,
+      includeArchived,
+      includeDeleted,
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionOperationalQuery.listSessionThreads:threads:query",
+          "ProjectionOperationalQuery.listSessionThreads:threads:decodeRows",
+        ),
+      ),
+      Effect.flatMap((threads) => {
+        if (threads.length === 0) {
+          return Effect.succeed([] satisfies OrchestrationListSessionThreadsResult);
         }
 
-        const latestTurnByThreadId = new Map<string, OrchestrationThreadSummary["latestTurn"]>();
-        for (const row of latestTurns) {
-          latestTurnByThreadId.set(row.threadId, {
-            turnId: row.turnId,
-            state: row.state,
-            requestedAt: row.requestedAt,
-            startedAt: row.startedAt,
-            completedAt: row.completedAt,
-            assistantMessageId: row.assistantMessageId,
-            ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
-              ? {
-                  sourceProposedPlan: {
-                    threadId: row.sourceProposedPlanThreadId,
-                    planId: row.sourceProposedPlanId,
-                  },
-                }
-              : {}),
-          });
-        }
+        const threadIds = new Set(threads.map((thread) => thread.threadId));
+        const projectIds = [...new Set(threads.map((thread) => thread.projectId))];
 
-        return threads.map((row) => ({
-          id: row.threadId,
-          projectId: row.projectId,
-          title: row.title,
-          labels: row.labels,
-          modelSelection: row.modelSelection,
-          runtimeMode: row.runtimeMode,
-          interactionMode: row.interactionMode,
-          branch: row.branch,
-          worktreePath: row.worktreePath,
-          latestTurn: latestTurnByThreadId.get(row.threadId) ?? null,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-          archivedAt: row.archivedAt ?? null,
-          deletedAt: row.deletedAt ?? null,
-          session: sessionByThreadId.get(row.threadId) ?? null,
-          orchestratorProjectId: row.orchestratorProjectId ?? undefined,
-          orchestratorThreadId: row.orchestratorThreadId ?? undefined,
-          parentThreadId: row.parentThreadId ?? undefined,
-          spawnRole: row.spawnRole ?? undefined,
-          spawnedBy: row.spawnedBy ?? undefined,
-          workflowId: row.workflowId ?? undefined,
-        }));
+        return Effect.all({
+          threads: Effect.succeed(threads),
+          sessionsByProject: Effect.forEach(projectIds, (projectId) =>
+            listProjectThreadSessionRows({ projectId }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionOperationalQuery.listSessionThreads:sessions:query",
+                  "ProjectionOperationalQuery.listSessionThreads:sessions:decodeRows",
+                ),
+              ),
+            ),
+          ),
+          latestTurnsByProject: Effect.forEach(projectIds, (projectId) =>
+            listProjectLatestTurnRows({ projectId }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionOperationalQuery.listSessionThreads:latestTurns:query",
+                  "ProjectionOperationalQuery.listSessionThreads:latestTurns:decodeRows",
+                ),
+              ),
+            ),
+          ),
+        }).pipe(
+          Effect.map(
+            ({
+              threads,
+              sessionsByProject,
+              latestTurnsByProject,
+            }): OrchestrationListSessionThreadsResult =>
+              mapThreadSummaryRows({
+                threads,
+                sessions: sessionsByProject
+                  .flat()
+                  .filter((sessionRow) => threadIds.has(sessionRow.threadId)),
+                latestTurns: latestTurnsByProject
+                  .flat()
+                  .filter((turnRow) => threadIds.has(turnRow.threadId)),
+              }),
+          ),
+        );
       }),
     );
   };
@@ -555,6 +897,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
     listProjects,
     getProjectByWorkspace,
     listProjectThreads,
+    listSessionThreads,
   } satisfies ProjectionOperationalQueryShape;
 });
 

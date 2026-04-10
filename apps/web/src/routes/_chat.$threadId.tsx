@@ -1,6 +1,14 @@
 import { ThreadId } from "@t3tools/contracts";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
-import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  type CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 
 import { ChangesPanel } from "../components/ChangesPanel";
 import ChatView from "../components/ChatView";
@@ -14,6 +22,13 @@ import {
 import { useComposerDraftStore } from "../composerDraftStore";
 import { type DiffRouteSearch, parseDiffRouteSearch } from "../diffRouteSearch";
 import { useSettings } from "../hooks/useSettings";
+import {
+  CHANGES_PANEL_DEFAULT_WIDTH,
+  CHANGES_PANEL_MIN_MAIN_CONTENT_WIDTH,
+  CHANGES_PANEL_MIN_WIDTH,
+  CHANGES_PANEL_WIDTH_STORAGE_KEY,
+  resolveEffectiveChangesPanelOpen,
+} from "../lib/chatChangesPanelLayout";
 import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
@@ -66,51 +81,6 @@ const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
   );
 };
 
-const CHANGES_PANEL_WIDTH_STORAGE_KEY = "chat_changes_panel_width";
-const CHANGES_PANEL_DEFAULT_WIDTH = "clamp(18rem,24vw,24rem)";
-const CHANGES_PANEL_MIN_WIDTH = 16 * 16;
-
-const ChangesPanelInlineSidebar = (props: {
-  changesPanelOpen: boolean;
-  onClose: () => void;
-  onOpen: () => void;
-}) => {
-  const { changesPanelOpen, onClose, onOpen } = props;
-  const onOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        onOpen();
-        return;
-      }
-      onClose();
-    },
-    [onClose, onOpen],
-  );
-
-  return (
-    <SidebarProvider
-      defaultOpen={false}
-      open={changesPanelOpen}
-      onOpenChange={onOpenChange}
-      className="w-auto min-h-0 flex-none bg-transparent"
-      style={{ "--sidebar-width": CHANGES_PANEL_DEFAULT_WIDTH } as React.CSSProperties}
-    >
-      <Sidebar
-        side="right"
-        collapsible="offcanvas"
-        className="border-l border-border bg-card text-foreground"
-        resizable={{
-          minWidth: CHANGES_PANEL_MIN_WIDTH,
-          storageKey: CHANGES_PANEL_WIDTH_STORAGE_KEY,
-        }}
-      >
-        <ChangesPanel />
-        <SidebarRail />
-      </Sidebar>
-    </SidebarProvider>
-  );
-};
-
 const ChangesWindowNavigationPublisher = (props: { threadId: ThreadId }) => {
   const [, setChangesWindowTarget] = useChangesWindowTarget();
 
@@ -148,13 +118,23 @@ function ChatThreadRouteView() {
   );
   const routeThreadExists = threadExists || draftThreadExists;
 
-  // Changes panel state from UI store
+  const settings = useSettings();
+  const showChangesPanelByDefault = settings.changesDrawerVisibility === "always_show";
+  const rememberDrawerWidth = settings.rememberChangesDrawerWidth;
   const changesPanelOpen = useUiStateStore((s) => s.changesPanelOpen);
+  const changesPanelInitializedFromSettings = useUiStateStore(
+    (s) => s.changesPanelInitializedFromSettings,
+  );
   const openChangesPanel = useUiStateStore((s) => s.openChangesPanel);
   const closeChangesPanel = useUiStateStore((s) => s.closeChangesPanel);
-  const settings = useSettings();
-  const changesDrawerVisibility = settings.changesDrawerVisibility;
-  const showChangesDrawer = changesDrawerVisibility === "always_show";
+  const initializeChangesPanelFromSettings = useUiStateStore(
+    (s) => s.initializeChangesPanelFromSettings,
+  );
+  const effectiveChangesPanelOpen = resolveEffectiveChangesPanelOpen({
+    changesPanelOpen,
+    initializedFromSettings: changesPanelInitializedFromSettings,
+    showByDefault: showChangesPanelByDefault,
+  });
 
   // Diff search params (retained for deep-linking to specific file diffs)
   const diffOpen = search.diff === "1";
@@ -174,10 +154,8 @@ function ChatThreadRouteView() {
   }, [diffOpen]);
 
   useEffect(() => {
-    if (!showChangesDrawer && changesPanelOpen) {
-      closeChangesPanel();
-    }
-  }, [changesPanelOpen, closeChangesPanel, showChangesDrawer]);
+    initializeChangesPanelFromSettings(showChangesPanelByDefault);
+  }, [initializeChangesPanelFromSettings, showChangesPanelByDefault]);
 
   useEffect(() => {
     if (!bootstrapComplete) {
@@ -199,16 +177,42 @@ function ChatThreadRouteView() {
   return (
     <>
       <ChangesWindowNavigationPublisher threadId={threadId} />
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-        <ChatView key={threadId} threadId={threadId} />
-      </SidebarInset>
-      {showChangesDrawer ? (
-        <ChangesPanelInlineSidebar
-          changesPanelOpen={changesPanelOpen}
-          onClose={closeChangesPanel}
-          onOpen={() => openChangesPanel()}
-        />
-      ) : null}
+      <SidebarProvider
+        defaultOpen={showChangesPanelByDefault}
+        open={effectiveChangesPanelOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            openChangesPanel();
+            return;
+          }
+          closeChangesPanel();
+        }}
+        className="h-dvh min-h-0 min-w-0 flex-1 bg-transparent"
+        style={
+          {
+            width: "auto",
+            "--sidebar-width": CHANGES_PANEL_DEFAULT_WIDTH,
+          } as CSSProperties
+        }
+      >
+        <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
+          <ChatView key={threadId} threadId={threadId} />
+        </SidebarInset>
+        <Sidebar
+          side="right"
+          collapsible="offcanvas"
+          className="border-l border-border bg-card text-foreground"
+          resizable={{
+            minWidth: CHANGES_PANEL_MIN_WIDTH,
+            shouldAcceptWidth: ({ nextWidth, wrapper }) =>
+              wrapper.clientWidth - nextWidth >= CHANGES_PANEL_MIN_MAIN_CONTENT_WIDTH,
+            ...(rememberDrawerWidth ? { storageKey: CHANGES_PANEL_WIDTH_STORAGE_KEY } : {}),
+          }}
+        >
+          <ChangesPanel />
+          <SidebarRail />
+        </Sidebar>
+      </SidebarProvider>
       {/* Diff panel overlay for when a specific file diff is requested */}
       {diffOpen && (
         <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>

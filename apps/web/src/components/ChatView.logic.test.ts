@@ -16,6 +16,7 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
+  resolveChatHeaderBadgeLabel,
   shouldMarkThreadVisitedForCompletedTurn,
   threadHasHydratedHistory,
   threadHasStarted,
@@ -85,6 +86,41 @@ describe("buildExpiredTerminalContextToastCopy", () => {
       title: "Expired terminal contexts omitted from message",
       description: "Re-add it if you want that terminal output included.",
     });
+  });
+});
+
+describe("resolveChatHeaderBadgeLabel", () => {
+  it("uses the orchestrator thread title when viewing an orchestrator thread", () => {
+    expect(
+      resolveChatHeaderBadgeLabel({
+        activeThread: {
+          title: "Planner Orchestrator",
+          spawnRole: "orchestrator",
+        },
+        activeProjectName: "repo-name",
+      }),
+    ).toBe("Planner Orchestrator");
+  });
+
+  it("uses the project name for non-orchestrator threads", () => {
+    expect(
+      resolveChatHeaderBadgeLabel({
+        activeThread: {
+          title: "Worker Thread",
+          spawnRole: "worker",
+        },
+        activeProjectName: "repo-name",
+      }),
+    ).toBe("repo-name");
+  });
+
+  it("falls back to the project name when there is no active thread", () => {
+    expect(
+      resolveChatHeaderBadgeLabel({
+        activeThread: null,
+        activeProjectName: "repo-name",
+      }),
+    ).toBe("repo-name");
   });
 });
 

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { NativeApi, OrchestrationReadModel } from "@t3tools/contracts";
+import {
+  EventId,
+  ProjectId,
+  ThreadId,
+  type NativeApi,
+  type OrchestrationReadModel,
+} from "@t3tools/contracts";
 
 vi.mock("../components/ui/toast", () => ({
   AnchoredToastProvider: ({ children }: { children?: unknown }) => children ?? null,
@@ -102,7 +108,11 @@ vi.mock("../lib/changesWindow", () => ({
   isChangesWindowPath: vi.fn(() => false),
 }));
 
-import { bootstrapOrchestrationState, isStandaloneRootRoutePath } from "./__root";
+import {
+  bootstrapOrchestrationState,
+  collectOrchestrationInvalidationTargets,
+  isStandaloneRootRoutePath,
+} from "./__root";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { isArtifactWindowPath } from "../lib/artifactWindow";
 import { isChangesWindowPath } from "../lib/changesWindow";
@@ -229,5 +239,116 @@ describe("isStandaloneRootRoutePath", () => {
 
   it("returns false for normal app routes", () => {
     expect(isStandaloneRootRoutePath("/")).toBe(false);
+  });
+});
+
+describe("collectOrchestrationInvalidationTargets", () => {
+  it("collects project and root invalidations for created workers", () => {
+    const targets = collectOrchestrationInvalidationTargets({
+      events: [
+        {
+          sequence: 1,
+          eventId: EventId.makeUnsafe("event-1"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("worker-1"),
+          occurredAt: "2026-04-10T00:00:00.000Z",
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.created",
+          payload: {
+            threadId: ThreadId.makeUnsafe("worker-1"),
+            projectId: ProjectId.makeUnsafe("project-worker"),
+            title: "Worker",
+            labels: [],
+            modelSelection: { provider: "codex", model: "gpt-5.4" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            orchestratorProjectId: ProjectId.makeUnsafe("project-orchestrator"),
+            orchestratorThreadId: ThreadId.makeUnsafe("root-1"),
+            parentThreadId: undefined,
+            spawnRole: "worker",
+            spawnedBy: ThreadId.makeUnsafe("root-1"),
+            workflowId: "wf-1",
+            createdAt: "2026-04-10T00:00:00.000Z",
+            updatedAt: "2026-04-10T00:00:00.000Z",
+          },
+        } as const,
+      ],
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("root-1"),
+          projectId: ProjectId.makeUnsafe("project-orchestrator"),
+          parentThreadId: undefined,
+          spawnRole: "orchestrator",
+          spawnedBy: undefined,
+          orchestratorThreadId: undefined,
+          workflowId: "wf-1",
+        },
+      ],
+      projects: [],
+    });
+
+    expect(targets.projectIds).toEqual([ProjectId.makeUnsafe("project-worker")]);
+    expect(targets.rootThreadIds).toEqual([ThreadId.makeUnsafe("root-1")]);
+  });
+
+  it("includes the currently selected root for archived or unarchived thread events", () => {
+    const targets = collectOrchestrationInvalidationTargets({
+      events: [
+        {
+          sequence: 1,
+          eventId: EventId.makeUnsafe("event-2"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("worker-1"),
+          occurredAt: "2026-04-10T00:00:00.000Z",
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.archived",
+          payload: {
+            threadId: ThreadId.makeUnsafe("worker-1"),
+            archivedAt: "2026-04-10T00:00:00.000Z",
+            updatedAt: "2026-04-10T00:00:00.000Z",
+          },
+        } as const,
+      ],
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("root-1"),
+          projectId: ProjectId.makeUnsafe("project-orchestrator"),
+          parentThreadId: undefined,
+          spawnRole: "orchestrator",
+          spawnedBy: undefined,
+          orchestratorThreadId: undefined,
+          workflowId: "wf-1",
+        },
+        {
+          id: ThreadId.makeUnsafe("worker-1"),
+          projectId: ProjectId.makeUnsafe("project-orchestrator"),
+          parentThreadId: ThreadId.makeUnsafe("root-1"),
+          spawnRole: "worker",
+          spawnedBy: ThreadId.makeUnsafe("root-1"),
+          orchestratorThreadId: ThreadId.makeUnsafe("root-1"),
+          workflowId: "wf-1",
+        },
+      ],
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-orchestrator"),
+          currentSessionRootThreadId: ThreadId.makeUnsafe("root-selected"),
+        },
+      ],
+    });
+
+    expect(targets.projectIds).toEqual([ProjectId.makeUnsafe("project-orchestrator")]);
+    expect(targets.rootThreadIds).toEqual([
+      ThreadId.makeUnsafe("root-1"),
+      ThreadId.makeUnsafe("root-selected"),
+    ]);
   });
 });

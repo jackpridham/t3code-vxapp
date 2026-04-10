@@ -741,6 +741,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* projectionOperationalQuery.listProjectThreads(body);
       }
 
+      case ORCHESTRATION_WS_METHODS.listSessionThreads: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.listSessionThreads(body);
+      }
+
       case ORCHESTRATION_WS_METHODS.getSnapshot: {
         const body = stripRequestTag(request.body);
         return yield* projectionReadModelQuery.getSnapshot(body);
@@ -854,6 +859,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.gitListBranches: {
         const body = stripRequestTag(request.body);
         return yield* git.listBranches(body);
+      }
+
+      case WS_METHODS.gitResolveRepoIdentity: {
+        const body = stripRequestTag(request.body);
+        return yield* git.resolveRepoIdentity(body);
       }
 
       case WS_METHODS.gitCreateWorktree: {

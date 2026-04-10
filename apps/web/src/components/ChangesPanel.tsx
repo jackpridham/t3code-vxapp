@@ -2,8 +2,9 @@ import { ThreadId } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { buildChangesWindowHref } from "../lib/changesWindow";
 import { useSettings } from "../hooks/useSettings";
-import { useChangesWindowTarget } from "../lib/changesWindowSync";
+import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import { inferCheckpointTurnCountByTurnId } from "../session-logic";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
@@ -35,13 +36,13 @@ function resolveLatestCheckpointTurnCount(
 export const ChangesPanel = memo(function ChangesPanel() {
   const settings = useSettings();
   const filesChangedViewType = settings.changesPanelFilesChangedViewType;
-  const changesPanelOpen = useUiStateStore((state) => state.changesPanelOpen);
   const activePath = useUiStateStore((state) => state.changesPanelActivePath);
   const contentMode = useUiStateStore((state) => state.changesPanelContentMode);
   const closePanel = useUiStateStore((state) => state.closeChangesPanel);
   const setActivePath = useUiStateStore((state) => state.setChangesPanelActivePath);
   const setActiveSection = useUiStateStore((state) => state.setChangesPanelActiveSection);
   const setContentMode = useUiStateStore((state) => state.setChangesPanelContentMode);
+  const [, setChangesWindowTarget] = useChangesWindowTarget();
 
   const routeThreadId = useParams({
     strict: false,
@@ -70,9 +71,32 @@ export const ChangesPanel = memo(function ChangesPanel() {
     [setActivePath, setActiveSection, setContentMode],
   );
 
-  if (!changesPanelOpen) {
-    return null;
-  }
+  const handleOpenItemInWindow = useCallback(
+    (item: DiscoveredFileReference) => {
+      const targetThreadId = activeThread?.id ?? routeThreadId;
+      if (!targetThreadId || typeof window === "undefined") {
+        return;
+      }
+
+      setChangesWindowTarget(
+        buildChangesWindowTarget({
+          threadId: targetThreadId,
+          path: item.resolvedPath,
+          mode: "preview",
+        }),
+      );
+      window.open(
+        buildChangesWindowHref({
+          threadId: targetThreadId,
+          path: item.resolvedPath,
+          mode: "preview",
+        }),
+        "_blank",
+        "noopener,noreferrer",
+      );
+    },
+    [activeThread?.id, routeThreadId, setChangesWindowTarget],
+  );
 
   return (
     <ChangesBrowser
@@ -85,6 +109,7 @@ export const ChangesPanel = memo(function ChangesPanel() {
       activePath={activePath}
       contentMode={contentMode}
       onSelectItem={handleSelectItem}
+      onOpenItemInWindow={handleOpenItemInWindow}
       onContentModeChange={setContentMode}
       onClose={closePanel}
       showPreviewPane={false}

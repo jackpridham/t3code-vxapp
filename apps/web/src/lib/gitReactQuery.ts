@@ -6,11 +6,13 @@ const GIT_STATUS_STALE_TIME_MS = 5_000;
 const GIT_STATUS_REFETCH_INTERVAL_MS = 15_000;
 const GIT_BRANCHES_STALE_TIME_MS = 15_000;
 const GIT_BRANCHES_REFETCH_INTERVAL_MS = 60_000;
+const GIT_REPO_IDENTITY_STALE_TIME_MS = 60_000;
 
 export const gitQueryKeys = {
   all: ["git"] as const,
   status: (cwd: string | null) => ["git", "status", cwd] as const,
   branches: (cwd: string | null) => ["git", "branches", cwd] as const,
+  repoIdentity: (cwd: string | null) => ["git", "repo-identity", cwd] as const,
 };
 
 export const gitMutationKeys = {
@@ -55,6 +57,21 @@ export function gitBranchesQueryOptions(cwd: string | null) {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     refetchInterval: GIT_BRANCHES_REFETCH_INTERVAL_MS,
+  });
+}
+
+export function gitResolveRepoIdentityQueryOptions(cwd: string | null) {
+  return queryOptions({
+    queryKey: gitQueryKeys.repoIdentity(cwd),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      if (!cwd) throw new Error("Git repo identity is unavailable.");
+      return api.git.resolveRepoIdentity({ cwd });
+    },
+    enabled: cwd !== null,
+    staleTime: GIT_REPO_IDENTITY_STALE_TIME_MS,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
   });
 }
 

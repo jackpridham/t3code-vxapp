@@ -1,0 +1,363 @@
+import type {
+  NativeApi,
+  OrchestrationReadModel,
+  OrchestrationThreadSummary,
+  ModelSelection,
+  ProjectId,
+  ThreadId,
+} from "@t3tools/contracts";
+import { DEFAULT_PROVIDER_INTERACTION_MODE } from "@t3tools/contracts";
+import type { QueryClient } from "@tanstack/react-query";
+import {
+  invalidateOrchestrationProjectCatalogs,
+  invalidateOrchestrationSessionCatalogs,
+  orchestrationSessionThreadsQueryOptions,
+} from "../../lib/orchestrationReactQuery";
+import { newCommandId, newThreadId } from "../../lib/utils";
+
+export interface SessionReactivationPlan {
+  affectedProjectIds: ProjectId[];
+  threadsToInterrupt: ThreadId[];
+  threadsToStop: ThreadId[];
+  threadsToArchive: ThreadId[];
+  threadsToUnarchive: ThreadId[];
+  rootThreadIdToHydrate: ThreadId;
+}
+
+export interface SessionArchivePlan {
+  affectedProjectIds: ProjectId[];
+  threadsToInterrupt: ThreadId[];
+  threadsToStop: ThreadId[];
+  threadsToArchive: ThreadId[];
+}
+
+function uniqueThreadIds(threadIds: readonly ThreadId[]): ThreadId[] {
+  return [...new Set(threadIds)];
+}
+
+function uniqueProjectIds(projectIds: readonly ProjectId[]): ProjectId[] {
+  return [...new Set(projectIds)];
+}
+
+function resolveThreadDepth(
+  threadById: ReadonlyMap<ThreadId, Pick<OrchestrationThreadSummary, "id" | "parentThreadId">>,
+  threadId: ThreadId,
+): number {
+  let depth = 0;
+  let currentThreadId: ThreadId | undefined = threadId;
+  const visited = new Set<ThreadId>();
+
+  while (currentThreadId) {
+    const thread = threadById.get(currentThreadId);
+    const parentThreadId = thread?.parentThreadId;
+    if (!parentThreadId || visited.has(parentThreadId)) {
+      break;
+    }
+    visited.add(parentThreadId);
+    currentThreadId = parentThreadId;
+    depth += 1;
+  }
+
+  return depth;
+}
+
+function sortThreadIdsByDepth(input: {
+  threads: readonly Pick<OrchestrationThreadSummary, "id" | "parentThreadId">[];
+  order: "root-first" | "leaf-first";
+}): ThreadId[] {
+  const threadById = new Map(input.threads.map((thread) => [thread.id, thread] as const));
+  return [...input.threads]
+    .toSorted((left, right) => {
+      const leftDepth = resolveThreadDepth(threadById, left.id);
+      const rightDepth = resolveThreadDepth(threadById, right.id);
+      return input.order === "root-first" ? leftDepth - rightDepth : rightDepth - leftDepth;
+    })
+    .map((thread) => thread.id);
+}
+
+function sessionRequiresStop(thread: Pick<OrchestrationThreadSummary, "session">): boolean {
+  if (thread.session === null) {
+    return false;
+  }
+  return !["idle", "stopped", "error"].includes(thread.session.status);
+}
+
+function buildSessionArchivePlan(input: {
+  activeSessionThreads: readonly OrchestrationThreadSummary[];
+}): SessionArchivePlan {
+  return {
+    affectedProjectIds: uniqueProjectIds(
+      input.activeSessionThreads.map((thread) => thread.projectId),
+    ),
+    threadsToInterrupt: uniqueThreadIds(
+      input.activeSessionThreads
+        .filter(
+          (thread) => thread.session?.status === "running" && thread.session.activeTurnId !== null,
+        )
+        .map((thread) => thread.id),
+    ),
+    threadsToStop: uniqueThreadIds(
+      input.activeSessionThreads.filter(sessionRequiresStop).map((thread) => thread.id),
+    ),
+    threadsToArchive: sortThreadIdsByDepth({
+      threads: input.activeSessionThreads,
+      order: "leaf-first",
+    }),
+  };
+}
+
+async function executeSessionArchivePlan(input: {
+  api: NativeApi;
+  plan: SessionArchivePlan;
+  commandTimestamp: string;
+}): Promise<void> {
+  for (const threadId of input.plan.threadsToInterrupt) {
+    await input.api.orchestration.dispatchCommand({
+      type: "thread.turn.interrupt",
+      commandId: newCommandId(),
+      threadId,
+      createdAt: input.commandTimestamp,
+    });
+  }
+
+  for (const threadId of input.plan.threadsToStop) {
+    await input.api.orchestration.dispatchCommand({
+      type: "thread.session.stop",
+      commandId: newCommandId(),
+      threadId,
+      createdAt: input.commandTimestamp,
+    });
+  }
+
+  for (const threadId of input.plan.threadsToArchive) {
+    await input.api.orchestration.dispatchCommand({
+      type: "thread.archive",
+      commandId: newCommandId(),
+      threadId,
+    });
+  }
+}
+
+export function buildSessionReactivationPlan(input: {
+  activeRootThreadId: ThreadId | null;
+  targetRootThreadId: ThreadId;
+  activeSessionThreads: readonly OrchestrationThreadSummary[];
+  targetSessionThreads: readonly OrchestrationThreadSummary[];
+  projectRootThreads: readonly OrchestrationThreadSummary[];
+}): SessionReactivationPlan {
+  const targetRoot = input.projectRootThreads.find(
+    (thread) => thread.id === input.targetRootThreadId,
+  );
+  const activeRoot =
+    input.activeRootThreadId === null
+      ? null
+      : (input.projectRootThreads.find((thread) => thread.id === input.activeRootThreadId) ?? null);
+  const isTargetAlreadyActive = input.activeRootThreadId === input.targetRootThreadId;
+
+  const threadsToInterrupt = isTargetAlreadyActive
+    ? []
+    : uniqueThreadIds(
+        input.activeSessionThreads
+          .filter(
+            (thread) =>
+              thread.session?.status === "running" && thread.session.activeTurnId !== null,
+          )
+          .map((thread) => thread.id),
+      );
+  const threadsToStop = isTargetAlreadyActive
+    ? []
+    : uniqueThreadIds(
+        input.activeSessionThreads.filter(sessionRequiresStop).map((thread) => thread.id),
+      );
+  const threadsToArchive = isTargetAlreadyActive
+    ? []
+    : sortThreadIdsByDepth({
+        threads: input.activeSessionThreads,
+        order: "leaf-first",
+      });
+  const threadsToUnarchive = isTargetAlreadyActive
+    ? []
+    : sortThreadIdsByDepth({
+        threads: input.targetSessionThreads.filter((thread) => thread.archivedAt !== null),
+        order: "root-first",
+      });
+
+  return {
+    affectedProjectIds: uniqueProjectIds(
+      [
+        ...input.activeSessionThreads.map((thread) => thread.projectId),
+        ...input.targetSessionThreads.map((thread) => thread.projectId),
+        ...(activeRoot ? [activeRoot.projectId] : []),
+        ...(targetRoot ? [targetRoot.projectId] : []),
+      ].filter((projectId): projectId is ProjectId => projectId !== undefined),
+    ),
+    threadsToInterrupt,
+    threadsToStop,
+    threadsToArchive,
+    threadsToUnarchive,
+    rootThreadIdToHydrate: input.targetRootThreadId,
+  };
+}
+
+export async function reactivateOrchestrationSession(input: {
+  api: NativeApi;
+  queryClient: QueryClient;
+  projectId: ProjectId;
+  activeRootThreadId: ThreadId | null;
+  targetRootThreadId: ThreadId;
+  activeSessionThreads: readonly OrchestrationThreadSummary[];
+  targetSessionThreads: readonly OrchestrationThreadSummary[];
+  projectRootThreads: readonly OrchestrationThreadSummary[];
+  syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  navigateToThread: (threadId: ThreadId) => Promise<void>;
+}): Promise<SessionReactivationPlan> {
+  const plan = buildSessionReactivationPlan(input);
+  const targetRoot = input.projectRootThreads.find(
+    (thread) => thread.id === input.targetRootThreadId,
+  );
+  const shouldConfirm =
+    input.activeRootThreadId !== null &&
+    input.activeRootThreadId !== input.targetRootThreadId &&
+    targetRoot?.archivedAt !== null;
+
+  if (shouldConfirm) {
+    const confirmed = await input.api.dialogs.confirm(
+      "Reactivate this orchestration session? The current active session will be archived first.",
+    );
+    if (!confirmed) {
+      return plan;
+    }
+  }
+
+  const commandTimestamp = new Date().toISOString();
+  await executeSessionArchivePlan({
+    api: input.api,
+    plan,
+    commandTimestamp,
+  });
+
+  for (const threadId of plan.threadsToUnarchive) {
+    await input.api.orchestration.dispatchCommand({
+      type: "thread.unarchive",
+      commandId: newCommandId(),
+      threadId,
+    });
+  }
+
+  await input.api.orchestration.dispatchCommand({
+    type: "project.meta.update",
+    commandId: newCommandId(),
+    projectId: input.projectId,
+    currentSessionRootThreadId: input.targetRootThreadId,
+  });
+
+  await invalidateOrchestrationProjectCatalogs(input.queryClient, plan.affectedProjectIds);
+  await invalidateOrchestrationSessionCatalogs(
+    input.queryClient,
+    uniqueThreadIds(
+      [input.activeRootThreadId, input.targetRootThreadId].filter(
+        (threadId): threadId is ThreadId => threadId !== null,
+      ),
+    ),
+  );
+
+  const snapshot = await input.api.orchestration.getSnapshot({
+    profile: "active-thread",
+    threadId: plan.rootThreadIdToHydrate,
+  });
+  input.syncServerReadModel(snapshot);
+
+  await input.queryClient.fetchQuery(
+    orchestrationSessionThreadsQueryOptions({
+      rootThreadId: input.targetRootThreadId,
+      includeArchived: true,
+    }),
+  );
+
+  await input.navigateToThread(plan.rootThreadIdToHydrate);
+
+  return plan;
+}
+
+export async function createNewOrchestrationSession(input: {
+  api: NativeApi;
+  queryClient: QueryClient;
+  projectId: ProjectId;
+  projectName: string;
+  projectModelSelection: ModelSelection;
+  activeRootThreadId: ThreadId | null;
+  activeSessionThreads: readonly OrchestrationThreadSummary[];
+  syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  navigateToThread: (threadId: ThreadId) => Promise<void>;
+}): Promise<ThreadId | null> {
+  if (input.activeRootThreadId !== null && input.activeSessionThreads.length > 0) {
+    const confirmed = await input.api.dialogs.confirm(
+      `Create a new ${input.projectName} session? Current workers in this session will be archived, but you can restore the session later.`,
+    );
+    if (!confirmed) {
+      return null;
+    }
+  }
+
+  const commandTimestamp = new Date().toISOString();
+  const archivePlan = buildSessionArchivePlan({
+    activeSessionThreads: input.activeSessionThreads,
+  });
+  await executeSessionArchivePlan({
+    api: input.api,
+    plan: archivePlan,
+    commandTimestamp,
+  });
+
+  const newRootThreadId = newThreadId();
+  await input.api.orchestration.dispatchCommand({
+    type: "thread.create",
+    commandId: newCommandId(),
+    threadId: newRootThreadId,
+    projectId: input.projectId,
+    title: `New ${input.projectName} Session`,
+    modelSelection: input.projectModelSelection,
+    runtimeMode: "full-access",
+    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    branch: null,
+    worktreePath: null,
+    spawnRole: "orchestrator",
+    createdAt: commandTimestamp,
+  });
+
+  await input.api.orchestration.dispatchCommand({
+    type: "project.meta.update",
+    commandId: newCommandId(),
+    projectId: input.projectId,
+    currentSessionRootThreadId: newRootThreadId,
+  });
+
+  await invalidateOrchestrationProjectCatalogs(input.queryClient, [
+    input.projectId,
+    ...archivePlan.affectedProjectIds,
+  ]);
+  await invalidateOrchestrationSessionCatalogs(
+    input.queryClient,
+    uniqueThreadIds(
+      [input.activeRootThreadId, newRootThreadId].filter(
+        (threadId): threadId is ThreadId => threadId !== null,
+      ),
+    ),
+  );
+
+  const snapshot = await input.api.orchestration.getSnapshot({
+    profile: "active-thread",
+    threadId: newRootThreadId,
+  });
+  input.syncServerReadModel(snapshot);
+
+  await input.queryClient.fetchQuery(
+    orchestrationSessionThreadsQueryOptions({
+      rootThreadId: newRootThreadId,
+      includeArchived: true,
+    }),
+  );
+
+  await input.navigateToThread(newRootThreadId);
+  return newRootThreadId;
+}

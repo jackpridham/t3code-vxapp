@@ -14,6 +14,7 @@ import {
   OrchestrationGetSnapshotInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationListProjectThreadsInput,
+  OrchestrationListSessionThreadsInput,
   OrchestrationListProjectsInput,
   OrchestrationReplayEventsInput,
 } from "./orchestration";
@@ -28,6 +29,7 @@ import {
   GitPullInput,
   GitPullRequestRefInput,
   GitRemoveWorktreeInput,
+  GitResolveRepoIdentityInput,
   GitRunStackedActionInput,
   GitStatusInput,
 } from "./git";
@@ -65,6 +67,7 @@ export const WS_METHODS = {
   gitStatus: "git.status",
   gitRunStackedAction: "git.runStackedAction",
   gitListBranches: "git.listBranches",
+  gitResolveRepoIdentity: "git.resolveRepoIdentity",
   gitCreateWorktree: "git.createWorktree",
   gitRemoveWorktree: "git.removeWorktree",
   gitCreateBranch: "git.createBranch",
@@ -124,6 +127,7 @@ const WebSocketRequestBody = Schema.Union([
     OrchestrationGetProjectByWorkspaceInput,
   ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listProjectThreads, OrchestrationListProjectThreadsInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.listSessionThreads, OrchestrationListSessionThreadsInput),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),
@@ -147,6 +151,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.gitStatus, GitStatusInput),
   tagRequestBody(WS_METHODS.gitRunStackedAction, GitRunStackedActionInput),
   tagRequestBody(WS_METHODS.gitListBranches, GitListBranchesInput),
+  tagRequestBody(WS_METHODS.gitResolveRepoIdentity, GitResolveRepoIdentityInput),
   tagRequestBody(WS_METHODS.gitCreateWorktree, GitCreateWorktreeInput),
   tagRequestBody(WS_METHODS.gitRemoveWorktree, GitRemoveWorktreeInput),
   tagRequestBody(WS_METHODS.gitCreateBranch, GitCreateBranchInput),

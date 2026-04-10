@@ -50,6 +50,7 @@ interface ChangesExplorerTreeProps {
   fileStatsByPath?: ReadonlyMap<string, ChangesExplorerStat | null>;
   fileKindsByPath: ReadonlyMap<string, string | undefined> | undefined;
   onSelectItem: (item: DiscoveredFileReference) => void;
+  onOpenItemInWindow?: ((item: DiscoveredFileReference) => void) | undefined;
 }
 
 function collectAncestorDirectoryPaths(
@@ -85,6 +86,7 @@ function renderTreeNode(
     onToggleSection: (section: string) => void;
     onToggleDirectory: (directoryPath: string) => void;
     onSelectItem: (item: DiscoveredFileReference) => void;
+    onOpenItemInWindow?: ((item: DiscoveredFileReference) => void) | undefined;
     resolvedTheme: "light" | "dark";
     fileKindsByPath: ReadonlyMap<string, string | undefined> | undefined;
   },
@@ -196,6 +198,7 @@ function renderTreeNode(
       )}
       style={{ paddingLeft: `${leftPadding}px` }}
       onClick={() => options.onSelectItem(node.item)}
+      onDoubleClick={() => options.onOpenItemInWindow?.(node.item)}
       title={node.item.resolvedPath}
     >
       <span aria-hidden="true" className="size-3.5 shrink-0" />
@@ -233,6 +236,7 @@ export const ChangesExplorerTree = memo(function ChangesExplorerTree({
   fileStatsByPath,
   fileKindsByPath,
   onSelectItem,
+  onOpenItemInWindow,
 }: ChangesExplorerTreeProps) {
   const tree = useMemo(
     () =>
@@ -291,6 +295,7 @@ export const ChangesExplorerTree = memo(function ChangesExplorerTree({
           onToggleSection: handleToggleSection,
           onToggleDirectory: handleToggleDirectory,
           onSelectItem,
+          onOpenItemInWindow,
           resolvedTheme,
           fileKindsByPath,
         }),

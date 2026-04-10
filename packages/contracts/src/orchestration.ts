@@ -23,6 +23,7 @@ export const ORCHESTRATION_WS_METHODS = {
   listProjects: "orchestration.listProjects",
   getProjectByWorkspace: "orchestration.getProjectByWorkspace",
   listProjectThreads: "orchestration.listProjectThreads",
+  listSessionThreads: "orchestration.listSessionThreads",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFileDiff: "orchestration.getFileDiff",
@@ -174,6 +175,8 @@ export const OrchestrationProject = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   kind: Schema.optional(OrchestrationProjectKind),
+  sidebarParentProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  currentSessionRootThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   hooks: ProjectHooks,
@@ -363,6 +366,7 @@ export const OrchestrationProjectSummary = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   kind: Schema.NullOr(OrchestrationProjectKind).pipe(Schema.withDecodingDefault(() => null)),
+  sidebarParentProjectId: Schema.optional(Schema.NullOr(ProjectId)),
   defaultModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -500,6 +504,8 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   kind: Schema.optional(OrchestrationProjectKind),
+  sidebarParentProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  currentSessionRootThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   hooks: Schema.optional(ProjectHooks),
@@ -833,6 +839,8 @@ export const ProjectCreatedPayload = Schema.Struct({
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
   kind: Schema.optional(OrchestrationProjectKind),
+  sidebarParentProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  currentSessionRootThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
   hooks: ProjectHooks,
@@ -845,6 +853,8 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   kind: Schema.optional(OrchestrationProjectKind),
+  sidebarParentProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  currentSessionRootThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   hooks: Schema.optional(ProjectHooks),
@@ -1283,6 +1293,16 @@ export const OrchestrationListProjectThreadsResult = Schema.Array(OrchestrationT
 export type OrchestrationListProjectThreadsResult =
   typeof OrchestrationListProjectThreadsResult.Type;
 
+export const OrchestrationListSessionThreadsInput = Schema.Struct({
+  rootThreadId: ThreadId,
+  includeArchived: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  includeDeleted: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+});
+export type OrchestrationListSessionThreadsInput = typeof OrchestrationListSessionThreadsInput.Type;
+export const OrchestrationListSessionThreadsResult = Schema.Array(OrchestrationThreadSummary);
+export type OrchestrationListSessionThreadsResult =
+  typeof OrchestrationListSessionThreadsResult.Type;
+
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
   { unsafePreserveChecks: true },
@@ -1353,6 +1373,10 @@ export const OrchestrationRpcSchemas = {
   listProjectThreads: {
     input: OrchestrationListProjectThreadsInput,
     output: OrchestrationListProjectThreadsResult,
+  },
+  listSessionThreads: {
+    input: OrchestrationListSessionThreadsInput,
+    output: OrchestrationListSessionThreadsResult,
   },
   dispatchCommand: {
     input: ClientOrchestrationCommand,

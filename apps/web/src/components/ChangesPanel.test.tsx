@@ -268,6 +268,54 @@ index 1111111..2222222 100644
     expect(html).not.toContain("Open changes in separate window");
   });
 
+  it("keeps the file list drawer closable when the drawer default is always show", () => {
+    state.settings = {
+      changesDrawerVisibility: "always_show",
+      changesPanelFilesChangedViewType: "list",
+      changesPanelWindowNavigationMode: "dynamic",
+    };
+    state.groups = [
+      {
+        section: "files_changed",
+        label: "Files Changed",
+        items: [
+          {
+            rawRef: "/repo/src/example.ts",
+            resolvedPath: "/repo/src/example.ts",
+            filename: "example.ts",
+            section: "files_changed",
+            firstSeenMessageId: MessageId.makeUnsafe("msg-1"),
+          },
+        ],
+      },
+    ];
+    state.appState = {
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: "project-1",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+      ],
+      projects: [{ id: "project-1", cwd: "/repo" }],
+    } as any;
+    state.uiState = {
+      ...state.uiState,
+      changesPanelOpen: false,
+      changesPanelActivePath: null,
+      changesPanelActiveSection: null,
+      changesPanelContentMode: "preview",
+    };
+
+    const html = renderPanel();
+
+    expect(html).toContain("example.ts");
+    expect(html).toContain("Close changes panel");
+  });
+
   it("renders the files changed section as a tree when configured", () => {
     state.settings = {
       changesDrawerVisibility: "always_show",

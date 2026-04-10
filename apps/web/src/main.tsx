@@ -8,8 +8,8 @@ import "./index.css";
 
 import { registerAppRouter } from "./appNavigation";
 import { isElectron } from "./env";
+import { buildAppDocumentTitle } from "./lib/documentTitle";
 import { getRouter } from "./router";
-import { APP_DISPLAY_NAME } from "./branding";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
@@ -17,7 +17,7 @@ const history = isElectron ? createHashHistory() : createBrowserHistory();
 const router = getRouter(history);
 registerAppRouter(router);
 
-document.title = APP_DISPLAY_NAME;
+document.title = buildAppDocumentTitle();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

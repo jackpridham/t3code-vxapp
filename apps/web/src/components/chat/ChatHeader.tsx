@@ -7,10 +7,12 @@ import ProjectHooksControl, { type NewProjectHookInput } from "../ProjectHooksCo
 import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { Button } from "../ui/button";
+import { getDisplayThreadLabelEntries } from "../../lib/threadLabels";
+import { WorkerLineageWarningIcon } from "../thread/WorkerLineageWarningIcon";
 
 interface ChatHeaderProps {
-  activeThreadTitle: string;
   activeThreadLabels?: string[] | undefined;
+  activeThreadWorkerLineageWarning?: string | null;
   activeProjectName: string | undefined;
   activeProjectHooks: ProjectHook[] | undefined;
   terminalAvailable: boolean;
@@ -29,8 +31,8 @@ interface ChatHeaderProps {
 }
 
 export const ChatHeader = memo(function ChatHeader({
-  activeThreadTitle,
   activeThreadLabels,
+  activeThreadWorkerLineageWarning,
   activeProjectName,
   activeProjectHooks,
   terminalAvailable,
@@ -47,36 +49,33 @@ export const ChatHeader = memo(function ChatHeader({
   onOpenChangesWindow,
   onLabelClick,
 }: ChatHeaderProps) {
+  const visibleThreadLabels = getDisplayThreadLabelEntries(activeThreadLabels);
+
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <h2
-          className="min-w-0 shrink truncate text-sm font-medium text-foreground"
-          title={activeThreadTitle}
-        >
-          {activeThreadTitle}
-        </h2>
         {activeProjectName && (
           <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
             <span className="min-w-0 truncate">{activeProjectName}</span>
           </Badge>
         )}
-        {activeThreadLabels && activeThreadLabels.length > 0 && (
+        {visibleThreadLabels.length > 0 && (
           <div className="hidden items-center gap-1 overflow-hidden sm:flex">
-            {activeThreadLabels.map((label) => (
+            {visibleThreadLabels.map((label) => (
               <Badge
-                key={label}
+                key={label.key}
                 variant="outline"
-                title={`Click to filter by "${label}"`}
+                title={`Click to filter by "${label.displayLabel}"`}
                 className="h-5 min-w-0 max-w-24 shrink-0 cursor-pointer px-1.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-foreground"
-                onClick={() => onLabelClick?.(label)}
+                onClick={() => onLabelClick?.(label.rawLabel)}
               >
-                <span className="truncate">{label}</span>
+                <span className="truncate">{label.displayLabel}</span>
               </Badge>
             ))}
           </div>
         )}
+        <WorkerLineageWarningIcon description={activeThreadWorkerLineageWarning ?? null} />
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {activeProjectHooks && (

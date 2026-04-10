@@ -307,6 +307,7 @@ function ChangesFlatGroup(props: {
   resolvedTheme: "light" | "dark";
   fileKindsByPath: ReadonlyMap<string, string | undefined>;
   onSelectItem: (item: DiscoveredFileReference) => void;
+  onOpenItemInWindow?: ((item: DiscoveredFileReference) => void) | undefined;
 }) {
   const Icon = LIST_SECTION_ICON[props.group.section];
   const accentClass = LIST_SECTION_ACCENT[props.group.section];
@@ -360,6 +361,7 @@ function ChangesFlatGroup(props: {
                     : "text-muted-foreground hover:bg-muted/30 hover:text-foreground/80",
                 )}
                 onClick={() => props.onSelectItem(item)}
+                onDoubleClick={() => props.onOpenItemInWindow?.(item)}
                 title={item.resolvedPath}
               >
                 <VscodeEntryIcon
@@ -663,6 +665,7 @@ export interface ChangesBrowserProps {
   activePath: string | null;
   contentMode: ChangesPanelContentMode;
   onSelectItem: (item: DiscoveredFileReference) => void;
+  onOpenItemInWindow?: ((item: DiscoveredFileReference) => void) | undefined;
   onContentModeChange: (mode: ChangesPanelContentMode) => void;
   onClose?: (() => void) | undefined;
   showPreviewPane?: boolean | undefined;
@@ -681,6 +684,7 @@ export const ChangesBrowser = memo(function ChangesBrowser({
   activePath,
   contentMode,
   onSelectItem,
+  onOpenItemInWindow,
   onContentModeChange,
   onClose,
   showPreviewPane = true,
@@ -941,6 +945,7 @@ export const ChangesBrowser = memo(function ChangesBrowser({
                       fileStatsByPath={fileStatsByPath}
                       fileKindsByPath={fileKindsByPath}
                       onSelectItem={onSelectItem}
+                      onOpenItemInWindow={onOpenItemInWindow}
                     />
                   ) : (
                     <ChangesFlatGroup
@@ -950,6 +955,7 @@ export const ChangesBrowser = memo(function ChangesBrowser({
                       resolvedTheme={resolvedTheme}
                       fileKindsByPath={fileKindsByPath}
                       onSelectItem={onSelectItem}
+                      onOpenItemInWindow={onOpenItemInWindow}
                     />
                   ),
                 )

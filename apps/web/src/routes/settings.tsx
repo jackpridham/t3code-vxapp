@@ -6,12 +6,14 @@ import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { isElectron } from "../env";
+import { resolveSettingsDocumentTitle, useDocumentTitle } from "../lib/documentTitle";
 
 function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(() =>
     setRestoreSignal((value) => value + 1),
   );
+  useDocumentTitle(resolveSettingsDocumentTitle());
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

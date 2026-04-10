@@ -21,14 +21,17 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import {
+  ChatViewInputWhenScrolling,
   ChangesDrawerVisibility,
   ChangesPanelFilesChangedViewType,
   ChangesPanelWindowNavigationMode,
   type ClientSettings,
   ClientSettingsSchema,
+  DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING,
   DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE,
   DEFAULT_CHANGES_DRAWER_VISIBILITY,
   DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE,
+  DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   SidebarProjectSortOrder,
@@ -213,6 +216,16 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.allowActiveThreadsInFold = legacySettings.allowActiveThreadsInFold;
   }
 
+  if (Predicate.isBoolean(legacySettings.sidebarOrchestrationModeEnabled)) {
+    patch.sidebarOrchestrationModeEnabled = legacySettings.sidebarOrchestrationModeEnabled;
+  }
+
+  if (Schema.is(ChatViewInputWhenScrolling)(legacySettings.chatViewInputWhenScrolling)) {
+    patch.chatViewInputWhenScrolling = legacySettings.chatViewInputWhenScrolling;
+  } else if (legacySettings.chatViewInputWhenScrolling === undefined) {
+    patch.chatViewInputWhenScrolling = DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING;
+  }
+
   if (
     Schema.is(ChangesPanelFilesChangedViewType)(legacySettings.changesPanelFilesChangedViewType)
   ) {
@@ -225,6 +238,12 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.changesDrawerVisibility = legacySettings.changesDrawerVisibility;
   } else if (legacySettings.changesDrawerVisibility === undefined) {
     patch.changesDrawerVisibility = DEFAULT_CHANGES_DRAWER_VISIBILITY;
+  }
+
+  if (Predicate.isBoolean(legacySettings.rememberChangesDrawerWidth)) {
+    patch.rememberChangesDrawerWidth = legacySettings.rememberChangesDrawerWidth;
+  } else if (legacySettings.rememberChangesDrawerWidth === undefined) {
+    patch.rememberChangesDrawerWidth = DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH;
   }
 
   if (

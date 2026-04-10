@@ -1,7 +1,12 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { Project, Thread } from "../types";
+import { getDisplayThreadLabelEntries } from "../lib/threadLabels";
 import { cn } from "../lib/utils";
+import {
+  collapseThreadToCanonicalProject,
+  resolveThreadSessionRootId,
+} from "../lib/orchestrationMode";
 import {
   findLatestProposedPlan,
   hasActionableProposedPlan,
@@ -416,22 +421,7 @@ export function getSidebarThreadLabels(
   labels: Thread["labels"] | null | undefined,
   maxLabels = 2,
 ): string[] {
-  const resolvedLabels: string[] = [];
-  const seenLabels = new Set<string>();
-
-  for (const label of labels ?? []) {
-    const trimmedLabel = label.trim();
-    if (trimmedLabel.length === 0 || seenLabels.has(trimmedLabel)) {
-      continue;
-    }
-    seenLabels.add(trimmedLabel);
-    resolvedLabels.push(trimmedLabel);
-    if (resolvedLabels.length >= maxLabels) {
-      break;
-    }
-  }
-
-  return resolvedLabels;
+  return getDisplayThreadLabelEntries(labels, maxLabels).map((label) => label.displayLabel);
 }
 
 export function resolveProjectStatusIndicator(
@@ -477,6 +467,129 @@ export function getUniqueLabelsFromThreads(
     }
   }
   return [...seen].toSorted();
+}
+
+export interface OrchestrationModeRenderedProjectGroup<TThread> {
+  canonicalProjectId: Project["id"];
+  canonicalProjectName: string;
+  threads: TThread[];
+}
+
+export function shouldUseSidebarOrchestrationMode(input: {
+  projectKind: SidebarProjectKind;
+  settingEnabled: boolean;
+  selectedSessionRootId: Thread["id"] | null;
+}): boolean {
+  return (
+    input.settingEnabled &&
+    input.projectKind === "orchestrator" &&
+    input.selectedSessionRootId !== null
+  );
+}
+
+export function resolveSelectedOrchestrationSessionRootId<
+  TThread extends Pick<
+    Thread,
+    | "id"
+    | "archivedAt"
+    | "createdAt"
+    | "updatedAt"
+    | "parentThreadId"
+    | "spawnRole"
+    | "spawnedBy"
+    | "orchestratorThreadId"
+    | "workflowId"
+  >,
+>(input: {
+  routeThreadId: TThread["id"] | null;
+  storedSelectedSessionRootId: TThread["id"] | null;
+  projectRootThreads: readonly TThread[];
+  threadsForResolution: readonly TThread[];
+}): TThread["id"] | null {
+  const validRootIds = new Set(input.projectRootThreads.map((thread) => thread.id));
+  const routeRootThreadId =
+    input.routeThreadId === null
+      ? null
+      : resolveThreadSessionRootId({
+          threadId: input.routeThreadId,
+          threads: input.threadsForResolution,
+        });
+  if (routeRootThreadId !== null && validRootIds.has(routeRootThreadId)) {
+    return routeRootThreadId;
+  }
+  return resolveCurrentOrchestrationSessionRootId({
+    storedCurrentSessionRootId: input.storedSelectedSessionRootId,
+    projectRootThreads: input.projectRootThreads,
+  });
+}
+
+export function resolveCurrentOrchestrationSessionRootId<
+  TThread extends Pick<Thread, "id" | "archivedAt" | "createdAt" | "updatedAt">,
+>(input: {
+  storedCurrentSessionRootId: TThread["id"] | null;
+  projectRootThreads: readonly TThread[];
+}): TThread["id"] | null {
+  const activeRootThread = [...input.projectRootThreads]
+    .filter((thread) => thread.archivedAt === null)
+    .toSorted(
+      (left, right) =>
+        (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt) ||
+        right.createdAt.localeCompare(left.createdAt),
+    )[0];
+  const storedRootThread =
+    input.storedCurrentSessionRootId === null
+      ? null
+      : (input.projectRootThreads.find(
+          (thread) => thread.id === input.storedCurrentSessionRootId,
+        ) ?? null);
+  if (storedRootThread && (storedRootThread.archivedAt === null || !activeRootThread)) {
+    return storedRootThread.id;
+  }
+  if (activeRootThread) {
+    return activeRootThread.id;
+  }
+
+  return (
+    [...input.projectRootThreads].toSorted(
+      (left, right) =>
+        (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt) ||
+        right.createdAt.localeCompare(left.createdAt),
+    )[0]?.id ?? null
+  );
+}
+
+export function groupThreadsForOrchestrationMode<
+  TThread extends Pick<
+    Thread,
+    "id" | "projectId" | "createdAt" | "updatedAt" | "worktreePath" | "orchestratorProjectId"
+  > &
+    SidebarThreadSortInput,
+>(input: {
+  threads: readonly TThread[];
+  projects: readonly Pick<Project, "id" | "name" | "cwd" | "kind">[];
+  sortOrder: SidebarThreadSortOrder;
+}): OrchestrationModeRenderedProjectGroup<TThread>[] {
+  const threadsByProjectId = new Map<Project["id"], TThread[]>();
+  const projectNameById = new Map<Project["id"], string>();
+
+  for (const thread of input.threads) {
+    const bucket = collapseThreadToCanonicalProject({
+      thread,
+      projects: input.projects,
+    });
+    const current = threadsByProjectId.get(bucket.canonicalProjectId) ?? [];
+    current.push(thread);
+    threadsByProjectId.set(bucket.canonicalProjectId, current);
+    projectNameById.set(bucket.canonicalProjectId, bucket.canonicalProjectName);
+  }
+
+  return [...threadsByProjectId.entries()]
+    .map(([canonicalProjectId, threads]) => ({
+      canonicalProjectId,
+      canonicalProjectName: projectNameById.get(canonicalProjectId) ?? canonicalProjectId,
+      threads: sortThreadsForSidebar(threads, input.sortOrder),
+    }))
+    .toSorted((left, right) => left.canonicalProjectName.localeCompare(right.canonicalProjectName));
 }
 
 export function getVisibleThreadsForProject<T extends Pick<Thread, "id" | "session">>(input: {

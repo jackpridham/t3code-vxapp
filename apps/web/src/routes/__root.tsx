@@ -2,6 +2,7 @@ import {
   type NativeApi,
   type OrchestrationReadModel,
   OrchestrationEvent,
+  type ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -15,11 +16,11 @@ import { useEffect, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 
-import { APP_DISPLAY_NAME } from "../branding";
 import { ArtifactPanel } from "../components/ArtifactPanel";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
+import { APP_DISPLAY_NAME } from "../branding";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
@@ -46,6 +47,13 @@ import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery
 import { isArtifactWindowPath } from "../lib/artifactWindow";
 import { isChangesWindowPath } from "../lib/changesWindow";
 import { isSidebarWindowPath } from "../lib/sidebarWindow";
+import {
+  invalidateOrchestrationProjectCatalogs,
+  invalidateOrchestrationSessionCatalogs,
+} from "../lib/orchestrationReactQuery";
+import { buildAppDocumentTitle } from "../lib/documentTitle";
+import { resolveThreadSessionRootId } from "../lib/orchestrationMode";
+import type { Project, Thread } from "../types";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -53,12 +61,99 @@ export const Route = createRootRouteWithContext<{
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
-    meta: [{ name: "title", content: APP_DISPLAY_NAME }],
+    meta: [{ name: "title", content: buildAppDocumentTitle() }],
   }),
 });
 
 export function isStandaloneRootRoutePath(pathname: string): boolean {
   return isArtifactWindowPath(pathname) || isChangesWindowPath(pathname);
+}
+
+type OrchestrationInvalidationThread = Pick<
+  Thread,
+  | "id"
+  | "projectId"
+  | "parentThreadId"
+  | "spawnRole"
+  | "spawnedBy"
+  | "orchestratorThreadId"
+  | "workflowId"
+>;
+
+export function collectOrchestrationInvalidationTargets(input: {
+  events: ReadonlyArray<OrchestrationEvent>;
+  threads: readonly OrchestrationInvalidationThread[];
+  projects: readonly Pick<Project, "id" | "currentSessionRootThreadId">[];
+}): {
+  projectIds: ProjectId[];
+  rootThreadIds: ThreadId[];
+} {
+  const projectIds = new Set<ProjectId>();
+  const rootThreadIds = new Set<ThreadId>();
+  const threadsById = new Map(input.threads.map((thread) => [thread.id, thread] as const));
+  const currentSessionRootByProjectId = new Map(
+    input.projects.map(
+      (project) => [project.id, project.currentSessionRootThreadId ?? null] as const,
+    ),
+  );
+
+  const addThreadTargets = (threadId: ThreadId) => {
+    const thread = threadsById.get(threadId);
+    if (!thread) {
+      return;
+    }
+    projectIds.add(thread.projectId);
+    const rootThreadId = resolveThreadSessionRootId({
+      threadId,
+      threads: input.threads,
+    });
+    if (rootThreadId) {
+      rootThreadIds.add(rootThreadId);
+    }
+    const selectedRootThreadId = currentSessionRootByProjectId.get(thread.projectId) ?? null;
+    if (selectedRootThreadId) {
+      rootThreadIds.add(selectedRootThreadId);
+    }
+  };
+
+  for (const event of input.events) {
+    switch (event.type) {
+      case "thread.created": {
+        const syntheticThread: OrchestrationInvalidationThread = {
+          id: event.payload.threadId,
+          projectId: event.payload.projectId,
+          parentThreadId: event.payload.parentThreadId,
+          spawnRole: event.payload.spawnRole,
+          spawnedBy: event.payload.spawnedBy,
+          orchestratorThreadId: event.payload.orchestratorThreadId,
+          workflowId: event.payload.workflowId,
+        };
+        projectIds.add(event.payload.projectId);
+        const rootThreadId = resolveThreadSessionRootId({
+          threadId: syntheticThread.id,
+          threads: [...input.threads, syntheticThread],
+        });
+        if (rootThreadId) {
+          rootThreadIds.add(rootThreadId);
+        }
+        break;
+      }
+      case "thread.deleted":
+      case "thread.archived":
+      case "thread.unarchived":
+      case "thread.meta-updated":
+      case "thread.session-set":
+        addThreadTargets(event.payload.threadId);
+        break;
+      default:
+        break;
+    }
+  }
+
+  return {
+    projectIds: [...projectIds],
+    rootThreadIds: [...rootThreadIds],
+  };
 }
 
 function RootRouteView() {
@@ -302,6 +397,8 @@ function EventRouter() {
         return;
       }
 
+      const threadsBeforeApply = useStore.getState().threads;
+
       const batchEffects = deriveOrchestrationBatchEffects(nextEvents);
       const needsProjectUiSync = nextEvents.some(
         (event) =>
@@ -316,6 +413,18 @@ function EventRouter() {
       }
 
       applyOrchestrationEvents(nextEvents);
+      const threadsAfterApply = useStore.getState().threads;
+      const invalidationTargets = collectOrchestrationInvalidationTargets({
+        events: nextEvents,
+        threads: [...threadsBeforeApply, ...threadsAfterApply],
+        projects: useStore.getState().projects,
+      });
+      if (invalidationTargets.projectIds.length > 0) {
+        void invalidateOrchestrationProjectCatalogs(queryClient, invalidationTargets.projectIds);
+      }
+      if (invalidationTargets.rootThreadIds.length > 0) {
+        void invalidateOrchestrationSessionCatalogs(queryClient, invalidationTargets.rootThreadIds);
+      }
 
       // Fire user notifications for real-time events only (skip during hydration)
       if (notificationsReady) {
