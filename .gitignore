@@ -58,6 +58,11 @@ __screenshots__/
 .claude/skills/vx-plan-tests-refine
 .claude/skills/vx-agents-handoff
 .claude/skills/vx-agents-feedback
+.claude/skills/*
+!.claude/skills/t3-settings-workflow/
+!.claude/skills/t3-settings-workflow/**
+!.claude/skills/vx-agents-feedback
+.skills/
 .agents/
 .claude/skills/api-runtime-diagnostics
 .claude/skills/vx-dev-server
