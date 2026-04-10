@@ -42,7 +42,7 @@ export const DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING: ChatViewInputWhenScrolling 
 
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
-  sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   chatViewInputWhenScrolling: ChatViewInputWhenScrolling.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING),
   ),

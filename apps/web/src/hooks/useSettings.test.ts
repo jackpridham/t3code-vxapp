@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import { buildLegacyClientSettingsMigrationPatch } from "./useSettings";
 
 describe("buildLegacyClientSettingsMigrationPatch", () => {
-  it("defaults sidebar orchestration mode to false", () => {
-    expect(DEFAULT_CLIENT_SETTINGS.sidebarOrchestrationModeEnabled).toBe(false);
+  it("defaults sidebar orchestration mode to true", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarOrchestrationModeEnabled).toBe(true);
   });
 
   it("defaults chat view input when scrolling to compact", () => {
