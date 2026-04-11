@@ -158,14 +158,3 @@ export function getWorkerLineageIndicator(input: {
     issues,
   };
 }
-
-export function getWorkerLineageWarningDescription(input: {
-  thread: Pick<
-    Thread,
-    "spawnRole" | "orchestratorProjectId" | "orchestratorThreadId" | "parentThreadId" | "workflowId"
-  >;
-  threads?: readonly Pick<Thread, "id">[];
-  projects?: readonly Pick<Project, "id">[];
-}): string | null {
-  return getWorkerLineageIndicator(input)?.description ?? null;
-}

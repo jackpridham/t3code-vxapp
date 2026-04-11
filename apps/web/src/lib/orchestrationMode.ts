@@ -43,6 +43,8 @@ export interface OrchestrationModeRowDescriptor {
   visibleBadges: OrchestrationModeRowBadge[];
 }
 
+export type OrchestrationWorkerVisibilityMode = "selected-session" | "project-diagnostic";
+
 function isNonEmptyString(value: string | null | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -241,23 +243,25 @@ export function filterProjectThreadsForOrchestrationMode<
     Thread,
     "id" | "parentThreadId" | "spawnRole" | "spawnedBy" | "orchestratorThreadId" | "workflowId"
   >[];
+  visibilityMode?: OrchestrationWorkerVisibilityMode;
 }): TThread[] {
   const selectedSessionRootIds =
     input.selectedSessionRootIds instanceof Set
       ? input.selectedSessionRootIds
       : new Set(input.selectedSessionRootIds);
+  const visibilityMode = input.visibilityMode ?? "selected-session";
 
   return input.threads.filter((thread) => {
     if (thread.spawnRole === "orchestrator") {
       return false;
     }
 
-    if (
-      thread.spawnRole === "worker" &&
-      isNonEmptyString(thread.orchestratorThreadId) &&
-      !selectedSessionRootIds.has(thread.orchestratorThreadId)
-    ) {
-      return false;
+    if (visibilityMode === "project-diagnostic") {
+      return true;
+    }
+
+    if (thread.spawnRole === "worker" && isNonEmptyString(thread.orchestratorThreadId)) {
+      return selectedSessionRootIds.has(thread.orchestratorThreadId);
     }
 
     const sessionRootId = resolveThreadSessionRootId({
@@ -265,11 +269,15 @@ export function filterProjectThreadsForOrchestrationMode<
       threads: input.threadsForResolution,
     });
 
-    if (sessionRootId === null) {
-      return true;
+    if (sessionRootId !== null) {
+      return selectedSessionRootIds.has(sessionRootId);
     }
 
-    return selectedSessionRootIds.has(sessionRootId);
+    if (thread.spawnRole === "worker") {
+      return false;
+    }
+
+    return true;
   });
 }
 
@@ -476,11 +484,23 @@ export function buildOrchestrationSessionCatalog(input: {
 
 export function collapseThreadToCanonicalProject(input: {
   thread: Pick<Thread, "projectId" | "worktreePath" | "orchestratorProjectId">;
-  projects: readonly Pick<Project, "id" | "name" | "cwd" | "kind">[];
+  projects: readonly Pick<Project, "id" | "name" | "cwd" | "kind" | "sidebarParentProjectId">[];
 }): OrchestrationModeProjectBucket {
   const projectById = new Map(input.projects.map((project) => [project.id, project] as const));
   const directProject = projectById.get(input.thread.projectId);
   if (directProject) {
+    const configuredParentProject =
+      directProject.sidebarParentProjectId &&
+      directProject.sidebarParentProjectId !== directProject.id
+        ? projectById.get(directProject.sidebarParentProjectId)
+        : undefined;
+    if (configuredParentProject) {
+      return {
+        canonicalProjectId: configuredParentProject.id,
+        canonicalProjectName: configuredParentProject.name,
+      };
+    }
+
     return {
       canonicalProjectId: directProject.id,
       canonicalProjectName: directProject.name,

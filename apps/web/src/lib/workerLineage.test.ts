@@ -66,7 +66,7 @@ const rootThread = makeThread({
   orchestratorProjectId: undefined,
   orchestratorThreadId: undefined,
   parentThreadId: undefined,
-  workflowId: "wf-1",
+  workflowId: undefined,
 });
 
 function getIndicatorForWorker(
@@ -86,6 +86,16 @@ function getIndicatorForWorker(
 }
 
 describe("getWorkerLineageIndicator", () => {
+  it("returns null for a root orchestrator with null lineage fields", () => {
+    expect(
+      getWorkerLineageIndicator({
+        thread: rootThread,
+        threads: [rootThread],
+        projects: [orchestratorProject],
+      }),
+    ).toBeNull();
+  });
+
   it("returns null for a worker whose lineage resolves cleanly", () => {
     expect(getIndicatorForWorker()).toBeNull();
   });

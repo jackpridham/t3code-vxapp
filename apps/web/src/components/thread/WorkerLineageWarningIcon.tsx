@@ -8,6 +8,10 @@ const ICON_CLASS_BY_SEVERITY: Record<WorkerLineageIssueSeverity, string> = {
   info: "text-sky-500",
 };
 
+function formatSeverityLabel(severity: WorkerLineageIssueSeverity): string {
+  return severity === "error" ? "Error" : severity === "warning" ? "Warning" : "Info";
+}
+
 export function WorkerLineageWarningIcon({
   indicator,
 }: {
@@ -29,7 +33,7 @@ export function WorkerLineageWarningIcon({
       <TooltipTrigger
         render={
           <span
-            aria-label={indicator.label}
+            aria-label={indicator.description}
             className={`inline-flex shrink-0 items-center justify-center ${ICON_CLASS_BY_SEVERITY[indicator.severity]}`}
           >
             <Icon className="size-3" />
@@ -37,7 +41,16 @@ export function WorkerLineageWarningIcon({
         }
       />
       <TooltipPopup side="top" className="max-w-80 text-xs">
-        {indicator.description}
+        <div className="space-y-1">
+          <div className="font-medium">{indicator.label}</div>
+          <ul className="space-y-0.5">
+            {indicator.issues.map((issue) => (
+              <li key={issue.key}>
+                {formatSeverityLabel(issue.severity)}: {issue.message}
+              </li>
+            ))}
+          </ul>
+        </div>
       </TooltipPopup>
     </Tooltip>
   );

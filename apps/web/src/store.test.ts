@@ -474,6 +474,81 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.labels).toEqual(["orchestrator", "jasper"]);
   });
 
+  it("excludes deleted threads during full snapshot sync", () => {
+    const initialState: AppState = {
+      ...makeState(
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-deleted"),
+          title: "Stale deleted worker",
+        }),
+      ),
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-deleted"),
+          title: "Stale deleted worker",
+        }),
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(makeReadModelThread({ id: ThreadId.makeUnsafe("thread-active") }), {
+        threads: [
+          makeReadModelThread({
+            id: ThreadId.makeUnsafe("thread-active"),
+            title: "Active thread",
+          }),
+          makeReadModelThread({
+            id: ThreadId.makeUnsafe("worker-deleted"),
+            title: "Deleted worker",
+            deletedAt: "2026-02-27T00:00:01.000Z",
+          }),
+        ],
+      }),
+    );
+
+    expect(next.threads.map((thread) => thread.id)).toEqual(["thread-active"]);
+    expect(next.threads.some((thread) => thread.id === "worker-deleted")).toBe(false);
+  });
+
+  it("removes existing threads when partial read-model payload marks them deleted", () => {
+    const initialState: AppState = {
+      ...makeState(
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-keep"),
+          title: "Keep thread",
+        }),
+      ),
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-keep"),
+          title: "Keep thread",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-deleted"),
+          title: "Stale deleted worker",
+        }),
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(makeReadModelThread({ id: ThreadId.makeUnsafe("worker-deleted") }), {
+        snapshotProfile: "active-thread",
+        threads: [
+          makeReadModelThread({
+            id: ThreadId.makeUnsafe("worker-deleted"),
+            spawnRole: "worker",
+            deletedAt: "2026-02-27T00:00:01.000Z",
+          }),
+        ],
+      }),
+    );
+
+    expect(next.threads.map((thread) => thread.id)).toEqual(["thread-keep"]);
+    expect(next.threads.some((thread) => thread.id === "worker-deleted")).toBe(false);
+  });
+
   it("replaces projects using snapshot order during recovery", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");

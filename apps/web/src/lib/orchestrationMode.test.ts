@@ -196,23 +196,76 @@ describe("filterProjectThreadsForOrchestrationMode", () => {
     ).toEqual(["worker-current"]);
   });
 
-  it("keeps malformed workers visible so broken orchestration lineage is inspectable", () => {
+  it("returns only the selected-session worker for the r23 regression shape", () => {
+    const selectedRoot = makeThread({
+      id: ThreadId.makeUnsafe("r23-root"),
+      spawnRole: "orchestrator",
+      workflowId: "wf-r23-root",
+    });
+    const r23Worker = makeThread({
+      id: ThreadId.makeUnsafe("r23-worker"),
+      spawnRole: "worker",
+      orchestratorThreadId: selectedRoot.id,
+      parentThreadId: selectedRoot.id,
+      workflowId: "wf-r23-root",
+    });
+    const historicalMalformedWorker = makeThread({
+      id: ThreadId.makeUnsafe("old-vortex-scripts-worker"),
+      spawnRole: "worker",
+      orchestratorThreadId: undefined,
+      parentThreadId: undefined,
+      workflowId: undefined,
+    });
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads: [r23Worker, historicalMalformedWorker],
+        selectedSessionRootIds: [selectedRoot.id],
+        threadsForResolution: [selectedRoot, r23Worker, historicalMalformedWorker],
+        visibilityMode: "selected-session",
+      }).map((thread) => thread.id),
+    ).toEqual(["r23-worker"]);
+  });
+
+  it("keeps malformed workers visible in project-diagnostic mode", () => {
+    const selectedRoot = makeThread({
+      id: ThreadId.makeUnsafe("r23-root"),
+      spawnRole: "orchestrator",
+      workflowId: "wf-r23-root",
+    });
+    const r23Worker = makeThread({
+      id: ThreadId.makeUnsafe("r23-worker"),
+      spawnRole: "worker",
+      orchestratorThreadId: selectedRoot.id,
+      parentThreadId: selectedRoot.id,
+      workflowId: "wf-r23-root",
+    });
+    const historicalMalformedWorker = makeThread({
+      id: ThreadId.makeUnsafe("old-vortex-scripts-worker"),
+      spawnRole: "worker",
+      orchestratorThreadId: undefined,
+      parentThreadId: undefined,
+      workflowId: undefined,
+    });
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads: [r23Worker, historicalMalformedWorker],
+        selectedSessionRootIds: [selectedRoot.id],
+        threadsForResolution: [selectedRoot, r23Worker, historicalMalformedWorker],
+        visibilityMode: "project-diagnostic",
+      }).map((thread) => thread.id),
+    ).toEqual(["r23-worker", "old-vortex-scripts-worker"]);
+  });
+
+  it("keeps worker visibility when orchestratorThreadId matches selected root even without parent/workflow", () => {
     const threads = [
       makeThread({
-        id: ThreadId.makeUnsafe("root-current"),
-        spawnRole: "orchestrator",
-        workflowId: "wf-current",
-      }),
-      makeThread({
-        id: ThreadId.makeUnsafe("worker-malformed"),
+        id: ThreadId.makeUnsafe("worker-current"),
         spawnRole: "worker",
-        orchestratorThreadId: undefined,
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
         parentThreadId: undefined,
         workflowId: undefined,
-      }),
-      makeThread({
-        id: ThreadId.makeUnsafe("custom-thread"),
-        spawnRole: undefined,
       }),
     ];
 
@@ -222,7 +275,7 @@ describe("filterProjectThreadsForOrchestrationMode", () => {
         selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
         threadsForResolution: threads,
       }).map((thread) => thread.id),
-    ).toEqual(["worker-malformed", "custom-thread"]);
+    ).toEqual(["worker-current"]);
   });
 
   it("hides workers with an explicit non-current orchestratorThreadId even when resolution data is incomplete", () => {
@@ -256,11 +309,41 @@ describe("filterProjectThreadsForOrchestrationMode", () => {
         selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
         threadsForResolution: threads,
       }).map((thread) => thread.id),
-    ).toEqual(["worker-current", "worker-malformed"]);
+    ).toEqual(["worker-current"]);
   });
 });
 
 describe("collapseThreadToCanonicalProject", () => {
+  it("uses configured sidebar parent project for worker worktree projects", () => {
+    const projects = [
+      makeProject({
+        id: ProjectId.makeUnsafe("project-parent"),
+        name: "t3code-vxapp",
+        cwd: "/repo/t3code-vxapp",
+      }),
+      makeProject({
+        id: ProjectId.makeUnsafe("project-worker-worktree"),
+        name: "r25-phase6b-booking-schema",
+        cwd: "/repo/t3code-vxapp/.worktrees/r25-phase6b-booking-schema",
+        sidebarParentProjectId: ProjectId.makeUnsafe("project-parent"),
+      }),
+    ];
+
+    expect(
+      collapseThreadToCanonicalProject({
+        thread: {
+          projectId: ProjectId.makeUnsafe("project-worker-worktree"),
+          worktreePath: "/repo/t3code-vxapp/.worktrees/r25-phase6b-booking-schema",
+          orchestratorProjectId: ProjectId.makeUnsafe("project-orchestrator"),
+        },
+        projects,
+      }),
+    ).toMatchObject({
+      canonicalProjectId: "project-parent",
+      canonicalProjectName: "t3code-vxapp",
+    });
+  });
+
   it("keeps same-project worktrees under their real project bucket", () => {
     const projects = [
       makeProject({
