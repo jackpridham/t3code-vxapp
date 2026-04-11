@@ -1980,6 +1980,200 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("keeps running turns active through provisional missing diffs", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      const projectId = ProjectId.makeUnsafe("project-running-missing-diff");
+      const threadId = ThreadId.makeUnsafe("thread-running-missing-diff");
+      const turnId = TurnId.makeUnsafe("turn-running-missing-diff");
+      const messageId = MessageId.makeUnsafe("message-running-missing-diff");
+      const assistantId = MessageId.makeUnsafe("assistant:turn-running-missing-diff");
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-running-missing-diff-1"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: "2026-02-26T17:00:00.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-missing-diff-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-missing-diff-1"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Project Running Missing Diff",
+          workspaceRoot: "/tmp/project-running-missing-diff",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: "2026-02-26T17:00:00.000Z",
+          updatedAt: "2026-02-26T17:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-running-missing-diff-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T17:00:01.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-missing-diff-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-missing-diff-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Thread Running Missing Diff",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T17:00:01.000Z",
+          updatedAt: "2026-02-26T17:00:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-start-requested",
+        eventId: EventId.makeUnsafe("evt-running-missing-diff-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T17:00:02.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-missing-diff-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-missing-diff-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          createdAt: "2026-02-26T17:00:02.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-running-missing-diff-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T17:00:03.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-missing-diff-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-missing-diff-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-02-26T17:00:03.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.makeUnsafe("evt-running-missing-diff-5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T17:00:04.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-missing-diff-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-missing-diff-5"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.makeUnsafe("provider-diff:running-missing-diff"),
+          status: "missing",
+          files: [],
+          assistantMessageId: assistantId,
+          completedAt: "2026-02-26T17:00:04.000Z",
+        },
+      });
+
+      let turnRows = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly checkpointStatus: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          checkpoint_status AS "checkpointStatus"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(turnRows, [
+        {
+          state: "running",
+          completedAt: null,
+          checkpointStatus: "missing",
+        },
+      ]);
+
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.makeUnsafe("evt-running-missing-diff-6"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T17:00:05.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-missing-diff-6"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-missing-diff-6"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.makeUnsafe(
+            "refs/t3/checkpoints/thread-running-missing-diff/turn/1",
+          ),
+          status: "ready",
+          files: [],
+          assistantMessageId: assistantId,
+          completedAt: "2026-02-26T17:00:05.000Z",
+        },
+      });
+
+      turnRows = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly checkpointStatus: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          checkpoint_status AS "checkpointStatus"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(turnRows, [
+        {
+          state: "completed",
+          completedAt: "2026-02-26T17:00:05.000Z",
+          checkpointStatus: "ready",
+        },
+      ]);
+    }),
+  );
+
   it.effect("does not fallback-retain messages whose turnId is removed by revert", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;

@@ -110,10 +110,28 @@ function nextProjectionTurnState(
   existingTurn: Option.Option<ProjectionTurn>,
   status: "ready" | "missing" | "error",
 ): ProjectionTurn["state"] {
+  if (
+    status === "missing" &&
+    Option.isSome(existingTurn) &&
+    (existingTurn.value.state === "running" || existingTurn.value.state === "pending")
+  ) {
+    return existingTurn.value.state;
+  }
   if (Option.isSome(existingTurn) && existingTurn.value.state === "interrupted") {
     return "interrupted";
   }
   return checkpointStatusToProjectionTurnState(status);
+}
+
+function nextProjectionTurnCompletedAt(
+  existingTurn: Option.Option<ProjectionTurn>,
+  nextState: ProjectionTurn["state"],
+  completedAt: string,
+): string | null {
+  if ((nextState === "running" || nextState === "pending") && Option.isSome(existingTurn)) {
+    return existingTurn.value.completedAt;
+  }
+  return completedAt;
 }
 
 function retainProjectionMessagesAfterRevert(
@@ -1193,7 +1211,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
           });
+          if (
+            event.payload.status === "missing" &&
+            Option.isSome(existingTurn) &&
+            existingTurn.value.checkpointStatus !== null &&
+            existingTurn.value.checkpointStatus !== "missing"
+          ) {
+            return;
+          }
           const nextState = nextProjectionTurnState(existingTurn, event.payload.status);
+          const nextCompletedAt = nextProjectionTurnCompletedAt(
+            existingTurn,
+            nextState,
+            event.payload.completedAt,
+          );
           yield* projectionTurnRepository.clearCheckpointTurnConflict({
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
@@ -1211,7 +1242,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               checkpointFiles: event.payload.files,
               startedAt: existingTurn.value.startedAt ?? event.payload.completedAt,
               requestedAt: existingTurn.value.requestedAt ?? event.payload.completedAt,
-              completedAt: event.payload.completedAt,
+              completedAt: nextCompletedAt,
             });
             return;
           }

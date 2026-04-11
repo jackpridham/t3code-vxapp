@@ -931,6 +931,64 @@ describe("incremental orchestration updates", () => {
     expect(next.threads[0]?.latestTurn).toEqual(state.threads[0]?.latestTurn);
   });
 
+  it("keeps running turns active through provisional missing diffs", () => {
+    const turnId = TurnId.makeUnsafe("turn-running-missing-diff");
+    const state = makeState(
+      makeThread({
+        latestTurn: {
+          turnId,
+          state: "running",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:01.000Z",
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      }),
+    );
+
+    const afterMissing = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-diff-completed", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId,
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("provider-diff:running-missing-diff"),
+        status: "missing",
+        files: [],
+        assistantMessageId: MessageId.makeUnsafe("assistant:turn-running-missing-diff"),
+        completedAt: "2026-02-27T00:00:02.000Z",
+      }),
+    );
+
+    expect(afterMissing.threads[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "running",
+      completedAt: null,
+    });
+    expect(afterMissing.threads[0]?.turnDiffSummaries[0]?.status).toBe("missing");
+
+    const afterAssistantComplete = applyOrchestrationEvent(
+      afterMissing,
+      makeEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("assistant-real"),
+        role: "assistant",
+        text: "done",
+        turnId,
+        streaming: false,
+        createdAt: "2026-02-27T00:00:03.000Z",
+        updatedAt: "2026-02-27T00:00:03.000Z",
+      }),
+    );
+
+    expect(afterAssistantComplete.threads[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "completed",
+      completedAt: "2026-02-27T00:00:03.000Z",
+      assistantMessageId: MessageId.makeUnsafe("assistant-real"),
+    });
+  });
+
   it("rebinds live turn diffs to the authoritative assistant message when it arrives later", () => {
     const turnId = TurnId.makeUnsafe("turn-1");
     const state = makeState(
