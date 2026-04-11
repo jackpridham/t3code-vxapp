@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 
 import type { Project, Thread } from "../types";
-import { getWorkerLineageWarningDescription } from "./workerLineage";
+import { getWorkerLineageIndicator } from "./workerLineage";
 
 function makeThread(
   overrides: Partial<
@@ -53,42 +53,146 @@ function makeProject(
   };
 }
 
-describe("getWorkerLineageWarningDescription", () => {
-  it("returns null for a worker whose lineage resolves cleanly", () => {
-    const orchestratorProject = makeProject({
-      id: ProjectId.makeUnsafe("project-orchestrator"),
-      name: "Jasper",
-      cwd: "/tmp/jasper",
-    });
-    const rootThread = makeThread({
-      id: ThreadId.makeUnsafe("root-1"),
-      projectId: orchestratorProject.id,
-      spawnRole: "orchestrator",
-      orchestratorProjectId: undefined,
-      orchestratorThreadId: undefined,
-      parentThreadId: undefined,
-      workflowId: "wf-1",
-    });
+const orchestratorProject = makeProject({
+  id: ProjectId.makeUnsafe("project-orchestrator"),
+  name: "Jasper",
+  cwd: "/tmp/jasper",
+});
 
-    expect(
-      getWorkerLineageWarningDescription({
-        thread: makeThread(),
-        threads: [rootThread, makeThread()],
-        projects: [makeProject(), orchestratorProject],
-      }),
-    ).toBeNull();
+const rootThread = makeThread({
+  id: ThreadId.makeUnsafe("root-1"),
+  projectId: orchestratorProject.id,
+  spawnRole: "orchestrator",
+  orchestratorProjectId: undefined,
+  orchestratorThreadId: undefined,
+  parentThreadId: undefined,
+  workflowId: "wf-1",
+});
+
+function getIndicatorForWorker(
+  threadOverrides: Partial<
+    Pick<Thread, "orchestratorProjectId" | "orchestratorThreadId" | "parentThreadId" | "workflowId">
+  > = {},
+  resolutionOverrides: {
+    threads?: readonly Pick<Thread, "id">[];
+    projects?: readonly Pick<Project, "id">[];
+  } = {},
+) {
+  return getWorkerLineageIndicator({
+    thread: makeThread(threadOverrides),
+    threads: resolutionOverrides.threads ?? [rootThread, makeThread()],
+    projects: resolutionOverrides.projects ?? [makeProject(), orchestratorProject],
+  });
+}
+
+describe("getWorkerLineageIndicator", () => {
+  it("returns null for a worker whose lineage resolves cleanly", () => {
+    expect(getIndicatorForWorker()).toBeNull();
   });
 
-  it("returns a warning when required worker lineage fields are missing", () => {
-    expect(
-      getWorkerLineageWarningDescription({
-        thread: makeThread({
-          orchestratorProjectId: undefined,
-          orchestratorThreadId: undefined,
-          parentThreadId: undefined,
-          workflowId: undefined,
-        }),
-      }),
-    ).toContain("Worker lineage warning:");
+  it("returns info when only workflowId is missing", () => {
+    const indicator = getIndicatorForWorker({ workflowId: undefined });
+
+    expect(indicator).toMatchObject({
+      severity: "info",
+      label: "Worker lineage note",
+      description: "Worker lineage note: Missing workflowId.",
+    });
+    expect(indicator?.issues).toEqual([
+      {
+        key: "missing-workflow-id",
+        severity: "info",
+        message: "Missing workflowId.",
+      },
+    ]);
+  });
+
+  it("returns error for missing orchestrator linkage", () => {
+    const indicator = getIndicatorForWorker({
+      orchestratorProjectId: undefined,
+      orchestratorThreadId: undefined,
+    });
+
+    expect(indicator).toMatchObject({
+      severity: "error",
+      label: "Worker ownership problem",
+    });
+    expect(indicator?.issues.map((issue) => [issue.key, issue.severity])).toEqual([
+      ["missing-orchestrator-project-id", "error"],
+      ["missing-orchestrator-thread-id", "error"],
+    ]);
+  });
+
+  it("returns error for unknown orchestrator linkage", () => {
+    const indicator = getIndicatorForWorker(
+      {
+        orchestratorProjectId: ProjectId.makeUnsafe("missing-project"),
+        orchestratorThreadId: ThreadId.makeUnsafe("missing-root"),
+      },
+      {
+        threads: [rootThread, makeThread()],
+        projects: [makeProject(), orchestratorProject],
+      },
+    );
+
+    expect(indicator).toMatchObject({
+      severity: "error",
+      label: "Worker ownership problem",
+    });
+    expect(indicator?.issues.map((issue) => [issue.key, issue.severity])).toEqual([
+      ["unknown-orchestrator-project", "error"],
+      ["unknown-orchestrator-thread", "error"],
+    ]);
+  });
+
+  it("returns warning for missing parent linkage", () => {
+    const indicator = getIndicatorForWorker({ parentThreadId: undefined });
+
+    expect(indicator).toMatchObject({
+      severity: "warning",
+      label: "Worker lineage warning",
+    });
+    expect(indicator?.issues).toEqual([
+      {
+        key: "missing-parent-thread-id",
+        severity: "warning",
+        message: "Missing parentThreadId.",
+      },
+    ]);
+  });
+
+  it("returns warning for unknown parent linkage", () => {
+    const indicator = getIndicatorForWorker({
+      parentThreadId: ThreadId.makeUnsafe("missing-parent"),
+    });
+
+    expect(indicator).toMatchObject({
+      severity: "warning",
+      label: "Worker lineage warning",
+    });
+    expect(indicator?.issues.map((issue) => [issue.key, issue.severity])).toEqual([
+      ["unknown-parent-thread", "warning"],
+    ]);
+  });
+
+  it("uses the highest severity while preserving every issue message", () => {
+    const indicator = getIndicatorForWorker({
+      orchestratorThreadId: undefined,
+      parentThreadId: undefined,
+      workflowId: undefined,
+    });
+
+    expect(indicator).toMatchObject({
+      severity: "error",
+      label: "Worker ownership problem",
+    });
+    expect(indicator?.description).toBe(
+      "Worker ownership problem: Missing orchestratorThreadId. Missing parentThreadId. Missing workflowId.",
+    );
+    expect(indicator?.issues.map((issue) => [issue.key, issue.severity, issue.message])).toEqual([
+      ["missing-orchestrator-thread-id", "error", "Missing orchestratorThreadId."],
+      ["missing-parent-thread-id", "warning", "Missing parentThreadId."],
+      ["missing-workflow-id", "info", "Missing workflowId."],
+    ]);
   });
 });

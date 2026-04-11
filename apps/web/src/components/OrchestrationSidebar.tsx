@@ -156,7 +156,7 @@ import {
   filterProjectThreadsForOrchestrationMode,
   resolveConfiguredProjectBuckets,
 } from "../lib/orchestrationMode";
-import { getWorkerLineageWarningDescription } from "../lib/workerLineage";
+import { getWorkerLineageIndicator } from "../lib/workerLineage";
 import {
   orchestrationProjectThreadsQueryOptions,
   orchestrationSessionThreadsQueryOptions,
@@ -1756,7 +1756,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       const terminalStatus = buildTerminalStatusIndicator(
         selectThreadTerminalState(terminalStateByThreadId, thread.id).runningTerminalIds,
       );
-      const workerLineageWarning = getWorkerLineageWarningDescription({
+      const workerLineageIndicator = getWorkerLineageIndicator({
         thread,
         threads: threadsForOrchestrationResolution,
         projects,
@@ -1796,7 +1796,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
           threadStatus={threadStatus}
           prStatus={prStatus}
           terminalStatus={terminalStatus}
-          workerLineageWarning={workerLineageWarning}
+          workerLineageIndicator={workerLineageIndicator}
           isThreadRunning={isThreadRunning}
           isConfirmingArchive={isConfirmingArchive}
           confirmThreadArchive={appSettings.confirmThreadArchive}

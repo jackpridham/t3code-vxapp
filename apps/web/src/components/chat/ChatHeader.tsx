@@ -8,11 +8,12 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { getDisplayThreadLabelEntries } from "../../lib/threadLabels";
+import type { WorkerLineageIndicator } from "../../lib/workerLineage";
 import { WorkerLineageWarningIcon } from "../thread/WorkerLineageWarningIcon";
 
 interface ChatHeaderProps {
   activeThreadLabels?: string[] | undefined;
-  activeThreadWorkerLineageWarning?: string | null;
+  activeThreadWorkerLineageIndicator?: WorkerLineageIndicator | null;
   activeProjectName: string | undefined;
   activeProjectHooks: ProjectHook[] | undefined;
   terminalAvailable: boolean;
@@ -32,7 +33,7 @@ interface ChatHeaderProps {
 
 export const ChatHeader = memo(function ChatHeader({
   activeThreadLabels,
-  activeThreadWorkerLineageWarning,
+  activeThreadWorkerLineageIndicator,
   activeProjectName,
   activeProjectHooks,
   terminalAvailable,
@@ -75,7 +76,7 @@ export const ChatHeader = memo(function ChatHeader({
             ))}
           </div>
         )}
-        <WorkerLineageWarningIcon description={activeThreadWorkerLineageWarning ?? null} />
+        <WorkerLineageWarningIcon indicator={activeThreadWorkerLineageIndicator ?? null} />
       </div>
       <div className="flex shrink-0 items-center justify-end gap-2 @3xl/header-actions:gap-3">
         {activeProjectHooks && (
