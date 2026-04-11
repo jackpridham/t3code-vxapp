@@ -38,6 +38,7 @@ import Migration0022 from "./Migrations/022_ProjectionThreadLineage.ts";
 import Migration0023 from "./Migrations/023_ProjectionOrchestratorWakes.ts";
 import Migration0024 from "./Migrations/024_ProjectionProjectCurrentSessionRoot.ts";
 import Migration0025 from "./Migrations/025_ProjectionProjectSidebarParent.ts";
+import Migration0026 from "./Migrations/026_ReconcileCompletedWakeTurnStatus.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -75,6 +76,7 @@ export const migrationEntries = [
   [23, "ProjectionOrchestratorWakes", Migration0023],
   [24, "ProjectionProjectCurrentSessionRoot", Migration0024],
   [25, "ProjectionProjectSidebarParent", Migration0025],
+  [26, "ReconcileCompletedWakeTurnStatus", Migration0026],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
