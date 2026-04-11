@@ -1790,6 +1790,196 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       }),
   );
 
+  it.effect("keeps latest-turn interrupts visible through checkpoint completion", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      const threadId = ThreadId.makeUnsafe("thread-interrupt-latest");
+      const turnId = TurnId.makeUnsafe("turn-interrupt-latest");
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-interrupt-latest-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.makeUnsafe("project-interrupt-latest"),
+        occurredAt: "2026-02-26T14:00:00.000Z",
+        commandId: CommandId.makeUnsafe("cmd-interrupt-latest-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-interrupt-latest-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.makeUnsafe("project-interrupt-latest"),
+          title: "Project Interrupt Latest",
+          workspaceRoot: "/tmp/project-interrupt-latest",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: "2026-02-26T14:00:00.000Z",
+          updatedAt: "2026-02-26T14:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-interrupt-latest-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T14:00:01.000Z",
+        commandId: CommandId.makeUnsafe("cmd-interrupt-latest-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-interrupt-latest-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.makeUnsafe("project-interrupt-latest"),
+          title: "Thread Interrupt Latest",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T14:00:01.000Z",
+          updatedAt: "2026-02-26T14:00:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-interrupt-latest-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T14:00:02.000Z",
+        commandId: CommandId.makeUnsafe("cmd-interrupt-latest-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-interrupt-latest-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-02-26T14:00:02.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.makeUnsafe("evt-interrupt-latest-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T14:00:03.000Z",
+        commandId: CommandId.makeUnsafe("cmd-interrupt-latest-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-interrupt-latest-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.makeUnsafe("assistant-interrupt-latest"),
+          role: "assistant",
+          text: "working",
+          turnId,
+          streaming: true,
+          createdAt: "2026-02-26T14:00:03.000Z",
+          updatedAt: "2026-02-26T14:00:03.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.turn-interrupt-requested",
+        eventId: EventId.makeUnsafe("evt-interrupt-latest-5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T14:00:04.000Z",
+        commandId: CommandId.makeUnsafe("cmd-interrupt-latest-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-interrupt-latest-5"),
+        metadata: {},
+        payload: {
+          threadId,
+          createdAt: "2026-02-26T14:00:04.000Z",
+        },
+      });
+
+      let turnRows = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly checkpointStatus: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          checkpoint_status AS "checkpointStatus"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(turnRows, [
+        {
+          state: "interrupted",
+          completedAt: "2026-02-26T14:00:04.000Z",
+          checkpointStatus: null,
+        },
+      ]);
+
+      yield* appendAndProject({
+        type: "thread.turn-diff-completed",
+        eventId: EventId.makeUnsafe("evt-interrupt-latest-6"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T14:00:05.000Z",
+        commandId: CommandId.makeUnsafe("cmd-interrupt-latest-6"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-interrupt-latest-6"),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.makeUnsafe(
+            "refs/t3/checkpoints/thread-interrupt-latest/turn/1",
+          ),
+          status: "ready",
+          files: [],
+          assistantMessageId: MessageId.makeUnsafe("assistant-interrupt-latest"),
+          completedAt: "2026-02-26T14:00:05.000Z",
+        },
+      });
+
+      turnRows = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly checkpointStatus: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          checkpoint_status AS "checkpointStatus"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(turnRows, [
+        {
+          state: "interrupted",
+          completedAt: "2026-02-26T14:00:05.000Z",
+          checkpointStatus: "ready",
+        },
+      ]);
+    }),
+  );
+
   it.effect("does not fallback-retain messages whose turnId is removed by revert", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;

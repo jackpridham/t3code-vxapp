@@ -94,6 +94,28 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null {
   return typeof requestId === "string" ? ApprovalRequestId.makeUnsafe(requestId) : null;
 }
 
+function checkpointStatusToProjectionTurnState(
+  status: "ready" | "missing" | "error",
+): ProjectionTurn["state"] {
+  if (status === "error") {
+    return "error";
+  }
+  if (status === "missing") {
+    return "interrupted";
+  }
+  return "completed";
+}
+
+function nextProjectionTurnState(
+  existingTurn: Option.Option<ProjectionTurn>,
+  status: "ready" | "missing" | "error",
+): ProjectionTurn["state"] {
+  if (Option.isSome(existingTurn) && existingTurn.value.state === "interrupted") {
+    return "interrupted";
+  }
+  return checkpointStatusToProjectionTurnState(status);
+}
+
 function retainProjectionMessagesAfterRevert(
   messages: ReadonlyArray<ProjectionThreadMessage>,
   turns: ReadonlyArray<ProjectionTurn>,
@@ -1121,12 +1143,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.turn-interrupt-requested": {
-          if (event.payload.turnId === undefined) {
+          const existingThread =
+            event.payload.turnId === undefined
+              ? yield* projectionThreadRepository.getById({
+                  threadId: event.payload.threadId,
+                })
+              : Option.none();
+          const targetTurnId =
+            event.payload.turnId ??
+            (Option.isSome(existingThread) ? existingThread.value.latestTurnId : null);
+          if (targetTurnId === null) {
             return;
           }
           const existingTurn = yield* projectionTurnRepository.getByTurnId({
             threadId: event.payload.threadId,
-            turnId: event.payload.turnId,
+            turnId: targetTurnId,
           });
           if (Option.isSome(existingTurn)) {
             yield* projectionTurnRepository.upsertByTurnId({
@@ -1139,7 +1170,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
           yield* projectionTurnRepository.upsertByTurnId({
-            turnId: event.payload.turnId,
+            turnId: targetTurnId,
             threadId: event.payload.threadId,
             pendingMessageId: null,
             sourceProposedPlanThreadId: null,
@@ -1162,7 +1193,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
           });
-          const nextState = event.payload.status === "error" ? "error" : "completed";
+          const nextState = nextProjectionTurnState(existingTurn, event.payload.status);
           yield* projectionTurnRepository.clearCheckpointTurnConflict({
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
