@@ -39,12 +39,25 @@ export const DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH = true;
 export const ChatViewInputWhenScrolling = Schema.Literals(["hide", "show", "compact"]);
 export type ChatViewInputWhenScrolling = typeof ChatViewInputWhenScrolling.Type;
 export const DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING: ChatViewInputWhenScrolling = "compact";
+export const WorkerChatViewVisibility = Schema.Literals(["always_show", "always_hide"]);
+export type WorkerChatViewVisibility = typeof WorkerChatViewVisibility.Type;
+export const DEFAULT_WORKER_CHAT_VIEW_VISIBILITY: WorkerChatViewVisibility = "always_hide";
+export const WorkerOrchestrationNoticesVisibility = Schema.Literals(["always_show", "always_hide"]);
+export type WorkerOrchestrationNoticesVisibility = typeof WorkerOrchestrationNoticesVisibility.Type;
+export const DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY: WorkerOrchestrationNoticesVisibility =
+  "always_hide";
 
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   chatViewInputWhenScrolling: ChatViewInputWhenScrolling.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING),
+  ),
+  workerChatViewVisibility: WorkerChatViewVisibility.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_WORKER_CHAT_VIEW_VISIBILITY),
+  ),
+  workerOrchestrationNoticesVisibility: WorkerOrchestrationNoticesVisibility.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY),
   ),
   changesPanelFilesChangedViewType: ChangesPanelFilesChangedViewType.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE),

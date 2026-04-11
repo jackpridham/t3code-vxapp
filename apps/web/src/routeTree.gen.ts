@@ -16,6 +16,7 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SidebarThreadIdRouteImport } from './routes/sidebar.$threadId'
 import { Route as SettingsThreadsRouteImport } from './routes/settings.threads'
+import { Route as SettingsOrchestrationRouteImport } from './routes/settings.orchestration'
 import { Route as SettingsNotificationsRouteImport } from './routes/settings.notifications'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
@@ -56,6 +57,11 @@ const SettingsThreadsRoute = SettingsThreadsRouteImport.update({
   path: '/threads',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsOrchestrationRoute = SettingsOrchestrationRouteImport.update({
+  id: '/orchestration',
+  path: '/orchestration',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsNotificationsRoute = SettingsNotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -92,6 +98,7 @@ export interface FileRoutesByFullPath {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/orchestration': typeof SettingsOrchestrationRoute
   '/settings/threads': typeof SettingsThreadsRoute
   '/sidebar/$threadId': typeof SidebarThreadIdRoute
 }
@@ -104,6 +111,7 @@ export interface FileRoutesByTo {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/orchestration': typeof SettingsOrchestrationRoute
   '/settings/threads': typeof SettingsThreadsRoute
   '/sidebar/$threadId': typeof SidebarThreadIdRoute
   '/': typeof ChatIndexRoute
@@ -119,6 +127,7 @@ export interface FileRoutesById {
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/orchestration': typeof SettingsOrchestrationRoute
   '/settings/threads': typeof SettingsThreadsRoute
   '/sidebar/$threadId': typeof SidebarThreadIdRoute
   '/_chat/': typeof ChatIndexRoute
@@ -135,6 +144,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/general'
     | '/settings/notifications'
+    | '/settings/orchestration'
     | '/settings/threads'
     | '/sidebar/$threadId'
   fileRoutesByTo: FileRoutesByTo
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/general'
     | '/settings/notifications'
+    | '/settings/orchestration'
     | '/settings/threads'
     | '/sidebar/$threadId'
     | '/'
@@ -161,6 +172,7 @@ export interface FileRouteTypes {
     | '/settings/archived'
     | '/settings/general'
     | '/settings/notifications'
+    | '/settings/orchestration'
     | '/settings/threads'
     | '/sidebar/$threadId'
     | '/_chat/'
@@ -225,6 +237,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsThreadsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/orchestration': {
+      id: '/settings/orchestration'
+      path: '/orchestration'
+      fullPath: '/settings/orchestration'
+      preLoaderRoute: typeof SettingsOrchestrationRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/notifications': {
       id: '/settings/notifications'
       path: '/notifications'
@@ -279,6 +298,7 @@ interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsNotificationsRoute: typeof SettingsNotificationsRoute
+  SettingsOrchestrationRoute: typeof SettingsOrchestrationRoute
   SettingsThreadsRoute: typeof SettingsThreadsRoute
 }
 
@@ -286,6 +306,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivedRoute: SettingsArchivedRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsNotificationsRoute: SettingsNotificationsRoute,
+  SettingsOrchestrationRoute: SettingsOrchestrationRoute,
   SettingsThreadsRoute: SettingsThreadsRoute,
 }
 

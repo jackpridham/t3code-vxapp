@@ -1,6 +1,8 @@
 import {
   DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING,
   DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY,
+  DEFAULT_WORKER_CHAT_VIEW_VISIBILITY,
 } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vitest";
 import { buildLegacyClientSettingsMigrationPatch } from "./useSettings";
@@ -16,6 +18,18 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     );
   });
 
+  it("defaults worker chat view to hidden", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.workerChatViewVisibility).toBe(
+      DEFAULT_WORKER_CHAT_VIEW_VISIBILITY,
+    );
+  });
+
+  it("defaults worker orchestration notices to hidden", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.workerOrchestrationNoticesVisibility).toBe(
+      DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY,
+    );
+  });
+
   it("migrates archive confirmation from legacy local settings", () => {
     expect(
       buildLegacyClientSettingsMigrationPatch({
@@ -28,6 +42,8 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
         sidebarOrchestrationModeEnabled: true,
         sidebarProjectSortOrder: "manual",
         showGitignoredFilesInMentions: true,
+        workerChatViewVisibility: "always_show",
+        workerOrchestrationNoticesVisibility: "always_show",
       }),
     ).toEqual({
       allowActiveThreadsInFold: true,
@@ -42,6 +58,8 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       sidebarOrchestrationModeEnabled: true,
       sidebarProjectSortOrder: "manual",
       showGitignoredFilesInMentions: true,
+      workerChatViewVisibility: "always_show",
+      workerOrchestrationNoticesVisibility: "always_show",
     });
   });
 
@@ -51,6 +69,8 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       changesDrawerVisibility: "always_show",
       changesPanelWindowNavigationMode: "dynamic",
       rememberChangesDrawerWidth: true,
+      workerChatViewVisibility: "always_hide",
+      workerOrchestrationNoticesVisibility: "always_hide",
     });
   });
 });

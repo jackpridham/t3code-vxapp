@@ -193,6 +193,8 @@ import {
   hasServerAcknowledgedLocalDispatch,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
+  resolveInitialWorkerComposerHidden,
+  resolveInitialWorkerOrchestrationNoticesHidden,
   type LocalDispatchSnapshot,
   PullRequestDialogState,
   readFileAsDataUrl,
@@ -451,7 +453,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.setStickyModelSelection,
   );
   const chatViewInputWhenScrolling = settings.chatViewInputWhenScrolling;
+  const sidebarOrchestrationModeEnabled = settings.sidebarOrchestrationModeEnabled;
   const timestampFormat = settings.timestampFormat;
+  const workerChatViewVisibility = settings.workerChatViewVisibility;
+  const workerOrchestrationNoticesVisibility = settings.workerOrchestrationNoticesVisibility;
   const navigate = useNavigate();
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
@@ -514,6 +519,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isComposerManuallyHidden, setIsComposerManuallyHidden] = useState(false);
   const [isComposerRevealedWhileScrolled, setIsComposerRevealedWhileScrolled] = useState(false);
+  const [areOrchestrationNoticesHidden, setAreOrchestrationNoticesHidden] = useState(false);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -589,6 +595,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
+  const initializedComposerVisibilityThreadIdRef = useRef<ThreadId | null>(null);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
     messagesScrollRef.current = element;
@@ -736,6 +743,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         .at(-1) ?? null,
     [workerWakeItems],
   );
+  const orchestrationNoticeCount =
+    activeOrchestratorWakeItems.length +
+    (activeThread?.spawnRole === "worker" && latestWorkerWakeItem ? 1 : 0);
   const activeThreadWorkerLineageIndicator = useMemo(
     () =>
       activeThread
@@ -747,6 +757,38 @@ export default function ChatView({ threadId }: ChatViewProps) {
         : null,
     [activeThread, projects, threads],
   );
+
+  useEffect(() => {
+    if (!activeThread) {
+      initializedComposerVisibilityThreadIdRef.current = null;
+      return;
+    }
+    if (initializedComposerVisibilityThreadIdRef.current === activeThread.id) {
+      return;
+    }
+
+    initializedComposerVisibilityThreadIdRef.current = activeThread.id;
+    setIsComposerManuallyHidden(
+      resolveInitialWorkerComposerHidden({
+        orchestrationModeEnabled: sidebarOrchestrationModeEnabled,
+        spawnRole: activeThread.spawnRole,
+        workerChatViewVisibility,
+      }),
+    );
+    setIsComposerRevealedWhileScrolled(false);
+    setAreOrchestrationNoticesHidden(
+      resolveInitialWorkerOrchestrationNoticesHidden({
+        orchestrationModeEnabled: sidebarOrchestrationModeEnabled,
+        spawnRole: activeThread.spawnRole,
+        workerOrchestrationNoticesVisibility,
+      }),
+    );
+  }, [
+    activeThread,
+    sidebarOrchestrationModeEnabled,
+    workerChatViewVisibility,
+    workerOrchestrationNoticesVisibility,
+  ]);
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -3863,41 +3905,73 @@ export default function ChatView({ threadId }: ChatViewProps) {
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
-      {activeOrchestratorWakeItems.length > 0 ? (
+      {orchestrationNoticeCount > 0 ? (
         <div className="border-b border-border px-3 py-2 sm:px-5">
-          <Alert>
-            <ListTodoIcon className="size-4" />
-            <AlertTitle>Worker wake queue</AlertTitle>
-            <AlertDescription>
-              <div className="space-y-2">
-                {activeOrchestratorWakeItems.map((wakeItem) => (
-                  <div
-                    key={wakeItem.wakeId}
-                    className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
-                  >
-                    <span className="font-medium text-foreground">
-                      {wakeItem.workerTitleSnapshot}
-                    </span>
-                    <span>{formatWakeStateLabel(wakeItem.state)}</span>
-                    <span>{wakeItem.outcome}</span>
-                    <span>{wakeItem.summary}</span>
-                  </div>
-                ))}
-              </div>
-            </AlertDescription>
-          </Alert>
-        </div>
-      ) : null}
-      {activeThread.spawnRole === "worker" && latestWorkerWakeItem !== null ? (
-        <div className="border-b border-border px-3 py-2 sm:px-5">
-          <Alert>
-            <BotIcon className="size-4" />
-            <AlertTitle>Orchestrator wake status</AlertTitle>
-            <AlertDescription className="text-xs text-muted-foreground">
-              {formatWakeStateLabel(latestWorkerWakeItem.state)} for{" "}
-              {latestWorkerWakeItem.orchestratorThreadId}. {latestWorkerWakeItem.summary}
-            </AlertDescription>
-          </Alert>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-foreground">Orchestration notices</p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {orchestrationNoticeCount} active wake{" "}
+                {orchestrationNoticeCount === 1 ? "notice" : "notices"}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              onClick={() => setAreOrchestrationNoticesHidden((hidden) => !hidden)}
+              aria-expanded={!areOrchestrationNoticesHidden}
+              aria-label={
+                areOrchestrationNoticesHidden
+                  ? "Show orchestration notices"
+                  : "Hide orchestration notices"
+              }
+            >
+              {areOrchestrationNoticesHidden ? (
+                <ChevronDownIcon className="size-3.5" />
+              ) : (
+                <ChevronUpIcon className="size-3.5" />
+              )}
+              {areOrchestrationNoticesHidden ? "Show" : "Hide"}
+            </Button>
+          </div>
+          {!areOrchestrationNoticesHidden ? (
+            <div className="space-y-2">
+              {activeOrchestratorWakeItems.length > 0 ? (
+                <Alert>
+                  <ListTodoIcon className="size-4" />
+                  <AlertTitle>Worker wake queue</AlertTitle>
+                  <AlertDescription>
+                    <div className="space-y-2">
+                      {activeOrchestratorWakeItems.map((wakeItem) => (
+                        <div
+                          key={wakeItem.wakeId}
+                          className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+                        >
+                          <span className="font-medium text-foreground">
+                            {wakeItem.workerTitleSnapshot}
+                          </span>
+                          <span>{formatWakeStateLabel(wakeItem.state)}</span>
+                          <span>{wakeItem.outcome}</span>
+                          <span>{wakeItem.summary}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              {activeThread.spawnRole === "worker" && latestWorkerWakeItem !== null ? (
+                <Alert>
+                  <BotIcon className="size-4" />
+                  <AlertTitle>Orchestrator wake status</AlertTitle>
+                  <AlertDescription className="text-xs text-muted-foreground">
+                    {formatWakeStateLabel(latestWorkerWakeItem.state)} for{" "}
+                    {latestWorkerWakeItem.orchestratorThreadId}. {latestWorkerWakeItem.summary}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {/* Main content area with optional plan sidebar */}

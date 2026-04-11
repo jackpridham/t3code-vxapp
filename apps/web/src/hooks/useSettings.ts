@@ -32,12 +32,16 @@ import {
   DEFAULT_CHANGES_DRAWER_VISIBILITY,
   DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE,
   DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH,
+  DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY,
+  DEFAULT_WORKER_CHAT_VIEW_VISIBILITY,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
   UnifiedSettings,
+  WorkerOrchestrationNoticesVisibility,
+  WorkerChatViewVisibility,
 } from "@t3tools/contracts/settings";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import { ensureNativeApi } from "~/nativeApi";
@@ -224,6 +228,23 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.chatViewInputWhenScrolling = legacySettings.chatViewInputWhenScrolling;
   } else if (legacySettings.chatViewInputWhenScrolling === undefined) {
     patch.chatViewInputWhenScrolling = DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING;
+  }
+
+  if (Schema.is(WorkerChatViewVisibility)(legacySettings.workerChatViewVisibility)) {
+    patch.workerChatViewVisibility = legacySettings.workerChatViewVisibility;
+  } else if (legacySettings.workerChatViewVisibility === undefined) {
+    patch.workerChatViewVisibility = DEFAULT_WORKER_CHAT_VIEW_VISIBILITY;
+  }
+
+  if (
+    Schema.is(WorkerOrchestrationNoticesVisibility)(
+      legacySettings.workerOrchestrationNoticesVisibility,
+    )
+  ) {
+    patch.workerOrchestrationNoticesVisibility =
+      legacySettings.workerOrchestrationNoticesVisibility;
+  } else if (legacySettings.workerOrchestrationNoticesVisibility === undefined) {
+    patch.workerOrchestrationNoticesVisibility = DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY;
   }
 
   if (
