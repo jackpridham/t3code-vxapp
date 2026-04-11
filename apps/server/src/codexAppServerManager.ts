@@ -1490,7 +1490,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     if (!activeTurnId) {
       return rawTurnId;
     }
-    if (!method.startsWith("item/")) {
+    const shouldPreferActiveTurn =
+      method.startsWith("item/") ||
+      method === "turn/completed" ||
+      method === "turn/diff/updated" ||
+      method === "thread/tokenUsage/updated";
+    if (!shouldPreferActiveTurn) {
       return rawTurnId;
     }
     if (!rawTurnId || !sameId(rawTurnId, activeTurnId)) {

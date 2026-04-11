@@ -1022,6 +1022,63 @@ describe("collab child conversation routing", () => {
     );
   });
 
+  it("rewrites stale top-level turn completion onto the active session turn", () => {
+    const { manager, context, emitEvent, updateSession } = createCollabNotificationHarness();
+    context.session.activeTurnId = "turn_active";
+
+    (
+      manager as unknown as {
+        handleServerNotification: (context: unknown, notification: Record<string, unknown>) => void;
+      }
+    ).handleServerNotification(context, {
+      method: "turn/completed",
+      params: {
+        threadId: "provider_parent",
+        turnId: "turn_stale",
+        turn: { id: "turn_stale", status: "completed" },
+      },
+    });
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "turn/completed",
+        turnId: "turn_active",
+      }),
+    );
+    expect(updateSession).toHaveBeenCalledWith(
+      context,
+      expect.objectContaining({
+        status: "ready",
+        activeTurnId: undefined,
+      }),
+    );
+  });
+
+  it("rewrites stale top-level turn diff updates onto the active session turn", () => {
+    const { manager, context, emitEvent } = createCollabNotificationHarness();
+    context.session.activeTurnId = "turn_active";
+
+    (
+      manager as unknown as {
+        handleServerNotification: (context: unknown, notification: Record<string, unknown>) => void;
+      }
+    ).handleServerNotification(context, {
+      method: "turn/diff/updated",
+      params: {
+        threadId: "provider_parent",
+        turnId: "turn_stale",
+        diff: { status: "ready" },
+      },
+    });
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "turn/diff/updated",
+        turnId: "turn_active",
+      }),
+    );
+  });
+
   it("rewrites stale top-level item requests onto the active session turn", () => {
     const { manager, context, emitEvent } = createCollabNotificationHarness();
     context.session.activeTurnId = "turn_active";
