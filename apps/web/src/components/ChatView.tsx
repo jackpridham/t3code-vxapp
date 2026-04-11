@@ -38,7 +38,7 @@ import { stripDiffSearchParams } from "../diffRouteSearch";
 import { buildChangesWindowHref } from "../lib/changesWindow";
 import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import { resolveChatDocumentTitle, useDocumentTitle } from "../lib/documentTitle";
-import { getWorkerLineageWarningDescription } from "../lib/workerLineage";
+import { getWorkerLineageIndicator } from "../lib/workerLineage";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -736,10 +736,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         .at(-1) ?? null,
     [workerWakeItems],
   );
-  const activeThreadWorkerLineageWarning = useMemo(
+  const activeThreadWorkerLineageIndicator = useMemo(
     () =>
       activeThread
-        ? getWorkerLineageWarningDescription({
+        ? getWorkerLineageIndicator({
             thread: activeThread,
             threads,
             projects,
@@ -3834,7 +3834,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       >
         <ChatHeader
           activeThreadLabels={activeThread.labels}
-          activeThreadWorkerLineageWarning={activeThreadWorkerLineageWarning}
+          activeThreadWorkerLineageIndicator={activeThreadWorkerLineageIndicator}
           activeProjectName={chatHeaderBadgeLabel}
           activeProjectHooks={activeProject?.hooks}
           terminalAvailable={activeProject !== undefined}
