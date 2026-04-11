@@ -210,7 +210,7 @@ function ChatThreadRouteView() {
           }}
         >
           <ChangesPanel />
-          <SidebarRail />
+          <SidebarRail className="top-0 bottom-auto h-12" />
         </Sidebar>
       </SidebarProvider>
       {/* Diff panel overlay for when a specific file diff is requested */}
