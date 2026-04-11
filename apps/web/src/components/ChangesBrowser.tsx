@@ -301,6 +301,24 @@ function hasMarkers(markers: ReadonlyMap<number, CodeLineMarkerKind>): boolean {
   return markers.size > 0;
 }
 
+function groupItemsBySourceLabel(
+  items: readonly DiscoveredFileReference[],
+): ReadonlyArray<{ label: string | null; items: readonly DiscoveredFileReference[] }> {
+  const groups: { label: string | null; items: DiscoveredFileReference[] }[] = [];
+  let currentGroup: { label: string | null; items: DiscoveredFileReference[] } | null = null;
+
+  for (const item of items) {
+    const label = item.sourceGroupLabel ?? null;
+    if (!currentGroup || currentGroup.label !== label) {
+      currentGroup = { label, items: [] };
+      groups.push(currentGroup);
+    }
+    currentGroup.items.push(item);
+  }
+
+  return groups;
+}
+
 function ChangesFlatGroup(props: {
   group: ChangesPanelGroup;
   activePath: string | null;
@@ -344,45 +362,62 @@ function ChangesFlatGroup(props: {
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <div className="space-y-0.5 pb-1 pl-3">
-          {props.group.items.map((item) => {
-            const isActive = props.activePath === item.resolvedPath;
-            const changeKind =
-              props.group.section === "files_changed"
-                ? props.fileKindsByPath.get(canonicalizeChangesPathForLookup(item.resolvedPath))
-                : undefined;
-            return (
-              <button
-                key={`${item.section}:${item.resolvedPath}`}
-                type="button"
-                className={cn(
-                  "group flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-left transition-colors",
-                  isActive
-                    ? "bg-primary/8 text-foreground"
-                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground/80",
-                )}
-                onClick={() => props.onSelectItem(item)}
-                onDoubleClick={() => props.onOpenItemInWindow?.(item)}
-                title={item.resolvedPath}
-              >
-                <VscodeEntryIcon
-                  pathValue={item.filename}
-                  kind="file"
-                  theme={props.resolvedTheme}
-                  className="size-3.5 shrink-0"
-                />
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-[12px]",
-                    props.group.section === "files_changed"
-                      ? getChangeKindTextClass(changeKind)
-                      : "text-muted-foreground/80",
-                  )}
-                >
-                  {item.filename}
-                </span>
-              </button>
-            );
-          })}
+          {groupItemsBySourceLabel(props.group.items).map((sourceGroup) => (
+            <div
+              key={
+                sourceGroup.label
+                  ? `source:${sourceGroup.label}`
+                  : `ungrouped:${sourceGroup.items[0]?.resolvedPath ?? props.group.section}`
+              }
+              className="space-y-0.5"
+            >
+              {sourceGroup.label ? (
+                <div className="px-3 pt-1.5 pb-0.5 text-[11px] font-medium text-muted-foreground/80">
+                  {sourceGroup.label}
+                </div>
+              ) : null}
+              {sourceGroup.items.map((item) => {
+                const isActive = props.activePath === item.resolvedPath;
+                const changeKind =
+                  props.group.section === "files_changed"
+                    ? props.fileKindsByPath.get(canonicalizeChangesPathForLookup(item.resolvedPath))
+                    : undefined;
+                return (
+                  <button
+                    key={`${item.section}:${item.sourceThreadId ?? "thread"}:${item.firstSeenMessageId}:${item.resolvedPath}`}
+                    type="button"
+                    className={cn(
+                      "group flex w-full cursor-pointer items-center gap-2 rounded-md py-1.5 pr-3 text-left transition-colors",
+                      sourceGroup.label ? "pl-6" : "pl-3",
+                      isActive
+                        ? "bg-primary/8 text-foreground"
+                        : "text-muted-foreground hover:bg-muted/30 hover:text-foreground/80",
+                    )}
+                    onClick={() => props.onSelectItem(item)}
+                    onDoubleClick={() => props.onOpenItemInWindow?.(item)}
+                    title={item.sourcePath ?? item.resolvedPath}
+                  >
+                    <VscodeEntryIcon
+                      pathValue={item.filename}
+                      kind="file"
+                      theme={props.resolvedTheme}
+                      className="size-3.5 shrink-0"
+                    />
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-[12px]",
+                        props.group.section === "files_changed"
+                          ? getChangeKindTextClass(changeKind)
+                          : "text-muted-foreground/80",
+                      )}
+                    >
+                      {item.filename}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </CollapsiblePanel>
     </Collapsible>
@@ -660,6 +695,7 @@ export interface ChangesBrowserProps {
   worktreePath: string | null;
   messages: readonly ChatMessage[];
   persistedFileChanges: readonly PersistedFileChange[];
+  groups?: readonly ChangesPanelGroup[] | undefined;
   latestCheckpointTurnCount: number | null;
   filesChangedViewType: "list" | "tree";
   activePath: string | null;
@@ -679,6 +715,7 @@ export const ChangesBrowser = memo(function ChangesBrowser({
   worktreePath,
   messages,
   persistedFileChanges,
+  groups: providedGroups,
   latestCheckpointTurnCount,
   filesChangedViewType,
   activePath,
@@ -770,7 +807,12 @@ export const ChangesBrowser = memo(function ChangesBrowser({
       window.removeEventListener("pointercancel", handlePointerEnd);
     };
   }, [browserPaneCollapsed, enableBrowserPaneControls]);
-  const groups = useChangesDiscovery(messages, persistedFileChanges, worktreePath ?? undefined);
+  const discoveredGroups = useChangesDiscovery(
+    messages,
+    persistedFileChanges,
+    worktreePath ?? undefined,
+  );
+  const groups = providedGroups ?? discoveredGroups;
   const nonEmptyGroups = useMemo(() => groups.filter((group) => group.items.length > 0), [groups]);
   const totalCount = useMemo(
     () => groups.reduce((sum, group) => sum + group.items.length, 0),
@@ -818,35 +860,48 @@ export const ChangesBrowser = memo(function ChangesBrowser({
   const showPreviewWithoutCard = contentMode === "preview" && !isDeletedFile;
   const canShowDiff = isCodeSelection && (contentMode === "preview" || isDeletedFile);
   const canShowFile = isCodeSelection && contentMode === "diff";
+  const activeSourceThreadId = activeItem?.sourceThreadId
+    ? ThreadId.makeUnsafe(activeItem.sourceThreadId)
+    : threadId;
+  const activeSourceWorktreePath = activeItem?.sourceWorktreePath ?? worktreePath;
+  const activeSourcePath = activeItem?.sourcePath ?? activePath;
+  const activeLatestCheckpointTurnCount =
+    activeItem?.sourceLatestCheckpointTurnCount ?? latestCheckpointTurnCount;
   const activeAbsolutePath = useMemo(
-    () => (activePath ? resolveChangesAbsolutePath(worktreePath, activePath) : null),
-    [activePath, worktreePath],
+    () =>
+      activeSourcePath
+        ? resolveChangesAbsolutePath(activeSourceWorktreePath, activeSourcePath)
+        : null,
+    [activeSourcePath, activeSourceWorktreePath],
   );
   const selectedFileQueryPath = useMemo(
-    () => (activePath ? resolveChangesThreadRelativePath(worktreePath, activePath) : null),
-    [activePath, worktreePath],
+    () =>
+      activeSourcePath
+        ? resolveChangesThreadRelativePath(activeSourceWorktreePath, activeSourcePath)
+        : null,
+    [activeSourcePath, activeSourceWorktreePath],
   );
 
   const fileDiffState = useChangesBrowserFileDiffState({
-    threadId,
+    threadId: activeSourceThreadId,
     selectedFilePath: activePath,
     selectedFileQueryPath,
     enabled: isCodeSelection,
-    latestCheckpointTurnCount,
+    latestCheckpointTurnCount: activeLatestCheckpointTurnCount,
   });
   const fullThreadDiffFallbackQuery = useQuery(
     checkpointDiffQueryOptions({
-      threadId,
+      threadId: activeSourceThreadId,
       fromTurnCount: 0,
-      toTurnCount: latestCheckpointTurnCount,
+      toTurnCount: activeLatestCheckpointTurnCount,
       cacheScope:
         isCodeSelection && selectedFileQueryPath
           ? `changes-panel:fallback:${selectedFileQueryPath}`
           : null,
       enabled:
         isCodeSelection &&
-        threadId !== null &&
-        latestCheckpointTurnCount !== null &&
+        activeSourceThreadId !== null &&
+        activeLatestCheckpointTurnCount !== null &&
         selectedFileQueryPath !== null &&
         (fileDiffState.query.isError ||
           fileDiffState.query.data == null ||
@@ -855,8 +910,8 @@ export const ChangesBrowser = memo(function ChangesBrowser({
   );
 
   const contentState = useWorkspaceFileContentState({
-    threadId: threadId ?? null,
-    worktreePath,
+    threadId: activeSourceThreadId ?? null,
+    worktreePath: activeSourceWorktreePath,
     absolutePath: activeAbsolutePath,
     enabled: !!activeAbsolutePath && !isDeletedFile && contentMode === "preview",
     mode: contentMode,
@@ -936,7 +991,7 @@ export const ChangesBrowser = memo(function ChangesBrowser({
                 nonEmptyGroups.map((group) =>
                   group.section === "files_changed" && filesChangedViewType === "tree" ? (
                     <ChangesExplorerTree
-                      key={group.section}
+                      key={`${group.label}:${group.section}`}
                       groups={[group]}
                       activePath={activePath}
                       activeSection={activeSection}
@@ -949,7 +1004,7 @@ export const ChangesBrowser = memo(function ChangesBrowser({
                     />
                   ) : (
                     <ChangesFlatGroup
-                      key={group.section}
+                      key={`${group.label}:${group.section}`}
                       group={group}
                       activePath={activePath}
                       resolvedTheme={resolvedTheme}
