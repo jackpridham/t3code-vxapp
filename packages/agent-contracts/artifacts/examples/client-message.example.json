@@ -1,0 +1,16 @@
+{
+  "id": "req-1",
+  "metadata": {
+    "protocolVersion": 1,
+    "sessionId": "session-01HX1234",
+    "conversationId": "conv-01HX5678",
+    "turnId": "turn-01HX9999",
+    "eventId": "evt-01HXABCD",
+    "sequence": 1,
+    "timestamp": "2026-04-12T01:00:00.000Z"
+  },
+  "payload": {
+    "_tag": "assistant.message",
+    "message": "Show me recurring quotes generated this month"
+  }
+}
