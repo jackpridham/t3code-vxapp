@@ -887,6 +887,116 @@ describe("orchestration projector", () => {
     ).toEqual([{ id: "assistant-keep", role: "assistant", turnId: "turn-1" }]);
   });
 
+  it("keeps running turns active through provisional missing diffs", async () => {
+    const model = createEmptyReadModel("2026-02-26T17:30:00.000Z");
+    const events = [
+      makeEvent({
+        sequence: 1,
+        type: "thread.created",
+        aggregateKind: "thread",
+        aggregateId: "thread-running-missing-diff",
+        occurredAt: "2026-02-26T17:30:01.000Z",
+        commandId: "cmd-running-missing-diff-1",
+        payload: {
+          threadId: "thread-running-missing-diff",
+          projectId: "project-1",
+          title: "demo",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.3-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T17:30:01.000Z",
+          updatedAt: "2026-02-26T17:30:01.000Z",
+        },
+      }),
+      makeEvent({
+        sequence: 2,
+        type: "thread.session-set",
+        aggregateKind: "thread",
+        aggregateId: "thread-running-missing-diff",
+        occurredAt: "2026-02-26T17:30:02.000Z",
+        commandId: "cmd-running-missing-diff-2",
+        payload: {
+          threadId: "thread-running-missing-diff",
+          session: {
+            threadId: "thread-running-missing-diff",
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: "turn-running-missing-diff",
+            lastError: null,
+            updatedAt: "2026-02-26T17:30:02.000Z",
+          },
+        },
+      }),
+      makeEvent({
+        sequence: 3,
+        type: "thread.turn-diff-completed",
+        aggregateKind: "thread",
+        aggregateId: "thread-running-missing-diff",
+        occurredAt: "2026-02-26T17:30:03.000Z",
+        commandId: "cmd-running-missing-diff-3",
+        payload: {
+          threadId: "thread-running-missing-diff",
+          turnId: "turn-running-missing-diff",
+          checkpointTurnCount: 1,
+          checkpointRef: "provider-diff:running-missing-diff",
+          status: "missing",
+          files: [],
+          assistantMessageId: "assistant:turn-running-missing-diff",
+          completedAt: "2026-02-26T17:30:03.000Z",
+        },
+      }),
+    ];
+
+    const afterMissing = await events.reduce<Promise<ReturnType<typeof createEmptyReadModel>>>(
+      (statePromise, event) =>
+        statePromise.then((state) => Effect.runPromise(projectEvent(state, event))),
+      Promise.resolve(model),
+    );
+
+    expect(afterMissing.threads[0]?.latestTurn).toMatchObject({
+      turnId: "turn-running-missing-diff",
+      state: "running",
+      completedAt: null,
+    });
+    expect(afterMissing.threads[0]?.checkpoints[0]?.status).toBe("missing");
+
+    const afterReady = await Effect.runPromise(
+      projectEvent(
+        afterMissing,
+        makeEvent({
+          sequence: 4,
+          type: "thread.turn-diff-completed",
+          aggregateKind: "thread",
+          aggregateId: "thread-running-missing-diff",
+          occurredAt: "2026-02-26T17:30:04.000Z",
+          commandId: "cmd-running-missing-diff-4",
+          payload: {
+            threadId: "thread-running-missing-diff",
+            turnId: "turn-running-missing-diff",
+            checkpointTurnCount: 1,
+            checkpointRef: "refs/t3/checkpoints/thread-running-missing-diff/turn/1",
+            status: "ready",
+            files: [],
+            assistantMessageId: "assistant:turn-running-missing-diff",
+            completedAt: "2026-02-26T17:30:04.000Z",
+          },
+        }),
+      ),
+    );
+
+    expect(afterReady.threads[0]?.latestTurn).toMatchObject({
+      turnId: "turn-running-missing-diff",
+      state: "completed",
+      completedAt: "2026-02-26T17:30:04.000Z",
+    });
+    expect(afterReady.threads[0]?.checkpoints[0]?.status).toBe("ready");
+  });
+
   it("caps message and checkpoint retention for long-lived threads", async () => {
     const createdAt = "2026-03-01T10:00:00.000Z";
     const model = createEmptyReadModel(createdAt);

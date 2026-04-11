@@ -33,9 +33,17 @@ type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 
-function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
+function checkpointStatusToLatestTurnState(
+  status: "ready" | "missing" | "error",
+  existingLatestTurn?: OrchestrationThread["latestTurn"],
+) {
   if (status === "error") return "error" as const;
-  if (status === "missing") return "interrupted" as const;
+  if (status === "missing") {
+    if (existingLatestTurn?.state === "running") {
+      return "running" as const;
+    }
+    return "interrupted" as const;
+  }
   return "completed" as const;
 }
 
@@ -583,6 +591,16 @@ export function projectEvent(
         ]
           .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
           .slice(-MAX_THREAD_CHECKPOINTS);
+        const existingLatestTurn =
+          thread.latestTurn?.turnId === payload.turnId ? thread.latestTurn : null;
+        const nextLatestTurnState = checkpointStatusToLatestTurnState(
+          payload.status,
+          existingLatestTurn,
+        );
+        const latestTurnCompletedAt =
+          nextLatestTurnState === "running"
+            ? (existingLatestTurn?.completedAt ?? null)
+            : payload.completedAt;
 
         return {
           ...nextBase,
@@ -590,7 +608,7 @@ export function projectEvent(
             checkpoints,
             latestTurn: {
               turnId: payload.turnId,
-              state: checkpointStatusToLatestTurnState(payload.status),
+              state: nextLatestTurnState,
               requestedAt:
                 thread.latestTurn?.turnId === payload.turnId
                   ? thread.latestTurn.requestedAt
@@ -599,7 +617,7 @@ export function projectEvent(
                 thread.latestTurn?.turnId === payload.turnId
                   ? (thread.latestTurn.startedAt ?? payload.completedAt)
                   : payload.completedAt,
-              completedAt: payload.completedAt,
+              completedAt: latestTurnCompletedAt,
               assistantMessageId: payload.assistantMessageId,
             },
             updatedAt: event.occurredAt,
