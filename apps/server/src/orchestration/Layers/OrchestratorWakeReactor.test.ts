@@ -4,6 +4,7 @@ import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -301,6 +302,161 @@ describe("OrchestratorWakeReactor", () => {
       state: "pending",
       outcome: "completed",
     });
+  });
+
+  it("creates a pending interrupted wake from a turn diff when runtime completion was missed", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "running",
+      activeTurnId: asTurnId("turn-orch-active"),
+      updatedAt: "2026-04-05T12:00:10.000Z",
+    });
+    await createWorkerThread(harness.engine);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.makeUnsafe("cmd-interrupted-diff-wake"),
+        threadId: asThreadId("thread-worker"),
+        turnId: asTurnId("turn-interrupted-with-state"),
+        completedAt: "2026-04-05T12:00:20.000Z",
+        checkpointRef: CheckpointRef.makeUnsafe(
+          "refs/t3/checkpoints/thread-worker/turn/interrupted",
+        ),
+        status: "missing",
+        files: [
+          {
+            path: "src/interrupted.ts",
+            kind: "modified",
+            additions: 3,
+            deletions: 1,
+          },
+        ],
+        checkpointTurnCount: 1,
+        createdAt: "2026-04-05T12:00:20.000Z",
+      }),
+    );
+
+    const readModel = await waitForReadModel(harness.engine, (model) =>
+      model.orchestratorWakeItems.some(
+        (item) => item.workerTurnId === asTurnId("turn-interrupted-with-state"),
+      ),
+    );
+    expect(readModel.orchestratorWakeItems[0]).toMatchObject({
+      wakeId: "wake:thread-worker:turn-interrupted-with-state:interrupted",
+      workerThreadId: asThreadId("thread-worker"),
+      state: "pending",
+      outcome: "interrupted",
+    });
+  });
+
+  it("creates a failed wake from an error turn diff when runtime completion was missed", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "running",
+      activeTurnId: asTurnId("turn-orch-active"),
+      updatedAt: "2026-04-05T12:00:25.000Z",
+    });
+    await createWorkerThread(harness.engine);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.makeUnsafe("cmd-failed-diff-wake"),
+        threadId: asThreadId("thread-worker"),
+        turnId: asTurnId("turn-failed-with-state"),
+        completedAt: "2026-04-05T12:00:30.000Z",
+        checkpointRef: CheckpointRef.makeUnsafe("refs/t3/checkpoints/thread-worker/turn/failed"),
+        status: "error",
+        files: [
+          {
+            path: "src/failed.ts",
+            kind: "modified",
+            additions: 4,
+            deletions: 2,
+          },
+        ],
+        checkpointTurnCount: 1,
+        createdAt: "2026-04-05T12:00:30.000Z",
+      }),
+    );
+
+    const readModel = await waitForReadModel(harness.engine, (model) =>
+      model.orchestratorWakeItems.some(
+        (item) => item.workerTurnId === asTurnId("turn-failed-with-state"),
+      ),
+    );
+    expect(readModel.orchestratorWakeItems[0]).toMatchObject({
+      wakeId: "wake:thread-worker:turn-failed-with-state:failed",
+      workerThreadId: asThreadId("thread-worker"),
+      state: "pending",
+      outcome: "failed",
+    });
+  });
+
+  it("does not wake the orchestrator for a true interrupted turn", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "running",
+      activeTurnId: asTurnId("turn-orch-active"),
+      updatedAt: "2026-04-05T12:00:35.000Z",
+    });
+    await createWorkerThread(harness.engine);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.interrupt",
+        commandId: CommandId.makeUnsafe("cmd-true-interrupt"),
+        threadId: asThreadId("thread-worker"),
+        turnId: asTurnId("turn-true-interrupt"),
+        createdAt: "2026-04-05T12:00:40.000Z",
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.makeUnsafe("cmd-true-interrupt-diff"),
+        threadId: asThreadId("thread-worker"),
+        turnId: asTurnId("turn-true-interrupt"),
+        completedAt: "2026-04-05T12:00:45.000Z",
+        checkpointRef: CheckpointRef.makeUnsafe(
+          "refs/t3/checkpoints/thread-worker/turn/true-interrupt",
+        ),
+        status: "missing",
+        files: [
+          {
+            path: "src/true-interrupt.ts",
+            kind: "modified",
+            additions: 2,
+            deletions: 0,
+          },
+        ],
+        checkpointTurnCount: 1,
+        createdAt: "2026-04-05T12:00:45.000Z",
+      }),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    expect(
+      readModel.orchestratorWakeItems.some(
+        (item) => item.workerTurnId === asTurnId("turn-true-interrupt"),
+      ),
+    ).toBe(false);
   });
 
   it("uses provider failure detail when a worker turn fails", async () => {
