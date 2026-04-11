@@ -15,6 +15,7 @@ import { Badge } from "../ui/badge";
 import { SidebarMenuSubButton, SidebarMenuSubItem } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkerLineageWarningIcon } from "../thread/WorkerLineageWarningIcon";
+import type { WorkerLineageIndicator } from "../../lib/workerLineage";
 
 export interface TerminalStatusIndicator {
   label: "Terminal process running";
@@ -128,7 +129,7 @@ export interface SidebarThreadRowProps {
   threadStatus: SidebarThreadStatus | null;
   prStatus: PrStatusIndicator | null;
   terminalStatus: TerminalStatusIndicator | null;
-  workerLineageWarning: string | null;
+  workerLineageIndicator: WorkerLineageIndicator | null;
   isThreadRunning: boolean;
   isConfirmingArchive: boolean;
   confirmThreadArchive: boolean;
@@ -157,7 +158,7 @@ export function SidebarThreadRow({
   threadStatus,
   prStatus,
   terminalStatus,
-  workerLineageWarning,
+  workerLineageIndicator,
   isThreadRunning,
   isConfirmingArchive,
   confirmThreadArchive,
@@ -221,7 +222,7 @@ export function SidebarThreadRow({
             </Tooltip>
           )}
           {threadStatus && <ThreadStatusLabel status={threadStatus} />}
-          <WorkerLineageWarningIcon description={workerLineageWarning} />
+          <WorkerLineageWarningIcon indicator={workerLineageIndicator} />
           {children}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">

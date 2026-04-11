@@ -321,3 +321,27 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );
 }
+
+export function resolveInitialWorkerComposerHidden(input: {
+  orchestrationModeEnabled: boolean;
+  spawnRole: Thread["spawnRole"] | undefined;
+  workerChatViewVisibility: "always_show" | "always_hide";
+}): boolean {
+  return (
+    input.orchestrationModeEnabled &&
+    input.spawnRole === "worker" &&
+    input.workerChatViewVisibility === "always_hide"
+  );
+}
+
+export function resolveInitialWorkerOrchestrationNoticesHidden(input: {
+  orchestrationModeEnabled: boolean;
+  spawnRole: Thread["spawnRole"] | undefined;
+  workerOrchestrationNoticesVisibility: "always_show" | "always_hide";
+}): boolean {
+  return (
+    input.orchestrationModeEnabled &&
+    input.spawnRole === "worker" &&
+    input.workerOrchestrationNoticesVisibility === "always_hide"
+  );
+}

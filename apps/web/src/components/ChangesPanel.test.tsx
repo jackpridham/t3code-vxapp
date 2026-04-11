@@ -1,4 +1,4 @@
-import { MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -92,7 +92,7 @@ vi.mock("@pierre/diffs/react", () => ({
   FileDiff: () => <div data-testid="single-file-diff" />,
 }));
 
-import { ChangesPanel, ChangesWindow } from "./ChangesPanel";
+import { buildOrchestratorWorkerChangesInput, ChangesPanel, ChangesWindow } from "./ChangesPanel";
 
 // ── Test helpers ────────────────────────────────────────────────────────────
 
@@ -208,6 +208,94 @@ describe("ChangesPanel discovery integration", () => {
 });
 
 describe("ChangesPanel component", () => {
+  it("renders orchestrator worker changes grouped by parent project", () => {
+    const rootThreadId = ThreadId.makeUnsafe("thread-1");
+    const workerAId = ThreadId.makeUnsafe("worker-a");
+    const workerBId = ThreadId.makeUnsafe("worker-b");
+    const projectAId = ProjectId.makeUnsafe("project-a");
+    const projectBId = ProjectId.makeUnsafe("project-b");
+    state.settings = {
+      changesDrawerVisibility: "always_show",
+      changesPanelFilesChangedViewType: "list",
+      changesPanelWindowNavigationMode: "dynamic",
+    };
+    state.appState = {
+      projects: [
+        { id: ProjectId.makeUnsafe("orchestrator-project"), name: "Jasper", cwd: "/orch" },
+        { id: projectAId, name: "API", cwd: "/repo/api" },
+        { id: projectBId, name: "Web", cwd: "/repo/web" },
+      ],
+      threads: [
+        {
+          id: rootThreadId,
+          projectId: ProjectId.makeUnsafe("orchestrator-project"),
+          title: "Jasper session",
+          spawnRole: "orchestrator",
+          workflowId: "workflow-1",
+          worktreePath: "/orch",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+        {
+          id: workerAId,
+          projectId: projectAId,
+          title: "API worker",
+          spawnRole: "worker",
+          orchestratorThreadId: rootThreadId,
+          workflowId: "workflow-1",
+          worktreePath: "/repo/api-worktree",
+          messages: [],
+          persistedFileChanges: [
+            {
+              path: "src/server.ts",
+              kind: "modified",
+              totalInsertions: 4,
+              totalDeletions: 1,
+              firstTurnId: TurnId.makeUnsafe("turn-a"),
+              lastTurnId: TurnId.makeUnsafe("turn-a"),
+            },
+          ],
+          turnDiffSummaries: [{ turnId: TurnId.makeUnsafe("turn-a"), completedAt: "", files: [] }],
+        },
+        {
+          id: workerBId,
+          projectId: projectBId,
+          title: "Web worker",
+          spawnRole: "worker",
+          orchestratorThreadId: rootThreadId,
+          workflowId: "workflow-1",
+          worktreePath: "/repo/web-worktree",
+          messages: [makeMessage("Created @Docs/@Scratch/web/notes.md", "msg-worker-b-artifact")],
+          persistedFileChanges: [
+            {
+              path: "src/App.tsx",
+              kind: "added",
+              totalInsertions: 8,
+              totalDeletions: 0,
+              firstTurnId: TurnId.makeUnsafe("turn-b"),
+              lastTurnId: TurnId.makeUnsafe("turn-b"),
+            },
+          ],
+          turnDiffSummaries: [{ turnId: TurnId.makeUnsafe("turn-b"), completedAt: "", files: [] }],
+        },
+      ],
+    } as any;
+
+    const html = renderPanel();
+
+    expect(html).toContain("Worker Changes");
+    expect(html).toContain("Files Changed");
+    expect(html).toContain("Artifacts");
+    expect(html).toContain("API");
+    expect(html).toContain("Web");
+    expect(html).not.toContain(">API worker<");
+    expect(html).not.toContain(">Web worker<");
+    expect(html).toContain("server.ts");
+    expect(html).toContain("notes.md");
+    expect(html).toContain("App.tsx");
+  });
+
   it("renders the drawer as a file browser without the preview pane", () => {
     state.groups = [
       {
@@ -620,6 +708,204 @@ index 1111111..2222222 100644
 
     expect(html).toContain("Thread title");
     expect(html).not.toContain("Open changes in separate window");
+  });
+});
+
+describe("buildOrchestratorWorkerChangesInput", () => {
+  it("groups multiple worker thread changes under the sidebar parent project name", () => {
+    const rootThreadId = ThreadId.makeUnsafe("thread-1");
+    const parentProjectId = ProjectId.makeUnsafe("project-parent");
+    const workerProjectAId = ProjectId.makeUnsafe("project-worker-a");
+    const workerProjectBId = ProjectId.makeUnsafe("project-worker-b");
+    const result = buildOrchestratorWorkerChangesInput({
+      projects: [
+        {
+          id: parentProjectId,
+          name: "t3code-vxapp",
+          cwd: "/repo/t3code-vxapp",
+        },
+        {
+          id: workerProjectAId,
+          name: "r25-phase6b-booking-schema",
+          cwd: "/repo/t3code-vxapp/.worktrees/r25-phase6b-booking-schema",
+          sidebarParentProjectId: parentProjectId,
+        },
+        {
+          id: workerProjectBId,
+          name: "r25-phase7-payments",
+          cwd: "/repo/t3code-vxapp/.worktrees/r25-phase7-payments",
+          sidebarParentProjectId: parentProjectId,
+        },
+      ] as any,
+      threads: [
+        {
+          id: rootThreadId,
+          projectId: ProjectId.makeUnsafe("project-orchestrator"),
+          title: "Root",
+          spawnRole: "orchestrator",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+        {
+          id: ThreadId.makeUnsafe("worker-a"),
+          projectId: workerProjectAId,
+          title: "r25-phase6b-booking-schema",
+          spawnRole: "worker",
+          orchestratorThreadId: rootThreadId,
+          worktreePath: "/repo/t3code-vxapp/.worktrees/r25-phase6b-booking-schema",
+          messages: [
+            makeMessage("Wrote @Docs/@Scratch/t3code-vxapp/schema-notes.md", "msg-worker-a"),
+          ],
+          persistedFileChanges: [
+            {
+              path: "apps/server/src/schema.ts",
+              kind: "modified",
+              totalInsertions: 5,
+              totalDeletions: 1,
+              firstTurnId: TurnId.makeUnsafe("turn-a"),
+              lastTurnId: TurnId.makeUnsafe("turn-a"),
+            },
+            {
+              path: "apps/web/src/schema-view.tsx",
+              kind: "added",
+              totalInsertions: 9,
+              totalDeletions: 0,
+              firstTurnId: TurnId.makeUnsafe("turn-a"),
+              lastTurnId: TurnId.makeUnsafe("turn-a"),
+            },
+          ],
+          turnDiffSummaries: [],
+        },
+        {
+          id: ThreadId.makeUnsafe("worker-b"),
+          projectId: workerProjectBId,
+          title: "r25-phase7-payments",
+          spawnRole: "worker",
+          orchestratorThreadId: rootThreadId,
+          worktreePath: "/repo/t3code-vxapp/.worktrees/r25-phase7-payments",
+          messages: [],
+          persistedFileChanges: [
+            {
+              path: "apps/server/src/payments.ts",
+              kind: "modified",
+              totalInsertions: 3,
+              totalDeletions: 2,
+              firstTurnId: TurnId.makeUnsafe("turn-b"),
+              lastTurnId: TurnId.makeUnsafe("turn-b"),
+            },
+          ],
+          turnDiffSummaries: [],
+        },
+      ] as any,
+      activeThread: {
+        id: rootThreadId,
+        projectId: ProjectId.makeUnsafe("project-orchestrator"),
+        title: "Root",
+        spawnRole: "orchestrator",
+        messages: [],
+        persistedFileChanges: [],
+        turnDiffSummaries: [],
+      } as any,
+    });
+
+    const filesChangedGroup = result?.groups?.find((group) => group.section === "files_changed");
+    const artifactsGroup = result?.groups?.find((group) => group.section === "artifacts");
+
+    expect(filesChangedGroup?.label).toBe("Files Changed");
+    expect(filesChangedGroup?.items).toHaveLength(3);
+    expect(filesChangedGroup?.items.map((item) => item.filename)).toEqual([
+      "schema.ts",
+      "schema-view.tsx",
+      "payments.ts",
+    ]);
+    expect(new Set(filesChangedGroup?.items.map((item) => item.sourceGroupLabel))).toEqual(
+      new Set(["t3code-vxapp"]),
+    );
+    expect(filesChangedGroup?.items.map((item) => item.sourcePath)).toEqual([
+      "apps/server/src/schema.ts",
+      "apps/web/src/schema-view.tsx",
+      "apps/server/src/payments.ts",
+    ]);
+    expect(artifactsGroup?.label).toBe("Artifacts");
+    expect(artifactsGroup?.items).toHaveLength(1);
+    expect(artifactsGroup?.items[0]).toMatchObject({
+      filename: "schema-notes.md",
+      sourceGroupLabel: "t3code-vxapp",
+    });
+    expect(
+      result?.groups?.flatMap((group) => group.items.map((item) => item.sourceGroupLabel)),
+    ).not.toContain("r25-phase6b-booking-schema");
+  });
+
+  it("preserves worker source context for aggregate file items", () => {
+    const rootThreadId = ThreadId.makeUnsafe("thread-1");
+    const workerId = ThreadId.makeUnsafe("worker-1");
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const result = buildOrchestratorWorkerChangesInput({
+      projects: [{ id: projectId, name: "Worker Project", cwd: "/repo" }] as any,
+      threads: [
+        {
+          id: rootThreadId,
+          projectId,
+          title: "Root",
+          spawnRole: "orchestrator",
+          worktreePath: "/repo",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+        {
+          id: workerId,
+          projectId,
+          title: "Worker One",
+          spawnRole: "worker",
+          orchestratorThreadId: rootThreadId,
+          worktreePath: "/repo/worktree",
+          messages: [],
+          persistedFileChanges: [
+            {
+              path: "src/index.ts",
+              kind: "modified",
+              totalInsertions: 2,
+              totalDeletions: 1,
+              firstTurnId: TurnId.makeUnsafe("turn-1"),
+              lastTurnId: TurnId.makeUnsafe("turn-1"),
+            },
+          ],
+          turnDiffSummaries: [
+            {
+              turnId: TurnId.makeUnsafe("turn-1"),
+              completedAt: "2026-04-07T00:00:00.000Z",
+              files: [],
+              checkpointTurnCount: 3,
+            },
+          ],
+        },
+      ] as any,
+      activeThread: {
+        id: rootThreadId,
+        projectId,
+        title: "Root",
+        spawnRole: "orchestrator",
+        worktreePath: "/repo",
+        messages: [],
+        persistedFileChanges: [],
+        turnDiffSummaries: [],
+      } as any,
+    });
+
+    const item = result?.groups?.[0]?.items[0];
+
+    expect(item).toMatchObject({
+      resolvedPath: "Worker Project/Worker One/src/index.ts",
+      sourceThreadId: workerId,
+      sourceWorktreePath: "/repo/worktree",
+      sourcePath: "src/index.ts",
+      sourceLatestCheckpointTurnCount: 3,
+      sourceGroupLabel: "Worker Project",
+    });
+    expect(result?.persistedFileChanges[0]?.path).toBe("Worker Project/Worker One/src/index.ts");
   });
 });
 

@@ -37,7 +37,6 @@ import {
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   type ProjectId,
   type DesktopUpdateState,
   ThreadId,
@@ -101,7 +100,6 @@ import {
 } from "./ui/sidebar";
 import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
-import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
   buildCopyThreadIdErrorDescription,
   filterThreadsByLabels,
@@ -111,7 +109,6 @@ import {
   groupThreadsByLineage,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
-  resolveLatestActiveThreadForProject,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
   resolveSidebarProjectKind,
@@ -146,7 +143,7 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import type { Project, Thread } from "../types";
 import { resolveThreadRouteTarget } from "../lib/sidebarWindow";
-import { getWorkerLineageWarningDescription } from "../lib/workerLineage";
+import { getWorkerLineageIndicator } from "../lib/workerLineage";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_LABEL_ARRAY: readonly string[] = [];
@@ -1132,7 +1129,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
       const terminalStatus = buildTerminalStatusIndicator(
         selectThreadTerminalState(terminalStateByThreadId, thread.id).runningTerminalIds,
       );
-      const workerLineageWarning = getWorkerLineageWarningDescription({
+      const workerLineageIndicator = getWorkerLineageIndicator({
         thread,
         threads,
         projects,
@@ -1154,7 +1151,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
           threadStatus={threadStatus}
           prStatus={prStatus}
           terminalStatus={terminalStatus}
-          workerLineageWarning={workerLineageWarning}
+          workerLineageIndicator={workerLineageIndicator}
           isThreadRunning={isThreadRunning}
           isConfirmingArchive={isConfirmingArchive}
           confirmThreadArchive={appSettings.confirmThreadArchive}

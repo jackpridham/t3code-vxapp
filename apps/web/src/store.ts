@@ -343,11 +343,17 @@ function isPartialReadModel(readModel: OrchestrationReadModel): boolean {
   );
 }
 
-function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
+function checkpointStatusToLatestTurnState(
+  status: "ready" | "missing" | "error",
+  existingLatestTurn?: Thread["latestTurn"],
+) {
   if (status === "error") {
     return "error" as const;
   }
   if (status === "missing") {
+    if (existingLatestTurn?.state === "running") {
+      return "running" as const;
+    }
     return "interrupted" as const;
   }
   return "completed" as const;
@@ -986,16 +992,25 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           .slice(-MAX_THREAD_CHECKPOINTS);
         const latestTurn =
           thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId
-            ? buildLatestTurn({
-                previous: thread.latestTurn,
-                turnId: event.payload.turnId,
-                state: checkpointStatusToLatestTurnState(event.payload.status),
-                requestedAt: thread.latestTurn?.requestedAt ?? event.payload.completedAt,
-                startedAt: thread.latestTurn?.startedAt ?? event.payload.completedAt,
-                completedAt: event.payload.completedAt,
-                assistantMessageId: event.payload.assistantMessageId,
-                sourceProposedPlan: thread.pendingSourceProposedPlan,
-              })
+            ? (() => {
+                const nextState = checkpointStatusToLatestTurnState(
+                  event.payload.status,
+                  thread.latestTurn,
+                );
+                return buildLatestTurn({
+                  previous: thread.latestTurn,
+                  turnId: event.payload.turnId,
+                  state: nextState,
+                  requestedAt: thread.latestTurn?.requestedAt ?? event.payload.completedAt,
+                  startedAt: thread.latestTurn?.startedAt ?? event.payload.completedAt,
+                  completedAt:
+                    nextState === "running"
+                      ? (thread.latestTurn?.completedAt ?? null)
+                      : event.payload.completedAt,
+                  assistantMessageId: event.payload.assistantMessageId,
+                  sourceProposedPlan: thread.pendingSourceProposedPlan,
+                });
+              })()
             : thread.latestTurn;
         return {
           ...thread,

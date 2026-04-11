@@ -20,7 +20,6 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
-import { SidebarMenuAction } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export type SortableProjectHandleProps = Pick<

@@ -9,11 +9,37 @@ import { inferCheckpointTurnCountByTurnId } from "../session-logic";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { ChangesBrowser } from "./ChangesBrowser";
-import type { DiscoveredFileReference } from "../changesDiscovery";
-import type { TurnDiffSummary } from "../types";
+import {
+  collectSessionThreadIds,
+  collapseThreadToCanonicalProject,
+} from "../lib/orchestrationMode";
+import {
+  categorizeReference,
+  discoverChangesReferences,
+  type ChangesSectionKind,
+  type DiscoveredFileReference,
+} from "../changesDiscovery";
+import type { ChangesPanelGroup } from "../changesDiscovery";
+import type { PersistedFileChange, Project, Thread, TurnDiffSummary } from "../types";
 
 const EMPTY_MESSAGES: readonly [] = [];
 const EMPTY_PERSISTED: readonly [] = [];
+const CHANGES_SECTION_LABELS: Record<ChangesSectionKind, string> = {
+  plans: "Plans",
+  artifacts: "Artifacts",
+  working_memory: "Working Memory",
+  files_changed: "Files Changed",
+  changelog: "Changelog",
+  reports: "Reports",
+};
+const CHANGES_SECTION_ORDER: readonly ChangesSectionKind[] = [
+  "plans",
+  "artifacts",
+  "working_memory",
+  "files_changed",
+  "changelog",
+  "reports",
+];
 
 function resolveLatestCheckpointTurnCount(
   turnDiffSummaries: readonly TurnDiffSummary[],
@@ -31,6 +57,167 @@ function resolveLatestCheckpointTurnCount(
     return null;
   }
   return Math.max(...turnCounts);
+}
+
+function sanitizeAggregatePathSegment(value: string): string {
+  const segment = value.replaceAll(/[\\/]+/g, " ").trim();
+  return segment.length > 0 ? segment : "Unknown Project";
+}
+
+function normalizeAggregateChangePath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/^\/+/, "");
+}
+
+function buildAggregateDisplayPath(input: {
+  projectName: string;
+  workerTitle: string;
+  sourcePath: string;
+}): string {
+  return [
+    sanitizeAggregatePathSegment(input.projectName),
+    sanitizeAggregatePathSegment(input.workerTitle),
+    normalizeAggregateChangePath(input.sourcePath),
+  ]
+    .filter((segment) => segment.length > 0)
+    .join("/");
+}
+
+function resolveThreadWorktreePath(
+  thread: Pick<Thread, "projectId" | "worktreePath">,
+  projectsById: ReadonlyMap<Project["id"], Pick<Project, "cwd">>,
+): string | null {
+  return thread.worktreePath ?? projectsById.get(thread.projectId)?.cwd ?? null;
+}
+
+export function buildOrchestratorWorkerChangesInput(input: {
+  activeThread: Thread | undefined;
+  threads: readonly Thread[];
+  projects: readonly Project[];
+}): {
+  groups: readonly ChangesPanelGroup[] | undefined;
+  latestCheckpointTurnCount: number | null;
+  messages: readonly [];
+  persistedFileChanges: readonly PersistedFileChange[];
+  title: string;
+  worktreePath: string | null;
+} | null {
+  const activeThread = input.activeThread;
+  if (!activeThread || activeThread.spawnRole !== "orchestrator") {
+    return null;
+  }
+
+  const sessionThreadIds = collectSessionThreadIds({
+    rootThreadId: activeThread.id,
+    threads: input.threads,
+  });
+  const projectsById = new Map(input.projects.map((project) => [project.id, project] as const));
+  const groupsBySection = new Map<ChangesSectionKind, ChangesPanelGroup>();
+  const persistedFileChanges: PersistedFileChange[] = [];
+
+  function getGroup(section: ChangesSectionKind): ChangesPanelGroup {
+    const existing = groupsBySection.get(section);
+    if (existing) {
+      return existing;
+    }
+    const created = {
+      section,
+      label: CHANGES_SECTION_LABELS[section],
+      items: [],
+    } satisfies ChangesPanelGroup;
+    groupsBySection.set(section, created);
+    return created;
+  }
+
+  for (const thread of input.threads) {
+    if (thread.id === activeThread.id || !sessionThreadIds.has(thread.id)) {
+      continue;
+    }
+    if (thread.spawnRole === "orchestrator") {
+      continue;
+    }
+
+    const projectBucket = collapseThreadToCanonicalProject({
+      thread,
+      projects: input.projects,
+    });
+    const projectName = projectBucket.canonicalProjectName;
+    const sourceGroupLabel = projectName;
+    const sourceWorktreePath = resolveThreadWorktreePath(thread, projectsById);
+    const sourceLatestCheckpointTurnCount = resolveLatestCheckpointTurnCount(
+      thread.turnDiffSummaries,
+    );
+
+    for (const discoveredGroup of discoverChangesReferences(
+      thread.messages,
+      sourceWorktreePath ?? undefined,
+    )) {
+      const targetGroup = getGroup(discoveredGroup.section);
+      for (const item of discoveredGroup.items) {
+        const sourcePath = item.resolvedPath;
+        targetGroup.items.push({
+          ...item,
+          resolvedPath: buildAggregateDisplayPath({
+            projectName,
+            workerTitle: thread.title,
+            sourcePath,
+          }),
+          sourceThreadId: thread.id,
+          sourceWorktreePath,
+          sourcePath,
+          sourceLatestCheckpointTurnCount,
+          sourceGroupLabel,
+        });
+      }
+    }
+
+    for (const change of thread.persistedFileChanges) {
+      const sourcePath = normalizeAggregateChangePath(change.path);
+      if (sourcePath.length === 0) {
+        continue;
+      }
+
+      const section = categorizeReference(sourcePath);
+      const resolvedPath = buildAggregateDisplayPath({
+        projectName,
+        workerTitle: thread.title,
+        sourcePath,
+      });
+      const filename = sourcePath.slice(sourcePath.lastIndexOf("/") + 1);
+      getGroup(section).items.push({
+        rawRef: change.path,
+        resolvedPath,
+        filename,
+        section,
+        firstSeenMessageId: change.firstTurnId,
+        sourceThreadId: thread.id,
+        sourceWorktreePath,
+        sourcePath,
+        sourceLatestCheckpointTurnCount,
+        sourceGroupLabel,
+      });
+      persistedFileChanges.push({
+        ...change,
+        path: resolvedPath,
+      });
+    }
+  }
+
+  const groups = [...groupsBySection.values()]
+    .filter((group) => group.items.length > 0)
+    .toSorted((left, right) => {
+      return (
+        CHANGES_SECTION_ORDER.indexOf(left.section) - CHANGES_SECTION_ORDER.indexOf(right.section)
+      );
+    });
+
+  return {
+    groups,
+    latestCheckpointTurnCount: null,
+    messages: EMPTY_MESSAGES,
+    persistedFileChanges,
+    title: "Worker Changes",
+    worktreePath: null,
+  };
 }
 
 export const ChangesPanel = memo(function ChangesPanel() {
@@ -55,12 +242,31 @@ export const ChangesPanel = memo(function ChangesPanel() {
   const activeProject = useStore((store) =>
     activeProjectId ? store.projects.find((project) => project.id === activeProjectId) : undefined,
   );
+  const threads = useStore((store) => store.threads);
+  const projects = useStore((store) => store.projects);
   const worktreePath = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
+
+  const orchestratorWorkerChangesInput = useMemo(
+    () => buildOrchestratorWorkerChangesInput({ activeThread, threads, projects }),
+    [activeThread, projects, threads],
+  );
 
   const latestCheckpointTurnCount = useMemo(
     () => resolveLatestCheckpointTurnCount(activeThread?.turnDiffSummaries ?? []),
     [activeThread?.turnDiffSummaries],
   );
+  const effectiveLatestCheckpointTurnCount =
+    orchestratorWorkerChangesInput?.latestCheckpointTurnCount ?? latestCheckpointTurnCount;
+  const effectiveMessages =
+    orchestratorWorkerChangesInput?.messages ?? activeThread?.messages ?? EMPTY_MESSAGES;
+  const effectivePersistedFileChanges =
+    orchestratorWorkerChangesInput?.persistedFileChanges ??
+    activeThread?.persistedFileChanges ??
+    EMPTY_PERSISTED;
+  const effectiveWorktreePath = orchestratorWorkerChangesInput?.worktreePath ?? worktreePath;
+  const effectiveFilesChangedViewType = orchestratorWorkerChangesInput
+    ? "list"
+    : filesChangedViewType;
 
   const handleSelectItem = useCallback(
     (item: DiscoveredFileReference) => {
@@ -73,22 +279,25 @@ export const ChangesPanel = memo(function ChangesPanel() {
 
   const handleOpenItemInWindow = useCallback(
     (item: DiscoveredFileReference) => {
-      const targetThreadId = activeThread?.id ?? routeThreadId;
+      const targetThreadId = item.sourceThreadId
+        ? ThreadId.makeUnsafe(item.sourceThreadId)
+        : (activeThread?.id ?? routeThreadId);
       if (!targetThreadId || typeof window === "undefined") {
         return;
       }
+      const targetPath = item.sourcePath ?? item.resolvedPath;
 
       setChangesWindowTarget(
         buildChangesWindowTarget({
           threadId: targetThreadId,
-          path: item.resolvedPath,
+          path: targetPath,
           mode: "preview",
         }),
       );
       window.open(
         buildChangesWindowHref({
           threadId: targetThreadId,
-          path: item.resolvedPath,
+          path: targetPath,
           mode: "preview",
         }),
         "_blank",
@@ -100,12 +309,14 @@ export const ChangesPanel = memo(function ChangesPanel() {
 
   return (
     <ChangesBrowser
+      title={orchestratorWorkerChangesInput?.title}
       threadId={activeThread?.id ?? null}
-      worktreePath={worktreePath}
-      messages={activeThread?.messages ?? EMPTY_MESSAGES}
-      persistedFileChanges={activeThread?.persistedFileChanges ?? EMPTY_PERSISTED}
-      latestCheckpointTurnCount={latestCheckpointTurnCount}
-      filesChangedViewType={filesChangedViewType}
+      worktreePath={effectiveWorktreePath}
+      messages={effectiveMessages}
+      persistedFileChanges={effectivePersistedFileChanges}
+      groups={orchestratorWorkerChangesInput?.groups}
+      latestCheckpointTurnCount={effectiveLatestCheckpointTurnCount}
+      filesChangedViewType={effectiveFilesChangedViewType}
       activePath={activePath}
       contentMode={contentMode}
       onSelectItem={handleSelectItem}

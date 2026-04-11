@@ -89,9 +89,9 @@ export function invalidateOrchestrationSessionCatalog(
 }
 
 export function invalidateAllOrchestrationQueries(queryClient: QueryClient): Promise<unknown[]> {
-  return Promise.all([
-    queryClient.invalidateQueries({
+  return queryClient
+    .invalidateQueries({
       queryKey: orchestrationQueryKeys.all,
-    }),
-  ]);
+    })
+    .then((result) => [result]);
 }

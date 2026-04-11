@@ -5,6 +5,7 @@ import {
   ChevronDownIcon,
   InfoIcon,
   LoaderIcon,
+  NetworkIcon,
   PlusIcon,
   RefreshCwIcon,
   Undo2Icon,
@@ -24,7 +25,9 @@ import {
   type ChangesDrawerVisibility,
   type ChangesPanelFilesChangedViewType,
   type ChangesPanelWindowNavigationMode,
+  type WorkerOrchestrationNoticesVisibility,
   type SidebarProjectSortOrder,
+  type WorkerChatViewVisibility,
 } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
@@ -485,7 +488,14 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.sidebarOrchestrationModeEnabled !==
       DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled
-        ? ["Sidebar orchestration mode"]
+        ? ["Orchestration mode"]
+        : []),
+      ...(settings.workerChatViewVisibility !== DEFAULT_UNIFIED_SETTINGS.workerChatViewVisibility
+        ? ["Worker chat view"]
+        : []),
+      ...(settings.workerOrchestrationNoticesVisibility !==
+      DEFAULT_UNIFIED_SETTINGS.workerOrchestrationNoticesVisibility
+        ? ["Worker orchestration notices"]
         : []),
       ...(settings.allowActiveThreadsInFold !== DEFAULT_UNIFIED_SETTINGS.allowActiveThreadsInFold
         ? ["Active threads in fold"]
@@ -545,6 +555,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarProjectSortOrder,
       settings.showGitignoredFilesInMentions,
       settings.timestampFormat,
+      settings.workerChatViewVisibility,
+      settings.workerOrchestrationNoticesVisibility,
       theme,
     ],
   );
@@ -589,6 +601,19 @@ const CHANGES_PANEL_WINDOW_NAVIGATION_MODE_LABELS: Record<
 const CHANGES_DRAWER_VISIBILITY_LABELS: Record<ChangesDrawerVisibility, string> = {
   always_show: "Show by default",
   always_hide: "Hide by default",
+};
+
+const WORKER_CHAT_VIEW_VISIBILITY_LABELS: Record<WorkerChatViewVisibility, string> = {
+  always_show: "Always Show",
+  always_hide: "Always Hide",
+};
+
+const WORKER_ORCHESTRATION_NOTICES_VISIBILITY_LABELS: Record<
+  WorkerOrchestrationNoticesVisibility,
+  string
+> = {
+  always_show: "Always Show",
+  always_hide: "Always Hide",
 };
 
 export function GeneralSettingsPanel() {
@@ -995,34 +1020,6 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
-          }
-        />
-
-        <SettingsRow
-          title="Sidebar orchestration mode"
-          description="Show orchestrator projects as session-scoped worker navigation grouped by core project."
-          resetAction={
-            settings.sidebarOrchestrationModeEnabled !==
-            DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled ? (
-              <SettingResetButton
-                label="sidebar orchestration mode"
-                onClick={() =>
-                  updateSettings({
-                    sidebarOrchestrationModeEnabled:
-                      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.sidebarOrchestrationModeEnabled}
-              onCheckedChange={(checked) =>
-                updateSettings({ sidebarOrchestrationModeEnabled: Boolean(checked) })
-              }
-              aria-label="Enable sidebar orchestration mode"
-            />
           }
         />
 
@@ -1676,6 +1673,145 @@ export function GeneralSettingsPanel() {
             description="Current version of the application."
           />
         )}
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function OrchestrationSettingsPanel() {
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  const orchestrationModeEnabled = settings.sidebarOrchestrationModeEnabled;
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Orchestration" icon={<NetworkIcon className="size-3.5" />}>
+        <SettingsRow
+          title="Enable Orchestration Mode"
+          description="Show orchestrator projects as session-scoped worker navigation grouped by core project."
+          resetAction={
+            settings.sidebarOrchestrationModeEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled ? (
+              <SettingResetButton
+                label="orchestration mode"
+                onClick={() =>
+                  updateSettings({
+                    sidebarOrchestrationModeEnabled:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarOrchestrationModeEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarOrchestrationModeEnabled: Boolean(checked) })
+              }
+              aria-label="Enable orchestration mode"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Worker Chat View"
+          description={
+            orchestrationModeEnabled
+              ? "Choose whether worker threads start with the chat input visible."
+              : "Enable orchestration mode to configure worker thread chat input defaults."
+          }
+          resetAction={
+            settings.workerChatViewVisibility !==
+            DEFAULT_UNIFIED_SETTINGS.workerChatViewVisibility ? (
+              <SettingResetButton
+                label="worker chat view"
+                onClick={() =>
+                  updateSettings({
+                    workerChatViewVisibility: DEFAULT_UNIFIED_SETTINGS.workerChatViewVisibility,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              disabled={!orchestrationModeEnabled}
+              value={settings.workerChatViewVisibility}
+              onValueChange={(value) => {
+                if (value === "always_show" || value === "always_hide") {
+                  updateSettings({ workerChatViewVisibility: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Worker chat view">
+                <SelectValue>
+                  {WORKER_CHAT_VIEW_VISIBILITY_LABELS[settings.workerChatViewVisibility]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="always_show">
+                  {WORKER_CHAT_VIEW_VISIBILITY_LABELS.always_show}
+                </SelectItem>
+                <SelectItem hideIndicator value="always_hide">
+                  {WORKER_CHAT_VIEW_VISIBILITY_LABELS.always_hide}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Worker Orchestration Notices"
+          description={
+            orchestrationModeEnabled
+              ? "Choose whether worker threads start with orchestration notice banners visible."
+              : "Enable orchestration mode to configure worker orchestration notice defaults."
+          }
+          resetAction={
+            settings.workerOrchestrationNoticesVisibility !==
+            DEFAULT_UNIFIED_SETTINGS.workerOrchestrationNoticesVisibility ? (
+              <SettingResetButton
+                label="worker orchestration notices"
+                onClick={() =>
+                  updateSettings({
+                    workerOrchestrationNoticesVisibility:
+                      DEFAULT_UNIFIED_SETTINGS.workerOrchestrationNoticesVisibility,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              disabled={!orchestrationModeEnabled}
+              value={settings.workerOrchestrationNoticesVisibility}
+              onValueChange={(value) => {
+                if (value === "always_show" || value === "always_hide") {
+                  updateSettings({ workerOrchestrationNoticesVisibility: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Worker orchestration notices">
+                <SelectValue>
+                  {
+                    WORKER_ORCHESTRATION_NOTICES_VISIBILITY_LABELS[
+                      settings.workerOrchestrationNoticesVisibility
+                    ]
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="always_show">
+                  {WORKER_ORCHESTRATION_NOTICES_VISIBILITY_LABELS.always_show}
+                </SelectItem>
+                <SelectItem hideIndicator value="always_hide">
+                  {WORKER_ORCHESTRATION_NOTICES_VISIBILITY_LABELS.always_hide}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
       </SettingsSection>
     </SettingsPageContainer>
   );

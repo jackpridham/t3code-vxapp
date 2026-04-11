@@ -743,24 +743,28 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
           const projects: ReadonlyArray<OrchestrationProject> = projectRows
             .filter((row) => visibleProjectIds === null || visibleProjectIds.has(row.projectId))
-            .map((row) => ({
-              id: row.projectId,
-              title: row.title,
-              workspaceRoot: row.workspaceRoot,
-              kind: row.kind ?? "project",
-              ...(row.sidebarParentProjectId !== null
-                ? { sidebarParentProjectId: row.sidebarParentProjectId }
-                : {}),
-              ...(row.currentSessionRootThreadId !== null
-                ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
-                : {}),
-              defaultModelSelection: row.defaultModelSelection,
-              scripts: row.scripts,
-              hooks: row.hooks,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-              deletedAt: row.deletedAt,
-            }));
+            .map((row) =>
+              Object.assign(
+                {
+                  id: row.projectId,
+                  title: row.title,
+                  workspaceRoot: row.workspaceRoot,
+                  kind: row.kind ?? "project",
+                  defaultModelSelection: row.defaultModelSelection,
+                  scripts: row.scripts,
+                  hooks: row.hooks,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  deletedAt: row.deletedAt,
+                },
+                row.sidebarParentProjectId !== null
+                  ? { sidebarParentProjectId: row.sidebarParentProjectId }
+                  : undefined,
+                row.currentSessionRootThreadId !== null
+                  ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
+                  : undefined,
+              ),
+            );
 
           const threads: ReadonlyArray<OrchestrationThread> = scopedThreadRows.map((row) => {
             const boundedMessages = takeTailBounded(

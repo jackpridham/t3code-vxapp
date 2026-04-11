@@ -87,11 +87,11 @@ export function dispatchNotification(
         bodyLines.length > 0 ? { body: bodyLines } : {},
       );
       if (threadId) {
-        notification.onclick = () => {
+        notification.addEventListener("click", () => {
           notification.close();
           globalThis.focus?.();
           openThreadRoute(threadId);
-        };
+        });
       }
     }
   }

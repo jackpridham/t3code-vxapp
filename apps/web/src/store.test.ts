@@ -474,6 +474,81 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.labels).toEqual(["orchestrator", "jasper"]);
   });
 
+  it("excludes deleted threads during full snapshot sync", () => {
+    const initialState: AppState = {
+      ...makeState(
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-deleted"),
+          title: "Stale deleted worker",
+        }),
+      ),
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-deleted"),
+          title: "Stale deleted worker",
+        }),
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(makeReadModelThread({ id: ThreadId.makeUnsafe("thread-active") }), {
+        threads: [
+          makeReadModelThread({
+            id: ThreadId.makeUnsafe("thread-active"),
+            title: "Active thread",
+          }),
+          makeReadModelThread({
+            id: ThreadId.makeUnsafe("worker-deleted"),
+            title: "Deleted worker",
+            deletedAt: "2026-02-27T00:00:01.000Z",
+          }),
+        ],
+      }),
+    );
+
+    expect(next.threads.map((thread) => thread.id)).toEqual(["thread-active"]);
+    expect(next.threads.some((thread) => thread.id === "worker-deleted")).toBe(false);
+  });
+
+  it("removes existing threads when partial read-model payload marks them deleted", () => {
+    const initialState: AppState = {
+      ...makeState(
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-keep"),
+          title: "Keep thread",
+        }),
+      ),
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-keep"),
+          title: "Keep thread",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-deleted"),
+          title: "Stale deleted worker",
+        }),
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(makeReadModelThread({ id: ThreadId.makeUnsafe("worker-deleted") }), {
+        snapshotProfile: "active-thread",
+        threads: [
+          makeReadModelThread({
+            id: ThreadId.makeUnsafe("worker-deleted"),
+            spawnRole: "worker",
+            deletedAt: "2026-02-27T00:00:01.000Z",
+          }),
+        ],
+      }),
+    );
+
+    expect(next.threads.map((thread) => thread.id)).toEqual(["thread-keep"]);
+    expect(next.threads.some((thread) => thread.id === "worker-deleted")).toBe(false);
+  });
+
   it("replaces projects using snapshot order during recovery", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
@@ -929,6 +1004,64 @@ describe("incremental orchestration updates", () => {
 
     expect(next.threads[0]?.turnDiffSummaries).toHaveLength(1);
     expect(next.threads[0]?.latestTurn).toEqual(state.threads[0]?.latestTurn);
+  });
+
+  it("keeps running turns active through provisional missing diffs", () => {
+    const turnId = TurnId.makeUnsafe("turn-running-missing-diff");
+    const state = makeState(
+      makeThread({
+        latestTurn: {
+          turnId,
+          state: "running",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:01.000Z",
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      }),
+    );
+
+    const afterMissing = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.turn-diff-completed", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId,
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("provider-diff:running-missing-diff"),
+        status: "missing",
+        files: [],
+        assistantMessageId: MessageId.makeUnsafe("assistant:turn-running-missing-diff"),
+        completedAt: "2026-02-27T00:00:02.000Z",
+      }),
+    );
+
+    expect(afterMissing.threads[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "running",
+      completedAt: null,
+    });
+    expect(afterMissing.threads[0]?.turnDiffSummaries[0]?.status).toBe("missing");
+
+    const afterAssistantComplete = applyOrchestrationEvent(
+      afterMissing,
+      makeEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("assistant-real"),
+        role: "assistant",
+        text: "done",
+        turnId,
+        streaming: false,
+        createdAt: "2026-02-27T00:00:03.000Z",
+        updatedAt: "2026-02-27T00:00:03.000Z",
+      }),
+    );
+
+    expect(afterAssistantComplete.threads[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "completed",
+      completedAt: "2026-02-27T00:00:03.000Z",
+      assistantMessageId: MessageId.makeUnsafe("assistant-real"),
+    });
   });
 
   it("rebinds live turn diffs to the authoritative assistant message when it arrives later", () => {

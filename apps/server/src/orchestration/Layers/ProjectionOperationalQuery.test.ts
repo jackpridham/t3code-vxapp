@@ -195,6 +195,22 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
             '2026-04-06T00:00:05.000Z',
             '2026-04-06T00:00:06.000Z',
             NULL
+          ),
+          (
+            'thread-deleted',
+            'project-threads',
+            'Thread Deleted',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:10.000Z',
+            '2026-04-06T00:00:11.000Z',
+            NULL,
+            '2026-04-06T00:00:12.000Z'
           )
       `;
 
@@ -258,17 +274,33 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
         )
       `;
 
-      const threads = yield* query.listProjectThreads({
+      const activeOnly = yield* query.listProjectThreads({
         projectId: ProjectId.makeUnsafe("project-threads"),
         includeArchived: false,
         includeDeleted: false,
       });
 
-      assert.equal(threads.length, 1);
-      assert.equal(threads[0]?.id, "thread-active");
-      assert.equal(threads[0]?.session?.status, "ready");
-      assert.equal(threads[0]?.latestTurn?.turnId, "turn-active");
-      assert.equal(threads[0]?.latestTurn?.completedAt, "2026-04-06T00:00:09.000Z");
+      assert.deepEqual(
+        activeOnly.map((thread) => thread.id),
+        ["thread-active"],
+      );
+      assert.equal(activeOnly[0]?.session?.status, "ready");
+      assert.equal(activeOnly[0]?.latestTurn?.turnId, "turn-active");
+      assert.equal(activeOnly[0]?.latestTurn?.completedAt, "2026-04-06T00:00:09.000Z");
+
+      const archivedInclusive = yield* query.listProjectThreads({
+        projectId: ProjectId.makeUnsafe("project-threads"),
+        includeArchived: true,
+        includeDeleted: false,
+      });
+      assert.deepEqual(
+        archivedInclusive.map((thread) => thread.id),
+        ["thread-active", "thread-archived"],
+      );
+      assert.equal(
+        archivedInclusive.some((thread) => thread.id === "thread-deleted"),
+        false,
+      );
     }),
   );
 
@@ -432,6 +464,72 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
             'workflow-1'
           ),
           (
+            'worker-deleted',
+            'project-worker',
+            'Worker Deleted',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:15.000Z',
+            '2026-04-06T00:00:16.000Z',
+            NULL,
+            '2026-04-06T00:00:17.000Z',
+            'project-orchestrator',
+            'root-1',
+            'root-1',
+            'worker',
+            'root-1',
+            'workflow-1'
+          ),
+          (
+            'root-deleted',
+            'project-orchestrator',
+            'Deleted Root',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:18.000Z',
+            '2026-04-06T00:00:19.000Z',
+            NULL,
+            '2026-04-06T00:00:20.000Z',
+            'project-orchestrator',
+            NULL,
+            NULL,
+            'orchestrator',
+            NULL,
+            'workflow-deleted'
+          ),
+          (
+            'worker-under-deleted-root',
+            'project-worker',
+            'Worker Under Deleted Root',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:21.000Z',
+            '2026-04-06T00:00:22.000Z',
+            NULL,
+            NULL,
+            'project-orchestrator',
+            'root-deleted',
+            'root-deleted',
+            'worker',
+            'root-deleted',
+            'workflow-deleted'
+          ),
+          (
             'root-2',
             'project-orchestrator',
             'Root Two',
@@ -489,6 +587,17 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
       );
       assert.equal(sessionThreads[2]?.projectId, "project-worker");
       assert.equal(sessionThreads[3]?.archivedAt, "2026-04-06T00:00:10.000Z");
+      assert.equal(
+        sessionThreads.some((thread) => thread.id === "worker-deleted"),
+        false,
+      );
+
+      const deletedRootSessionThreads = yield* query.listSessionThreads({
+        rootThreadId: ThreadId.makeUnsafe("root-deleted"),
+        includeArchived: true,
+        includeDeleted: false,
+      });
+      assert.deepEqual(deletedRootSessionThreads, []);
     }),
   );
 });

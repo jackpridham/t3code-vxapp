@@ -17,12 +17,78 @@ import {
   deriveComposerSendState,
   hasServerAcknowledgedLocalDispatch,
   resolveChatHeaderBadgeLabel,
+  resolveInitialWorkerComposerHidden,
+  resolveInitialWorkerOrchestrationNoticesHidden,
   shouldMarkThreadVisitedForCompletedTurn,
   threadHasHydratedHistory,
   threadHasStarted,
   threadIsHydratingHistory,
   waitForStartedServerThread,
 } from "./ChatView.logic";
+
+describe("resolveInitialWorkerComposerHidden", () => {
+  it("hides worker composer by default when orchestration mode is enabled", () => {
+    expect(
+      resolveInitialWorkerComposerHidden({
+        orchestrationModeEnabled: true,
+        spawnRole: "worker",
+        workerChatViewVisibility: "always_hide",
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps worker composer visible when configured to always show", () => {
+    expect(
+      resolveInitialWorkerComposerHidden({
+        orchestrationModeEnabled: true,
+        spawnRole: "worker",
+        workerChatViewVisibility: "always_show",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not hide non-worker composer views", () => {
+    expect(
+      resolveInitialWorkerComposerHidden({
+        orchestrationModeEnabled: true,
+        spawnRole: "orchestrator",
+        workerChatViewVisibility: "always_hide",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveInitialWorkerOrchestrationNoticesHidden", () => {
+  it("hides worker orchestration notices by default when orchestration mode is enabled", () => {
+    expect(
+      resolveInitialWorkerOrchestrationNoticesHidden({
+        orchestrationModeEnabled: true,
+        spawnRole: "worker",
+        workerOrchestrationNoticesVisibility: "always_hide",
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps worker orchestration notices visible when configured to always show", () => {
+    expect(
+      resolveInitialWorkerOrchestrationNoticesHidden({
+        orchestrationModeEnabled: true,
+        spawnRole: "worker",
+        workerOrchestrationNoticesVisibility: "always_show",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not hide non-worker orchestration notices", () => {
+    expect(
+      resolveInitialWorkerOrchestrationNoticesHidden({
+        orchestrationModeEnabled: true,
+        spawnRole: "orchestrator",
+        workerOrchestrationNoticesVisibility: "always_hide",
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {

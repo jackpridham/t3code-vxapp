@@ -38,6 +38,16 @@ export interface DiscoveredFileReference {
   section: ChangesSectionKind;
   /** MessageId of the first message that referenced this file. */
   firstSeenMessageId: string;
+  /** Optional source thread for synthesized aggregate views. */
+  sourceThreadId?: string | undefined;
+  /** Optional source worktree for synthesized aggregate views. */
+  sourceWorktreePath?: string | null | undefined;
+  /** Optional source-relative path for synthesized aggregate views. */
+  sourcePath?: string | undefined;
+  /** Optional source checkpoint bound for synthesized aggregate views. */
+  sourceLatestCheckpointTurnCount?: number | null | undefined;
+  /** Optional nested group label for synthesized aggregate views. */
+  sourceGroupLabel?: string | undefined;
 }
 
 /** A group of file references for one section of the Changes panel. */

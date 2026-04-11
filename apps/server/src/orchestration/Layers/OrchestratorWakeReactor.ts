@@ -36,6 +36,8 @@ type WakeDomainEvent = Extract<
       | "thread.archived"
       | "thread.deleted"
       | "thread.turn-start-requested"
+      | "thread.turn-diff-completed"
+      | "thread.turn-interrupt-requested"
       | "thread.session-set"
       | "thread.unarchived"
       | "thread.orchestrator-wake-upserted";
@@ -70,11 +72,32 @@ function normalizeWakeOutcome(
   }
 }
 
+function wakeOutcomeFromCheckpoint(input: {
+  readonly status: "ready" | "missing" | "error";
+  readonly files: ReadonlyArray<unknown>;
+}): "failed" | "interrupted" | null {
+  if (input.files.length === 0) {
+    return null;
+  }
+  switch (input.status) {
+    case "error":
+      return "failed";
+    case "missing":
+      return "interrupted";
+    case "ready":
+      return null;
+  }
+}
+
 function sameId(left: string | null | undefined, right: string | null | undefined): boolean {
   if (left === null || left === undefined || right === null || right === undefined) {
     return false;
   }
   return left === right;
+}
+
+function turnKey(threadId: ThreadId, turnId: TurnId): string {
+  return `${threadId}:${turnId}`;
 }
 
 function toWakeItem(input: {
@@ -256,6 +279,7 @@ const make = Effect.gen(function* () {
   const wakeRepository = yield* ProjectionOrchestratorWakeRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const drainingOrchestratorThreadIds = new Set<string>();
+  const explicitlyInterruptedTurnKeys = new Set<string>();
 
   const appendWakeRejectedActivity = Effect.fn("appendWakeRejectedActivity")(function* (input: {
     readonly threadId: ThreadId;
@@ -448,6 +472,138 @@ const make = Effect.gen(function* () {
             },
       createdAt: supersededAt ?? event.createdAt,
       commandTag: supersededAt === null ? "upsert" : "upsert-superseded",
+    });
+  });
+
+  const enqueueWakeFromTerminalTurnDiff = Effect.fn("enqueueWakeFromTerminalTurnDiff")(function* (
+    event: Extract<OrchestrationEvent, { type: "thread.turn-diff-completed" }>,
+  ) {
+    const turnId = event.payload.turnId;
+    const outcome = wakeOutcomeFromCheckpoint({
+      status: event.payload.status,
+      files: event.payload.files,
+    });
+    if (outcome === null) {
+      return;
+    }
+
+    if (explicitlyInterruptedTurnKeys.has(turnKey(event.payload.threadId, turnId))) {
+      return;
+    }
+
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const workerThread = readModel.threads.find((entry) => entry.id === event.payload.threadId);
+    if (!workerThread || workerThread.spawnRole !== "worker") {
+      return;
+    }
+    if (workerThread.archivedAt !== null || workerThread.deletedAt !== null) {
+      return;
+    }
+
+    const duplicateWake = readModel.orchestratorWakeItems.find(
+      (wakeItem) =>
+        wakeItem.workerThreadId === workerThread.id &&
+        wakeItem.workerTurnId === turnId &&
+        wakeItem.outcome === outcome,
+    );
+    if (duplicateWake) {
+      return;
+    }
+
+    if (
+      workerThread.orchestratorThreadId === undefined ||
+      workerThread.orchestratorProjectId === undefined
+    ) {
+      yield* appendWakeRejectedActivity({
+        threadId: workerThread.id,
+        turnId,
+        createdAt: event.payload.completedAt,
+        reason: "missing_orchestrator_lineage",
+        detail: "Worker turn completed without a valid orchestrator target.",
+      });
+      return;
+    }
+
+    if (workerThread.orchestratorThreadId === workerThread.id) {
+      yield* appendWakeRejectedActivity({
+        threadId: workerThread.id,
+        turnId,
+        createdAt: event.payload.completedAt,
+        reason: "worker_targets_itself",
+        detail: "Worker lineage points back to the worker thread itself.",
+        orchestratorThreadId: workerThread.orchestratorThreadId,
+        orchestratorProjectId: workerThread.orchestratorProjectId,
+      });
+      return;
+    }
+
+    const orchestratorThread = readModel.threads.find(
+      (entry) => entry.id === workerThread.orchestratorThreadId,
+    );
+    if (!orchestratorThread) {
+      yield* appendWakeRejectedActivity({
+        threadId: workerThread.id,
+        turnId,
+        createdAt: event.payload.completedAt,
+        reason: "orchestrator_missing",
+        detail: "Worker target orchestrator thread no longer exists.",
+        orchestratorThreadId: workerThread.orchestratorThreadId,
+        orchestratorProjectId: workerThread.orchestratorProjectId,
+      });
+      return;
+    }
+
+    if (orchestratorThread.projectId !== workerThread.orchestratorProjectId) {
+      yield* appendWakeRejectedActivity({
+        threadId: workerThread.id,
+        turnId,
+        createdAt: event.payload.completedAt,
+        reason: "orchestrator_mismatch",
+        detail: "Worker target orchestrator project does not match the recorded lineage.",
+        orchestratorThreadId: workerThread.orchestratorThreadId,
+        orchestratorProjectId: workerThread.orchestratorProjectId,
+      });
+      return;
+    }
+
+    const wakeId = `wake:${workerThread.id}:${turnId}:${outcome}`;
+    const turns = yield* projectionTurnRepository.listByThreadId({
+      threadId: workerThread.id,
+    });
+    const supersededAt = findSupersedingTurnRequestedAt({
+      turns,
+      completedTurnId: turnId,
+      completedAt: event.payload.completedAt,
+      activeTurnId: workerThread.session?.activeTurnId ?? null,
+    });
+    const wakeItem = toWakeItem({
+      wakeId,
+      orchestratorThreadId: workerThread.orchestratorThreadId,
+      orchestratorProjectId: workerThread.orchestratorProjectId,
+      workerThread,
+      workerTurnId: turnId,
+      outcome,
+      summary:
+        outcome === "failed"
+          ? `${workerThread.title} failed its turn`
+          : outcome === "interrupted"
+            ? `${workerThread.title} was interrupted`
+            : `${workerThread.title} completed its assigned turn`,
+      queuedAt: event.payload.completedAt,
+    });
+    yield* dispatchWakeUpsert({
+      preferredThreadId: workerThread.orchestratorThreadId,
+      wakeItem:
+        supersededAt === null
+          ? wakeItem
+          : {
+              ...wakeItem,
+              state: "consumed",
+              consumedAt: supersededAt,
+              consumeReason: "worker_superseded_by_new_turn",
+            },
+      createdAt: supersededAt ?? event.payload.completedAt,
+      commandTag: supersededAt === null ? "diff-upsert" : "diff-upsert-superseded",
     });
   });
 
@@ -1017,6 +1173,16 @@ const make = Effect.gen(function* () {
             commandTag: "consume",
           });
           return;
+        case "thread.turn-interrupt-requested":
+          if (event.payload.turnId !== undefined) {
+            explicitlyInterruptedTurnKeys.add(
+              turnKey(event.payload.threadId, event.payload.turnId),
+            );
+          }
+          return;
+        case "thread.turn-diff-completed":
+          yield* enqueueWakeFromTerminalTurnDiff(event);
+          return;
         case "thread.session-set":
           if (
             event.payload.session.activeTurnId === null &&
@@ -1110,6 +1276,8 @@ const make = Effect.gen(function* () {
             event.type !== "thread.archived" &&
             event.type !== "thread.deleted" &&
             event.type !== "thread.turn-start-requested" &&
+            event.type !== "thread.turn-diff-completed" &&
+            event.type !== "thread.turn-interrupt-requested" &&
             event.type !== "thread.session-set" &&
             event.type !== "thread.unarchived" &&
             event.type !== "thread.orchestrator-wake-upserted"

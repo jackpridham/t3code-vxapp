@@ -2,7 +2,6 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
-  OrchestrationLatestTurn,
   OrchestrationProjectKind,
   ProjectId,
   ProjectHooks,

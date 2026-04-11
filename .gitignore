@@ -75,3 +75,4 @@ __screenshots__/
 .claude/skills/t3-thread-lineage-decoder
 .claude/skills/t3-ui-state-and-projection-boundaries
 .agents/skills
+.claude/skills/t3-document-title-workflow
