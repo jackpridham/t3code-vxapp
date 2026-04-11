@@ -165,29 +165,6 @@ function sameId(left: string | null | undefined, right: string | null | undefine
   return left === right;
 }
 
-function latestTurnIdIfStillOpen(thread: {
-  readonly session?: {
-    readonly status: OrchestrationSession["status"];
-    readonly activeTurnId: TurnId | null;
-  } | null;
-  readonly latestTurn?: {
-    readonly turnId: TurnId;
-    readonly state: "pending" | "running" | "interrupted" | "completed" | "error";
-  } | null;
-}): TurnId | null {
-  const session = thread.session ?? null;
-  if (session?.status === "running" && session.activeTurnId !== null) {
-    return session.activeTurnId;
-  }
-
-  const latestTurn = thread.latestTurn ?? null;
-  if (!latestTurn) {
-    return null;
-  }
-
-  return latestTurn.state === "pending" ? latestTurn.turnId : null;
-}
-
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
@@ -480,7 +457,6 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
-    const requestedTurnId = latestTurnIdIfStillOpen(thread);
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,

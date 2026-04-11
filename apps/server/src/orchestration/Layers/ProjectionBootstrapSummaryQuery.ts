@@ -14,6 +14,7 @@ import {
   type OrchestrationProject,
   type OrchestrationSession,
   type OrchestrationThread,
+  type OrchestratorWakeItem,
 } from "@t3tools/contracts";
 import { Effect, Layer, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -375,24 +376,28 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
 
-          const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
-            id: row.projectId,
-            title: row.title,
-            workspaceRoot: row.workspaceRoot,
-            kind: row.kind ?? "project",
-            ...(row.sidebarParentProjectId !== null
-              ? { sidebarParentProjectId: row.sidebarParentProjectId }
-              : {}),
-            ...(row.currentSessionRootThreadId !== null
-              ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
-              : {}),
-            defaultModelSelection: row.defaultModelSelection,
-            scripts: row.scripts,
-            hooks: row.hooks,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt,
-          }));
+          const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) =>
+            Object.assign(
+              {
+                id: row.projectId,
+                title: row.title,
+                workspaceRoot: row.workspaceRoot,
+                kind: row.kind ?? "project",
+                defaultModelSelection: row.defaultModelSelection,
+                scripts: row.scripts,
+                hooks: row.hooks,
+                createdAt: row.createdAt,
+                updatedAt: row.updatedAt,
+                deletedAt: row.deletedAt,
+              },
+              row.sidebarParentProjectId !== null
+                ? { sidebarParentProjectId: row.sidebarParentProjectId }
+                : undefined,
+              row.currentSessionRootThreadId !== null
+                ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
+                : undefined,
+            ),
+          );
 
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map(
             (row) =>
@@ -431,24 +436,30 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
               ) satisfies OrchestrationThread,
           );
 
-          const orchestratorWakeItems = wakeRows.map((row) => ({
-            wakeId: row.wakeId,
-            orchestratorThreadId: row.orchestratorThreadId,
-            orchestratorProjectId: row.orchestratorProjectId,
-            workerThreadId: row.workerThreadId,
-            workerProjectId: row.workerProjectId,
-            workerTurnId: row.workerTurnId,
-            ...(row.workflowId !== null ? { workflowId: row.workflowId } : {}),
-            workerTitleSnapshot: row.workerTitleSnapshot,
-            outcome: row.outcome,
-            summary: row.summary,
-            queuedAt: row.queuedAt,
-            state: row.state,
-            ...(row.deliveryMessageId !== null ? { deliveryMessageId: row.deliveryMessageId } : {}),
-            deliveredAt: row.deliveredAt,
-            consumedAt: row.consumedAt,
-            ...(row.consumeReason !== null ? { consumeReason: row.consumeReason } : {}),
-          }));
+          const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> = wakeRows.map((row) =>
+            Object.assign(
+              {
+                wakeId: row.wakeId,
+                orchestratorThreadId: row.orchestratorThreadId,
+                orchestratorProjectId: row.orchestratorProjectId,
+                workerThreadId: row.workerThreadId,
+                workerProjectId: row.workerProjectId,
+                workerTurnId: row.workerTurnId,
+                workerTitleSnapshot: row.workerTitleSnapshot,
+                outcome: row.outcome,
+                summary: row.summary,
+                queuedAt: row.queuedAt,
+                state: row.state,
+                deliveredAt: row.deliveredAt,
+                consumedAt: row.consumedAt,
+              },
+              row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+              row.deliveryMessageId !== null
+                ? { deliveryMessageId: row.deliveryMessageId }
+                : undefined,
+              row.consumeReason !== null ? { consumeReason: row.consumeReason } : undefined,
+            ),
+          );
 
           return yield* decodeReadModel({
             snapshotSequence: computeSnapshotSequence(stateRows),

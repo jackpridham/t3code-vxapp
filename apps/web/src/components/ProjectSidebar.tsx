@@ -37,7 +37,6 @@ import {
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   type ProjectId,
   type DesktopUpdateState,
   ThreadId,
@@ -101,7 +100,6 @@ import {
 } from "./ui/sidebar";
 import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
-import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
   buildCopyThreadIdErrorDescription,
   filterThreadsByLabels,
@@ -111,7 +109,6 @@ import {
   groupThreadsByLineage,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
-  resolveLatestActiveThreadForProject,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadEnvMode,
   resolveSidebarProjectKind,

@@ -537,7 +537,7 @@ function overrideRuntimeEventTurnId(
 ): Omit<ProviderRuntimeEvent, "type" | "payload"> {
   const { turnId: _previousTurnId, providerRefs: previousProviderRefs, ...rest } = base;
   const providerRefs = {
-    ...(previousProviderRefs ?? {}),
+    ...previousProviderRefs,
     ...(turnId ? { providerTurnId: turnId } : {}),
   };
 
@@ -1619,8 +1619,8 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       if (hasTerminalLifecycle) {
         inFlightTurnIdsByThread.delete(event.threadId);
       } else {
-        const latestTurnScopedEvent = [...runtimeEvents]
-          .reverse()
+        const latestTurnScopedEvent = runtimeEvents
+          .toReversed()
           .find((runtimeEvent) => runtimeEvent.turnId !== undefined);
         if (latestTurnScopedEvent?.turnId) {
           inFlightTurnIdsByThread.set(event.threadId, latestTurnScopedEvent.turnId);
