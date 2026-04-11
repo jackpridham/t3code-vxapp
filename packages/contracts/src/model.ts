@@ -67,10 +67,16 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind,
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
   codex: {
     "5.4": "gpt-5.4",
+    "GPT-5.4": "gpt-5.4",
+    "GPT-5.4 Mini": "gpt-5.4-mini",
     "5.3": "gpt-5.3-codex",
     "gpt-5.3": "gpt-5.3-codex",
+    "GPT-5.3 Codex": "gpt-5.3-codex",
     "5.3-spark": "gpt-5.3-codex-spark",
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
+    "GPT-5.3 Codex Spark": "gpt-5.3-codex-spark",
+    "GPT-5.2": "gpt-5.2",
+    "GPT-5.2 Codex": "gpt-5.2-codex",
   },
   claudeAgent: {
     opus: "claude-opus-4-6",

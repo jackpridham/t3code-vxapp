@@ -138,7 +138,34 @@ export function normalizeModelSlug(
   const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
     ? aliases[trimmed]
     : undefined;
-  return typeof aliased === "string" ? aliased : trimmed;
+  if (typeof aliased === "string") {
+    return aliased;
+  }
+
+  const lowerTrimmed = trimmed.toLowerCase();
+  const caseInsensitiveAlias = Object.entries(aliases).find(
+    ([alias]) => alias.toLowerCase() === lowerTrimmed,
+  )?.[1];
+  if (typeof caseInsensitiveAlias === "string") {
+    return caseInsensitiveAlias;
+  }
+
+  if (provider === "codex") {
+    const codexDisplayAliases: Record<string, string> = {
+      "gpt-5.4": "gpt-5.4",
+      "gpt-5.4 mini": "gpt-5.4-mini",
+      "gpt-5.3 codex": "gpt-5.3-codex",
+      "gpt-5.3 codex spark": "gpt-5.3-codex-spark",
+      "gpt-5.2": "gpt-5.2",
+      "gpt-5.2 codex": "gpt-5.2-codex",
+    };
+    const displayAlias = codexDisplayAliases[lowerTrimmed];
+    if (displayAlias) {
+      return displayAlias;
+    }
+  }
+
+  return trimmed;
 }
 
 export function resolveSelectableModel(
