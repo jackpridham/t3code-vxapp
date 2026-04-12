@@ -108,6 +108,9 @@ const defaultProviderStatuses: ReadonlyArray<ServerProvider> = [
     models: [],
   },
 ];
+const CONFIG_UPDATED_HELPER_TIMEOUT_MS = 3_000;
+const CONFIG_UPDATED_HELPER_ATTEMPTS = 3;
+const CONFIG_UPDATED_HELPER_RETRY_DELAY_MS = 250;
 
 const defaultProviderRegistryService: ProviderRegistryShape = {
   getProviders: Effect.succeed(defaultProviderStatuses),
@@ -118,12 +121,14 @@ const defaultProviderRegistryService: ProviderRegistryShape = {
 const defaultServerSettings = DEFAULT_SERVER_SETTINGS;
 const AGENT_SESSION_TOKEN_SECRET = "agent-session-token-test-secret";
 const AGENT_SESSION_TOKEN_SIGNATURE_ALGORITHM = "sha256";
+const DEFAULT_AGENT_CAPABILITIES = ["recurring-quotes", "quote-search", "render-table"] as const;
+
 function normalizeAgentSessionTokenPayload(payload: {
   tenantId: string;
   userId: string;
   sessionId: string;
   conversationId: string;
-  capabilities: string[];
+  capabilities?: string[];
   lastSeenSequence?: number;
   exp?: number;
 }): string {
@@ -138,6 +143,24 @@ function normalizeAgentSessionTokenPayload(payload: {
     ...(payload.exp !== undefined ? { exp: payload.exp } : {}),
     ...(payload.capabilities ? { capabilities: payload.capabilities } : {}),
   });
+}
+
+function makeAgentSessionTokenFromPayload(
+  payload: {
+    tenantId: string;
+    userId: string;
+    sessionId: string;
+    conversationId: string;
+    capabilities?: string[];
+    lastSeenSequence?: number;
+    exp?: number;
+  },
+  signingKey = AGENT_SESSION_TOKEN_SECRET,
+): string {
+  const signature = createHmac(AGENT_SESSION_TOKEN_SIGNATURE_ALGORITHM, signingKey)
+    .update(normalizeAgentSessionTokenPayload(payload))
+    .digest("hex");
+  return JSON.stringify({ ...payload, signature });
 }
 
 function makeAgentSessionToken(
@@ -166,14 +189,7 @@ function makeAgentSessionToken(
       : {}),
     ...(overrides.exp !== undefined ? { exp: overrides.exp } : {}),
   };
-  const signature = createHmac(AGENT_SESSION_TOKEN_SIGNATURE_ALGORITHM, signingKey)
-    .update(normalizeAgentSessionTokenPayload(tokenPayload))
-    .digest("hex");
-
-  return JSON.stringify({
-    ...tokenPayload,
-    signature,
-  });
+  return makeAgentSessionTokenFromPayload(tokenPayload, signingKey);
 }
 
 class MockTerminalManager implements TerminalManagerShape {
@@ -414,6 +430,15 @@ function sleepMs(milliseconds: number): Promise<void> {
   });
 }
 
+function makeAlternateKeybindingsContents(contents: string): string {
+  try {
+    JSON.parse(contents);
+    return "{ not-json";
+  } catch {
+    return "[]";
+  }
+}
+
 function connectWsOnce(port: number, token?: string, route = "/"): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
@@ -632,8 +657,10 @@ async function rewriteKeybindingsAndWaitForPush(
   keybindingsPath: string,
   contents: string,
   predicate: (push: WsPushMessage<typeof WS_CHANNELS.serverConfigUpdated>) => boolean,
-  attempts = 6,
+  attempts = CONFIG_UPDATED_HELPER_ATTEMPTS,
 ): Promise<WsPushMessage<typeof WS_CHANNELS.serverConfigUpdated>> {
+  const alternateContents = makeAlternateKeybindingsContents(contents);
+
   const clearQueuedConfigUpdatedPushes = () => {
     const channels = channelsBySocket.get(ws);
     if (!channels) return;
@@ -644,18 +671,28 @@ async function rewriteKeybindingsAndWaitForPush(
 
   // Give the server keybindings poll loop a chance to hydrate its internal baseline
   // before we rewrite the file, which prevents missing the first change signal.
-  await sleepMs(300);
+  await sleepMs(CONFIG_UPDATED_HELPER_RETRY_DELAY_MS);
 
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt++) {
     clearQueuedConfigUpdatedPushes();
+    if (alternateContents !== contents) {
+      fs.writeFileSync(keybindingsPath, alternateContents, "utf8");
+      await sleepMs(25);
+    }
     fs.writeFileSync(keybindingsPath, contents, "utf8");
     try {
-      const push = await waitForPush(ws, WS_CHANNELS.serverConfigUpdated, predicate, 24, 2_500);
+      const push = await waitForPush(
+        ws,
+        WS_CHANNELS.serverConfigUpdated,
+        predicate,
+        48,
+        CONFIG_UPDATED_HELPER_TIMEOUT_MS,
+      );
       return push;
     } catch (error) {
       lastError = error;
-      await sleepMs(250);
+      await sleepMs(CONFIG_UPDATED_HELPER_RETRY_DELAY_MS);
     }
   }
   throw lastError;
@@ -2486,6 +2523,14 @@ describe("WebSocket Server", () => {
     server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const futureExp = Date.now() + 60_000;
+    const baseToken = JSON.parse(
+      makeAgentSessionToken({
+        tenantId: "tenant-1",
+        userId: "user-1",
+        exp: futureExp,
+      }),
+    ) as Record<string, unknown>;
 
     await expect(connectAgentWs(port)).rejects.toThrow("WebSocket connection failed");
     await expect(connectAgentWs(port, "not-json")).rejects.toThrow("WebSocket connection failed");
@@ -2501,16 +2546,63 @@ describe("WebSocket Server", () => {
         makeAgentSessionToken({ tenantId: "tenant-1", userId: "user-1" }, "invalid-session-secret"),
       ),
     ).rejects.toThrow("WebSocket connection failed");
-    const tamperedToken = JSON.parse(
-      makeAgentSessionToken({ tenantId: "tenant-1", userId: "user-1" }),
-    ) as {
-      tenantId: string;
-      [key: string]: unknown;
-    };
-    tamperedToken.tenantId = "tenant-evil";
-    await expect(connectAgentWs(port, JSON.stringify(tamperedToken))).rejects.toThrow(
-      "WebSocket connection failed",
-    );
+
+    const tamperCases: Array<{ label: string; mutate: (token: Record<string, unknown>) => void }> =
+      [
+        {
+          label: "tenantId",
+          mutate: (token) => {
+            token.tenantId = "tenant-evil";
+          },
+        },
+        {
+          label: "userId",
+          mutate: (token) => {
+            token.userId = "user-evil";
+          },
+        },
+        {
+          label: "sessionId",
+          mutate: (token) => {
+            token.sessionId = "session-evil";
+          },
+        },
+        {
+          label: "conversationId",
+          mutate: (token) => {
+            token.conversationId = "conversation-evil";
+          },
+        },
+        {
+          label: "lastSeenSequence",
+          mutate: (token) => {
+            token.lastSeenSequence = 999;
+          },
+        },
+        {
+          label: "exp",
+          mutate: (token) => {
+            token.exp = Date.now() - 1;
+          },
+        },
+        {
+          label: "capabilities",
+          mutate: (token) => {
+            const capabilities = Array.isArray(token.capabilities) ? [...token.capabilities] : [];
+            capabilities.push("admin");
+            token.capabilities = capabilities;
+          },
+        },
+      ];
+
+    for (const entry of tamperCases) {
+      const tamperedToken = JSON.parse(JSON.stringify(baseToken)) as Record<string, unknown>;
+      entry.mutate(tamperedToken);
+      await expect(connectAgentWs(port, JSON.stringify(tamperedToken))).rejects.toThrow(
+        `WebSocket connection failed`,
+      );
+      void entry.label;
+    }
   });
 
   it("bootstraps a new agent websocket session and sends welcome", async () => {
@@ -2555,6 +2647,7 @@ describe("WebSocket Server", () => {
         tenantId: "tenant-agent",
         userId: "agent-user",
         sessionId: "agent-protocol-session",
+        capabilities: ["quote-search"],
       }),
     );
     connections.push(ws);
@@ -2564,9 +2657,19 @@ describe("WebSocket Server", () => {
       authToken: "agent-token",
       capabilities: ["recurring-quotes", "quote-search"],
     });
+    const connectWelcome = await waitForAgentPush(
+      ws,
+      AGENT_WS_CHANNELS.sessionWelcome,
+      (push) => push.channel === AGENT_WS_CHANNELS.sessionWelcome,
+    );
     expect(connectResponse.error).toBeUndefined();
     expect(connectResponse.result).toEqual({
-      capabilities: ["recurring-quotes", "quote-search"],
+      capabilities: ["quote-search"],
+    });
+    expect(connectWelcome.data).toMatchObject({
+      message: "Session connected",
+      capabilities: ["quote-search"],
+      resumeSupported: true,
     });
 
     const message = "What is the weather in Sydney?";
@@ -2593,6 +2696,71 @@ describe("WebSocket Server", () => {
       message,
       status: "complete",
     });
+  });
+
+  it("authoritatively resolves capabilities from token on connect and getCapabilities", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const token = makeAgentSessionToken({
+      tenantId: "tenant-agent",
+      userId: "agent-user",
+      sessionId: "agent-capability-session",
+      conversationId: "agent-capability-conversation",
+      capabilities: ["quote-search"],
+    });
+
+    const [ws] = await connectAndAwaitAgentWelcome(port, token);
+    connections.push(ws);
+
+    const connectResponse = await sendAgentRequest(ws, AGENT_WS_METHODS.connect, {
+      tenantId: "tenant-agent",
+      authToken: "agent-token",
+      capabilities: ["recurring-quotes", "quote-search", "admin"],
+    });
+    expect(connectResponse.error).toBeUndefined();
+    expect(connectResponse.result).toEqual({
+      capabilities: ["quote-search"],
+    });
+
+    const getCapabilitiesResponse = await sendAgentRequest(ws, AGENT_WS_METHODS.getCapabilities);
+    expect(getCapabilitiesResponse.error).toBeUndefined();
+    expect(getCapabilitiesResponse.result).toEqual({
+      capabilities: ["quote-search"],
+    });
+  });
+
+  it("falls back to default capabilities when token capabilities are empty or omitted", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const futureExp = Date.now() + 60_000;
+    const omittedCapabilitiesToken = makeAgentSessionTokenFromPayload({
+      tenantId: "tenant-agent-default-omitted",
+      userId: "agent-user-default",
+      sessionId: "agent-default-session-omitted",
+      conversationId: "agent-default-conversation-omitted",
+      exp: futureExp,
+    });
+    const emptyCapabilitiesToken = makeAgentSessionToken({
+      tenantId: "tenant-agent-default-empty",
+      userId: "agent-user-default",
+      sessionId: "agent-default-session-empty",
+      conversationId: "agent-default-conversation-empty",
+      capabilities: [],
+      exp: futureExp,
+    });
+
+    for (const token of [omittedCapabilitiesToken, emptyCapabilitiesToken]) {
+      const [ws] = await connectAndAwaitAgentWelcome(port, token);
+      connections.push(ws);
+
+      const response = await sendAgentRequest(ws, AGENT_WS_METHODS.getCapabilities);
+      expect(response.error).toBeUndefined();
+      expect(response.result).toEqual({
+        capabilities: DEFAULT_AGENT_CAPABILITIES,
+      });
+    }
   });
 
   it("replays prior agent events when lastSeenSequence is provided", async () => {
@@ -2648,6 +2816,185 @@ describe("WebSocket Server", () => {
     );
     expect(replayWelcome.metadata.sequence).toBe(5);
     expect(replayWelcome.metadata.sequence).toBeGreaterThan(replayMessage.metadata.sequence);
+  });
+
+  it("rejects stale session reuse when tenant, user, or conversation identity changes", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const tokenSeed = {
+      tenantId: "tenant-rebind",
+      userId: "agent-user-rebind",
+      sessionId: "agent-rebind-session",
+      conversationId: "agent-rebind-conversation",
+    };
+    const message = "stateful message before rebind attempt";
+
+    const [seedWs] = await connectAndAwaitAgentWelcome(port, makeAgentSessionToken(tokenSeed));
+    connections.push(seedWs);
+    const response = await sendAgentRequest(seedWs, AGENT_WS_METHODS.sendMessage, { message });
+    expect(response.error).toBeUndefined();
+    seedWs.close();
+
+    const expectRejectedRebind = async (overrides: {
+      tenantId?: string;
+      userId?: string;
+      conversationId?: string;
+    }) => {
+      const rebindWs = await connectAgentWs(
+        port,
+        makeAgentSessionToken({
+          ...tokenSeed,
+          ...overrides,
+        }),
+      );
+      await Promise.race([
+        new Promise<void>((resolve, reject) => {
+          rebindWs.once("close", (code, reason) => {
+            if (code !== 1008 || reason.toString() !== "Invalid agent session token") {
+              reject(new Error(`Unexpected close: ${code} ${reason}`));
+              return;
+            }
+            resolve();
+          });
+          rebindWs.once("error", (error) => {
+            reject(new Error(`Unexpected error: ${String(error)}`));
+          });
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Timed out waiting for invalid-session close")), 1_000),
+        ),
+      ]);
+    };
+
+    await expect(expectRejectedRebind({ tenantId: "tenant-another" })).resolves.toBeUndefined();
+    await expect(expectRejectedRebind({ userId: "user-another" })).resolves.toBeUndefined();
+    await expect(
+      expectRejectedRebind({ conversationId: "conversation-another" }),
+    ).resolves.toBeUndefined();
+
+    const reconnectedWs = await connectAgentWs(
+      port,
+      makeAgentSessionToken({
+        ...tokenSeed,
+        lastSeenSequence: 1,
+      }),
+    );
+    connections.push(reconnectedWs);
+
+    const replayDelta = await waitForAgentPush(
+      reconnectedWs,
+      AGENT_WS_CHANNELS.assistantDelta,
+      (push) => (push.data as { delta?: string }).delta === message,
+    );
+    expect(replayDelta.data).toEqual({ delta: message });
+    expect(replayDelta.metadata.sequence).toBe(2);
+  });
+
+  it("does not replay events when lastSeenSequence is already current", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const tokenSeed = {
+      tenantId: "tenant-noreplay",
+      userId: "agent-user-noreplay",
+      sessionId: "agent-noreplay-session",
+      conversationId: "agent-noreplay-conversation",
+    };
+
+    const [seedWs] = await connectAndAwaitAgentWelcome(port, makeAgentSessionToken(tokenSeed));
+    connections.push(seedWs);
+    await sendAgentRequest(seedWs, AGENT_WS_METHODS.sendMessage, {
+      message: "only for first sequence seed",
+    });
+    seedWs.close();
+
+    const reconnectedWs = await connectAgentWs(
+      port,
+      makeAgentSessionToken({
+        ...tokenSeed,
+        lastSeenSequence: 4,
+      }),
+    );
+    connections.push(reconnectedWs);
+
+    const freshWelcome = await waitForAgentPush(
+      reconnectedWs,
+      AGENT_WS_CHANNELS.sessionWelcome,
+      () => true,
+    );
+    expect(freshWelcome.data).toMatchObject({
+      capabilities: ["recurring-quotes", "quote-search"],
+      resumeSupported: true,
+    });
+    expect(freshWelcome.metadata.sequence).toBe(5);
+    await expect(
+      waitForAgentPush(reconnectedWs, AGENT_WS_CHANNELS.assistantDelta, () => true, 16, 200),
+    ).rejects.toThrow("Timed out waiting for WebSocket message");
+  });
+
+  it("returns schema errors for malformed agent messages and keeps the socket usable", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitAgentWelcome(
+      port,
+      makeAgentSessionToken({
+        tenantId: "tenant-malformed",
+        userId: "agent-user-malformed",
+      }),
+    );
+    connections.push(ws);
+
+    const channels = agentChannelsBySocket.get(ws);
+    if (!channels) throw new Error("Agent channels missing");
+    ws.send("totally not json");
+
+    const malformedResponse = await dequeue(channels.response, 5_000);
+    expect(malformedResponse.error).toBeDefined();
+    expect(malformedResponse.error?.message).toContain("Invalid request format");
+
+    const capabilities = await sendAgentRequest(ws, AGENT_WS_METHODS.getCapabilities);
+    expect(capabilities.error).toBeUndefined();
+    expect(capabilities.result).toEqual({
+      capabilities: ["recurring-quotes", "quote-search"],
+    });
+  });
+
+  it("returns typed unsupported-method errors without poisoning other agent sessions", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [errorWs] = await connectAndAwaitAgentWelcome(
+      port,
+      makeAgentSessionToken({
+        tenantId: "tenant-multi",
+        userId: "agent-user-multi",
+      }),
+    );
+    const [healthyWs] = await connectAndAwaitAgentWelcome(
+      port,
+      makeAgentSessionToken({
+        tenantId: "tenant-multi",
+        userId: "agent-user-multi",
+        sessionId: "agent-healthy-session",
+      }),
+    );
+    connections.push(errorWs, healthyWs);
+
+    const errorResponse = await sendAgentRequest(errorWs, "agent.unknown");
+    expect(errorResponse.error).toEqual({
+      code: "bad_request",
+      message: "Unsupported agent method: agent.unknown",
+    });
+
+    const healthyResponse = await sendAgentRequest(healthyWs, AGENT_WS_METHODS.getCapabilities);
+    expect(healthyResponse.error).toBeUndefined();
+    expect(healthyResponse.result).toEqual({
+      capabilities: ["recurring-quotes", "quote-search"],
+    });
   });
 
   it("returns protocol errors for unsupported agent methods", async () => {

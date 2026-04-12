@@ -107,6 +107,8 @@ import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService
 
 const AGENT_WS_ROUTE_PATH = "/agent";
 const AGENT_DEFAULT_CAPABILITIES = ["recurring-quotes", "quote-search", "render-table"] as const;
+const resolveAgentCapabilities = (token: AgentSessionToken): readonly string[] =>
+  token.capabilities?.length ? token.capabilities : AGENT_DEFAULT_CAPABILITIES;
 
 const AGENT_SESSION_TOKEN_SCHEMA = Schema.Struct({
   tenantId: TenantId,
@@ -516,7 +518,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     sendAgentPush(ws, session, {
       channel: AGENT_WS_CHANNELS.sessionWelcome,
       data: {
-        capabilities: token.capabilities?.length ? token.capabilities : AGENT_DEFAULT_CAPABILITIES,
+        capabilities: resolveAgentCapabilities(token),
         resumeSupported: true,
       },
     } as AgentServerPushType);
@@ -1296,10 +1298,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
     switch (requestPayload._tag) {
       case AGENT_WS_METHODS.connect: {
-        const capabilities = requestPayload.capabilities as string[] | undefined;
-        const resolvedCapabilities = capabilities?.length
-          ? capabilities
-          : AGENT_DEFAULT_CAPABILITIES;
+        const resolvedCapabilities = resolveAgentCapabilities(session.token);
         yield* sendAgentPush(ws, session, {
           channel: AGENT_WS_CHANNELS.sessionWelcome,
           data: {
@@ -1320,9 +1319,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           id: request.id,
           metadata: rebuildAgentMetadata(session, request.id),
           result: {
-            capabilities: session.token.capabilities?.length
-              ? session.token.capabilities
-              : AGENT_DEFAULT_CAPABILITIES,
+            capabilities: resolveAgentCapabilities(session.token),
           },
         });
 
