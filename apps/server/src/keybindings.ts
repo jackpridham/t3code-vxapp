@@ -510,6 +510,11 @@ export interface KeybindingsShape {
   readonly loadConfigState: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
 
   /**
+   * Load keybindings state directly from disk, bypassing the memoized cache.
+   */
+  readonly loadConfigStateFromDisk: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
+
+  /**
    * Read the latest keybindings snapshot from cache/disk.
    */
   readonly getSnapshot: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>;
@@ -833,6 +838,8 @@ const makeKeybindings = Effect.gen(function* () {
     const debouncedKeybindingsEvents = fs.watch(keybindingsConfigDir).pipe(
       Stream.filter((event) => {
         return (
+          event.path === "" ||
+          event.path == null ||
           event.path === keybindingsConfigFile ||
           event.path === keybindingsConfigPath ||
           path.resolve(keybindingsConfigDir, event.path) === keybindingsConfigPathResolved
@@ -876,6 +883,7 @@ const makeKeybindings = Effect.gen(function* () {
     ready: Deferred.await(startedDeferred),
     syncDefaultKeybindingsOnStartup,
     loadConfigState: loadConfigStateFromCacheOrDisk,
+    loadConfigStateFromDisk,
     getSnapshot: loadConfigStateFromCacheOrDisk,
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);

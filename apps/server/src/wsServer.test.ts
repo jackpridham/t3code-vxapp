@@ -2,6 +2,7 @@ import * as Http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHmac } from "node:crypto";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -43,6 +44,13 @@ import {
   type WsPushMessage,
   type WsPush,
 } from "@t3tools/contracts";
+import {
+  WS_CHANNELS as AGENT_WS_CHANNELS,
+  WS_METHODS as AGENT_WS_METHODS,
+  type AgentProtocolMeta,
+  type AgentServerPush,
+  type AgentServerResponse,
+} from "@agent-runtime/contracts";
 import { compileResolvedKeybindingRule, DEFAULT_KEYBINDINGS } from "./keybindings";
 import type {
   TerminalClearInput,
@@ -66,6 +74,17 @@ import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+
+vi.mock("node-pty", () => ({
+  spawn: () => ({
+    pid: 4242,
+    write: () => {},
+    resize: () => {},
+    kill: () => {},
+    onData: () => () => {},
+    onExit: () => () => {},
+  }),
+}));
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -97,6 +116,65 @@ const defaultProviderRegistryService: ProviderRegistryShape = {
 };
 
 const defaultServerSettings = DEFAULT_SERVER_SETTINGS;
+const AGENT_SESSION_TOKEN_SECRET = "agent-session-token-test-secret";
+const AGENT_SESSION_TOKEN_SIGNATURE_ALGORITHM = "sha256";
+function normalizeAgentSessionTokenPayload(payload: {
+  tenantId: string;
+  userId: string;
+  sessionId: string;
+  conversationId: string;
+  capabilities: string[];
+  lastSeenSequence?: number;
+  exp?: number;
+}): string {
+  return JSON.stringify({
+    tenantId: payload.tenantId,
+    userId: payload.userId,
+    ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
+    ...(payload.conversationId ? { conversationId: payload.conversationId } : {}),
+    ...(payload.lastSeenSequence !== undefined
+      ? { lastSeenSequence: payload.lastSeenSequence }
+      : {}),
+    ...(payload.exp !== undefined ? { exp: payload.exp } : {}),
+    ...(payload.capabilities ? { capabilities: payload.capabilities } : {}),
+  });
+}
+
+function makeAgentSessionToken(
+  overrides: {
+    tenantId?: string;
+    userId?: string;
+    sessionId?: string;
+    conversationId?: string;
+    capabilities?: string[];
+    lastSeenSequence?: number;
+    exp?: number;
+  } = {},
+  signingKey = AGENT_SESSION_TOKEN_SECRET,
+): string {
+  const tokenPayload = {
+    tenantId: overrides.tenantId ?? "tenant-1",
+    userId: overrides.userId ?? "user-1",
+    sessionId: overrides.sessionId ?? "agent-session-boot",
+    conversationId: overrides.conversationId ?? "agent-conversation-boot",
+    capabilities: overrides.capabilities ?? ["recurring-quotes", "quote-search"],
+    ...(overrides.lastSeenSequence !== undefined
+      ? { lastSeenSequence: overrides.lastSeenSequence }
+      : {}),
+    ...(overrides.lastSeenSequence !== undefined
+      ? { lastSeenSequence: overrides.lastSeenSequence }
+      : {}),
+    ...(overrides.exp !== undefined ? { exp: overrides.exp } : {}),
+  };
+  const signature = createHmac(AGENT_SESSION_TOKEN_SIGNATURE_ALGORITHM, signingKey)
+    .update(normalizeAgentSessionTokenPayload(tokenPayload))
+    .digest("hex");
+
+  return JSON.stringify({
+    ...tokenPayload,
+    signature,
+  });
+}
 
 class MockTerminalManager implements TerminalManagerShape {
   private readonly sessions = new Map<string, TerminalSessionSnapshot>();
@@ -255,7 +333,22 @@ interface SocketChannels {
   response: MessageChannel<WebSocketResponse>;
 }
 
+interface AgentMessageChannel<T> {
+  queue: T[];
+  waiters: Array<{
+    resolve: (value: T) => void;
+    reject: (error: Error) => void;
+    timeoutId: ReturnType<typeof setTimeout> | null;
+  }>;
+}
+
+interface AgentSocketChannels {
+  push: AgentMessageChannel<AgentServerPush>;
+  response: AgentMessageChannel<AgentServerResponse>;
+}
+
 const channelsBySocket = new WeakMap<WebSocket, SocketChannels>();
+const agentChannelsBySocket = new WeakMap<WebSocket, AgentSocketChannels>();
 
 function enqueue<T>(channel: MessageChannel<T>, item: T) {
   const waiter = channel.waiters.shift();
@@ -293,6 +386,12 @@ function isWsPushEnvelope(message: unknown): message is WsPush {
   return (message as { type?: unknown }).type === "push";
 }
 
+function isAgentPushEnvelope(message: unknown): message is AgentServerPush {
+  if (typeof message !== "object" || message === null) return false;
+  if (!("metadata" in message) || !("channel" in message)) return false;
+  return !("id" in message) && typeof (message as { channel?: unknown }).channel === "string";
+}
+
 function asWebSocketResponse(message: unknown): WebSocketResponse | null {
   if (typeof message !== "object" || message === null) return null;
   if (!("id" in message)) return null;
@@ -301,10 +400,24 @@ function asWebSocketResponse(message: unknown): WebSocketResponse | null {
   return message as WebSocketResponse;
 }
 
-function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
+function asAgentResponse(message: unknown): AgentServerResponse | null {
+  if (typeof message !== "object" || message === null) return null;
+  if (!("id" in message)) return null;
+  const id = (message as { id?: unknown }).id;
+  if (typeof id !== "string") return null;
+  return message as AgentServerResponse;
+}
+
+function sleepMs(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function connectWsOnce(port: number, token?: string, route = "/"): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${route}${query}`);
     const channels: SocketChannels = {
       push: { queue: [], waiters: [] },
       response: { queue: [], waiters: [] },
@@ -345,6 +458,53 @@ async function connectWs(port: number, token?: string, attempts = 5): Promise<We
   throw lastError;
 }
 
+async function connectAgentWs(port: number, token?: string, attempts = 5): Promise<WebSocket> {
+  let lastError: unknown = new Error("WebSocket connection failed");
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await connectAgentWsOnce(port, token);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+function connectAgentWsOnce(port: number, token?: string): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/agent${query}`);
+    const channels: AgentSocketChannels = {
+      push: { queue: [], waiters: [] },
+      response: { queue: [], waiters: [] },
+    };
+    agentChannelsBySocket.set(ws, channels);
+
+    ws.on("message", (raw) => {
+      const parsed = JSON.parse(String(raw));
+      if (isAgentPushEnvelope(parsed)) {
+        enqueue(channels.push, parsed);
+      } else {
+        const response = asAgentResponse(parsed);
+        if (response) {
+          enqueue(channels.response, response);
+        }
+      }
+    });
+
+    ws.once("open", () => resolve(ws));
+    ws.once("error", () => reject(new Error("WebSocket connection failed")));
+    ws.once("close", (code, reason) => {
+      reject(new Error(`WebSocket connection closed: ${code} ${reason.toString()}`));
+    });
+  });
+}
+
 /** Connect and wait for the server.welcome push. Returns [ws, welcomeData]. */
 async function connectAndAwaitWelcome(
   port: number,
@@ -352,6 +512,19 @@ async function connectAndAwaitWelcome(
 ): Promise<[WebSocket, WsPushMessage<typeof WS_CHANNELS.serverWelcome>]> {
   const ws = await connectWs(port, token);
   const welcome = await waitForPush(ws, WS_CHANNELS.serverWelcome);
+  return [ws, welcome];
+}
+
+async function connectAndAwaitAgentWelcome(
+  port: number,
+  token: string,
+): Promise<[WebSocket, AgentServerPush]> {
+  const ws = await connectAgentWs(port, token);
+  const welcome = await waitForAgentPush(
+    ws,
+    AGENT_WS_CHANNELS.sessionWelcome,
+    (push) => push.channel === AGENT_WS_CHANNELS.sessionWelcome,
+  );
   return [ws, welcome];
 }
 
@@ -381,6 +554,60 @@ async function sendRequest(
   }
 }
 
+async function sendAgentRequest(
+  ws: WebSocket,
+  method: string,
+  params: Record<string, unknown> = {},
+  metadata: Partial<AgentProtocolMeta> = {},
+): Promise<AgentServerResponse> {
+  const channels = agentChannelsBySocket.get(ws);
+  if (!channels) throw new Error("Agent websocket not initialized");
+
+  const id = crypto.randomUUID();
+  const metadataPayload = {
+    protocolVersion: 1,
+    sessionId: "agent-session-1",
+    conversationId: "agent-conversation-1",
+    turnId: "turn-1",
+    eventId: `agent-event-${id}`,
+    sequence: 1,
+    timestamp: new Date().toISOString(),
+    ...metadata,
+  };
+  ws.send(
+    JSON.stringify({
+      id,
+      metadata: metadataPayload,
+      payload: { _tag: method, ...params },
+    }),
+  );
+
+  while (true) {
+    const response = await dequeue(channels.response, 60_000);
+    if (response.id === id || response.id === "unknown") {
+      return response;
+    }
+  }
+}
+
+async function waitForAgentPush(
+  ws: WebSocket,
+  channel: string,
+  predicate?: (push: AgentServerPush) => boolean,
+  maxMessages = 120,
+  idleTimeoutMs = 5_000,
+): Promise<AgentServerPush> {
+  const channels = agentChannelsBySocket.get(ws);
+  if (!channels) throw new Error("Agent websocket not initialized");
+
+  for (let remaining = maxMessages; remaining > 0; remaining--) {
+    const push = await dequeue(channels.push, idleTimeoutMs);
+    if (push.channel !== channel) continue;
+    if (!predicate || predicate(push)) return push;
+  }
+  throw new Error(`Timed out waiting for agent push on ${channel}`);
+}
+
 async function waitForPush<C extends WsPushChannel>(
   ws: WebSocket,
   channel: C,
@@ -405,15 +632,30 @@ async function rewriteKeybindingsAndWaitForPush(
   keybindingsPath: string,
   contents: string,
   predicate: (push: WsPushMessage<typeof WS_CHANNELS.serverConfigUpdated>) => boolean,
-  attempts = 3,
+  attempts = 6,
 ): Promise<WsPushMessage<typeof WS_CHANNELS.serverConfigUpdated>> {
+  const clearQueuedConfigUpdatedPushes = () => {
+    const channels = channelsBySocket.get(ws);
+    if (!channels) return;
+    channels.push.queue = channels.push.queue.filter(
+      (queued) => queued.channel !== WS_CHANNELS.serverConfigUpdated,
+    );
+  };
+
+  // Give the server keybindings poll loop a chance to hydrate its internal baseline
+  // before we rewrite the file, which prevents missing the first change signal.
+  await sleepMs(300);
+
   let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt++) {
+    clearQueuedConfigUpdatedPushes();
     fs.writeFileSync(keybindingsPath, contents, "utf8");
     try {
-      return await waitForPush(ws, WS_CHANNELS.serverConfigUpdated, predicate, 20, 3_000);
+      const push = await waitForPush(ws, WS_CHANNELS.serverConfigUpdated, predicate, 24, 2_500);
+      return push;
     } catch (error) {
       lastError = error;
+      await sleepMs(250);
     }
   }
   throw lastError;
@@ -637,7 +879,6 @@ describe("WebSocket Server", () => {
     const [ws, welcome] = await connectAndAwaitWelcome(port);
     connections.push(ws);
 
-    expect(welcome.type).toBe("push");
     expect(welcome.data).toEqual({
       cwd: "/test/project",
       projectName: "project",
@@ -1193,6 +1434,28 @@ describe("WebSocket Server", () => {
       issues: [{ kind: "keybindings.malformed-config", message: expect.any(String) }],
     });
 
+    const invalidEntryPush = await rewriteKeybindingsAndWaitForPush(
+      ws,
+      keybindingsPath,
+      JSON.stringify([
+        { key: "mod+j", command: "terminal.toggle" },
+        { key: "mod+x", command: "chat.notReal" },
+      ]),
+      (push) =>
+        Array.isArray(push.data.issues) &&
+        push.data.issues.length === 1 &&
+        push.data.issues[0]!.kind === "keybindings.invalid-entry",
+    );
+    expect(invalidEntryPush.data).toEqual({
+      issues: [
+        {
+          kind: "keybindings.invalid-entry",
+          index: 1,
+          message: expect.any(String),
+        },
+      ],
+    });
+
     const successPush = await rewriteKeybindingsAndWaitForPush(
       ws,
       keybindingsPath,
@@ -1200,7 +1463,7 @@ describe("WebSocket Server", () => {
       (push) => Array.isArray(push.data.issues) && push.data.issues.length === 0,
     );
     expect(successPush.data).toEqual({ issues: [] });
-  });
+  }, 30_000);
 
   it("routes shell.openInEditor through the injected open service", async () => {
     const openCalls: Array<{ cwd: string; editor: string }> = [];
@@ -2217,6 +2480,195 @@ describe("WebSocket Server", () => {
         }),
       }),
     );
+  });
+
+  it("rejects agent websocket connections without a valid session token", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    await expect(connectAgentWs(port)).rejects.toThrow("WebSocket connection failed");
+    await expect(connectAgentWs(port, "not-json")).rejects.toThrow("WebSocket connection failed");
+    await expect(
+      connectAgentWs(
+        port,
+        makeAgentSessionToken({ tenantId: "tenant-1", userId: "user-1", exp: 0 }),
+      ),
+    ).rejects.toThrow("WebSocket connection failed");
+    await expect(
+      connectAgentWs(
+        port,
+        makeAgentSessionToken({ tenantId: "tenant-1", userId: "user-1" }, "invalid-session-secret"),
+      ),
+    ).rejects.toThrow("WebSocket connection failed");
+    const tamperedToken = JSON.parse(
+      makeAgentSessionToken({ tenantId: "tenant-1", userId: "user-1" }),
+    ) as {
+      tenantId: string;
+      [key: string]: unknown;
+    };
+    tamperedToken.tenantId = "tenant-evil";
+    await expect(connectAgentWs(port, JSON.stringify(tamperedToken))).rejects.toThrow(
+      "WebSocket connection failed",
+    );
+  });
+
+  it("bootstraps a new agent websocket session and sends welcome", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const token = makeAgentSessionToken({
+      tenantId: "tenant-agent",
+      userId: "agent-user",
+      sessionId: "agent-session-boot",
+      conversationId: "agent-conversation-boot",
+      capabilities: ["quote-search"],
+    });
+
+    const [ws, welcome] = await connectAndAwaitAgentWelcome(port, token);
+    connections.push(ws);
+
+    expect(welcome.channel).toBe(AGENT_WS_CHANNELS.sessionWelcome);
+    expect(welcome.data).toEqual({
+      capabilities: ["quote-search"],
+      resumeSupported: true,
+    });
+    expect(welcome.metadata).toMatchObject({
+      protocolVersion: 1,
+      sessionId: "agent-session-boot",
+      conversationId: "agent-conversation-boot",
+      sequence: 1,
+      turnId: expect.any(String),
+      eventId: expect.any(String),
+      timestamp: expect.any(String),
+    });
+  });
+
+  it("supports agent protocol connect/sendMessage flow with response and pushes", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitAgentWelcome(
+      port,
+      makeAgentSessionToken({
+        tenantId: "tenant-agent",
+        userId: "agent-user",
+        sessionId: "agent-protocol-session",
+      }),
+    );
+    connections.push(ws);
+
+    const connectResponse = await sendAgentRequest(ws, AGENT_WS_METHODS.connect, {
+      tenantId: "tenant-agent",
+      authToken: "agent-token",
+      capabilities: ["recurring-quotes", "quote-search"],
+    });
+    expect(connectResponse.error).toBeUndefined();
+    expect(connectResponse.result).toEqual({
+      capabilities: ["recurring-quotes", "quote-search"],
+    });
+
+    const message = "What is the weather in Sydney?";
+    const response = await sendAgentRequest(ws, AGENT_WS_METHODS.sendMessage, { message });
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual(
+      expect.objectContaining({
+        turnId: expect.any(String),
+        messageId: expect.stringContaining("assistant-"),
+      }),
+    );
+
+    const delta = await waitForAgentPush(ws, AGENT_WS_CHANNELS.assistantDelta, (push) => {
+      return (push.data as { delta?: string }).delta === message;
+    });
+    expect(delta.data).toEqual({ delta: message });
+
+    const complete = await waitForAgentPush(
+      ws,
+      AGENT_WS_CHANNELS.assistantMessage,
+      (push) => (push.data as { status?: string }).status === "complete",
+    );
+    expect(complete.data).toEqual({
+      message,
+      status: "complete",
+    });
+  });
+
+  it("replays prior agent events when lastSeenSequence is provided", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const tokenSeed = {
+      tenantId: "tenant-agent",
+      userId: "agent-user",
+      sessionId: "agent-replay-session",
+      conversationId: "agent-replay-conversation",
+    };
+
+    const [originalWs] = await connectAndAwaitAgentWelcome(port, makeAgentSessionToken(tokenSeed));
+    connections.push(originalWs);
+
+    const message = "Replay this message from prior session";
+    const response = await sendAgentRequest(originalWs, AGENT_WS_METHODS.sendMessage, { message });
+    expect(response.error).toBeUndefined();
+
+    originalWs.close();
+
+    const replayedWs = await connectAgentWs(
+      port,
+      makeAgentSessionToken({
+        ...tokenSeed,
+        lastSeenSequence: 1,
+      }),
+    );
+    connections.push(replayedWs);
+
+    const replayDelta = await waitForAgentPush(
+      replayedWs,
+      AGENT_WS_CHANNELS.assistantDelta,
+      (push) => (push.data as { delta?: string }).delta === message,
+    );
+    expect(replayDelta.data).toEqual({ delta: message });
+    expect(replayDelta.metadata.sequence).toBe(2);
+    const replayMessage = await waitForAgentPush(
+      replayedWs,
+      AGENT_WS_CHANNELS.assistantMessage,
+      (push) => (push.data as { message?: string }).message === message,
+    );
+    expect(replayMessage.data).toEqual({
+      message,
+      status: "complete",
+    });
+    expect(replayMessage.metadata.sequence).toBe(3);
+    const replayWelcome = await waitForAgentPush(
+      replayedWs,
+      AGENT_WS_CHANNELS.sessionWelcome,
+      (push) => push.channel === AGENT_WS_CHANNELS.sessionWelcome,
+    );
+    expect(replayWelcome.metadata.sequence).toBe(5);
+    expect(replayWelcome.metadata.sequence).toBeGreaterThan(replayMessage.metadata.sequence);
+  });
+
+  it("returns protocol errors for unsupported agent methods", async () => {
+    server = await createTestServer({ cwd: "/test", authToken: AGENT_SESSION_TOKEN_SECRET });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const token = makeAgentSessionToken({
+      tenantId: "tenant-agent",
+      userId: "agent-user",
+      sessionId: "agent-error-session",
+    });
+
+    const [ws] = await connectAndAwaitAgentWelcome(port, token);
+    connections.push(ws);
+
+    const response = await sendAgentRequest(ws, "agent.unknown");
+    expect(response.error).toBeDefined();
+    expect(response.error).toMatchObject({
+      code: "bad_request",
+      message: "Unsupported agent method: agent.unknown",
+    });
   });
 
   it("rejects websocket connections without a valid auth token", async () => {

@@ -8,11 +8,31 @@
  */
 import http from "node:http";
 import type { Duplex } from "node:stream";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 import Mime from "@effect/platform-node/Mime";
 import {
+  AI_AGENT_PROTOCOL_VERSION,
+  AgentClientMessage,
+  AgentProtocolMeta,
+  AgentServerPush,
+  type AgentServerPush as AgentServerPushType,
+  AgentServerResponse as AgentServerResponseCodec,
+  type AgentServerResponse as AgentServerResponseType,
+  WS_CHANNELS as AGENT_WS_CHANNELS,
+  WS_METHODS as AGENT_WS_METHODS,
+  RuntimeSessionId,
+  RequestId,
+  TurnId,
+  UserId,
+  TenantId,
+  ConversationId,
+  EventId,
+} from "@agent-runtime/contracts";
+import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  type ServerConfigIssue,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
   ORCHESTRATION_WS_CHANNELS,
@@ -84,6 +104,169 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
+
+const AGENT_WS_ROUTE_PATH = "/agent";
+const AGENT_DEFAULT_CAPABILITIES = ["recurring-quotes", "quote-search", "render-table"] as const;
+
+const AGENT_SESSION_TOKEN_SCHEMA = Schema.Struct({
+  tenantId: TenantId,
+  userId: UserId,
+  sessionId: Schema.optional(RuntimeSessionId),
+  conversationId: Schema.optional(ConversationId),
+  lastSeenSequence: Schema.optional(Schema.Number),
+  exp: Schema.optional(Schema.Number),
+  capabilities: Schema.optional(Schema.Array(Schema.String)),
+  signature: Schema.String,
+});
+
+type AgentSessionTokenPayload = Omit<typeof AGENT_SESSION_TOKEN_SCHEMA.Type, "signature">;
+type AgentSessionToken = typeof AGENT_SESSION_TOKEN_SCHEMA.Type;
+type AgentSessionMetadata = AgentProtocolMeta;
+
+interface AgentSessionEvent {
+  readonly push: AgentServerPushType;
+}
+
+interface AgentRuntimeSession {
+  readonly sessionId: RuntimeSessionId;
+  readonly tenantId: TenantId;
+  readonly userId: UserId;
+  readonly conversationId: ConversationId;
+  turnId: TurnId;
+  sequence: number;
+  events: AgentSessionEvent[];
+  readonly token: AgentSessionToken;
+}
+
+const AGENT_EVENT_REPLAY_LIMIT = 256;
+
+const encodeAgentResponse = Schema.encodeUnknownEffect(
+  Schema.fromJsonString(AgentServerResponseCodec),
+);
+const encodeAgentPush = Schema.encodeUnknownEffect(Schema.fromJsonString(AgentServerPush));
+
+const decodeAgentClientMessage = decodeJsonResult(AgentClientMessage);
+const decodeAgentClientMessageFallback = decodeJsonResult(
+  Schema.Struct({
+    id: RequestId,
+    metadata: AgentProtocolMeta,
+    payload: Schema.Struct({
+      _tag: Schema.String,
+    }),
+  }),
+);
+const decodeAgentSessionToken = Schema.decodeUnknownExit(AGENT_SESSION_TOKEN_SCHEMA);
+const AGENT_SESSION_TOKEN_SIGNATURE_ALGORITHM = "sha256";
+const AGENT_SESSION_TOKEN_SIGNATURE_LENGTH = 64;
+
+function normalizeAgentSessionTokenPayload(token: AgentSessionTokenPayload): string {
+  const body: Record<string, unknown> = {
+    tenantId: token.tenantId,
+    userId: token.userId,
+  };
+
+  if (token.sessionId !== undefined) {
+    body.sessionId = token.sessionId;
+  }
+  if (token.conversationId !== undefined) {
+    body.conversationId = token.conversationId;
+  }
+  if (token.lastSeenSequence !== undefined) {
+    body.lastSeenSequence = token.lastSeenSequence;
+  }
+  if (token.exp !== undefined) {
+    body.exp = token.exp;
+  }
+  if (token.capabilities !== undefined) {
+    body.capabilities = token.capabilities;
+  }
+
+  return JSON.stringify(body);
+}
+
+function validateAgentSessionTokenSignature(
+  token: AgentSessionToken,
+  signingSecret: string | undefined,
+): boolean {
+  if (!signingSecret) {
+    return false;
+  }
+  if (!/^[a-f0-9]{64}$/i.test(token.signature)) {
+    return false;
+  }
+
+  const payload: AgentSessionTokenPayload = {
+    tenantId: token.tenantId,
+    userId: token.userId,
+    ...(token.sessionId !== undefined ? { sessionId: token.sessionId } : {}),
+    ...(token.conversationId !== undefined ? { conversationId: token.conversationId } : {}),
+    ...(token.lastSeenSequence !== undefined ? { lastSeenSequence: token.lastSeenSequence } : {}),
+    ...(token.exp !== undefined ? { exp: token.exp } : {}),
+    ...(token.capabilities !== undefined ? { capabilities: token.capabilities } : {}),
+  };
+  const expectedSignature = createHmac(AGENT_SESSION_TOKEN_SIGNATURE_ALGORITHM, signingSecret)
+    .update(normalizeAgentSessionTokenPayload(payload))
+    .digest("hex");
+  const expected = Buffer.from(expectedSignature, "hex");
+  const provided = Buffer.from(token.signature, "hex");
+  if (provided.length !== AGENT_SESSION_TOKEN_SIGNATURE_LENGTH / 2) {
+    return false;
+  }
+  if (expected.length !== provided.length) {
+    return false;
+  }
+
+  return timingSafeEqual(expected, provided);
+}
+
+function parseAgentSessionToken(
+  rawToken: string | null,
+  signingSecret: string | undefined,
+): Result.Result<AgentSessionToken, string> {
+  if (!rawToken) {
+    return Result.fail("Missing session token");
+  }
+
+  let tokenPayload: unknown;
+  try {
+    tokenPayload = JSON.parse(rawToken);
+  } catch {
+    return Result.fail("Invalid session token: expected JSON payload");
+  }
+
+  const tokenResult = decodeAgentSessionToken(tokenPayload);
+  if (Exit.isFailure(tokenResult)) {
+    return Result.fail("Invalid session token");
+  }
+
+  const token = tokenResult.value;
+  if (typeof token.exp === "number" && token.exp < Date.now()) {
+    return Result.fail("Session token expired");
+  }
+  if (!validateAgentSessionTokenSignature(token, signingSecret)) {
+    return Result.fail("Invalid session token");
+  }
+
+  return Result.succeed(token);
+}
+
+function createAgentMetadata(
+  session: AgentRuntimeSession,
+  correlationId: string | undefined,
+): AgentSessionMetadata {
+  session.sequence += 1;
+
+  return {
+    protocolVersion: AI_AGENT_PROTOCOL_VERSION,
+    sessionId: session.sessionId,
+    conversationId: session.conversationId,
+    turnId: session.turnId,
+    eventId: EventId.makeUnsafe(crypto.randomUUID()),
+    sequence: session.sequence,
+    timestamp: new Date().toISOString(),
+    correlationId: correlationId ? String(correlationId) : undefined,
+  };
+}
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -253,6 +436,91 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const providersRef = yield* Ref.make(yield* providerRegistry.getProviders);
 
   const clients = yield* Ref.make(new Set<WebSocket>());
+  const agentSessions = new Map<string, AgentRuntimeSession>();
+  const agentSessionSockets = new WeakMap<WebSocket, AgentRuntimeSession>();
+  const getOrCreateAgentSession = (token: AgentSessionToken): AgentRuntimeSession => {
+    const sessionId =
+      token.sessionId ??
+      (RuntimeSessionId.makeUnsafe(`agent-${crypto.randomUUID()}`) as RuntimeSessionId);
+    const conversationId =
+      token.conversationId ??
+      (ConversationId.makeUnsafe(`conversation-${crypto.randomUUID()}`) as ConversationId);
+
+    const existing = agentSessions.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+
+    const created: AgentRuntimeSession = {
+      sessionId,
+      tenantId: token.tenantId,
+      userId: token.userId,
+      conversationId,
+      turnId: TurnId.makeUnsafe(`turn-${crypto.randomUUID()}`) as TurnId,
+      sequence: 0,
+      events: [],
+      token,
+    };
+    agentSessions.set(sessionId, created);
+    return created;
+  };
+
+  const rebuildAgentMetadata = (session: AgentRuntimeSession, correlationId: string | undefined) =>
+    createAgentMetadata(session, correlationId);
+
+  const sendAgentResponse = (ws: WebSocket, response: AgentServerResponseType) =>
+    encodeAgentResponse(response).pipe(
+      Effect.tap((responseText) => Effect.sync(() => ws.send(responseText))),
+      Effect.asVoid,
+    );
+
+  const sendAgentPush = (
+    ws: WebSocket,
+    session: AgentRuntimeSession,
+    payload: Omit<AgentServerPushType, "metadata">,
+  ) =>
+    Effect.gen(function* () {
+      const metadata = rebuildAgentMetadata(session, undefined);
+      const pushMessage = { ...payload, metadata } as AgentServerPushType;
+      if (session.events.length >= AGENT_EVENT_REPLAY_LIMIT) {
+        session.events.shift();
+      }
+      session.events.push({ push: pushMessage });
+      yield* encodeAgentPush(pushMessage).pipe(
+        Effect.tap((encodedPush) => Effect.sync(() => ws.send(encodedPush))),
+        Effect.asVoid,
+      );
+    });
+
+  const recordAgentEventsForReplay = Effect.fnUntraced(function* (
+    ws: WebSocket,
+    session: AgentRuntimeSession,
+    lastSeenSequence: number | undefined,
+  ) {
+    const replayEvents = session.events.filter(
+      ({ push }) =>
+        push.metadata.sequence > (lastSeenSequence ?? 0) &&
+        push.channel !== AGENT_WS_CHANNELS.sessionWelcome,
+    );
+    for (const event of replayEvents) {
+      const encodedReplay = yield* encodeAgentPush(event.push);
+      yield* Effect.sync(() => ws.send(encodedReplay));
+    }
+  });
+
+  const emitSessionWelcome = (
+    ws: WebSocket,
+    session: AgentRuntimeSession,
+    token: AgentSessionToken,
+  ) =>
+    sendAgentPush(ws, session, {
+      channel: AGENT_WS_CHANNELS.sessionWelcome,
+      data: {
+        capabilities: token.capabilities?.length ? token.capabilities : AGENT_DEFAULT_CAPABILITIES,
+        resumeSupported: true,
+      },
+    } as AgentServerPushType);
+
   const logger = createLogger("ws");
   const readiness = yield* makeServerReadiness;
 
@@ -607,15 +875,65 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const subscriptionsScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(subscriptionsScope, Exit.void));
 
+  const keybindingsConfigFingerprint = yield* Ref.make<string | undefined>(undefined);
+  const publishServerConfigUpdatedFromKeybindings = (state: {
+    issues: readonly ServerConfigIssue[];
+    keybindings: readonly unknown[];
+  }) =>
+    Effect.gen(function* () {
+      const nextFingerprint = JSON.stringify(state);
+      const previousFingerprint = yield* Ref.get(keybindingsConfigFingerprint);
+      if (previousFingerprint === nextFingerprint) {
+        return;
+      }
+      yield* Ref.set(keybindingsConfigFingerprint, nextFingerprint);
+      if (previousFingerprint !== undefined) {
+        yield* pushBus.publishAll(WS_CHANNELS.serverConfigUpdated, {
+          issues: state.issues,
+        });
+      }
+    });
+
   yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
     pushBus.publishAll(ORCHESTRATION_WS_CHANNELS.domainEvent, event),
   ).pipe(Effect.forkIn(subscriptionsScope));
 
   yield* Stream.runForEach(keybindingsManager.streamChanges, (event) =>
-    pushBus.publishAll(WS_CHANNELS.serverConfigUpdated, {
-      issues: event.issues,
-    }),
+    publishServerConfigUpdatedFromKeybindings(event),
   ).pipe(Effect.forkIn(subscriptionsScope));
+
+  yield* Effect.forkIn(
+    Effect.gen(function* () {
+      while (true) {
+        const parsed = yield* keybindingsManager.loadConfigStateFromDisk.pipe(
+          Effect.catch((error: unknown) => {
+            const message =
+              error instanceof Error ? error.message : "Unable to read keybindings config";
+            const fallbackState: {
+              keybindings: readonly unknown[];
+              issues: readonly ServerConfigIssue[];
+            } = {
+              keybindings: [],
+              issues: [{ kind: "keybindings.malformed-config", message }],
+            };
+            return Effect.gen(function* () {
+              yield* Effect.logWarning("failed to load keybindings config state", {
+                path: keybindingsConfigPath,
+                detail: message,
+              });
+              return fallbackState;
+            });
+          }),
+        );
+        yield* publishServerConfigUpdatedFromKeybindings({
+          issues: parsed.issues,
+          keybindings: parsed.keybindings,
+        });
+        yield* Effect.sleep(250);
+      }
+    }),
+    subscriptionsScope,
+  );
 
   yield* Stream.runForEach(serverSettingsManager.streamChanges, (settings) =>
     pushBus.publishAll(WS_CHANNELS.serverConfigUpdated, {
@@ -966,7 +1284,161 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }
   });
 
-  const handleMessage = Effect.fnUntraced(function* (ws: WebSocket, raw: unknown) {
+  const routeAgentRequest = Effect.fnUntraced(function* (
+    ws: WebSocket,
+    session: AgentRuntimeSession,
+    request: AgentClientMessage,
+  ) {
+    const requestPayload = request.payload as {
+      _tag: string;
+      [key: string]: unknown;
+    };
+
+    switch (requestPayload._tag) {
+      case AGENT_WS_METHODS.connect: {
+        const capabilities = requestPayload.capabilities as string[] | undefined;
+        const resolvedCapabilities = capabilities?.length
+          ? capabilities
+          : AGENT_DEFAULT_CAPABILITIES;
+        yield* sendAgentPush(ws, session, {
+          channel: AGENT_WS_CHANNELS.sessionWelcome,
+          data: {
+            message: "Session connected",
+            capabilities: resolvedCapabilities,
+            resumeSupported: true,
+          },
+        });
+        return yield* sendAgentResponse(ws, {
+          id: request.id,
+          metadata: rebuildAgentMetadata(session, request.id),
+          result: { capabilities: resolvedCapabilities },
+        });
+      }
+
+      case AGENT_WS_METHODS.getCapabilities:
+        return yield* sendAgentResponse(ws, {
+          id: request.id,
+          metadata: rebuildAgentMetadata(session, request.id),
+          result: {
+            capabilities: session.token.capabilities?.length
+              ? session.token.capabilities
+              : AGENT_DEFAULT_CAPABILITIES,
+          },
+        });
+
+      case AGENT_WS_METHODS.sendMessage: {
+        const message = requestPayload.message as string;
+        yield* sendAgentPush(ws, session, {
+          channel: AGENT_WS_CHANNELS.assistantDelta,
+          data: {
+            delta: message,
+          },
+        });
+        yield* sendAgentPush(ws, session, {
+          channel: AGENT_WS_CHANNELS.assistantMessage,
+          data: {
+            message,
+            status: "complete",
+          },
+        });
+        return yield* sendAgentResponse(ws, {
+          id: request.id,
+          metadata: rebuildAgentMetadata(session, request.id),
+          result: {
+            turnId: session.turnId,
+            messageId: `assistant-${crypto.randomUUID()}`,
+          },
+        });
+      }
+
+      case AGENT_WS_METHODS.commandResult:
+        return yield* sendAgentResponse(ws, {
+          id: request.id,
+          metadata: rebuildAgentMetadata(session, request.id),
+          result: {
+            acknowledged: true,
+            commandId: requestPayload.commandId as string,
+            status: requestPayload.status as string,
+          },
+        });
+
+      case AGENT_WS_METHODS.confirmationDecision:
+        return yield* sendAgentResponse(ws, {
+          id: request.id,
+          metadata: rebuildAgentMetadata(session, request.id),
+          result: {
+            acknowledged: true,
+            operationId: requestPayload.operationId as string,
+            approved: requestPayload.approved as boolean,
+          },
+        });
+
+      case AGENT_WS_METHODS.contextSnapshot:
+        return yield* sendAgentResponse(ws, {
+          id: request.id,
+          metadata: rebuildAgentMetadata(session, request.id),
+          result: {
+            snapshotAccepted: true,
+          },
+        });
+
+      default:
+        return yield* sendAgentResponse(ws, {
+          id: request.id,
+          metadata: rebuildAgentMetadata(session, request.id),
+          error: {
+            code: "bad_request",
+            message: `Unsupported agent method: ${requestPayload._tag}`,
+          },
+        });
+    }
+  });
+
+  const handleAgentMessage = Effect.fnUntraced(function* (
+    ws: WebSocket,
+    session: AgentRuntimeSession,
+    raw: unknown,
+  ) {
+    const messageText = websocketRawToString(raw);
+    if (messageText === null) {
+      return yield* sendAgentResponse(ws, {
+        id: RequestId.makeUnsafe("unknown"),
+        metadata: rebuildAgentMetadata(session, undefined),
+        error: {
+          code: "bad_request",
+          message: "Invalid request format: Failed to read message",
+        },
+      });
+    }
+
+    const request = decodeAgentClientMessage(messageText);
+    if (Result.isFailure(request)) {
+      const fallback = decodeAgentClientMessageFallback(messageText);
+      if (Result.isSuccess(fallback)) {
+        return yield* sendAgentResponse(ws, {
+          id: fallback.success.id,
+          metadata: rebuildAgentMetadata(session, fallback.success.id),
+          error: {
+            code: "bad_request",
+            message: `Unsupported agent method: ${fallback.success.payload._tag}`,
+          },
+        });
+      }
+
+      return yield* sendAgentResponse(ws, {
+        id: RequestId.makeUnsafe("unknown"),
+        metadata: rebuildAgentMetadata(session, undefined),
+        error: {
+          code: "bad_request",
+          message: `Invalid request format: ${formatSchemaError(request.failure)}`,
+        },
+      });
+    }
+
+    return yield* routeAgentRequest(ws, session, request.success);
+  });
+
+  const handleOrchestrationMessage = Effect.fnUntraced(function* (ws: WebSocket, raw: unknown) {
     const sendWsResponse = (response: WsResponseMessage) =>
       encodeWsResponse(response).pipe(
         Effect.tap((encodedResponse) => Effect.sync(() => ws.send(encodedResponse))),
@@ -1006,16 +1478,38 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   httpServer.on("upgrade", (request, socket, head) => {
     socket.on("error", () => {}); // Prevent unhandled `EPIPE`/`ECONNRESET` from crashing the process if the client disconnects mid-handshake
 
-    if (authToken) {
-      let providedToken: string | null = null;
-      try {
-        const url = new URL(request.url ?? "/", `http://localhost:${port}`);
-        providedToken = url.searchParams.get("token");
-      } catch {
-        rejectUpgrade(socket, 400, "Invalid WebSocket URL");
-        return;
-      }
+    let isAgentRoute = false;
+    let agentToken: AgentSessionToken | undefined;
+    let lastSeenSequence: number | undefined;
 
+    try {
+      const url = new URL(request.url ?? "/", `http://localhost:${port}`);
+      isAgentRoute = url.pathname === AGENT_WS_ROUTE_PATH;
+      if (isAgentRoute) {
+        const tokenResult = parseAgentSessionToken(url.searchParams.get("token"), authToken);
+        if (Result.isFailure(tokenResult)) {
+          rejectUpgrade(socket, 401, tokenResult.failure as string);
+          return;
+        }
+        agentToken = tokenResult.success;
+        lastSeenSequence = agentToken.lastSeenSequence;
+      } else if (authToken) {
+        const providedToken = url.searchParams.get("token");
+        if (providedToken !== authToken) {
+          rejectUpgrade(socket, 401, "Unauthorized WebSocket connection");
+          return;
+        }
+      }
+    } catch {
+      rejectUpgrade(socket, 400, "Invalid WebSocket URL");
+      return;
+    }
+
+    if (!isAgentRoute && authToken) {
+      const providedToken = new URL(
+        request.url ?? "/",
+        `http://localhost:${port}`,
+      ).searchParams.get("token");
       if (providedToken !== authToken) {
         rejectUpgrade(socket, 401, "Unauthorized WebSocket connection");
         return;
@@ -1023,53 +1517,115 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }
 
     wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
+      wss.emit("connection", ws, request, agentToken, lastSeenSequence);
     });
   });
 
-  wss.on("connection", (ws) => {
-    const segments = cwd.split(/[/\\]/).filter(Boolean);
-    const projectName = segments[segments.length - 1] ?? "project";
+  wss.on(
+    "connection",
+    (
+      ws: WebSocket,
+      request: http.IncomingMessage | undefined,
+      agentToken: AgentSessionToken | undefined,
+      lastSeenSequence: number | undefined,
+    ) => {
+      const isAgentRoute = (() => {
+        try {
+          const requestUrl = new URL(request?.url ?? "/", `http://localhost:${port}`);
+          return requestUrl.pathname === AGENT_WS_ROUTE_PATH;
+        } catch {
+          return false;
+        }
+      })();
 
-    const welcomeData = {
-      cwd,
-      projectName,
-      ...(welcomeBootstrapProjectId ? { bootstrapProjectId: welcomeBootstrapProjectId } : {}),
-      ...(welcomeBootstrapThreadId ? { bootstrapThreadId: welcomeBootstrapThreadId } : {}),
-    };
-    // Send welcome before adding to broadcast set so publishAll calls
-    // cannot reach this client before the welcome arrives.
-    void runPromise(
-      readiness.awaitServerReady.pipe(
-        Effect.flatMap(() => pushBus.publishClient(ws, WS_CHANNELS.serverWelcome, welcomeData)),
-        Effect.flatMap((delivered) =>
-          delivered ? Ref.update(clients, (clients) => clients.add(ws)) : Effect.void,
+      if (isAgentRoute && agentToken) {
+        const session = getOrCreateAgentSession(agentToken);
+        if (
+          session.tenantId !== agentToken.tenantId ||
+          session.userId !== agentToken.userId ||
+          session.conversationId !== (agentToken.conversationId ?? session.conversationId)
+        ) {
+          ws.close(1008, "Invalid agent session token");
+          return;
+        }
+
+        agentSessionSockets.set(ws, session);
+        void runPromise(
+          Effect.gen(function* () {
+            yield* recordAgentEventsForReplay(ws, session, lastSeenSequence);
+            yield* emitSessionWelcome(ws, session, agentToken);
+          }),
+        );
+
+        ws.on(
+          "message",
+          (raw: string | ArrayBuffer | Buffer | DataView | Int8Array | Uint8Array) => {
+            const sessionContext = agentSessionSockets.get(ws);
+            if (!sessionContext) {
+              ws.close(1008, "Missing agent session");
+              return;
+            }
+            void runPromise(
+              handleAgentMessage(ws, sessionContext, raw).pipe(Effect.ignoreCause({ log: true })),
+            );
+          },
+        );
+
+        ws.on("close", () => {
+          agentSessionSockets.delete(ws);
+        });
+
+        ws.on("error", () => {
+          agentSessionSockets.delete(ws);
+        });
+        return;
+      }
+
+      const segments = cwd.split(/[/\\]/).filter(Boolean);
+      const projectName = segments[segments.length - 1] ?? "project";
+
+      const welcomeData = {
+        cwd,
+        projectName,
+        ...(welcomeBootstrapProjectId ? { bootstrapProjectId: welcomeBootstrapProjectId } : {}),
+        ...(welcomeBootstrapThreadId ? { bootstrapThreadId: welcomeBootstrapThreadId } : {}),
+      };
+      // Send welcome before adding to broadcast set so publishAll calls
+      // cannot reach this client before the welcome arrives.
+      void runPromise(
+        readiness.awaitServerReady.pipe(
+          Effect.flatMap(() => pushBus.publishClient(ws, WS_CHANNELS.serverWelcome, welcomeData)),
+          Effect.flatMap((delivered) =>
+            delivered ? Ref.update(clients, (clients) => clients.add(ws)) : Effect.void,
+          ),
         ),
-      ),
-    );
-
-    ws.on("message", (raw) => {
-      void runPromise(handleMessage(ws, raw).pipe(Effect.ignoreCause({ log: true })));
-    });
-
-    ws.on("close", () => {
-      void runPromise(
-        Ref.update(clients, (clients) => {
-          clients.delete(ws);
-          return clients;
-        }),
       );
-    });
 
-    ws.on("error", () => {
-      void runPromise(
-        Ref.update(clients, (clients) => {
-          clients.delete(ws);
-          return clients;
-        }),
-      );
-    });
-  });
+      ws.on("message", (raw: string | ArrayBuffer | Buffer | DataView | Int8Array | Uint8Array) => {
+        void runPromise(
+          handleOrchestrationMessage(ws, raw).pipe(Effect.ignoreCause({ log: true })),
+        );
+      });
+
+      ws.on("close", () => {
+        void runPromise(
+          Ref.update(clients, (clients) => {
+            clients.delete(ws);
+            return clients;
+          }),
+        );
+      });
+
+      ws.on("error", () => {
+        void runPromise(
+          Ref.update(clients, (clients) => {
+            clients.delete(ws);
+            return clients;
+          }),
+        );
+      });
+    },
+  );
 
   return httpServer;
 });
