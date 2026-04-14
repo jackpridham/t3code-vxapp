@@ -24,6 +24,8 @@ import {
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
 import type { ProjectionAttachmentSideEffects } from "../Services/ProjectionPipeline.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 
 interface CommandEnvelope {
   command: OrchestrationCommand;
@@ -55,6 +57,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const eventStore = yield* OrchestrationEventStore;
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
   let readModel = createEmptyReadModel(new Date().toISOString());
 
@@ -204,12 +207,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   yield* projectionPipeline.bootstrap;
 
-  // bootstrap in-memory read model from event store
-  yield* Stream.runForEach(eventStore.readAll(), (event) =>
-    Effect.gen(function* () {
-      readModel = yield* projectEvent(readModel, event);
-    }),
-  );
+  readModel = yield* projectionSnapshotQuery.getSnapshot({ profile: "operational" });
 
   const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
   yield* Effect.forkScoped(worker);
@@ -246,4 +244,4 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 export const OrchestrationEngineLive = Layer.effect(
   OrchestrationEngineService,
   makeOrchestrationEngine,
-);
+).pipe(Layer.provide(OrchestrationProjectionSnapshotQueryLive));

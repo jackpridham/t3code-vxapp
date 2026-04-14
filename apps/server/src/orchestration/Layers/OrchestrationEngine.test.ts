@@ -60,6 +60,39 @@ function now() {
 }
 
 describe("OrchestrationEngine", () => {
+  it("hydrates startup read model from projections without replaying the full event store", async () => {
+    let readAllCalls = 0;
+    const eventStore: OrchestrationEventStoreShape = {
+      append: () => Effect.die(new Error("unexpected append")),
+      readFromSequence: () => Stream.empty,
+      readAll: () => {
+        readAllCalls += 1;
+        return Stream.die(new Error("startup must not replay all orchestration events"));
+      },
+    };
+
+    const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+      prefix: "t3-orchestration-engine-test-",
+    });
+    const runtime = ManagedRuntime.make(
+      OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionPipelineLive),
+        Layer.provide(Layer.succeed(OrchestrationEventStore, eventStore)),
+        Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(SqlitePersistenceMemory),
+        Layer.provideMerge(ServerConfigLayer),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    );
+
+    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const readModel = await runtime.runPromise(engine.getReadModel());
+
+    expect(readModel.snapshotSequence).toBe(0);
+    expect(readAllCalls).toBe(0);
+    await runtime.dispose();
+  });
+
   it("returns deterministic read models for repeated reads", async () => {
     const createdAt = now();
     const system = await createOrchestrationSystem();
