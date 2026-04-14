@@ -27,7 +27,6 @@ import { useStore } from "../../store";
 import type { DraftThreadEnvMode } from "../../composerDraftStore";
 import type { Project, Thread } from "../../types";
 import { createNewOrchestrationSession } from "./orchestrationModeActions";
-import { orchestrationSessionThreadsQueryOptions } from "../../lib/orchestrationReactQuery";
 import { loadCurrentStateWithThreadDetail } from "../../lib/orchestrationCurrentStateHydration";
 
 type ProjectDraftThread = {
@@ -250,26 +249,6 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
         if (!project) {
           return;
         }
-        const projectThreads = await api.orchestration.listProjectThreads({
-          projectId,
-          includeArchived: true,
-          includeDeleted: false,
-        });
-        const activeRootThreadId =
-          sortThreadsForSidebar(
-            projectThreads.filter((thread) => thread.archivedAt === null),
-            input.sidebarThreadSortOrder,
-          )[0]?.id ?? null;
-        const activeSessionThreads =
-          activeRootThreadId === null
-            ? []
-            : await queryClient.fetchQuery(
-                orchestrationSessionThreadsQueryOptions({
-                  rootThreadId: activeRootThreadId,
-                  includeArchived: true,
-                }),
-              );
-
         await createNewOrchestrationSession({
           api,
           queryClient,
@@ -279,8 +258,6 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
             provider: "codex",
             model: DEFAULT_MODEL_BY_PROVIDER.codex,
           },
-          activeRootThreadId,
-          activeSessionThreads,
           syncServerReadModel: useStore.getState().syncServerReadModel,
           navigateToThread: input.navigateToSelectedThread,
         });

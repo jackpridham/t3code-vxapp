@@ -957,50 +957,28 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
         return;
       }
 
-      const projectRootThreads =
-        orchestrationProjectCatalogSummariesByProjectId.get(projectId) ?? [];
-      const activeRootThreadId =
-        [...projectRootThreads]
-          .filter((thread) => thread.archivedAt === null)
-          .toSorted(
-            (left, right) =>
-              (right.updatedAt ?? right.createdAt).localeCompare(
-                left.updatedAt ?? left.createdAt,
-              ) || right.createdAt.localeCompare(left.createdAt),
-          )[0]?.id ?? null;
-      const activeSessionThreads =
-        activeRootThreadId === null
-          ? []
-          : (orchestrationSessionCatalogSummariesByRootId.get(activeRootThreadId) ??
-            (await queryClient.fetchQuery(
-              orchestrationSessionThreadsQueryOptions({
-                rootThreadId: activeRootThreadId,
-                includeArchived: true,
-              }),
-            )));
-
-      await createNewOrchestrationSession({
-        api,
-        queryClient,
-        projectId,
-        projectName: project.name,
-        projectModelSelection: project.defaultModelSelection ?? {
-          provider: "codex",
-          model: DEFAULT_MODEL_BY_PROVIDER.codex,
-        },
-        activeRootThreadId,
-        activeSessionThreads,
-        syncServerReadModel: useStore.getState().syncServerReadModel,
-        navigateToThread: navigateToSelectedThread,
-      });
+      try {
+        await createNewOrchestrationSession({
+          api,
+          queryClient,
+          projectId,
+          projectName: project.name,
+          projectModelSelection: project.defaultModelSelection ?? {
+            provider: "codex",
+            model: DEFAULT_MODEL_BY_PROVIDER.codex,
+          },
+          syncServerReadModel: useStore.getState().syncServerReadModel,
+          navigateToThread: navigateToSelectedThread,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to create orchestration session",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      }
     },
-    [
-      navigateToSelectedThread,
-      orchestrationProjectCatalogSummariesByProjectId,
-      orchestrationSessionCatalogSummariesByRootId,
-      projects,
-      queryClient,
-    ],
+    [navigateToSelectedThread, projects, queryClient],
   );
 
   const cancelRename = useCallback(() => {

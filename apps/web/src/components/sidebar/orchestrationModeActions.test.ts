@@ -109,6 +109,42 @@ describe("buildSessionReactivationPlan", () => {
     expect(plan.threadsToUnarchive).toEqual([targetRoot.id, targetWorker.id]);
     expect(plan.affectedProjectIds).toEqual([projectA, projectB]);
   });
+
+  it("does not include already archived threads in the active session archive work", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const activeRoot = makeSummary({
+      id: ThreadId.makeUnsafe("root-active"),
+      projectId,
+      spawnRole: "orchestrator",
+    });
+    const archivedWorker = makeSummary({
+      id: ThreadId.makeUnsafe("worker-archived"),
+      projectId,
+      parentThreadId: activeRoot.id,
+      archivedAt: "2026-04-10T00:05:00.000Z",
+      session: {
+        threadId: ThreadId.makeUnsafe("worker-archived"),
+        status: "running",
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: ThreadId.makeUnsafe("turn-active") as never,
+        lastError: null,
+        updatedAt: "2026-04-10T00:00:00.000Z",
+      },
+    });
+
+    const plan = buildSessionReactivationPlan({
+      activeRootThreadId: activeRoot.id,
+      targetRootThreadId: ThreadId.makeUnsafe("root-target"),
+      activeSessionThreads: [activeRoot, archivedWorker],
+      targetSessionThreads: [],
+      projectRootThreads: [activeRoot],
+    });
+
+    expect(plan.threadsToInterrupt).toEqual([]);
+    expect(plan.threadsToStop).toEqual([]);
+    expect(plan.threadsToArchive).toEqual([activeRoot.id]);
+  });
 });
 
 describe("reactivateOrchestrationSession", () => {
@@ -159,7 +195,11 @@ describe("reactivateOrchestrationSession", () => {
     const invalidateQueries = vi
       .spyOn(queryClient, "invalidateQueries")
       .mockResolvedValue(undefined);
-    const fetchQuery = vi.spyOn(queryClient, "fetchQuery").mockResolvedValue([]);
+    const fetchQuery = vi
+      .spyOn(queryClient, "fetchQuery")
+      .mockResolvedValueOnce([activeRoot])
+      .mockResolvedValueOnce([activeRoot, activeWorker])
+      .mockResolvedValueOnce([]);
     const syncServerReadModel = vi.fn();
     const navigateToThread = vi.fn().mockResolvedValue(undefined);
     await reactivateOrchestrationSession({
@@ -250,7 +290,11 @@ describe("createNewOrchestrationSession", () => {
     const invalidateQueries = vi
       .spyOn(queryClient, "invalidateQueries")
       .mockResolvedValue(undefined);
-    const fetchQuery = vi.spyOn(queryClient, "fetchQuery").mockResolvedValue([]);
+    const fetchQuery = vi
+      .spyOn(queryClient, "fetchQuery")
+      .mockResolvedValueOnce([activeRoot])
+      .mockResolvedValueOnce([activeRoot, activeWorker])
+      .mockResolvedValueOnce([]);
     const syncServerReadModel = vi.fn();
     const navigateToThread = vi.fn().mockResolvedValue(undefined);
 
@@ -272,8 +316,6 @@ describe("createNewOrchestrationSession", () => {
       projectId,
       projectName: "Jasper",
       projectModelSelection: { provider: "codex", model: "gpt-5.4" },
-      activeRootThreadId: activeRoot.id,
-      activeSessionThreads: [activeRoot, activeWorker],
       syncServerReadModel,
       navigateToThread,
     });
@@ -306,7 +348,159 @@ describe("createNewOrchestrationSession", () => {
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(snapshot);
     expect(invalidateQueries).toHaveBeenCalled();
-    expect(fetchQuery).toHaveBeenCalled();
+    expect(fetchQuery).toHaveBeenCalledTimes(3);
     expect(navigateToThread).toHaveBeenCalledWith(newThreadId);
+  });
+
+  it("uses a fresh project catalog before creating so stale empty sidebar state cannot skip archiving", async () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const activeRoot = makeSummary({
+      id: ThreadId.makeUnsafe("root-active"),
+      projectId,
+      spawnRole: "orchestrator",
+      updatedAt: "2026-04-10T00:10:00.000Z",
+    });
+    const archivedRoot = makeSummary({
+      id: ThreadId.makeUnsafe("root-archived"),
+      projectId,
+      spawnRole: "orchestrator",
+      archivedAt: "2026-04-10T00:09:00.000Z",
+      updatedAt: "2026-04-10T00:09:00.000Z",
+    });
+    const snapshot = {
+      snapshotSequence: 1,
+      projects: [],
+      threads: [],
+      orchestratorWakeItems: [],
+      updatedAt: "2026-04-10T00:00:00.000Z",
+    };
+    const dispatchCommand = vi.fn().mockResolvedValue({ sequence: 1 });
+    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getSnapshot = vi.fn();
+    const listThreadMessages = vi.fn().mockResolvedValue([]);
+    const listThreadActivities = vi.fn().mockResolvedValue([]);
+    const listThreadSessions = vi.fn().mockResolvedValue([]);
+    const listSessionThreads = vi.fn().mockResolvedValue([]);
+    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
+    const confirm = vi.fn().mockResolvedValue(true);
+    const queryClient = new QueryClient();
+    vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+    const fetchQuery = vi
+      .spyOn(queryClient, "fetchQuery")
+      .mockResolvedValueOnce([archivedRoot, activeRoot])
+      .mockResolvedValueOnce([activeRoot])
+      .mockResolvedValueOnce([]);
+    const syncServerReadModel = vi.fn();
+    const navigateToThread = vi.fn().mockResolvedValue(undefined);
+
+    await createNewOrchestrationSession({
+      api: {
+        dialogs: { confirm },
+        orchestration: {
+          dispatchCommand,
+          getCurrentState,
+          getSnapshot,
+          listThreadMessages,
+          listThreadActivities,
+          listThreadSessions,
+          listSessionThreads,
+          listOrchestratorWakes,
+        },
+      } as never,
+      queryClient,
+      projectId,
+      projectName: "Jasper",
+      projectModelSelection: { provider: "codex", model: "gpt-5.4" },
+      syncServerReadModel,
+      navigateToThread,
+    });
+
+    expect(fetchQuery).toHaveBeenCalledTimes(3);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(dispatchCommand.mock.calls.map(([command]) => command.type)).toEqual([
+      "thread.archive",
+      "thread.create",
+      "project.meta.update",
+    ]);
+    expect(dispatchCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "thread.archive",
+      threadId: activeRoot.id,
+    });
+  });
+
+  it("skips archived session members and tolerates concurrent already-archived responses", async () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const activeRoot = makeSummary({
+      id: ThreadId.makeUnsafe("root-active"),
+      projectId,
+      spawnRole: "orchestrator",
+    });
+    const archivedWorker = makeSummary({
+      id: ThreadId.makeUnsafe("worker-archived"),
+      projectId,
+      parentThreadId: activeRoot.id,
+      archivedAt: "2026-04-10T00:05:00.000Z",
+    });
+    const snapshot = {
+      snapshotSequence: 1,
+      projects: [],
+      threads: [],
+      orchestratorWakeItems: [],
+      updatedAt: "2026-04-10T00:00:00.000Z",
+    };
+    const dispatchCommand = vi.fn((command) => {
+      if (command.type === "thread.archive") {
+        return Promise.reject(
+          new Error(
+            "Orchestration command invariant failed (thread.archive): Thread 'root-active' is already archived and cannot handle command 'thread.archive'.",
+          ),
+        );
+      }
+      return Promise.resolve({ sequence: 1 });
+    });
+    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getSnapshot = vi.fn();
+    const listThreadMessages = vi.fn().mockResolvedValue([]);
+    const listThreadActivities = vi.fn().mockResolvedValue([]);
+    const listThreadSessions = vi.fn().mockResolvedValue([]);
+    const listSessionThreads = vi.fn().mockResolvedValue([]);
+    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
+    const confirm = vi.fn().mockResolvedValue(true);
+    const queryClient = new QueryClient();
+    vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+    vi.spyOn(queryClient, "fetchQuery")
+      .mockResolvedValueOnce([activeRoot])
+      .mockResolvedValueOnce([activeRoot, archivedWorker])
+      .mockResolvedValueOnce([]);
+    const syncServerReadModel = vi.fn();
+    const navigateToThread = vi.fn().mockResolvedValue(undefined);
+
+    await createNewOrchestrationSession({
+      api: {
+        dialogs: { confirm },
+        orchestration: {
+          dispatchCommand,
+          getCurrentState,
+          getSnapshot,
+          listThreadMessages,
+          listThreadActivities,
+          listThreadSessions,
+          listSessionThreads,
+          listOrchestratorWakes,
+        },
+      } as never,
+      queryClient,
+      projectId,
+      projectName: "Jasper",
+      projectModelSelection: { provider: "codex", model: "gpt-5.4" },
+      syncServerReadModel,
+      navigateToThread,
+    });
+
+    expect(dispatchCommand.mock.calls.map(([command]) => command.type)).toEqual([
+      "thread.archive",
+      "thread.create",
+      "project.meta.update",
+    ]);
   });
 });
