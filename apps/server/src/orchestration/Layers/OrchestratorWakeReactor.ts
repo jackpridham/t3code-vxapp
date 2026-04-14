@@ -228,12 +228,105 @@ function isOrchestratorInactive(thread: OrchestrationThread): boolean {
   return session.status !== "starting" && session.status !== "running";
 }
 
-function buildOrchestratorWakePrompt(items: readonly OrchestratorWakeItem[]): string {
+function resolveWorkerWorkspaceForWake(input: {
+  readonly item: OrchestratorWakeItem;
+  readonly readModel: OrchestrationReadModel;
+}): string | null {
+  const workerThread = input.readModel.threads.find(
+    (thread) => thread.id === input.item.workerThreadId,
+  );
+  if (workerThread?.worktreePath) {
+    return workerThread.worktreePath;
+  }
+
+  const workerProject = input.readModel.projects.find(
+    (project) => project.id === input.item.workerProjectId,
+  );
+  return workerProject?.workspaceRoot ?? null;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function buildSettlementCommand(input: {
+  readonly item: OrchestratorWakeItem;
+  readonly workspace: string;
+}): string {
+  return [
+    "vx t3 lanes settle-observer",
+    `--orchestrator-thread ${shellQuote(input.item.orchestratorThreadId)}`,
+    `--worker-thread ${shellQuote(input.item.workerThreadId)}`,
+    `--workspace ${shellQuote(input.workspace)}`,
+    "--json",
+  ].join(" ");
+}
+
+function formatNullableContext(value: string | null | undefined): string {
+  return value && value.trim().length > 0 ? value : "none";
+}
+
+function buildWakeContextLine(input: {
+  readonly item: OrchestratorWakeItem;
+  readonly readModel: OrchestrationReadModel;
+}): string {
+  const workerThread = input.readModel.threads.find(
+    (thread) => thread.id === input.item.workerThreadId,
+  );
+  const workspace =
+    resolveWorkerWorkspaceForWake({
+      item: input.item,
+      readModel: input.readModel,
+    }) ?? "unresolved";
+  const branch = formatNullableContext(workerThread?.branch);
+  const parentThreadId = formatNullableContext(workerThread?.parentThreadId);
+  const orchestratorThreadId = formatNullableContext(workerThread?.orchestratorThreadId);
+  const workflowId = formatNullableContext(input.item.workflowId ?? workerThread?.workflowId);
+
+  return [
+    `- worker=${input.item.workerThreadId}`,
+    `project=${input.item.workerProjectId}`,
+    `turn=${input.item.workerTurnId}`,
+    `outcome=${input.item.outcome}`,
+    `workspace=${workspace}`,
+    `branch=${branch}`,
+    `orchestrator=${orchestratorThreadId}`,
+    `parent=${parentThreadId}`,
+    `workflow=${workflowId}`,
+  ].join(" ");
+}
+
+function buildOrchestratorWakePrompt(input: {
+  readonly items: readonly OrchestratorWakeItem[];
+  readonly readModel: OrchestrationReadModel;
+}): string {
+  const { items, readModel } = input;
   const lines = items.map(
     (item) => `- ${item.workerTitleSnapshot} - ${item.outcome} - ${item.summary}`,
   );
+  const settlementLines = items.map((item) => {
+    const workspace = resolveWorkerWorkspaceForWake({ item, readModel });
+    if (!workspace) {
+      return `# Could not resolve workspace for worker ${item.workerThreadId}; inspect the worker thread before settlement.`;
+    }
+    return buildSettlementCommand({ item, workspace });
+  });
+  const contextLines = items.map((item) => buildWakeContextLine({ item, readModel }));
+
   return [
+    "wake-up-buttercup",
+    "",
     "Worker updates are ready for review.",
+    "",
+    "Run this first, one command per worker outcome:",
+    "```bash",
+    ...settlementLines,
+    "```",
+    "",
+    "Wake context:",
+    ...contextLines,
+    "",
+    "The command above is the first post-wake check. It replaces the usual initial `workers doctor`, `threads status`, git status/log/stash, wake-state, and workspace-cleanliness probes.",
     "",
     "Pending worker outcomes:",
     ...lines,
@@ -1300,7 +1393,10 @@ const make = Effect.gen(function* () {
         { concurrency: 1 },
       ).pipe(Effect.asVoid);
 
-      const prompt = buildOrchestratorWakePrompt(batch);
+      const prompt = buildOrchestratorWakePrompt({
+        items: batch,
+        readModel: refreshedReadModel,
+      });
 
       const dispatchResult = yield* Effect.exit(
         orchestrationEngine.dispatch({

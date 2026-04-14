@@ -1082,7 +1082,22 @@ describe("OrchestratorWakeReactor", () => {
         (orchestratorThread?.messages.some(
           (message) =>
             message.role === "user" &&
+            message.text.startsWith("wake-up-buttercup\n\n") &&
             message.text.includes("Worker updates are ready for review.") &&
+            message.text.includes(
+              "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+            ) &&
+            message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
+            message.text.includes("--json") &&
+            message.text.includes("Wake context:") &&
+            message.text.includes("worker=thread-worker") &&
+            message.text.includes("project=project-worker") &&
+            message.text.includes("turn=turn-6") &&
+            message.text.includes(`workspace=${harness.workspaceRoot}`) &&
+            message.text.includes("orchestrator=thread-orch") &&
+            message.text.includes("parent=thread-orch") &&
+            message.text.includes("workflow=wf-thread-orch") &&
+            message.text.includes("replaces the usual initial `workers doctor`") &&
             message.text.includes("Worker thread-worker completed its assigned turn"),
         ) ??
           false)
@@ -1095,7 +1110,22 @@ describe("OrchestratorWakeReactor", () => {
       orchestratorThreadWhileDelivering?.messages.some(
         (message) =>
           message.role === "user" &&
+          message.text.startsWith("wake-up-buttercup\n\n") &&
           message.text.includes("Worker updates are ready for review.") &&
+          message.text.includes(
+            "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+          ) &&
+          message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
+          message.text.includes("--json") &&
+          message.text.includes("Wake context:") &&
+          message.text.includes("worker=thread-worker") &&
+          message.text.includes("project=project-worker") &&
+          message.text.includes("turn=turn-6") &&
+          message.text.includes(`workspace=${harness.workspaceRoot}`) &&
+          message.text.includes("orchestrator=thread-orch") &&
+          message.text.includes("parent=thread-orch") &&
+          message.text.includes("workflow=wf-thread-orch") &&
+          message.text.includes("replaces the usual initial `workers doctor`") &&
           message.text.includes("Worker thread-worker completed its assigned turn"),
       ),
     ).toBe(true);
