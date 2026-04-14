@@ -2,6 +2,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrationCheckpointFile,
   OrchestrationProjectKind,
   ProjectId,
   ProjectHooks,
@@ -27,6 +28,7 @@ import {
   toPersistenceSqlError,
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
+import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
@@ -35,6 +37,7 @@ import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionOperationalQuery,
   type ProjectionOperationalQueryShape,
+  type ProjectionThreadCheckpointContext,
 } from "../Services/ProjectionOperationalQuery.ts";
 
 const ProjectionProjectSummaryDbRowSchema = ProjectionProject.mapFields(
@@ -70,6 +73,18 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   sourceProposedPlanId: Schema.NullOr(Schema.String),
 });
 type ProjectionLatestTurnDbRow = typeof ProjectionLatestTurnDbRowSchema.Type;
+
+const ProjectionThreadCheckpointContextDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  worktreePath: Schema.NullOr(Schema.String),
+  workspaceRoot: Schema.NullOr(Schema.String),
+});
+
+const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
+  Struct.assign({
+    files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
+  }),
+);
 
 const ProjectionStateDbRowSchema = ProjectionState;
 
@@ -672,6 +687,43 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       `,
   });
 
+  const getThreadCheckpointContextRow = SqlSchema.findOneOption({
+    Request: Schema.Struct({ threadId: ThreadId }),
+    Result: ProjectionThreadCheckpointContextDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          t.thread_id AS "threadId",
+          t.worktree_path AS "worktreePath",
+          p.workspace_root AS "workspaceRoot"
+        FROM projection_threads t
+        LEFT JOIN projection_projects p ON p.project_id = t.project_id
+        WHERE t.thread_id = ${threadId}
+        LIMIT 1
+      `,
+  });
+
+  const listThreadCheckpointRows = SqlSchema.findAll({
+    Request: Schema.Struct({ threadId: ThreadId }),
+    Result: ProjectionCheckpointDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          checkpoint_turn_count AS "checkpointTurnCount",
+          checkpoint_ref AS "checkpointRef",
+          checkpoint_status AS "status",
+          checkpoint_files_json AS "files",
+          assistant_message_id AS "assistantMessageId",
+          completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND checkpoint_turn_count IS NOT NULL
+        ORDER BY checkpoint_turn_count ASC
+      `,
+  });
+
   const readProjectCountRow = SqlSchema.findOne({
     Request: Schema.Void,
     Result: CountRowSchema,
@@ -891,12 +943,51 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
     );
   };
 
+  const getThreadCheckpointContext: ProjectionOperationalQueryShape["getThreadCheckpointContext"] =
+    (input) =>
+      Effect.gen(function* () {
+        const threadRow = yield* getThreadCheckpointContextRow({ threadId: input.threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionOperationalQuery.getThreadCheckpointContext:thread:query",
+              "ProjectionOperationalQuery.getThreadCheckpointContext:thread:decodeRow",
+            ),
+          ),
+        );
+
+        if (Option.isNone(threadRow)) {
+          return {
+            threadId: input.threadId,
+            threadFound: false,
+            workspaceCwd: null,
+            checkpoints: [],
+          } satisfies ProjectionThreadCheckpointContext;
+        }
+
+        const checkpoints = yield* listThreadCheckpointRows({ threadId: input.threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionOperationalQuery.getThreadCheckpointContext:checkpoints:query",
+              "ProjectionOperationalQuery.getThreadCheckpointContext:checkpoints:decodeRows",
+            ),
+          ),
+        );
+
+        return {
+          threadId: input.threadId,
+          threadFound: true,
+          workspaceCwd: threadRow.value.worktreePath ?? threadRow.value.workspaceRoot,
+          checkpoints,
+        } satisfies ProjectionThreadCheckpointContext;
+      });
+
   return {
     getReadiness,
     listProjects,
     getProjectByWorkspace,
     listProjectThreads,
     listSessionThreads,
+    getThreadCheckpointContext,
   } satisfies ProjectionOperationalQueryShape;
 });
 

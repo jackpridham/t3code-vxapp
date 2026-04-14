@@ -1,94 +1,57 @@
-import {
-  CheckpointRef,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
-  ProjectId,
-  ThreadId,
-  TurnId,
-  type OrchestrationReadModel,
-} from "@t3tools/contracts";
+import { CheckpointRef, ThreadId, TurnId } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  ProjectionOperationalQuery,
+  type ProjectionOperationalQueryShape,
+  type ProjectionThreadCheckpointContext,
+} from "../../orchestration/Services/ProjectionOperationalQuery.ts";
 import { checkpointRefForThreadTurn } from "../Utils.ts";
 import { CheckpointDiffQueryLive } from "./CheckpointDiffQuery.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
 import { CheckpointDiffQuery } from "../Services/CheckpointDiffQuery.ts";
 
-function makeSnapshot(input: {
-  readonly projectId: ProjectId;
+function makeThreadCheckpointContext(input: {
   readonly threadId: ThreadId;
-  readonly workspaceRoot: string;
-  readonly worktreePath: string | null;
+  readonly workspaceCwd: string | null;
   readonly checkpointTurnCount: number;
   readonly checkpointRef: CheckpointRef;
-}): OrchestrationReadModel {
+}): ProjectionThreadCheckpointContext {
   return {
-    snapshotSequence: 0,
-    updatedAt: "2026-01-01T00:00:00.000Z",
-    projects: [
+    threadId: input.threadId,
+    threadFound: true,
+    workspaceCwd: input.workspaceCwd,
+    checkpoints: [
       {
-        id: input.projectId,
-        title: "Project",
-        workspaceRoot: input.workspaceRoot,
-        defaultModelSelection: null,
-        scripts: [],
-        hooks: [],
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-        deletedAt: null,
-      },
-    ],
-    orchestratorWakeItems: [],
-    threads: [
-      {
-        id: input.threadId,
-        projectId: input.projectId,
-        title: "Thread",
-        labels: [],
-        modelSelection: {
-          provider: "codex",
-          model: "gpt-5-codex",
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "full-access",
-        branch: null,
-        worktreePath: input.worktreePath,
-        latestTurn: {
-          turnId: TurnId.makeUnsafe("turn-1"),
-          state: "completed",
-          requestedAt: "2026-01-01T00:00:00.000Z",
-          startedAt: "2026-01-01T00:00:00.000Z",
-          completedAt: "2026-01-01T00:00:00.000Z",
-          assistantMessageId: null,
-        },
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-        archivedAt: null,
-        deletedAt: null,
-        messages: [],
-        activities: [],
-        proposedPlans: [],
-        checkpoints: [
-          {
-            turnId: TurnId.makeUnsafe("turn-1"),
-            checkpointTurnCount: input.checkpointTurnCount,
-            checkpointRef: input.checkpointRef,
-            status: "ready",
-            files: [],
-            assistantMessageId: null,
-            completedAt: "2026-01-01T00:00:00.000Z",
-          },
-        ],
-        session: null,
+        turnId: TurnId.makeUnsafe("turn-1"),
+        checkpointTurnCount: input.checkpointTurnCount,
+        checkpointRef: input.checkpointRef,
+        status: "ready",
+        files: [],
+        assistantMessageId: null,
+        completedAt: "2026-01-01T00:00:00.000Z",
       },
     ],
   };
 }
 
+function makeProjectionOperationalQuery(
+  context: ProjectionThreadCheckpointContext,
+): ProjectionOperationalQueryShape {
+  const unused = () => Effect.die("unexpected ProjectionOperationalQuery call");
+  return {
+    getReadiness: unused,
+    listProjects: unused,
+    getProjectByWorkspace: unused,
+    listProjectThreads: unused,
+    listSessionThreads: unused,
+    getThreadCheckpointContext: () => Effect.succeed(context),
+  };
+}
+
 describe("CheckpointDiffQueryLive", () => {
   it("computes diffs using canonical turn-0 checkpoint refs", async () => {
-    const projectId = ProjectId.makeUnsafe("project-1");
     const threadId = ThreadId.makeUnsafe("thread-1");
     const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
     const hasCheckpointRefCalls: Array<CheckpointRef> = [];
@@ -99,11 +62,9 @@ describe("CheckpointDiffQueryLive", () => {
       readonly pathspecs?: ReadonlyArray<string>;
     }> = [];
 
-    const snapshot = makeSnapshot({
-      projectId,
+    const context = makeThreadCheckpointContext({
       threadId,
-      workspaceRoot: "/tmp/workspace",
-      worktreePath: null,
+      workspaceCwd: "/tmp/workspace",
       checkpointTurnCount: 1,
       checkpointRef: toCheckpointRef,
     });
@@ -133,9 +94,7 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.succeed(snapshot),
-        }),
+        Layer.succeed(ProjectionOperationalQuery, makeProjectionOperationalQuery(context)),
       ),
     );
 
@@ -168,8 +127,14 @@ describe("CheckpointDiffQueryLive", () => {
     });
   });
 
-  it("fails when the thread is missing from the snapshot", async () => {
+  it("fails when the thread is missing from the checkpoint context", async () => {
     const threadId = ThreadId.makeUnsafe("thread-missing");
+    const context: ProjectionThreadCheckpointContext = {
+      threadId,
+      threadFound: false,
+      workspaceCwd: null,
+      checkpoints: [],
+    };
 
     const checkpointStore: CheckpointStoreShape = {
       isGitRepository: () => Effect.succeed(true),
@@ -183,16 +148,7 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              orchestratorWakeItems: [],
-              updatedAt: "2026-01-01T00:00:00.000Z",
-            } satisfies OrchestrationReadModel),
-        }),
+        Layer.succeed(ProjectionOperationalQuery, makeProjectionOperationalQuery(context)),
       ),
     );
 
@@ -211,7 +167,6 @@ describe("CheckpointDiffQueryLive", () => {
   });
 
   it("computes file diffs with a pathspec filter", async () => {
-    const projectId = ProjectId.makeUnsafe("project-1");
     const threadId = ThreadId.makeUnsafe("thread-1");
     const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
     const diffCheckpointsCalls: Array<{
@@ -221,11 +176,9 @@ describe("CheckpointDiffQueryLive", () => {
       readonly pathspecs?: ReadonlyArray<string>;
     }> = [];
 
-    const snapshot = makeSnapshot({
-      projectId,
+    const context = makeThreadCheckpointContext({
       threadId,
-      workspaceRoot: "/tmp/workspace",
-      worktreePath: null,
+      workspaceCwd: "/tmp/workspace",
       checkpointTurnCount: 1,
       checkpointRef: toCheckpointRef,
     });
@@ -251,9 +204,7 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.succeed(snapshot),
-        }),
+        Layer.succeed(ProjectionOperationalQuery, makeProjectionOperationalQuery(context)),
       ),
     );
 

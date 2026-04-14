@@ -9,9 +9,9 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Layer, Schema } from "effect";
 
-import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectionOperationalQuery } from "../../orchestration/Services/ProjectionOperationalQuery.ts";
 import { CheckpointInvariantError, CheckpointUnavailableError } from "../Errors.ts";
-import { checkpointRefForThreadTurn, resolveThreadWorkspaceCwd } from "../Utils.ts";
+import { checkpointRefForThreadTurn } from "../Utils.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
   CheckpointDiffQuery,
@@ -22,7 +22,7 @@ const isTurnDiffResult = Schema.is(OrchestrationGetTurnDiffResult);
 const isFileDiffResult = Schema.is(OrchestrationGetFileDiffResult);
 
 const make = Effect.gen(function* () {
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projectionOperationalQuery = yield* ProjectionOperationalQuery;
   const checkpointStore = yield* CheckpointStore;
 
   const resolveDiffContext = (input: {
@@ -32,16 +32,17 @@ const make = Effect.gen(function* () {
     readonly operation: string;
   }) =>
     Effect.gen(function* () {
-      const snapshot = yield* projectionSnapshotQuery.getSnapshot();
-      const thread = snapshot.threads.find((entry) => entry.id === input.threadId);
-      if (!thread) {
+      const context = yield* projectionOperationalQuery.getThreadCheckpointContext({
+        threadId: input.threadId,
+      });
+      if (!context.threadFound) {
         return yield* new CheckpointInvariantError({
           operation: input.operation,
           detail: `Thread '${input.threadId}' not found.`,
         });
       }
 
-      const maxTurnCount = thread.checkpoints.reduce(
+      const maxTurnCount = context.checkpoints.reduce(
         (max, checkpoint) => Math.max(max, checkpoint.checkpointTurnCount),
         0,
       );
@@ -53,10 +54,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      const workspaceCwd = resolveThreadWorkspaceCwd({
-        thread,
-        projects: snapshot.projects,
-      });
+      const workspaceCwd = context.workspaceCwd;
       if (!workspaceCwd) {
         return yield* new CheckpointInvariantError({
           operation: input.operation,
@@ -67,7 +65,7 @@ const make = Effect.gen(function* () {
       const fromCheckpointRef =
         input.fromTurnCount === 0
           ? checkpointRefForThreadTurn(input.threadId, 0)
-          : thread.checkpoints.find(
+          : context.checkpoints.find(
               (checkpoint) => checkpoint.checkpointTurnCount === input.fromTurnCount,
             )?.checkpointRef;
       if (!fromCheckpointRef) {
@@ -78,7 +76,7 @@ const make = Effect.gen(function* () {
         });
       }
 
-      const toCheckpointRef = thread.checkpoints.find(
+      const toCheckpointRef = context.checkpoints.find(
         (checkpoint) => checkpoint.checkpointTurnCount === input.toTurnCount,
       )?.checkpointRef;
       if (!toCheckpointRef) {

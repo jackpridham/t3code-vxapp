@@ -109,7 +109,7 @@ export function makeServerRuntimeServicesLayer() {
   );
 
   const checkpointDiffQueryLayer = CheckpointDiffQueryLive.pipe(
-    Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+    Layer.provideMerge(OrchestrationProjectionOperationalQueryLive),
     Layer.provideMerge(checkpointStoreLayer),
   );
 

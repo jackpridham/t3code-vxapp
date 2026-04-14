@@ -1,4 +1,5 @@
 import type {
+  OrchestrationCheckpointSummary,
   OrchestrationGetProjectByWorkspaceInput,
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetReadinessResult,
@@ -7,11 +8,19 @@ import type {
   OrchestrationListSessionThreadsInput,
   OrchestrationListSessionThreadsResult,
   OrchestrationListProjectsResult,
+  ThreadId,
 } from "@t3tools/contracts";
 import type { Effect } from "effect";
 import { ServiceMap } from "effect";
 
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+
+export interface ProjectionThreadCheckpointContext {
+  readonly threadId: ThreadId;
+  readonly threadFound: boolean;
+  readonly workspaceCwd: string | null;
+  readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
+}
 
 export interface ProjectionOperationalQueryShape {
   readonly getReadiness: () => Effect.Effect<
@@ -31,6 +40,9 @@ export interface ProjectionOperationalQueryShape {
   readonly listSessionThreads: (
     input: OrchestrationListSessionThreadsInput,
   ) => Effect.Effect<OrchestrationListSessionThreadsResult, ProjectionRepositoryError>;
+  readonly getThreadCheckpointContext: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ProjectionThreadCheckpointContext, ProjectionRepositoryError>;
 }
 
 export class ProjectionOperationalQuery extends ServiceMap.Service<

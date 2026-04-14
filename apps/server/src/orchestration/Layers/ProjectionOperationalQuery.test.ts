@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { CheckpointRef, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -598,6 +598,175 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
         includeDeleted: false,
       });
       assert.deepEqual(deletedRootSessionThreads, []);
+    }),
+  );
+
+  it.effect("returns bounded checkpoint context for one thread", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionOperationalQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_turns`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-checkpoints',
+          'Project Checkpoints',
+          '/tmp/project-checkpoints',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '[]',
+          '2026-04-06T00:00:00.000Z',
+          '2026-04-06T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          labels_json,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'thread-with-worktree',
+            'project-checkpoints',
+            'Thread With Worktree',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            '/tmp/thread-worktree',
+            'turn-2',
+            '2026-04-06T00:00:02.000Z',
+            '2026-04-06T00:00:03.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-with-project-root',
+            'project-checkpoints',
+            'Thread With Project Root',
+            '[]',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            '2026-04-06T00:00:04.000Z',
+            '2026-04-06T00:00:05.000Z',
+            NULL,
+            NULL
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id,
+          turn_id,
+          pending_message_id,
+          source_proposed_plan_thread_id,
+          source_proposed_plan_id,
+          assistant_message_id,
+          state,
+          requested_at,
+          started_at,
+          completed_at,
+          checkpoint_turn_count,
+          checkpoint_ref,
+          checkpoint_status,
+          checkpoint_files_json
+        )
+        VALUES
+          (
+            'thread-with-worktree',
+            'turn-2',
+            NULL,
+            NULL,
+            NULL,
+            'message-2',
+            'completed',
+            '2026-04-06T00:00:08.000Z',
+            '2026-04-06T00:00:08.000Z',
+            '2026-04-06T00:00:09.000Z',
+            2,
+            'refs/checkpoints/thread-with-worktree/2',
+            'ready',
+            '[{"path":"b.ts","kind":"modified","additions":1,"deletions":0}]'
+          ),
+          (
+            'thread-with-worktree',
+            'turn-1',
+            NULL,
+            NULL,
+            NULL,
+            'message-1',
+            'completed',
+            '2026-04-06T00:00:06.000Z',
+            '2026-04-06T00:00:06.000Z',
+            '2026-04-06T00:00:07.000Z',
+            1,
+            'refs/checkpoints/thread-with-worktree/1',
+            'ready',
+            '[]'
+          )
+      `;
+
+      const worktreeContext = yield* query.getThreadCheckpointContext({
+        threadId: ThreadId.makeUnsafe("thread-with-worktree"),
+      });
+      assert.equal(worktreeContext.threadFound, true);
+      assert.equal(worktreeContext.workspaceCwd, "/tmp/thread-worktree");
+      assert.deepEqual(
+        worktreeContext.checkpoints.map((checkpoint) => checkpoint.checkpointTurnCount),
+        [1, 2],
+      );
+      assert.equal(
+        worktreeContext.checkpoints[1]?.checkpointRef,
+        CheckpointRef.makeUnsafe("refs/checkpoints/thread-with-worktree/2"),
+      );
+      assert.equal(worktreeContext.checkpoints[1]?.turnId, TurnId.makeUnsafe("turn-2"));
+
+      const projectRootContext = yield* query.getThreadCheckpointContext({
+        threadId: ThreadId.makeUnsafe("thread-with-project-root"),
+      });
+      assert.equal(projectRootContext.threadFound, true);
+      assert.equal(projectRootContext.workspaceCwd, "/tmp/project-checkpoints");
+      assert.deepEqual(projectRootContext.checkpoints, []);
+
+      const missingContext = yield* query.getThreadCheckpointContext({
+        threadId: ThreadId.makeUnsafe("thread-missing"),
+      });
+      assert.equal(missingContext.threadFound, false);
+      assert.equal(missingContext.workspaceCwd, null);
+      assert.deepEqual(missingContext.checkpoints, []);
     }),
   );
 });
