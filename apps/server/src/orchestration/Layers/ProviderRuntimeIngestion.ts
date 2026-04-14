@@ -32,6 +32,7 @@ import {
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
+import { notifyOrchestratorChatMessage } from "../orchestratorNotify.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -739,6 +740,17 @@ const make = Effect.fn("make")(function* () {
       ...(input.turnId ? { turnId: input.turnId } : {}),
       createdAt: input.createdAt,
     });
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const finalizedThread = readModel.threads.find((thread) => thread.id === input.threadId);
+    const finalizedMessage = finalizedThread?.messages.find(
+      (message) => message.id === input.messageId,
+    );
+    if (finalizedThread && finalizedMessage) {
+      yield* notifyOrchestratorChatMessage({
+        thread: finalizedThread,
+        message: finalizedMessage,
+      });
+    }
     yield* clearAssistantMessageState(input.messageId);
   });
 
