@@ -1,6 +1,12 @@
 import { type ProjectHook } from "@t3tools/contracts";
 import { memo } from "react";
-import { ArrowUpRightIcon, FolderOpenIcon, TerminalSquareIcon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  FolderOpenIcon,
+  PanelLeftCloseIcon,
+  PanelLeftIcon,
+  TerminalSquareIcon,
+} from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectHooksControl, { type NewProjectHookInput } from "../ProjectHooksControl";
@@ -21,12 +27,14 @@ interface ChatHeaderProps {
   terminalToggleShortcutLabel: string | null;
   changesPanelShortcutLabel: string | null;
   changesPanelOpen: boolean;
+  mobileSidebarOpen?: boolean | undefined;
   showChangesDrawerToggle: boolean;
   onAddProjectHook: (input: NewProjectHookInput) => Promise<void>;
   onUpdateProjectHook: (hookId: string, input: NewProjectHookInput) => Promise<void>;
   onDeleteProjectHook: (hookId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleChangesPanel: () => void;
+  onToggleMobileSidebar?: (() => void) | undefined;
   onOpenChangesWindow: () => void;
   onLabelClick?: (label: string) => void;
 }
@@ -41,21 +49,38 @@ export const ChatHeader = memo(function ChatHeader({
   terminalToggleShortcutLabel,
   changesPanelShortcutLabel,
   changesPanelOpen,
+  mobileSidebarOpen,
   showChangesDrawerToggle,
   onAddProjectHook,
   onUpdateProjectHook,
   onDeleteProjectHook,
   onToggleTerminal,
   onToggleChangesPanel,
+  onToggleMobileSidebar,
   onOpenChangesWindow,
   onLabelClick,
 }: ChatHeaderProps) {
   const visibleThreadLabels = getDisplayThreadLabelEntries(activeThreadLabels);
+  const mobileSidebarTrigger = onToggleMobileSidebar ? (
+    <Button
+      className="size-7 shrink-0 md:hidden"
+      data-sidebar="trigger"
+      data-slot="sidebar-trigger"
+      onClick={onToggleMobileSidebar}
+      size="icon"
+      variant="ghost"
+    >
+      {mobileSidebarOpen ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
+      <span className="sr-only">Toggle Sidebar</span>
+    </Button>
+  ) : (
+    <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+  );
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        {mobileSidebarTrigger}
         {activeProjectName && (
           <Badge variant="outline" className="min-w-0 shrink overflow-hidden">
             <span className="min-w-0 truncate">{activeProjectName}</span>

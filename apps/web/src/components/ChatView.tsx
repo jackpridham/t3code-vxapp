@@ -359,6 +359,8 @@ const terminalContextIdListsEqual = (
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
 
 interface ChatViewProps {
+  mobileSidebarOpen?: boolean | undefined;
+  onToggleMobileSidebar?: (() => void) | undefined;
   threadId: ThreadId;
 }
 
@@ -435,7 +437,11 @@ function useLocalDispatchState(input: {
   };
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({
+  mobileSidebarOpen,
+  onToggleMobileSidebar,
+  threadId,
+}: ChatViewProps) {
   const serverThread = useThreadById(threadId);
   const isMobile = useIsMobile();
   const projects = useStore((store) => store.projects);
@@ -3884,12 +3890,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           changesPanelShortcutLabel={changesPanelShortcutLabel}
           changesPanelOpen={changesPanelOpen}
+          mobileSidebarOpen={mobileSidebarOpen}
           showChangesDrawerToggle={showChangesDrawerToggle}
           onAddProjectHook={saveProjectHook}
           onUpdateProjectHook={updateProjectHook}
           onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleChangesPanel={toggleChangesPanel}
+          onToggleMobileSidebar={onToggleMobileSidebar}
           onOpenChangesWindow={openChangesWindow}
           onLabelClick={(label) => {
             if (activeProject) {
