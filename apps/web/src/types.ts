@@ -145,6 +145,7 @@ export interface Thread {
   spawnRole?: "orchestrator" | "worker" | "supervisor" | undefined;
   spawnedBy?: string | undefined;
   workflowId?: string | undefined;
+  sessionWorkerThreadCount?: number | undefined;
 }
 
 export interface ThreadSession {

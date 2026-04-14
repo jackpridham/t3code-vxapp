@@ -196,6 +196,7 @@ type SidebarThreadSnapshot = Pick<
   | "updatedAt"
   | "workflowId"
   | "worktreePath"
+  | "sessionWorkerThreadCount"
 > & {
   lastVisitedAt?: string | undefined;
   latestUserMessageAt: string | null;
@@ -258,6 +259,7 @@ function toSidebarThreadSnapshot(
     spawnRole: thread.spawnRole,
     spawnedBy: thread.spawnedBy,
     workflowId: thread.workflowId,
+    sessionWorkerThreadCount: thread.sessionWorkerThreadCount,
   };
   sidebarThreadSnapshotCache.set(thread, { lastVisitedAt, snapshot });
   return snapshot;
@@ -311,6 +313,7 @@ function toSidebarThreadSummarySnapshot(
     spawnRole: thread.spawnRole,
     spawnedBy: thread.spawnedBy,
     workflowId: thread.workflowId,
+    sessionWorkerThreadCount: thread.sessionWorkerThreadCount,
   };
 }
 
@@ -581,7 +584,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     }
     return rootsByProjectId;
   }, [orchestrationRootCatalogByProjectId, orchestrationSessionOptionsByProjectId]);
-  const threadsForOrchestrationResolution = useMemo(() => {
+  const threadsForOrchestrationRootResolution = useMemo(() => {
     const threadsById = new Map<ThreadId, SidebarThreadSnapshot>();
 
     for (const thread of threads) {
@@ -610,7 +613,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
           routeThreadId,
           storedSelectedSessionRootId: project.currentSessionRootThreadId ?? null,
           projectRootThreads: rootThreads,
-          threadsForResolution: threadsForOrchestrationResolution,
+          threadsForResolution: threadsForOrchestrationRootResolution,
         }),
       );
     }
@@ -620,7 +623,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     orchestrationRootThreadsByProjectId,
     routeThreadId,
     sidebarProjects,
-    threadsForOrchestrationResolution,
+    threadsForOrchestrationRootResolution,
   ]);
   const orchestrationSessionThreadQueryTargets = useMemo(
     () =>
@@ -632,8 +635,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
           const shouldLoadSession =
             appSettings.sidebarOrchestrationModeEnabled &&
             projectKind === "orchestrator" &&
-            selectedRootThreadId !== null &&
-            project.expanded;
+            selectedRootThreadId !== null;
           return shouldLoadSession && selectedRootThreadId
             ? { projectId: project.id, rootThreadId: selectedRootThreadId }
             : null;
@@ -686,6 +688,20 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     }
     return catalogByRootId;
   }, [orchestrationSessionCatalogSummariesByRootId, threadLastVisitedAtById, threads]);
+  const threadsForOrchestrationResolution = useMemo(() => {
+    const threadsById = new Map<ThreadId, SidebarThreadSnapshot>();
+
+    for (const thread of threadsForOrchestrationRootResolution) {
+      threadsById.set(thread.id, thread);
+    }
+    for (const catalog of orchestrationSessionCatalogByRootId.values()) {
+      for (const thread of catalog) {
+        threadsById.set(thread.id, thread);
+      }
+    }
+
+    return [...threadsById.values()];
+  }, [orchestrationSessionCatalogByRootId, threadsForOrchestrationRootResolution]);
   const orchestrationProjectCatalogStateByProjectId = useMemo(() => {
     const stateByProjectId = new Map<
       ProjectId,
@@ -1411,6 +1427,23 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     }
     return rootIds;
   }, [orchestratorProjectCwds, orchestrationRootThreadsByProjectId, sidebarProjects]);
+  const visibleThreadsWithSelectedSessions = useMemo(() => {
+    const threadsById = new Map<ThreadId, SidebarThreadSnapshot>();
+
+    for (const thread of visibleThreads) {
+      threadsById.set(thread.id, thread);
+    }
+    for (const rootThreadId of currentOrchestrationSessionRootIds) {
+      const sessionThreads = orchestrationSessionCatalogByRootId.get(rootThreadId) ?? [];
+      for (const thread of sessionThreads) {
+        if (thread.archivedAt === null) {
+          threadsById.set(thread.id, thread);
+        }
+      }
+    }
+
+    return [...threadsById.values()];
+  }, [currentOrchestrationSessionRootIds, orchestrationSessionCatalogByRootId, visibleThreads]);
   const visibleSidebarProjects = useMemo(
     () =>
       sidebarProjects.filter((project) => {
@@ -1421,11 +1454,11 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
   );
   const bucketedVisibleThreadsForSorting = useMemo(
     () =>
-      visibleThreads.map((thread) => ({
+      visibleThreadsWithSelectedSessions.map((thread) => ({
         ...thread,
         projectId: bucketProjectIdByProjectId.get(thread.projectId) ?? thread.projectId,
       })),
-    [bucketProjectIdByProjectId, visibleThreads],
+    [bucketProjectIdByProjectId, visibleThreadsWithSelectedSessions],
   );
   const sortedProjects = useMemo(
     () =>
@@ -1443,7 +1476,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
         const projectKind = resolveSidebarProjectKind({ project, orchestratorProjectCwds });
         const isOrchestratorProject = projectKind === "orchestrator";
         const projectThreads = sortThreadsForSidebar(
-          visibleThreads.filter((thread) =>
+          visibleThreadsWithSelectedSessions.filter((thread) =>
             isOrchestratorProject
               ? thread.projectId === project.id
               : (bucketProjectIdByProjectId.get(thread.projectId) ?? thread.projectId) ===
@@ -1611,7 +1644,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       routeThreadId,
       sortedProjects,
       threadsForOrchestrationResolution,
-      visibleThreads,
+      visibleThreadsWithSelectedSessions,
     ],
   );
   const orchestratorRenderedProjects = useMemo(

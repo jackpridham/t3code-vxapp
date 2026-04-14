@@ -412,6 +412,9 @@ export const OrchestrationThreadSummary = Schema.Struct({
   workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(() => undefined),
   ),
+  sessionWorkerThreadCount: Schema.optional(NonNegativeInt).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
 });
 export type OrchestrationThreadSummary = typeof OrchestrationThreadSummary.Type;
 

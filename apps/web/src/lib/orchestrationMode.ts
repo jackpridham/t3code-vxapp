@@ -443,6 +443,7 @@ export function buildOrchestrationSessionCatalog(input: {
     | "parentThreadId"
     | "orchestratorThreadId"
     | "workflowId"
+    | "sessionWorkerThreadCount"
   >[];
 }): OrchestrationModeSessionCatalogEntry[] {
   const threadsById = new Map(input.threads.map((thread) => [thread.id, thread] as const));
@@ -471,7 +472,9 @@ export function buildOrchestrationSessionCatalog(input: {
           updatedAt: rootThread.updatedAt ?? rootThread.createdAt,
           archivedAt: rootThread.archivedAt,
           memberThreadIds,
-          workerThreadCount: memberThreadIds.filter((threadId) => threadId !== rootThreadId).length,
+          workerThreadCount:
+            rootThread.sessionWorkerThreadCount ??
+            memberThreadIds.filter((threadId) => threadId !== rootThreadId).length,
         } satisfies OrchestrationModeSessionCatalogEntry,
       ];
     })

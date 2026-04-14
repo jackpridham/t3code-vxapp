@@ -119,6 +119,22 @@ describe("buildOrchestrationSessionCatalog", () => {
       },
     ]);
   });
+
+  it("uses server-provided worker counts when catalog input only has root threads", () => {
+    const root = makeThread({
+      id: ThreadId.makeUnsafe("root-cross-project"),
+      title: "Cross project root",
+      spawnRole: "orchestrator",
+      sessionWorkerThreadCount: 4,
+    });
+
+    expect(buildOrchestrationSessionCatalog({ threads: [root] })).toMatchObject([
+      {
+        rootThreadId: "root-cross-project",
+        workerThreadCount: 4,
+      },
+    ]);
+  });
 });
 
 describe("collectSessionThreadIds", () => {

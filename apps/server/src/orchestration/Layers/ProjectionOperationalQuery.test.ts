@@ -598,6 +598,17 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
         includeDeleted: false,
       });
       assert.deepEqual(deletedRootSessionThreads, []);
+
+      const projectThreads = yield* query.listProjectThreads({
+        projectId: ProjectId.makeUnsafe("project-orchestrator"),
+        includeArchived: true,
+        includeDeleted: false,
+      });
+      const rootOne = projectThreads.find((thread) => thread.id === "root-1");
+      const rootTwo = projectThreads.find((thread) => thread.id === "root-2");
+
+      assert.equal(rootOne?.sessionWorkerThreadCount, 3);
+      assert.equal(rootTwo?.sessionWorkerThreadCount, 1);
     }),
   );
 

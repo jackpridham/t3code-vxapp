@@ -70,6 +70,7 @@ const ProjectionThreadSummaryDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     labels: Schema.fromJsonString(ThreadLabels),
     modelSelection: Schema.fromJsonString(ModelSelection),
+    sessionWorkerThreadCount: Schema.optional(NonNegativeInt),
   }),
 );
 
@@ -122,6 +123,11 @@ const ProjectionStateDbRowSchema = ProjectionState;
 
 const CountRowSchema = Schema.Struct({
   count: NonNegativeInt,
+});
+
+const ProjectionSessionWorkerCountDbRowSchema = Schema.Struct({
+  rootThreadId: ThreadId,
+  workerThreadCount: NonNegativeInt,
 });
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
@@ -226,6 +232,7 @@ function mapThreadSummaryRows(input: {
     spawnRole: row.spawnRole ?? undefined,
     spawnedBy: row.spawnedBy ?? undefined,
     workflowId: row.workflowId ?? undefined,
+    sessionWorkerThreadCount: row.sessionWorkerThreadCount ?? undefined,
   }));
 }
 
@@ -455,6 +462,195 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           AND t.archived_at IS NULL
           AND t.deleted_at IS NULL
         ORDER BY t.created_at ASC, t.thread_id ASC
+      `;
+    },
+  });
+
+  const listProjectSessionWorkerCountRows = SqlSchema.findAll({
+    Request: Schema.Struct({
+      projectId: Schema.String,
+      includeArchived: Schema.Boolean,
+      includeDeleted: Schema.Boolean,
+    }),
+    Result: ProjectionSessionWorkerCountDbRowSchema,
+    execute: ({ projectId, includeArchived, includeDeleted }) => {
+      if (includeArchived && includeDeleted) {
+        return sql`
+          WITH RECURSIVE
+            roots AS (
+              SELECT
+                thread_id AS root_thread_id,
+                workflow_id AS root_workflow_id
+              FROM projection_threads
+              WHERE project_id = ${projectId}
+                AND spawn_role = 'orchestrator'
+            ),
+            family(root_thread_id, thread_id) AS (
+              SELECT root_thread_id, root_thread_id FROM roots
+              UNION
+              SELECT f.root_thread_id, t.thread_id
+              FROM projection_threads t
+              INNER JOIN family f
+                ON t.parent_thread_id = f.thread_id
+                OR t.spawned_by = f.thread_id
+                OR t.orchestrator_thread_id = f.thread_id
+            ),
+            family_with_workflow(root_thread_id, thread_id) AS (
+              SELECT root_thread_id, thread_id FROM family
+              UNION
+              SELECT r.root_thread_id, t.thread_id
+              FROM projection_threads t
+              INNER JOIN roots r
+                ON r.root_workflow_id IS NOT NULL
+                AND t.workflow_id = r.root_workflow_id
+              WHERE COALESCE(t.spawn_role, '') <> 'orchestrator'
+            )
+          SELECT
+            r.root_thread_id AS "rootThreadId",
+            COUNT(DISTINCT CASE
+              WHEN f.thread_id <> r.root_thread_id THEN f.thread_id
+              ELSE NULL
+            END) AS "workerThreadCount"
+          FROM roots r
+          LEFT JOIN family_with_workflow f ON f.root_thread_id = r.root_thread_id
+          GROUP BY r.root_thread_id
+        `;
+      }
+      if (includeArchived) {
+        return sql`
+          WITH RECURSIVE
+            roots AS (
+              SELECT
+                thread_id AS root_thread_id,
+                workflow_id AS root_workflow_id
+              FROM projection_threads
+              WHERE project_id = ${projectId}
+                AND spawn_role = 'orchestrator'
+                AND deleted_at IS NULL
+            ),
+            family(root_thread_id, thread_id) AS (
+              SELECT root_thread_id, root_thread_id FROM roots
+              UNION
+              SELECT f.root_thread_id, t.thread_id
+              FROM projection_threads t
+              INNER JOIN family f
+                ON t.parent_thread_id = f.thread_id
+                OR t.spawned_by = f.thread_id
+                OR t.orchestrator_thread_id = f.thread_id
+              WHERE t.deleted_at IS NULL
+            ),
+            family_with_workflow(root_thread_id, thread_id) AS (
+              SELECT root_thread_id, thread_id FROM family
+              UNION
+              SELECT r.root_thread_id, t.thread_id
+              FROM projection_threads t
+              INNER JOIN roots r
+                ON r.root_workflow_id IS NOT NULL
+                AND t.workflow_id = r.root_workflow_id
+              WHERE t.deleted_at IS NULL
+                AND COALESCE(t.spawn_role, '') <> 'orchestrator'
+            )
+          SELECT
+            r.root_thread_id AS "rootThreadId",
+            COUNT(DISTINCT CASE
+              WHEN f.thread_id <> r.root_thread_id THEN f.thread_id
+              ELSE NULL
+            END) AS "workerThreadCount"
+          FROM roots r
+          LEFT JOIN family_with_workflow f ON f.root_thread_id = r.root_thread_id
+          GROUP BY r.root_thread_id
+        `;
+      }
+      if (includeDeleted) {
+        return sql`
+          WITH RECURSIVE
+            roots AS (
+              SELECT
+                thread_id AS root_thread_id,
+                workflow_id AS root_workflow_id
+              FROM projection_threads
+              WHERE project_id = ${projectId}
+                AND spawn_role = 'orchestrator'
+                AND archived_at IS NULL
+            ),
+            family(root_thread_id, thread_id) AS (
+              SELECT root_thread_id, root_thread_id FROM roots
+              UNION
+              SELECT f.root_thread_id, t.thread_id
+              FROM projection_threads t
+              INNER JOIN family f
+                ON t.parent_thread_id = f.thread_id
+                OR t.spawned_by = f.thread_id
+                OR t.orchestrator_thread_id = f.thread_id
+              WHERE t.archived_at IS NULL
+            ),
+            family_with_workflow(root_thread_id, thread_id) AS (
+              SELECT root_thread_id, thread_id FROM family
+              UNION
+              SELECT r.root_thread_id, t.thread_id
+              FROM projection_threads t
+              INNER JOIN roots r
+                ON r.root_workflow_id IS NOT NULL
+                AND t.workflow_id = r.root_workflow_id
+              WHERE t.archived_at IS NULL
+                AND COALESCE(t.spawn_role, '') <> 'orchestrator'
+            )
+          SELECT
+            r.root_thread_id AS "rootThreadId",
+            COUNT(DISTINCT CASE
+              WHEN f.thread_id <> r.root_thread_id THEN f.thread_id
+              ELSE NULL
+            END) AS "workerThreadCount"
+          FROM roots r
+          LEFT JOIN family_with_workflow f ON f.root_thread_id = r.root_thread_id
+          GROUP BY r.root_thread_id
+        `;
+      }
+      return sql`
+        WITH RECURSIVE
+          roots AS (
+            SELECT
+              thread_id AS root_thread_id,
+              workflow_id AS root_workflow_id
+            FROM projection_threads
+            WHERE project_id = ${projectId}
+              AND spawn_role = 'orchestrator'
+              AND archived_at IS NULL
+              AND deleted_at IS NULL
+          ),
+          family(root_thread_id, thread_id) AS (
+            SELECT root_thread_id, root_thread_id FROM roots
+            UNION
+            SELECT f.root_thread_id, t.thread_id
+            FROM projection_threads t
+            INNER JOIN family f
+              ON t.parent_thread_id = f.thread_id
+              OR t.spawned_by = f.thread_id
+              OR t.orchestrator_thread_id = f.thread_id
+            WHERE t.archived_at IS NULL
+              AND t.deleted_at IS NULL
+          ),
+          family_with_workflow(root_thread_id, thread_id) AS (
+            SELECT root_thread_id, thread_id FROM family
+            UNION
+            SELECT r.root_thread_id, t.thread_id
+            FROM projection_threads t
+            INNER JOIN roots r
+              ON r.root_workflow_id IS NOT NULL
+              AND t.workflow_id = r.root_workflow_id
+            WHERE t.archived_at IS NULL
+              AND t.deleted_at IS NULL
+              AND COALESCE(t.spawn_role, '') <> 'orchestrator'
+          )
+        SELECT
+          r.root_thread_id AS "rootThreadId",
+          COUNT(DISTINCT CASE
+            WHEN f.thread_id <> r.root_thread_id THEN f.thread_id
+            ELSE NULL
+          END) AS "workerThreadCount"
+        FROM roots r
+        LEFT JOIN family_with_workflow f ON f.root_thread_id = r.root_thread_id
+        GROUP BY r.root_thread_id
       `;
     },
   });
@@ -1288,10 +1484,39 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           ),
         ),
       ),
+      sessionWorkerCounts: listProjectSessionWorkerCountRows({
+        projectId: input.projectId,
+        includeArchived,
+        includeDeleted,
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionOperationalQuery.listProjectThreads:sessionWorkerCounts:query",
+            "ProjectionOperationalQuery.listProjectThreads:sessionWorkerCounts:decodeRows",
+          ),
+        ),
+      ),
     }).pipe(
       Effect.map(
-        ({ threads, sessions, latestTurns }): OrchestrationListProjectThreadsResult =>
-          mapThreadSummaryRows({ threads, sessions, latestTurns }),
+        ({
+          threads,
+          sessions,
+          latestTurns,
+          sessionWorkerCounts,
+        }): OrchestrationListProjectThreadsResult => {
+          const sessionWorkerCountByRootId = new Map(
+            sessionWorkerCounts.map((row) => [row.rootThreadId, row.workerThreadCount] as const),
+          );
+          const enrichedThreads = threads.map((row) =>
+            row.spawnRole === "orchestrator"
+              ? {
+                  ...row,
+                  sessionWorkerThreadCount: sessionWorkerCountByRootId.get(row.threadId) ?? 0,
+                }
+              : row,
+          );
+          return mapThreadSummaryRows({ threads: enrichedThreads, sessions, latestTurns });
+        },
       ),
     );
   };
