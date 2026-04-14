@@ -11,7 +11,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { Cause, Effect, Layer, Stream } from "effect";
+import { Cause, Effect, FileSystem, Layer, Stream } from "effect";
 
 import { ProjectionOrchestratorWakeRepositoryLive } from "../../persistence/Layers/ProjectionOrchestratorWakes.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
@@ -57,6 +57,9 @@ type WakeReactorInput =
     };
 
 const MAX_WAKE_BATCH_SIZE = 5;
+const SUPPRESS_STARTUP_WAKE_ENV = "T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE";
+const SUPPRESS_STARTUP_WAKE_MARKER_ENV = "T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER";
+const DEFAULT_SUPPRESS_STARTUP_WAKE_MARKER = "/tmp/t3code-vxapp-no-wake";
 
 const serverCommandId = (tag: string): CommandId =>
   CommandId.makeUnsafe(`server:orchestrator-wake:${tag}:${crypto.randomUUID()}`);
@@ -158,6 +161,14 @@ function sameId(left: string | null | undefined, right: string | null | undefine
 
 function turnKey(threadId: ThreadId, turnId: TurnId): string {
   return `${threadId}:${turnId}`;
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
 function toWakeItem(input: {
@@ -339,6 +350,7 @@ const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const wakeRepository = yield* ProjectionOrchestratorWakeRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
+  const fileSystem = yield* FileSystem.FileSystem;
   const drainingOrchestratorThreadIds = new Set<string>();
   const explicitlyInterruptedTurnKeys = new Set<string>();
 
@@ -1416,24 +1428,55 @@ const make = Effect.gen(function* () {
 
   const worker = yield* makeDrainableWorker(processInputSafely);
 
-  const reconcileWakesOnStart = orchestrationEngine.getReadModel().pipe(
-    Effect.flatMap((readModel) => {
-      const activeOrchestratorThreadIds = [
-        ...new Set(
-          readModel.orchestratorWakeItems
-            .filter((wakeItem) => wakeItem.state === "pending" || wakeItem.state === "delivering")
-            .map((wakeItem) => wakeItem.orchestratorThreadId),
+  const shouldSuppressStartupWakeReconciliation = Effect.gen(function* () {
+    if (isTruthyEnv(process.env[SUPPRESS_STARTUP_WAKE_ENV])) {
+      return true;
+    }
+
+    const markerPath =
+      process.env[SUPPRESS_STARTUP_WAKE_MARKER_ENV] ?? DEFAULT_SUPPRESS_STARTUP_WAKE_MARKER;
+    const markerExists = yield* fileSystem
+      .exists(markerPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!markerExists) {
+      return false;
+    }
+
+    yield* fileSystem.remove(markerPath).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("failed to remove startup orchestrator wake suppression marker", {
+          markerPath,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+    return true;
+  });
+
+  const reconcileWakesOnStart = Effect.gen(function* () {
+    const suppressStartupReconciliation = yield* shouldSuppressStartupWakeReconciliation;
+    if (suppressStartupReconciliation) {
+      yield* Effect.logInfo("orchestrator wake startup reconciliation suppressed");
+      return;
+    }
+
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const activeOrchestratorThreadIds = [
+      ...new Set(
+        readModel.orchestratorWakeItems
+          .filter((wakeItem) => wakeItem.state === "pending" || wakeItem.state === "delivering")
+          .map((wakeItem) => wakeItem.orchestratorThreadId),
+      ),
+    ];
+    yield* Effect.forEach(
+      activeOrchestratorThreadIds,
+      (orchestratorThreadId) =>
+        reconcileDeliveringWakeItemsForOrchestrator(orchestratorThreadId).pipe(
+          Effect.flatMap(() => evaluateDrainForOrchestrator(orchestratorThreadId)),
         ),
-      ];
-      return Effect.forEach(
-        activeOrchestratorThreadIds,
-        (orchestratorThreadId) =>
-          reconcileDeliveringWakeItemsForOrchestrator(orchestratorThreadId).pipe(
-            Effect.flatMap(() => evaluateDrainForOrchestrator(orchestratorThreadId)),
-          ),
-        { concurrency: 1 },
-      ).pipe(Effect.asVoid);
-    }),
+      { concurrency: 1 },
+    ).pipe(Effect.asVoid);
+  }).pipe(
     Effect.catchCause((cause) => {
       return Effect.logWarning("orchestrator wake reactor failed to reconcile startup wakes", {
         cause: Cause.pretty(cause),

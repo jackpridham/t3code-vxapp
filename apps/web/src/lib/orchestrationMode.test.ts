@@ -520,6 +520,50 @@ describe("resolveConfiguredProjectBuckets", () => {
     expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
   });
 
+  it("collapses branch-named git worktrees even when naming aliases cannot match", () => {
+    const parentProject = makeProject({
+      id: ProjectId.makeUnsafe("project-t3code"),
+      name: "t3code-vxapp",
+      cwd: "/home/gizmo/t3code-vxapp",
+    });
+    const childProject = makeProject({
+      id: ProjectId.makeUnsafe("project-r27-runtime"),
+      name: "r27-runtime-ai-first-spa-phase1",
+      cwd: "/home/gizmo/worktrees/r27-runtime-ai-first-spa-phase1",
+      sidebarParentProjectId: null,
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [parentProject, childProject],
+      repoIdentityByProjectId: new Map([
+        [
+          parentProject.id,
+          {
+            isRepo: true,
+            commonGitDir: "/home/gizmo/t3code-vxapp/.git",
+            gitDir: "/home/gizmo/t3code-vxapp/.git",
+            worktreeRoot: "/home/gizmo/t3code-vxapp",
+            isMainWorktree: true,
+          },
+        ],
+        [
+          childProject.id,
+          {
+            isRepo: true,
+            commonGitDir: "/home/gizmo/t3code-vxapp/.git",
+            gitDir: "/home/gizmo/t3code-vxapp/.git/worktrees/r27-runtime-ai-first-spa-phase1",
+            worktreeRoot: "/home/gizmo/worktrees/r27-runtime-ai-first-spa-phase1",
+            isMainWorktree: false,
+          },
+        ],
+      ]),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(childProject.id)).toBe(parentProject.id);
+    expect(result.visibleProjectIds.has(parentProject.id)).toBe(true);
+    expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
+  });
+
   it("falls back to configured parent name aliases when git identity is unavailable", () => {
     const parentProject = makeProject({
       id: ProjectId.makeUnsafe("project-vue"),
@@ -553,6 +597,73 @@ describe("resolveConfiguredProjectBuckets", () => {
     expect(result.visibleProjectIds.has(scriptsParent.id)).toBe(true);
     expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
     expect(result.visibleProjectIds.has(scriptsChild.id)).toBe(false);
+  });
+
+  it("groups unmatched scripts worktrees under vortex-scripts when configured", () => {
+    const scriptsParent = makeProject({
+      id: ProjectId.makeUnsafe("project-scripts"),
+      name: "vortex-scripts",
+      cwd: "/repos/vortex-scripts",
+    });
+    const scriptsChild = makeProject({
+      id: ProjectId.makeUnsafe("project-scripts-closeout"),
+      name: "scripts-closeout-r06-20260411",
+      cwd: "/missing/worktree/scripts-closeout-r06-20260411",
+      sidebarParentProjectId: null,
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [scriptsParent, scriptsChild],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(scriptsChild.id)).toBe(scriptsParent.id);
+    expect(result.visibleProjectIds.has(scriptsParent.id)).toBe(true);
+    expect(result.visibleProjectIds.has(scriptsChild.id)).toBe(false);
+  });
+
+  it("does not let scripts fallback override existing repo-specific bucket matches", () => {
+    const apiParent = makeProject({
+      id: ProjectId.makeUnsafe("project-api"),
+      name: "api-vxapp",
+      cwd: "/repos/api-vxapp",
+    });
+    const scriptsParent = makeProject({
+      id: ProjectId.makeUnsafe("project-scripts"),
+      name: "vortex-scripts",
+      cwd: "/repos/vortex-scripts",
+    });
+    const apiScriptsChild = makeProject({
+      id: ProjectId.makeUnsafe("project-api-scripts"),
+      name: "api-scripts-maintenance-r01",
+      cwd: "/missing/worktree/api-scripts-maintenance-r01",
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [apiParent, scriptsParent, apiScriptsChild],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(apiScriptsChild.id)).toBe(apiParent.id);
+    expect(result.visibleProjectIds.has(apiParent.id)).toBe(true);
+    expect(result.visibleProjectIds.has(scriptsParent.id)).toBe(true);
+    expect(result.visibleProjectIds.has(apiScriptsChild.id)).toBe(false);
+  });
+
+  it("keeps unmatched scripts worktrees top-level when vortex-scripts is not configured", () => {
+    const scriptsChild = makeProject({
+      id: ProjectId.makeUnsafe("project-scripts-closeout"),
+      name: "scripts-closeout-r06-20260411",
+      cwd: "/missing/worktree/scripts-closeout-r06-20260411",
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [scriptsChild],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(scriptsChild.id)).toBe(scriptsChild.id);
+    expect(result.visibleProjectIds.has(scriptsChild.id)).toBe(true);
   });
 
   it("does not synthesize parents when only the child project is configured", () => {
@@ -598,7 +709,7 @@ describe("resolveConfiguredProjectBuckets", () => {
     expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
   });
 
-  it("keeps a project top-level when sidebarParentProjectId is explicitly null", () => {
+  it("treats null sidebar parent metadata as absent so persisted defaults can still auto-bucket", () => {
     const parentProject = makeProject({
       id: ProjectId.makeUnsafe("project-vue"),
       name: "vue-vxapp",
@@ -609,6 +720,29 @@ describe("resolveConfiguredProjectBuckets", () => {
       name: "vue-datatable-product-alpha",
       cwd: "/missing/worktree/vue-datatable-product-alpha",
       sidebarParentProjectId: null,
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [parentProject, childProject],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(childProject.id)).toBe(parentProject.id);
+    expect(result.visibleProjectIds.has(parentProject.id)).toBe(true);
+    expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
+  });
+
+  it("keeps a project top-level when sidebarParentProjectId points to itself", () => {
+    const parentProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue"),
+      name: "vue-vxapp",
+      cwd: "/repos/vue-vxapp",
+    });
+    const childProject = makeProject({
+      id: ProjectId.makeUnsafe("project-vue-feature"),
+      name: "vue-datatable-product-alpha",
+      cwd: "/missing/worktree/vue-datatable-product-alpha",
+      sidebarParentProjectId: ProjectId.makeUnsafe("project-vue-feature"),
     });
 
     const result = resolveConfiguredProjectBuckets({

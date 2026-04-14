@@ -142,11 +142,11 @@ export function resolveConfiguredProjectBuckets(input: {
   }
 
   for (const project of input.projects) {
-    if (project.sidebarParentProjectId === undefined) {
+    if (project.sidebarParentProjectId === undefined || project.sidebarParentProjectId === null) {
       continue;
     }
 
-    if (project.sidebarParentProjectId === null || project.sidebarParentProjectId === project.id) {
+    if (project.sidebarParentProjectId === project.id) {
       bucketProjectIdByProjectId.set(project.id, project.id);
       visibleProjectIds.add(project.id);
       continue;
@@ -177,7 +177,7 @@ export function resolveConfiguredProjectBuckets(input: {
     });
 
   for (const project of input.projects) {
-    if (project.sidebarParentProjectId !== undefined) {
+    if (project.sidebarParentProjectId !== undefined && project.sidebarParentProjectId !== null) {
       continue;
     }
 
@@ -203,15 +203,63 @@ export function resolveConfiguredProjectBuckets(input: {
     visibleProjectIds.delete(project.id);
   }
 
+  const vortexScriptsProject = input.projects.find(
+    (project) =>
+      normalizeProjectName(project.name) === "vortex-scripts" ||
+      normalizeProjectName(getPathBasename(project.cwd)) === "vortex-scripts",
+  );
+
+  if (vortexScriptsProject) {
+    for (const project of input.projects) {
+      if (project.id === vortexScriptsProject.id) {
+        continue;
+      }
+
+      if (project.sidebarParentProjectId !== undefined && project.sidebarParentProjectId !== null) {
+        continue;
+      }
+
+      if ((bucketProjectIdByProjectId.get(project.id) ?? project.id) !== project.id) {
+        continue;
+      }
+
+      if (!hasProjectNameToken(project, "scripts")) {
+        continue;
+      }
+
+      bucketProjectIdByProjectId.set(project.id, vortexScriptsProject.id);
+      visibleProjectIds.delete(project.id);
+    }
+  }
+
   return {
     bucketProjectIdByProjectId,
     visibleProjectIds,
   };
 }
 
+function getPathBasename(path: string): string {
+  return (
+    normalizePath(path)
+      .split(/[/\\]+/)
+      .at(-1) ?? path
+  );
+}
+
 function normalizeProjectName(name: string): string | null {
   const trimmed = name.trim().toLowerCase();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function hasProjectNameToken(project: Pick<Project, "name" | "cwd">, token: string): boolean {
+  const normalizedToken = token.toLowerCase();
+  const values = [project.name, getPathBasename(project.cwd)];
+  return values.some((value) =>
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .some((part) => part === normalizedToken),
+  );
 }
 
 function buildProjectNameAliases(name: string): string[] {

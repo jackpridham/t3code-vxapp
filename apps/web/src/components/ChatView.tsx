@@ -3883,6 +3883,9 @@ export default function ChatView({
         <ChatHeader
           activeThreadLabels={activeThread.labels}
           activeThreadWorkerLineageIndicator={activeThreadWorkerLineageIndicator}
+          activeThreadId={activeThread.id}
+          activeThreadTitle={activeThread.title}
+          canRenameActiveThread={isServerThread}
           activeProjectName={chatHeaderBadgeLabel}
           activeProjectHooks={activeProject?.hooks}
           terminalAvailable={activeProject !== undefined}

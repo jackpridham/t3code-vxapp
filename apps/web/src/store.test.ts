@@ -194,6 +194,61 @@ describe("store read model sync", () => {
     expect(next.bootstrapComplete).toBe(true);
   });
 
+  it("keeps omitted sidebar parent metadata undefined after bootstrap summary sync", () => {
+    const next = syncServerReadModel(
+      makeState(makeThread()),
+      makeReadModel(makeReadModelThread({}), {
+        snapshotProfile: "bootstrap-summary",
+        projects: [
+          makeReadModelProject({
+            id: ProjectId.makeUnsafe("project-parent"),
+            title: "Parent Project",
+            workspaceRoot: "/repos/project-parent",
+          }),
+          makeReadModelProject({
+            id: ProjectId.makeUnsafe("project-worktree"),
+            title: "Parent Project Feature",
+            workspaceRoot: "/repos/project-parent/.worktrees/feature",
+          }),
+        ],
+      }),
+    );
+
+    const parentProject = next.projects.find((project) => project.id === "project-parent");
+    const worktreeProject = next.projects.find((project) => project.id === "project-worktree");
+
+    expect(parentProject).toEqual(expect.not.objectContaining({ sidebarParentProjectId: null }));
+    expect(parentProject?.sidebarParentProjectId).toBeUndefined();
+    expect(worktreeProject).toEqual(expect.not.objectContaining({ sidebarParentProjectId: null }));
+    expect(worktreeProject?.sidebarParentProjectId).toBeUndefined();
+  });
+
+  it("preserves explicit sidebar parent metadata from bootstrap summary sync", () => {
+    const next = syncServerReadModel(
+      makeState(makeThread()),
+      makeReadModel(makeReadModelThread({}), {
+        snapshotProfile: "bootstrap-summary",
+        projects: [
+          makeReadModelProject({
+            id: ProjectId.makeUnsafe("project-parent"),
+            title: "Parent Project",
+            workspaceRoot: "/repos/project-parent",
+          }),
+          makeReadModelProject({
+            id: ProjectId.makeUnsafe("project-worktree"),
+            title: "Parent Project Feature",
+            workspaceRoot: "/repos/project-parent/.worktrees/feature",
+            sidebarParentProjectId: ProjectId.makeUnsafe("project-parent"),
+          }),
+        ],
+      }),
+    );
+
+    expect(next.projects.find((project) => project.id === "project-worktree")).toEqual(
+      expect.objectContaining({ sidebarParentProjectId: "project-parent" }),
+    );
+  });
+
   it("merges bootstrap summary payloads without dropping unrelated hydrated threads", () => {
     const initialState: AppState = {
       ...makeState(makeThread()),

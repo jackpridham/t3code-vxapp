@@ -106,8 +106,83 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
       });
       assert.equal(projects.length, 1);
       assert.equal(projects[0]?.id, "project-1");
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(projects[0], "sidebarParentProjectId"),
+        false,
+      );
       assert.equal(project?.id, "project-1");
+      assert.equal(Object.prototype.hasOwnProperty.call(project, "sidebarParentProjectId"), false);
       assert.equal(project?.defaultModelSelection?.model, "gpt-5-codex");
+    }),
+  );
+
+  it.effect("omits default parent overrides while preserving configured sidebar parents", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionOperationalQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          kind,
+          sidebar_parent_project_id,
+          current_session_root_thread_id,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'project-parent',
+            'Parent Project',
+            '/repos/project-parent',
+            'project',
+            NULL,
+            NULL,
+            NULL,
+            '[]',
+            '[]',
+            '2026-04-06T00:00:00.000Z',
+            '2026-04-06T00:00:01.000Z',
+            NULL
+          ),
+          (
+            'project-worktree',
+            'Parent Project Feature',
+            '/repos/project-parent/.worktrees/feature',
+            'project',
+            'project-parent',
+            'thread-current',
+            NULL,
+            '[]',
+            '[]',
+            '2026-04-06T00:00:02.000Z',
+            '2026-04-06T00:00:03.000Z',
+            NULL
+          )
+      `;
+
+      const projects = yield* query.listProjects();
+      const parentProject = projects.find((project) => project.id === "project-parent");
+      const worktreeProject = projects.find((project) => project.id === "project-worktree");
+
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(parentProject, "sidebarParentProjectId"),
+        false,
+      );
+      assert.equal(worktreeProject?.sidebarParentProjectId, "project-parent");
+      assert.equal(worktreeProject?.currentSessionRootThreadId, "thread-current");
     }),
   );
 
@@ -975,6 +1050,10 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
 
       const currentState = yield* query.getCurrentState();
       assert.equal(currentState.snapshotProfile, "bootstrap-summary");
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(currentState.projects[0], "sidebarParentProjectId"),
+        false,
+      );
       assert.equal(currentState.threads.length, 1);
       assert.equal(currentState.threads[0]?.messages.length, 0);
       assert.equal(currentState.threads[0]?.activities.length, 0);

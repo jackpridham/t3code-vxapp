@@ -14,18 +14,23 @@ NO_BROWSER_FLAG="--no-browser"
 LOG_FILE="${DEPLOY_LOG_FILE:-/tmp/t3code-vxapp-deploy.log}"
 PID_FILE="${DEPLOY_PID_FILE:-/tmp/t3code-vxapp-deploy.pid}"
 READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-120}"
+NO_WAKE_MARKER="${T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER:-/tmp/t3code-vxapp-no-wake}"
+NO_WAKE=0
 
 export PATH="$(dirname "$BUN_BIN"):$PATH"
 
 usage() {
     cat <<'EOF'
-Usage: ./deploy.sh [--full|--build-only|--restart-only|--status]
+Usage: ./deploy.sh [--full|--build-only|--restart-only|--status] [--no-wake]
 
 Default mode is --full:
   1. bun install
   2. bun run build
   3. restart the live server
   4. verify http://127.0.0.1:7421/
+
+Options:
+  --no-wake       Suppress the server's one-shot startup orchestrator wake drain.
 
 Fallback behavior:
   - Uses systemd restart when available.
@@ -101,8 +106,20 @@ run_build() {
     "$BUN_BIN" run build
 }
 
+prepare_no_wake() {
+    if [[ "$NO_WAKE" != "1" ]]; then
+        return 0
+    fi
+
+    step "Suppressing startup orchestrator wake"
+    mkdir -p "$(dirname "$NO_WAKE_MARKER")"
+    printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$NO_WAKE_MARKER"
+    log "No-wake marker: $NO_WAKE_MARKER"
+}
+
 restart_via_systemd() {
     step "Restarting systemd service"
+    prepare_no_wake
 
     if can_use_sudo_systemctl; then
         sudo -n systemctl restart "$SERVICE_NAME"
@@ -130,6 +147,8 @@ start_direct_process() {
     nohup env \
         PATH="/home/gizmo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
         NODE_ENV=production \
+        T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE="$NO_WAKE" \
+        T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER="$NO_WAKE_MARKER" \
         "$NODE_BIN" "$REPO_ROOT/apps/server/dist/index.mjs" \
         --host "$HOST" \
         --port "$PORT" \
@@ -160,7 +179,24 @@ show_status() {
 }
 
 main() {
-    local mode="${1:---full}"
+    local mode="--full"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --full|--build-only|--restart-only|--status|-h|--help|help)
+                mode="$1"
+                ;;
+            --no-wake)
+                NO_WAKE=1
+                ;;
+            *)
+                printf 'Unknown option: %s\n\n' "$1" >&2
+                usage >&2
+                exit 1
+                ;;
+        esac
+        shift
+    done
 
     require_cmd curl
     require_cmd "$BUN_BIN"

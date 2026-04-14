@@ -75,6 +75,7 @@ const ProjectionThreadSummaryDbRowSchema = ProjectionThread.mapFields(
 );
 
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
+type ProjectionProjectSummaryDbRow = typeof ProjectionProjectSummaryDbRowSchema.Type;
 type ProjectionThreadSummaryDbRow = typeof ProjectionThreadSummaryDbRowSchema.Type;
 type ProjectionThreadSessionDbRow = typeof ProjectionThreadSessionDbRowSchema.Type;
 
@@ -129,6 +130,54 @@ const ProjectionSessionWorkerCountDbRowSchema = Schema.Struct({
   rootThreadId: ThreadId,
   workerThreadCount: NonNegativeInt,
 });
+
+function mapProjectRowToReadModelProject(
+  row: ProjectionProjectSummaryDbRow,
+): OrchestrationReadModel["projects"][number] {
+  return Object.assign(
+    {
+      id: row.projectId,
+      title: row.title,
+      workspaceRoot: row.workspaceRoot,
+      kind: row.kind ?? "project",
+      defaultModelSelection: row.defaultModelSelection ?? null,
+      scripts: row.scripts,
+      hooks: row.hooks,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      deletedAt: row.deletedAt ?? null,
+    },
+    row.sidebarParentProjectId !== null
+      ? { sidebarParentProjectId: row.sidebarParentProjectId }
+      : undefined,
+    row.currentSessionRootThreadId !== null
+      ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
+      : undefined,
+  );
+}
+
+function mapProjectRowToSummary(
+  row: ProjectionProjectSummaryDbRow,
+): OrchestrationListProjectsResult[number] {
+  return Object.assign(
+    {
+      id: row.projectId,
+      title: row.title,
+      workspaceRoot: row.workspaceRoot,
+      kind: row.kind ?? null,
+      defaultModelSelection: row.defaultModelSelection ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      deletedAt: row.deletedAt ?? null,
+    },
+    row.sidebarParentProjectId !== null
+      ? { sidebarParentProjectId: row.sidebarParentProjectId }
+      : undefined,
+    row.currentSessionRootThreadId !== null
+      ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
+      : undefined,
+  );
+}
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -1362,20 +1411,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               wakeItemLimit: 0,
               wakeItemsTruncated: false,
             },
-            projects: projectRows.map((row) => ({
-              id: row.projectId,
-              title: row.title,
-              workspaceRoot: row.workspaceRoot,
-              kind: row.kind ?? "project",
-              sidebarParentProjectId: row.sidebarParentProjectId ?? null,
-              currentSessionRootThreadId: row.currentSessionRootThreadId ?? null,
-              defaultModelSelection: row.defaultModelSelection ?? null,
-              scripts: row.scripts,
-              hooks: row.hooks,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-              deletedAt: row.deletedAt ?? null,
-            })),
+            projects: projectRows.map(mapProjectRowToReadModelProject),
             threads: threadSummaries.map(mapSummaryToThread),
             orchestratorWakeItems: [],
             updatedAt,
@@ -1407,21 +1443,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           "ProjectionOperationalQuery.listProjects:decodeRows",
         ),
       ),
-      Effect.map(
-        (rows): OrchestrationListProjectsResult =>
-          rows.map((row) => ({
-            id: row.projectId,
-            title: row.title,
-            workspaceRoot: row.workspaceRoot,
-            kind: row.kind ?? null,
-            sidebarParentProjectId: row.sidebarParentProjectId ?? null,
-            currentSessionRootThreadId: row.currentSessionRootThreadId ?? null,
-            defaultModelSelection: row.defaultModelSelection ?? null,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            deletedAt: row.deletedAt ?? null,
-          })),
-      ),
+      Effect.map((rows): OrchestrationListProjectsResult => rows.map(mapProjectRowToSummary)),
     );
 
   const getProjectByWorkspace: ProjectionOperationalQueryShape["getProjectByWorkspace"] = (input) =>
@@ -1436,18 +1458,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
         (row): OrchestrationGetProjectByWorkspaceResult =>
           Option.match(row, {
             onNone: () => null,
-            onSome: (project) => ({
-              id: project.projectId,
-              title: project.title,
-              workspaceRoot: project.workspaceRoot,
-              kind: project.kind ?? null,
-              sidebarParentProjectId: project.sidebarParentProjectId ?? null,
-              currentSessionRootThreadId: project.currentSessionRootThreadId ?? null,
-              defaultModelSelection: project.defaultModelSelection ?? null,
-              createdAt: project.createdAt,
-              updatedAt: project.updatedAt,
-              deletedAt: project.deletedAt ?? null,
-            }),
+            onSome: mapProjectRowToSummary,
           }),
       ),
     );

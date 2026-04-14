@@ -1382,6 +1382,79 @@ describe("OrchestratorWakeReactor", () => {
     });
   });
 
+  it("skips startup wake drain when the no-wake marker is present", async () => {
+    const harness = await createHarness({ autoStart: false });
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await createWorkerThread(harness.engine);
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "stopped",
+      activeTurnId: null,
+      updatedAt: "2026-04-05T12:08:33.000Z",
+    });
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.orchestrator-wake.upsert",
+        commandId: CommandId.makeUnsafe("cmd-seed-no-wake-startup"),
+        threadId: asThreadId("thread-orch"),
+        wakeItem: {
+          wakeId: "wake:thread-worker:turn-no-wake:completed",
+          orchestratorThreadId: asThreadId("thread-orch"),
+          orchestratorProjectId: asProjectId("project-orch"),
+          workerThreadId: asThreadId("thread-worker"),
+          workerProjectId: asProjectId("project-worker"),
+          workerTurnId: asTurnId("turn-no-wake"),
+          workerTitleSnapshot: "Worker thread-worker",
+          outcome: "completed",
+          summary: "Worker thread-worker completed its assigned turn",
+          queuedAt: "2026-04-05T12:08:29.000Z",
+          state: "pending",
+          deliveredAt: null,
+          consumedAt: null,
+        },
+        createdAt: "2026-04-05T12:08:34.000Z",
+      }),
+    );
+
+    const previousSuppressEnv = process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE;
+    const previousMarkerEnv = process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER;
+    const markerPath = path.join(harness.workspaceRoot, "no-wake-marker");
+    fs.writeFileSync(markerPath, "no-wake\n");
+    delete process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE;
+    process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER = markerPath;
+
+    try {
+      await harness.startReactor();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const readModel = await Effect.runPromise(harness.engine.getReadModel());
+      expect(
+        readModel.orchestratorWakeItems.find(
+          (item) => item.wakeId === "wake:thread-worker:turn-no-wake:completed",
+        ),
+      ).toMatchObject({
+        state: "pending",
+        deliveredAt: null,
+        consumedAt: null,
+      });
+      expect(fs.existsSync(markerPath)).toBe(false);
+    } finally {
+      if (previousSuppressEnv === undefined) {
+        delete process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE;
+      } else {
+        process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE = previousSuppressEnv;
+      }
+      if (previousMarkerEnv === undefined) {
+        delete process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER;
+      } else {
+        process.env.T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER = previousMarkerEnv;
+      }
+    }
+  });
+
   it("consumes a delivering wake when the orchestrator review turn completes even if session lifecycle is stale", async () => {
     const harness = await createHarness();
     runtime = harness.runtime;
