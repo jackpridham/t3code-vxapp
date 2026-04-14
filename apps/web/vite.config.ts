@@ -17,7 +17,9 @@ const buildSourcemap =
 
 export default defineConfig({
   plugins: [
-    tanstackRouter(),
+    tanstackRouter({
+      routeFileIgnorePattern: "\\.test\\.(ts|tsx)$",
+    }),
     react(),
     babel({
       // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0

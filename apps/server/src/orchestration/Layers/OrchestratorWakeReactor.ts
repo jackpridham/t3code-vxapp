@@ -4,6 +4,7 @@ import {
   MessageId,
   type OrchestratorWakeItem,
   type OrchestrationEvent,
+  type OrchestrationReadModel,
   type OrchestrationThread,
   type ProviderRuntimeEvent,
   ThreadId,
@@ -23,6 +24,7 @@ import {
   ProjectionTurnRepository,
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   OrchestratorWakeReactor,
@@ -58,6 +60,64 @@ const MAX_WAKE_BATCH_SIZE = 5;
 
 const serverCommandId = (tag: string): CommandId =>
   CommandId.makeUnsafe(`server:orchestrator-wake:${tag}:${crypto.randomUUID()}`);
+
+function resolveActiveRejectedWakeNotificationTarget(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly workerThread: OrchestrationThread;
+}): OrchestrationThread | null {
+  const workerProject = input.readModel.projects.find(
+    (project) => project.id === input.workerThread.projectId,
+  );
+  if (!workerProject) {
+    return null;
+  }
+
+  const currentSessionCandidates = input.readModel.projects
+    .filter(
+      (project) =>
+        project.kind === "orchestrator" &&
+        project.deletedAt === null &&
+        project.workspaceRoot === workerProject.workspaceRoot &&
+        project.currentSessionRootThreadId != null,
+    )
+    .map((project) =>
+      input.readModel.threads.find(
+        (thread) =>
+          thread.id === project.currentSessionRootThreadId &&
+          thread.projectId === project.id &&
+          thread.archivedAt === null &&
+          thread.deletedAt === null,
+      ),
+    )
+    .filter((thread): thread is OrchestrationThread => thread !== undefined);
+
+  if (currentSessionCandidates.length === 1) {
+    return currentSessionCandidates[0] ?? null;
+  }
+
+  const orchestratorProjectIds = new Set(
+    input.readModel.projects
+      .filter(
+        (project) =>
+          project.kind === "orchestrator" &&
+          project.deletedAt === null &&
+          project.workspaceRoot === workerProject.workspaceRoot,
+      )
+      .map((project) => project.id),
+  );
+  const singleThreadCandidates = input.readModel.threads.filter(
+    (thread) =>
+      orchestratorProjectIds.has(thread.projectId) &&
+      thread.archivedAt === null &&
+      thread.deletedAt === null,
+  );
+
+  if (singleThreadCandidates.length !== 1) {
+    return null;
+  }
+
+  return singleThreadCandidates[0] ?? null;
+}
 
 function normalizeWakeOutcome(
   state: "completed" | "failed" | "interrupted" | "cancelled",
@@ -276,13 +336,15 @@ function partitionPendingWakeRowsForDelivery(rows: readonly ProjectionOrchestrat
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
+  const serverSettingsService = yield* ServerSettingsService;
   const wakeRepository = yield* ProjectionOrchestratorWakeRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const drainingOrchestratorThreadIds = new Set<string>();
   const explicitlyInterruptedTurnKeys = new Set<string>();
 
   const appendWakeRejectedActivity = Effect.fn("appendWakeRejectedActivity")(function* (input: {
-    readonly threadId: ThreadId;
+    readonly readModel: OrchestrationReadModel;
+    readonly workerThread: OrchestrationThread;
     readonly turnId: TurnId | null;
     readonly createdAt: string;
     readonly reason: string;
@@ -294,7 +356,7 @@ const make = Effect.gen(function* () {
       .dispatch({
         type: "thread.activity.append",
         commandId: serverCommandId("rejected"),
-        threadId: input.threadId,
+        threadId: input.workerThread.id,
         activity: {
           id: EventId.makeUnsafe(`wake-rejected:${crypto.randomUUID()}`),
           tone: "error",
@@ -311,6 +373,55 @@ const make = Effect.gen(function* () {
               : {}),
           },
           turnId: input.turnId,
+          createdAt: input.createdAt,
+        },
+        createdAt: input.createdAt,
+      })
+      .pipe(Effect.asVoid);
+
+    const settings = yield* serverSettingsService.getSettings;
+    if (!settings.notifyActiveOrchestratorOnRejectedWorkerWake) {
+      return;
+    }
+
+    const activeOrchestratorThread = resolveActiveRejectedWakeNotificationTarget({
+      readModel: input.readModel,
+      workerThread: input.workerThread,
+    });
+    if (!activeOrchestratorThread) {
+      yield* Effect.logWarning("rejected worker wake notification skipped", {
+        workerThreadId: input.workerThread.id,
+        workerProjectId: input.workerThread.projectId,
+        reason: input.reason,
+        detail: "No single active orchestrator thread matched the worker workspace.",
+      });
+      return;
+    }
+
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.activity.append",
+        commandId: serverCommandId("rejected-active-orchestrator"),
+        threadId: activeOrchestratorThread.id,
+        activity: {
+          id: EventId.makeUnsafe(`wake-rejected-notify:${crypto.randomUUID()}`),
+          tone: "error",
+          kind: "diagnostic_worker_wake_rejected",
+          summary: "Rejected worker completion wake",
+          payload: {
+            workerThreadId: input.workerThread.id,
+            workerProjectId: input.workerThread.projectId,
+            workerTurnId: input.turnId,
+            reason: input.reason,
+            detail: input.detail,
+            expectedOrchestratorThreadId: input.workerThread.orchestratorThreadId ?? null,
+            expectedOrchestratorProjectId: input.workerThread.orchestratorProjectId ?? null,
+            actualNotificationThreadId: activeOrchestratorThread.id,
+            actualNotificationProjectId: activeOrchestratorThread.projectId,
+            workerParentThreadId: input.workerThread.parentThreadId ?? null,
+            workerWorkflowId: input.workerThread.workflowId ?? null,
+          },
+          turnId: null,
           createdAt: input.createdAt,
         },
         createdAt: input.createdAt,
@@ -388,7 +499,8 @@ const make = Effect.gen(function* () {
       workerThread.orchestratorProjectId === undefined
     ) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.createdAt,
         reason: "missing_orchestrator_lineage",
@@ -397,9 +509,41 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (workerThread.workflowId === undefined) {
+      yield* appendWakeRejectedActivity({
+        readModel,
+        workerThread,
+        turnId,
+        createdAt: event.createdAt,
+        reason: "missing_workflow_id",
+        detail: "Worker turn completed without a workflowId.",
+        orchestratorThreadId: workerThread.orchestratorThreadId,
+        orchestratorProjectId: workerThread.orchestratorProjectId,
+      });
+      return;
+    }
+
+    if (
+      workerThread.parentThreadId !== undefined &&
+      workerThread.parentThreadId !== workerThread.orchestratorThreadId
+    ) {
+      yield* appendWakeRejectedActivity({
+        readModel,
+        workerThread,
+        turnId,
+        createdAt: event.createdAt,
+        reason: "parent_orchestrator_mismatch",
+        detail: "Worker parentThreadId does not match orchestratorThreadId.",
+        orchestratorThreadId: workerThread.orchestratorThreadId,
+        orchestratorProjectId: workerThread.orchestratorProjectId,
+      });
+      return;
+    }
+
     if (workerThread.orchestratorThreadId === workerThread.id) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.createdAt,
         reason: "worker_targets_itself",
@@ -415,7 +559,8 @@ const make = Effect.gen(function* () {
     );
     if (!orchestratorThread) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.createdAt,
         reason: "orchestrator_missing",
@@ -428,7 +573,8 @@ const make = Effect.gen(function* () {
 
     if (orchestratorThread.projectId !== workerThread.orchestratorProjectId) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.createdAt,
         reason: "orchestrator_mismatch",
@@ -515,7 +661,8 @@ const make = Effect.gen(function* () {
       workerThread.orchestratorProjectId === undefined
     ) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.payload.completedAt,
         reason: "missing_orchestrator_lineage",
@@ -524,9 +671,41 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (workerThread.workflowId === undefined) {
+      yield* appendWakeRejectedActivity({
+        readModel,
+        workerThread,
+        turnId,
+        createdAt: event.payload.completedAt,
+        reason: "missing_workflow_id",
+        detail: "Worker turn completed without a workflowId.",
+        orchestratorThreadId: workerThread.orchestratorThreadId,
+        orchestratorProjectId: workerThread.orchestratorProjectId,
+      });
+      return;
+    }
+
+    if (
+      workerThread.parentThreadId !== undefined &&
+      workerThread.parentThreadId !== workerThread.orchestratorThreadId
+    ) {
+      yield* appendWakeRejectedActivity({
+        readModel,
+        workerThread,
+        turnId,
+        createdAt: event.payload.completedAt,
+        reason: "parent_orchestrator_mismatch",
+        detail: "Worker parentThreadId does not match orchestratorThreadId.",
+        orchestratorThreadId: workerThread.orchestratorThreadId,
+        orchestratorProjectId: workerThread.orchestratorProjectId,
+      });
+      return;
+    }
+
     if (workerThread.orchestratorThreadId === workerThread.id) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.payload.completedAt,
         reason: "worker_targets_itself",
@@ -542,7 +721,8 @@ const make = Effect.gen(function* () {
     );
     if (!orchestratorThread) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.payload.completedAt,
         reason: "orchestrator_missing",
@@ -555,7 +735,8 @@ const make = Effect.gen(function* () {
 
     if (orchestratorThread.projectId !== workerThread.orchestratorProjectId) {
       yield* appendWakeRejectedActivity({
-        threadId: workerThread.id,
+        readModel,
+        workerThread,
         turnId,
         createdAt: event.payload.completedAt,
         reason: "orchestrator_mismatch",

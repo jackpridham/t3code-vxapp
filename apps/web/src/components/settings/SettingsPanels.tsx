@@ -497,6 +497,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.workerOrchestrationNoticesVisibility
         ? ["Worker orchestration notices"]
         : []),
+      ...(settings.notifyActiveOrchestratorOnRejectedWorkerWake !==
+      DEFAULT_UNIFIED_SETTINGS.notifyActiveOrchestratorOnRejectedWorkerWake
+        ? ["Rejected worker wake notifications"]
+        : []),
       ...(settings.allowActiveThreadsInFold !== DEFAULT_UNIFIED_SETTINGS.allowActiveThreadsInFold
         ? ["Active threads in fold"]
         : []),
@@ -551,6 +555,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.maxProjectThreadsBeforeFolding,
+      settings.notifyActiveOrchestratorOnRejectedWorkerWake,
       settings.sidebarOrchestrationModeEnabled,
       settings.sidebarProjectSortOrder,
       settings.showGitignoredFilesInMentions,
@@ -1810,6 +1815,41 @@ export function OrchestrationSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Rejected Worker Wake Notifications"
+          description={
+            orchestrationModeEnabled
+              ? "Notify the active orchestrator when a worker completion cannot create a wake because lineage is invalid."
+              : "Enable orchestration mode to configure rejected worker wake notifications."
+          }
+          resetAction={
+            settings.notifyActiveOrchestratorOnRejectedWorkerWake !==
+            DEFAULT_UNIFIED_SETTINGS.notifyActiveOrchestratorOnRejectedWorkerWake ? (
+              <SettingResetButton
+                label="rejected worker wake notifications"
+                onClick={() =>
+                  updateSettings({
+                    notifyActiveOrchestratorOnRejectedWorkerWake:
+                      DEFAULT_UNIFIED_SETTINGS.notifyActiveOrchestratorOnRejectedWorkerWake,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              disabled={!orchestrationModeEnabled}
+              checked={settings.notifyActiveOrchestratorOnRejectedWorkerWake}
+              onCheckedChange={(checked) =>
+                updateSettings({
+                  notifyActiveOrchestratorOnRejectedWorkerWake: Boolean(checked),
+                })
+              }
+              aria-label="Notify active orchestrator about rejected worker completions"
+            />
           }
         />
       </SettingsSection>

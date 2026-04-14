@@ -28,6 +28,7 @@ import type { DraftThreadEnvMode } from "../../composerDraftStore";
 import type { Project, Thread } from "../../types";
 import { createNewOrchestrationSession } from "./orchestrationModeActions";
 import { orchestrationSessionThreadsQueryOptions } from "../../lib/orchestrationReactQuery";
+import { loadCurrentStateWithThreadDetail } from "../../lib/orchestrationCurrentStateHydration";
 
 type ProjectDraftThread = {
   threadId: ThreadId;
@@ -211,11 +212,8 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
             .getState()
             .threads.some((thread) => thread.id === latestServerThread.id);
           if (!alreadyHydrated) {
-            const snapshot = await api.orchestration.getSnapshot({
-              profile: "active-thread",
-              threadId: latestServerThread.id,
-            });
-            useStore.getState().syncServerReadModel(snapshot);
+            const readModel = await loadCurrentStateWithThreadDetail(api, latestServerThread.id);
+            useStore.getState().syncServerReadModel(readModel);
           }
           await input.navigateToSelectedThread(latestServerThread.id);
           return;

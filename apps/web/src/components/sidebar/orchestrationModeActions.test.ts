@@ -147,7 +147,13 @@ describe("reactivateOrchestrationSession", () => {
       updatedAt: "2026-04-10T00:00:00.000Z",
     };
     const dispatchCommand = vi.fn().mockResolvedValue({ sequence: 1 });
-    const getSnapshot = vi.fn().mockResolvedValue(snapshot);
+    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getSnapshot = vi.fn();
+    const listThreadMessages = vi.fn().mockResolvedValue([]);
+    const listThreadActivities = vi.fn().mockResolvedValue([]);
+    const listThreadSessions = vi.fn().mockResolvedValue([]);
+    const listSessionThreads = vi.fn().mockResolvedValue([]);
+    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
     const confirm = vi.fn().mockResolvedValue(true);
     const queryClient = new QueryClient();
     const invalidateQueries = vi
@@ -161,7 +167,13 @@ describe("reactivateOrchestrationSession", () => {
         dialogs: { confirm },
         orchestration: {
           dispatchCommand,
+          getCurrentState,
           getSnapshot,
+          listThreadMessages,
+          listThreadActivities,
+          listThreadSessions,
+          listSessionThreads,
+          listOrchestratorWakes,
         },
       } as never,
       queryClient,
@@ -183,9 +195,11 @@ describe("reactivateOrchestrationSession", () => {
       "thread.unarchive",
       "project.meta.update",
     ]);
-    expect(getSnapshot).toHaveBeenCalledWith({
-      profile: "active-thread",
+    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(getSnapshot).not.toHaveBeenCalled();
+    expect(listThreadMessages).toHaveBeenCalledWith({
       threadId: targetRoot.id,
+      limit: 500,
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(snapshot);
     expect(invalidateQueries).toHaveBeenCalled();
@@ -224,7 +238,13 @@ describe("createNewOrchestrationSession", () => {
       updatedAt: "2026-04-10T00:00:00.000Z",
     };
     const dispatchCommand = vi.fn().mockResolvedValue({ sequence: 1 });
-    const getSnapshot = vi.fn().mockResolvedValue(snapshot);
+    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getSnapshot = vi.fn();
+    const listThreadMessages = vi.fn().mockResolvedValue([]);
+    const listThreadActivities = vi.fn().mockResolvedValue([]);
+    const listThreadSessions = vi.fn().mockResolvedValue([]);
+    const listSessionThreads = vi.fn().mockResolvedValue([]);
+    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
     const confirm = vi.fn().mockResolvedValue(true);
     const queryClient = new QueryClient();
     const invalidateQueries = vi
@@ -239,7 +259,13 @@ describe("createNewOrchestrationSession", () => {
         dialogs: { confirm },
         orchestration: {
           dispatchCommand,
+          getCurrentState,
           getSnapshot,
+          listThreadMessages,
+          listThreadActivities,
+          listThreadSessions,
+          listSessionThreads,
+          listOrchestratorWakes,
         },
       } as never,
       queryClient,
@@ -272,9 +298,11 @@ describe("createNewOrchestrationSession", () => {
       projectId,
       currentSessionRootThreadId: newThreadId,
     });
-    expect(getSnapshot).toHaveBeenCalledWith({
-      profile: "active-thread",
+    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(getSnapshot).not.toHaveBeenCalled();
+    expect(listThreadMessages).toHaveBeenCalledWith({
       threadId: newThreadId,
+      limit: 500,
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(snapshot);
     expect(invalidateQueries).toHaveBeenCalled();

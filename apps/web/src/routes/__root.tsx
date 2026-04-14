@@ -52,6 +52,10 @@ import {
   invalidateOrchestrationSessionCatalogs,
 } from "../lib/orchestrationReactQuery";
 import { buildAppDocumentTitle } from "../lib/documentTitle";
+import {
+  addThreadDetailToReadModel,
+  loadCurrentStateWithThreadDetail,
+} from "../lib/orchestrationCurrentStateHydration";
 import { resolveThreadSessionRootId } from "../lib/orchestrationMode";
 import type { Project, Thread } from "../types";
 
@@ -271,7 +275,41 @@ type BootstrapRecoveryDeps = {
   reconcileSnapshotDerivedState: () => void;
   recoverFromSequenceGap: () => Promise<void>;
   isDisposed: () => boolean;
+  getCurrentThreadId?: () => ThreadId | null;
 };
+
+function findCurrentSessionRootThreadId(
+  readModel: Pick<OrchestrationReadModel, "projects">,
+): ThreadId | null {
+  for (const project of readModel.projects) {
+    if (project.currentSessionRootThreadId) {
+      return project.currentSessionRootThreadId;
+    }
+  }
+  return null;
+}
+
+export function resolveRouteThreadId(pathname: string): ThreadId | null {
+  const match = /^\/([^/?#]+)/.exec(pathname);
+  if (!match) {
+    return null;
+  }
+  const routeThreadId = match[1];
+  if (
+    !routeThreadId ||
+    routeThreadId === "artifact" ||
+    routeThreadId === "changes" ||
+    routeThreadId === "settings" ||
+    routeThreadId === "sidebar"
+  ) {
+    return null;
+  }
+  try {
+    return ThreadId.makeUnsafe(decodeURIComponent(routeThreadId));
+  } catch {
+    return null;
+  }
+}
 
 export async function bootstrapOrchestrationState({
   api,
@@ -280,46 +318,54 @@ export async function bootstrapOrchestrationState({
   reconcileSnapshotDerivedState,
   recoverFromSequenceGap,
   isDisposed,
+  getCurrentThreadId,
 }: BootstrapRecoveryDeps): Promise<void> {
   const applyReadModel = async (
     loadReadModel: () => Promise<OrchestrationReadModel>,
-  ): Promise<void> => {
+  ): Promise<OrchestrationReadModel | null> => {
     const readModel = await loadReadModel();
     if (isDisposed()) {
-      return;
+      return null;
     }
     syncServerReadModel(readModel);
     reconcileSnapshotDerivedState();
     if (recovery.completeSnapshotRecovery(readModel.snapshotSequence)) {
       void recoverFromSequenceGap();
     }
+    return readModel;
   };
 
   const runSnapshotRecovery = async (
     loadReadModel: () => Promise<OrchestrationReadModel>,
-  ): Promise<boolean> => {
+  ): Promise<OrchestrationReadModel | null> => {
     if (!recovery.beginSnapshotRecovery("bootstrap")) {
-      return false;
+      return null;
     }
 
     try {
-      await applyReadModel(loadReadModel);
-      return true;
+      return await applyReadModel(loadReadModel);
     } catch {
       recovery.failSnapshotRecovery();
-      return false;
+      return null;
     }
   };
 
   const summaryApplied = await runSnapshotRecovery(() => api.orchestration.getBootstrapSummary());
   if (summaryApplied) {
-    // The bootstrap summary intentionally omits persisted thread history. Refresh it
-    // with the bounded operational snapshot so reloaded threads render real content.
-    await runSnapshotRecovery(() => api.orchestration.getSnapshot());
+    const activeThreadId = getCurrentThreadId?.() ?? findCurrentSessionRootThreadId(summaryApplied);
+    if (activeThreadId) {
+      await runSnapshotRecovery(() => loadCurrentStateWithThreadDetail(api, activeThreadId));
+    }
     return;
   }
 
-  await runSnapshotRecovery(() => api.orchestration.getSnapshot());
+  const currentState = await runSnapshotRecovery(() => api.orchestration.getCurrentState());
+  const activeThreadId = currentState
+    ? (getCurrentThreadId?.() ?? findCurrentSessionRootThreadId(currentState))
+    : null;
+  if (currentState && activeThreadId) {
+    await runSnapshotRecovery(() => addThreadDetailToReadModel(api, currentState, activeThreadId));
+  }
 }
 
 function EventRouter() {
@@ -472,7 +518,7 @@ function EventRouter() {
         }
       } catch {
         recovery.failReplayRecovery();
-        void fallbackToSnapshotRecovery();
+        void recoverFromBoundedState();
         return;
       }
 
@@ -481,17 +527,34 @@ function EventRouter() {
       }
     };
 
+    const resolveCurrentThreadId = (): ThreadId | null => {
+      const routeThreadId = resolveRouteThreadId(pathnameRef.current);
+      if (routeThreadId) {
+        return routeThreadId;
+      }
+      const projects = useStore.getState().projects;
+      for (const project of projects) {
+        if (project.currentSessionRootThreadId) {
+          return project.currentSessionRootThreadId;
+        }
+      }
+      return null;
+    };
+
     const runSnapshotRecovery = async (reason: "bootstrap" | "replay-failed"): Promise<void> => {
       if (!recovery.beginSnapshotRecovery(reason)) {
         return;
       }
 
       try {
-        const snapshot = await api.orchestration.getSnapshot();
+        const currentThreadId = resolveCurrentThreadId();
+        const readModel = currentThreadId
+          ? await loadCurrentStateWithThreadDetail(api, currentThreadId)
+          : await api.orchestration.getCurrentState();
         if (!disposed) {
-          syncServerReadModel(snapshot);
+          syncServerReadModel(readModel);
           reconcileSnapshotDerivedState();
-          if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
+          if (recovery.completeSnapshotRecovery(readModel.snapshotSequence)) {
             void recoverFromSequenceGap();
           }
         }
@@ -501,7 +564,7 @@ function EventRouter() {
       }
     };
 
-    const fallbackToSnapshotRecovery = async (): Promise<void> => {
+    const recoverFromBoundedState = async (): Promise<void> => {
       await runSnapshotRecovery("replay-failed");
     };
 
@@ -539,6 +602,7 @@ function EventRouter() {
           reconcileSnapshotDerivedState,
           recoverFromSequenceGap,
           isDisposed: () => disposed,
+          getCurrentThreadId: resolveCurrentThreadId,
         });
         if (disposed) {
           return;

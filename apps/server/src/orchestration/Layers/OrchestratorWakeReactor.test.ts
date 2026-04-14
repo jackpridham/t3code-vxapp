@@ -28,6 +28,7 @@ import {
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestratorWakeReactorLive } from "./OrchestratorWakeReactor.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
@@ -89,7 +90,10 @@ async function waitForReadModel(
   throw new Error("Timed out waiting for orchestration read model state.");
 }
 
-async function createHarness(options?: { autoStart?: boolean }) {
+async function createHarness(options?: {
+  readonly autoStart?: boolean;
+  readonly notifyActiveOrchestratorOnRejectedWorkerWake?: boolean;
+}) {
   const workspaceRoot = makeTempDir("t3-orchestrator-wake-reactor-");
   fs.mkdirSync(path.join(workspaceRoot, ".git"));
   const provider = createProviderServiceHarness();
@@ -103,6 +107,12 @@ async function createHarness(options?: { autoStart?: boolean }) {
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+    Layer.provideMerge(
+      ServerSettingsService.layerTest({
+        notifyActiveOrchestratorOnRejectedWorkerWake:
+          options?.notifyActiveOrchestratorOnRejectedWorkerWake ?? false,
+      }),
+    ),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -165,6 +175,14 @@ async function createHarness(options?: { autoStart?: boolean }) {
       createdAt,
     }),
   );
+  await Effect.runPromise(
+    engine.dispatch({
+      type: "project.meta.update",
+      commandId: CommandId.makeUnsafe("cmd-project-orch-current-session"),
+      projectId: asProjectId("project-orch"),
+      currentSessionRootThreadId: asThreadId("thread-orch"),
+    }),
+  );
 
   return {
     runtime,
@@ -184,6 +202,8 @@ async function createWorkerThread(
     readonly projectId?: ProjectId;
     readonly orchestratorProjectId?: ProjectId | undefined;
     readonly orchestratorThreadId?: ThreadId | undefined;
+    readonly parentThreadId?: ThreadId | null;
+    readonly workflowId?: string | null;
   },
 ) {
   const createdAt = new Date().toISOString();
@@ -210,7 +230,10 @@ async function createWorkerThread(
       ...(input?.orchestratorThreadId !== undefined
         ? { orchestratorThreadId: input.orchestratorThreadId }
         : { orchestratorThreadId: asThreadId("thread-orch") }),
-      parentThreadId: asThreadId("thread-orch"),
+      ...(input?.workflowId !== null ? { workflowId: input?.workflowId ?? "wf-thread-orch" } : {}),
+      ...(input?.parentThreadId !== null
+        ? { parentThreadId: input?.parentThreadId ?? asThreadId("thread-orch") }
+        : {}),
       createdAt,
     }),
   );
@@ -577,8 +600,137 @@ describe("OrchestratorWakeReactor", () => {
     const worker = readModel.threads.find(
       (thread) => thread.id === asThreadId("thread-worker-mismatch"),
     );
+    const orchestrator = readModel.threads.find(
+      (thread) => thread.id === asThreadId("thread-orch"),
+    );
     expect(worker?.activities.at(-1)?.payload).toMatchObject({
       reason: "orchestrator_mismatch",
+    });
+    expect(
+      orchestrator?.activities.some(
+        (activity) => activity.kind === "diagnostic_worker_wake_rejected",
+      ),
+    ).toBe(false);
+    expect(readModel.orchestratorWakeItems).toHaveLength(0);
+  });
+
+  it("rejects worker completions that are missing workflowId", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await createWorkerThread(harness.engine, {
+      threadId: asThreadId("thread-worker-missing-workflow"),
+      workflowId: null,
+    });
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-missing-workflow"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:03:30.000Z",
+      threadId: asThreadId("thread-worker-missing-workflow"),
+      turnId: asTurnId("turn-missing-workflow"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const readModel = await waitForReadModel(
+      harness.engine,
+      (model) =>
+        model.threads
+          .find((thread) => thread.id === asThreadId("thread-worker-missing-workflow"))
+          ?.activities.some((activity) => activity.kind === "orchestrator.wake.rejected") ?? false,
+    );
+    const worker = readModel.threads.find(
+      (thread) => thread.id === asThreadId("thread-worker-missing-workflow"),
+    );
+    expect(worker?.activities.at(-1)?.payload).toMatchObject({
+      reason: "missing_workflow_id",
+    });
+    expect(readModel.orchestratorWakeItems).toHaveLength(0);
+  });
+
+  it("rejects worker completions when parentThreadId is stale", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await createWorkerThread(harness.engine, {
+      threadId: asThreadId("thread-worker-stale-parent"),
+      parentThreadId: asThreadId("thread-stale-orch"),
+    });
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-stale-parent"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:03:40.000Z",
+      threadId: asThreadId("thread-worker-stale-parent"),
+      turnId: asTurnId("turn-stale-parent"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const readModel = await waitForReadModel(
+      harness.engine,
+      (model) =>
+        model.threads
+          .find((thread) => thread.id === asThreadId("thread-worker-stale-parent"))
+          ?.activities.some((activity) => activity.kind === "orchestrator.wake.rejected") ?? false,
+    );
+    const worker = readModel.threads.find(
+      (thread) => thread.id === asThreadId("thread-worker-stale-parent"),
+    );
+    expect(worker?.activities.at(-1)?.payload).toMatchObject({
+      reason: "parent_orchestrator_mismatch",
+    });
+    expect(readModel.orchestratorWakeItems).toHaveLength(0);
+  });
+
+  it("notifies the active orchestrator about rejected worker completions when enabled", async () => {
+    const harness = await createHarness({
+      notifyActiveOrchestratorOnRejectedWorkerWake: true,
+    });
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    await createWorkerThread(harness.engine, {
+      threadId: asThreadId("thread-worker-notify"),
+      orchestratorProjectId: asProjectId("project-worker"),
+      orchestratorThreadId: asThreadId("thread-orch"),
+    });
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-notify-rejected"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:03:50.000Z",
+      threadId: asThreadId("thread-worker-notify"),
+      turnId: asTurnId("turn-notify-rejected"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const readModel = await waitForReadModel(
+      harness.engine,
+      (model) =>
+        model.threads
+          .find((thread) => thread.id === asThreadId("thread-orch"))
+          ?.activities.some((activity) => activity.kind === "diagnostic_worker_wake_rejected") ??
+        false,
+    );
+    const orchestrator = readModel.threads.find(
+      (thread) => thread.id === asThreadId("thread-orch"),
+    );
+    expect(orchestrator?.activities.at(-1)?.payload).toMatchObject({
+      workerThreadId: asThreadId("thread-worker-notify"),
+      workerTurnId: asTurnId("turn-notify-rejected"),
+      reason: "orchestrator_mismatch",
+      actualNotificationThreadId: asThreadId("thread-orch"),
     });
     expect(readModel.orchestratorWakeItems).toHaveLength(0);
   });

@@ -1,12 +1,21 @@
 import type {
   OrchestrationCheckpointSummary,
+  OrchestrationGetCurrentStateResult,
   OrchestrationGetProjectByWorkspaceInput,
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetReadinessResult,
+  OrchestrationListOrchestratorWakesInput,
+  OrchestrationListOrchestratorWakesResult,
   OrchestrationListProjectThreadsInput,
   OrchestrationListProjectThreadsResult,
   OrchestrationListSessionThreadsInput,
   OrchestrationListSessionThreadsResult,
+  OrchestrationListThreadActivitiesInput,
+  OrchestrationListThreadActivitiesResult,
+  OrchestrationListThreadMessagesInput,
+  OrchestrationListThreadMessagesResult,
+  OrchestrationListThreadSessionsInput,
+  OrchestrationListThreadSessionsResult,
   OrchestrationListProjectsResult,
   ThreadId,
 } from "@t3tools/contracts";
@@ -27,6 +36,10 @@ export interface ProjectionOperationalQueryShape {
     OrchestrationGetReadinessResult,
     ProjectionRepositoryError
   >;
+  readonly getCurrentState: () => Effect.Effect<
+    OrchestrationGetCurrentStateResult,
+    ProjectionRepositoryError
+  >;
   readonly listProjects: () => Effect.Effect<
     OrchestrationListProjectsResult,
     ProjectionRepositoryError
@@ -40,6 +53,18 @@ export interface ProjectionOperationalQueryShape {
   readonly listSessionThreads: (
     input: OrchestrationListSessionThreadsInput,
   ) => Effect.Effect<OrchestrationListSessionThreadsResult, ProjectionRepositoryError>;
+  readonly listThreadMessages: (
+    input: OrchestrationListThreadMessagesInput,
+  ) => Effect.Effect<OrchestrationListThreadMessagesResult, ProjectionRepositoryError>;
+  readonly listThreadActivities: (
+    input: OrchestrationListThreadActivitiesInput,
+  ) => Effect.Effect<OrchestrationListThreadActivitiesResult, ProjectionRepositoryError>;
+  readonly listThreadSessions: (
+    input: OrchestrationListThreadSessionsInput,
+  ) => Effect.Effect<OrchestrationListThreadSessionsResult, ProjectionRepositoryError>;
+  readonly listOrchestratorWakes: (
+    input: OrchestrationListOrchestratorWakesInput,
+  ) => Effect.Effect<OrchestrationListOrchestratorWakesResult, ProjectionRepositoryError>;
   readonly getThreadCheckpointContext: (input: {
     readonly threadId: ThreadId;
   }) => Effect.Effect<ProjectionThreadCheckpointContext, ProjectionRepositoryError>;

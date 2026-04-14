@@ -221,6 +221,7 @@ export function createWsNativeApi(): NativeApi {
       getBootstrapSummary: () => transport.request(ORCHESTRATION_WS_METHODS.getBootstrapSummary),
       getSnapshot: (input) => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot, input),
       getReadiness: () => transport.request(ORCHESTRATION_WS_METHODS.getReadiness),
+      getCurrentState: () => transport.request(ORCHESTRATION_WS_METHODS.getCurrentState),
       listProjects: () => transport.request(ORCHESTRATION_WS_METHODS.listProjects),
       getProjectByWorkspace: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getProjectByWorkspace, input),
@@ -228,6 +229,14 @@ export function createWsNativeApi(): NativeApi {
         transport.request(ORCHESTRATION_WS_METHODS.listProjectThreads, input),
       listSessionThreads: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.listSessionThreads, input),
+      listThreadMessages: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.listThreadMessages, input),
+      listThreadActivities: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.listThreadActivities, input),
+      listThreadSessions: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.listThreadSessions, input),
+      listOrchestratorWakes: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.listOrchestratorWakes, input),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),

@@ -198,7 +198,18 @@ describe("store read model sync", () => {
     const initialState: AppState = {
       ...makeState(makeThread()),
       threads: [
-        makeThread(),
+        makeThread({
+          messages: [
+            {
+              id: MessageId.makeUnsafe("message-preserved"),
+              role: "assistant",
+              text: "preserved",
+              turnId: null,
+              streaming: false,
+              createdAt: "2026-02-27T00:00:00.000Z",
+            },
+          ],
+        }),
         makeThread({
           id: ThreadId.makeUnsafe("thread-2"),
           projectId: ProjectId.makeUnsafe("project-2"),
@@ -242,6 +253,9 @@ describe("store read model sync", () => {
     expect(next.projects).toHaveLength(2);
     expect(next.threads.find((thread) => thread.id === "thread-1")?.title).toBe(
       "Updated summary thread",
+    );
+    expect(next.threads.find((thread) => thread.id === "thread-1")?.messages).toEqual(
+      initialState.threads[0]?.messages,
     );
     expect(next.threads.find((thread) => thread.id === "thread-2")?.title).toBe("Other thread");
   });
@@ -323,6 +337,172 @@ describe("store read model sync", () => {
     expect(next.threads).toHaveLength(2);
     expect(next.threads.find((thread) => thread.id === "thread-1")?.messages).toHaveLength(1);
     expect(next.threads.find((thread) => thread.id === "thread-2")?.title).toBe("Other thread");
+  });
+
+  it("applies bounded thread detail carried by a bootstrap-summary read model", () => {
+    const initialState: AppState = {
+      ...makeState(
+        makeThread({
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-1"),
+            state: "completed",
+            requestedAt: "2026-02-27T00:00:00.000Z",
+            startedAt: "2026-02-27T00:00:01.000Z",
+            completedAt: "2026-02-27T00:00:02.000Z",
+            assistantMessageId: null,
+          },
+        }),
+      ),
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          messages: [
+            {
+              id: MessageId.makeUnsafe("message-hydrated"),
+              role: "assistant",
+              text: "hydrated history",
+              turnId: TurnId.makeUnsafe("turn-1"),
+              streaming: false,
+              createdAt: "2026-02-27T00:00:02.000Z",
+              updatedAt: "2026-02-27T00:00:02.000Z",
+            },
+          ],
+          activities: [
+            {
+              id: EventId.makeUnsafe("activity-hydrated"),
+              tone: "info",
+              kind: "turn.completed",
+              summary: "completed",
+              payload: {},
+              turnId: TurnId.makeUnsafe("turn-1"),
+              createdAt: "2026-02-27T00:00:02.000Z",
+            },
+          ],
+          snapshotCoverage: {
+            messageCount: 1,
+            messageLimit: 500,
+            messagesTruncated: false,
+            proposedPlanCount: 0,
+            proposedPlanLimit: 0,
+            proposedPlansTruncated: false,
+            activityCount: 1,
+            activityLimit: 250,
+            activitiesTruncated: false,
+            checkpointCount: 0,
+            checkpointLimit: 0,
+            checkpointsTruncated: false,
+          },
+        }),
+        {
+          snapshotProfile: "bootstrap-summary",
+        },
+      ),
+    );
+
+    const thread = next.threads.find((entry) => entry.id === "thread-1");
+    expect(thread?.messages).toEqual([expect.objectContaining({ text: "hydrated history" })]);
+    expect(thread?.activities).toEqual([expect.objectContaining({ summary: "completed" })]);
+    expect(thread?.snapshotCoverage).toEqual(
+      expect.objectContaining({
+        messageCount: 1,
+        messageLimit: 500,
+        activityCount: 1,
+        activityLimit: 250,
+      }),
+    );
+  });
+
+  it("preserves detail groups omitted from bounded current-state hydration", () => {
+    const initialState: AppState = {
+      ...makeState(
+        makeThread({
+          proposedPlans: [
+            {
+              id: "plan-existing",
+              turnId: TurnId.makeUnsafe("turn-existing"),
+              planMarkdown: "keep me",
+              implementedAt: null,
+              implementationThreadId: null,
+              createdAt: "2026-02-27T00:00:00.000Z",
+              updatedAt: "2026-02-27T00:00:00.000Z",
+            },
+          ],
+          turnDiffSummaries: [
+            {
+              turnId: TurnId.makeUnsafe("turn-existing"),
+              completedAt: "2026-02-27T00:00:01.000Z",
+              status: "ready",
+              checkpointTurnCount: 1,
+              checkpointRef: CheckpointRef.makeUnsafe("checkpoint-existing"),
+              files: [{ path: "src/existing.ts", additions: 2, deletions: 0, kind: "modified" }],
+            },
+          ],
+          persistedFileChanges: [
+            {
+              path: "src/existing.ts",
+              kind: "modified",
+              totalInsertions: 2,
+              totalDeletions: 0,
+              firstTurnId: TurnId.makeUnsafe("turn-existing"),
+              lastTurnId: TurnId.makeUnsafe("turn-existing"),
+            },
+          ],
+        }),
+      ),
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          messages: [
+            {
+              id: MessageId.makeUnsafe("message-new"),
+              role: "assistant",
+              text: "new bounded detail",
+              turnId: null,
+              streaming: false,
+              createdAt: "2026-02-27T00:00:02.000Z",
+              updatedAt: "2026-02-27T00:00:02.000Z",
+            },
+          ],
+          proposedPlans: [],
+          checkpoints: [],
+          snapshotCoverage: {
+            messageCount: 1,
+            messageLimit: 500,
+            messagesTruncated: false,
+            proposedPlanCount: 1,
+            proposedPlanLimit: 0,
+            proposedPlansTruncated: false,
+            activityCount: 0,
+            activityLimit: 250,
+            activitiesTruncated: false,
+            checkpointCount: 1,
+            checkpointLimit: 0,
+            checkpointsTruncated: false,
+          },
+        }),
+        {
+          snapshotProfile: "bootstrap-summary",
+        },
+      ),
+    );
+
+    const thread = next.threads.find((entry) => entry.id === "thread-1");
+    expect(thread?.messages).toEqual([expect.objectContaining({ text: "new bounded detail" })]);
+    expect(thread?.proposedPlans).toEqual([
+      expect.objectContaining({ id: "plan-existing", planMarkdown: "keep me" }),
+    ]);
+    expect(thread?.turnDiffSummaries).toEqual([
+      expect.objectContaining({ checkpointRef: "checkpoint-existing" }),
+    ]);
+    expect(thread?.persistedFileChanges).toEqual([
+      expect.objectContaining({ path: "src/existing.ts" }),
+    ]);
   });
 
   it("preserves claude model slugs without an active session", () => {

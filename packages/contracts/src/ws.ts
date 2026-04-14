@@ -5,6 +5,7 @@ import {
   ClientOrchestrationCommand,
   OrchestrationEvent,
   OrchestrationGetBootstrapSummaryInput,
+  OrchestrationGetCurrentStateInput,
   OrchestrationGetFileDiffInput,
   OrchestrationGetProjectByWorkspaceInput,
   ORCHESTRATION_WS_CHANNELS,
@@ -13,8 +14,12 @@ import {
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotInput,
   OrchestrationGetTurnDiffInput,
+  OrchestrationListOrchestratorWakesInput,
   OrchestrationListProjectThreadsInput,
   OrchestrationListSessionThreadsInput,
+  OrchestrationListThreadActivitiesInput,
+  OrchestrationListThreadMessagesInput,
+  OrchestrationListThreadSessionsInput,
   OrchestrationListProjectsInput,
   OrchestrationReplayEventsInput,
 } from "./orchestration";
@@ -121,6 +126,7 @@ const WebSocketRequestBody = Schema.Union([
     OrchestrationGetBootstrapSummaryInput,
   ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getReadiness, OrchestrationGetReadinessInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getCurrentState, OrchestrationGetCurrentStateInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listProjects, OrchestrationListProjectsInput),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
@@ -128,6 +134,16 @@ const WebSocketRequestBody = Schema.Union([
   ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listProjectThreads, OrchestrationListProjectThreadsInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listSessionThreads, OrchestrationListSessionThreadsInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.listThreadMessages, OrchestrationListThreadMessagesInput),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.listThreadActivities,
+    OrchestrationListThreadActivitiesInput,
+  ),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.listThreadSessions, OrchestrationListThreadSessionsInput),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.listOrchestratorWakes,
+    OrchestrationListOrchestratorWakesInput,
+  ),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.dispatchCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),

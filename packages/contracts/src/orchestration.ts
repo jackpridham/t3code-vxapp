@@ -20,10 +20,15 @@ export const ORCHESTRATION_WS_METHODS = {
   getBootstrapSummary: "orchestration.getBootstrapSummary",
   getSnapshot: "orchestration.getSnapshot",
   getReadiness: "orchestration.getReadiness",
+  getCurrentState: "orchestration.getCurrentState",
   listProjects: "orchestration.listProjects",
   getProjectByWorkspace: "orchestration.getProjectByWorkspace",
   listProjectThreads: "orchestration.listProjectThreads",
   listSessionThreads: "orchestration.listSessionThreads",
+  listThreadMessages: "orchestration.listThreadMessages",
+  listThreadActivities: "orchestration.listThreadActivities",
+  listThreadSessions: "orchestration.listThreadSessions",
+  listOrchestratorWakes: "orchestration.listOrchestratorWakes",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFileDiff: "orchestration.getFileDiff",
@@ -367,6 +372,7 @@ export const OrchestrationProjectSummary = Schema.Struct({
   workspaceRoot: TrimmedNonEmptyString,
   kind: Schema.NullOr(OrchestrationProjectKind).pipe(Schema.withDecodingDefault(() => null)),
   sidebarParentProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  currentSessionRootThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   defaultModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1269,6 +1275,11 @@ export type OrchestrationGetReadinessInput = typeof OrchestrationGetReadinessInp
 export const OrchestrationGetReadinessResult = OrchestrationReadinessSummary;
 export type OrchestrationGetReadinessResult = typeof OrchestrationGetReadinessResult.Type;
 
+export const OrchestrationGetCurrentStateInput = Schema.Struct({});
+export type OrchestrationGetCurrentStateInput = typeof OrchestrationGetCurrentStateInput.Type;
+export const OrchestrationGetCurrentStateResult = OrchestrationReadModel;
+export type OrchestrationGetCurrentStateResult = typeof OrchestrationGetCurrentStateResult.Type;
+
 export const OrchestrationListProjectsInput = Schema.Struct({});
 export type OrchestrationListProjectsInput = typeof OrchestrationListProjectsInput.Type;
 export const OrchestrationListProjectsResult = Schema.Array(OrchestrationProjectSummary);
@@ -1302,6 +1313,49 @@ export type OrchestrationListSessionThreadsInput = typeof OrchestrationListSessi
 export const OrchestrationListSessionThreadsResult = Schema.Array(OrchestrationThreadSummary);
 export type OrchestrationListSessionThreadsResult =
   typeof OrchestrationListSessionThreadsResult.Type;
+
+const OrchestrationPageLimit = NonNegativeInt.check(Schema.isLessThanOrEqualTo(1000)).pipe(
+  Schema.withDecodingDefault(() => 250),
+);
+
+export const OrchestrationListThreadMessagesInput = Schema.Struct({
+  threadId: ThreadId,
+  limit: OrchestrationPageLimit,
+  beforeCreatedAt: Schema.optional(IsoDateTime),
+});
+export type OrchestrationListThreadMessagesInput = typeof OrchestrationListThreadMessagesInput.Type;
+export const OrchestrationListThreadMessagesResult = Schema.Array(OrchestrationMessage);
+export type OrchestrationListThreadMessagesResult =
+  typeof OrchestrationListThreadMessagesResult.Type;
+
+export const OrchestrationListThreadActivitiesInput = Schema.Struct({
+  threadId: ThreadId,
+  limit: OrchestrationPageLimit,
+  beforeSequence: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationListThreadActivitiesInput =
+  typeof OrchestrationListThreadActivitiesInput.Type;
+export const OrchestrationListThreadActivitiesResult = Schema.Array(OrchestrationThreadActivity);
+export type OrchestrationListThreadActivitiesResult =
+  typeof OrchestrationListThreadActivitiesResult.Type;
+
+export const OrchestrationListThreadSessionsInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationListThreadSessionsInput = typeof OrchestrationListThreadSessionsInput.Type;
+export const OrchestrationListThreadSessionsResult = Schema.Array(OrchestrationSession);
+export type OrchestrationListThreadSessionsResult =
+  typeof OrchestrationListThreadSessionsResult.Type;
+
+export const OrchestrationListOrchestratorWakesInput = Schema.Struct({
+  orchestratorThreadId: ThreadId,
+  limit: OrchestrationPageLimit,
+});
+export type OrchestrationListOrchestratorWakesInput =
+  typeof OrchestrationListOrchestratorWakesInput.Type;
+export const OrchestrationListOrchestratorWakesResult = Schema.Array(OrchestratorWakeItem);
+export type OrchestrationListOrchestratorWakesResult =
+  typeof OrchestrationListOrchestratorWakesResult.Type;
 
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
@@ -1362,6 +1416,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetReadinessInput,
     output: OrchestrationGetReadinessResult,
   },
+  getCurrentState: {
+    input: OrchestrationGetCurrentStateInput,
+    output: OrchestrationGetCurrentStateResult,
+  },
   listProjects: {
     input: OrchestrationListProjectsInput,
     output: OrchestrationListProjectsResult,
@@ -1377,6 +1435,22 @@ export const OrchestrationRpcSchemas = {
   listSessionThreads: {
     input: OrchestrationListSessionThreadsInput,
     output: OrchestrationListSessionThreadsResult,
+  },
+  listThreadMessages: {
+    input: OrchestrationListThreadMessagesInput,
+    output: OrchestrationListThreadMessagesResult,
+  },
+  listThreadActivities: {
+    input: OrchestrationListThreadActivitiesInput,
+    output: OrchestrationListThreadActivitiesResult,
+  },
+  listThreadSessions: {
+    input: OrchestrationListThreadSessionsInput,
+    output: OrchestrationListThreadSessionsResult,
+  },
+  listOrchestratorWakes: {
+    input: OrchestrationListOrchestratorWakesInput,
+    output: OrchestrationListOrchestratorWakesResult,
   },
   dispatchCommand: {
     input: ClientOrchestrationCommand,

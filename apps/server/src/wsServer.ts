@@ -728,6 +728,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case ORCHESTRATION_WS_METHODS.getReadiness:
         return yield* projectionOperationalQuery.getReadiness();
 
+      case ORCHESTRATION_WS_METHODS.getCurrentState:
+        return yield* projectionOperationalQuery.getCurrentState();
+
       case ORCHESTRATION_WS_METHODS.listProjects:
         return yield* projectionOperationalQuery.listProjects();
 
@@ -744,6 +747,26 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case ORCHESTRATION_WS_METHODS.listSessionThreads: {
         const body = stripRequestTag(request.body);
         return yield* projectionOperationalQuery.listSessionThreads(body);
+      }
+
+      case ORCHESTRATION_WS_METHODS.listThreadMessages: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.listThreadMessages(body);
+      }
+
+      case ORCHESTRATION_WS_METHODS.listThreadActivities: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.listThreadActivities(body);
+      }
+
+      case ORCHESTRATION_WS_METHODS.listThreadSessions: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.listThreadSessions(body);
+      }
+
+      case ORCHESTRATION_WS_METHODS.listOrchestratorWakes: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.listOrchestratorWakes(body);
       }
 
       case ORCHESTRATION_WS_METHODS.getSnapshot: {

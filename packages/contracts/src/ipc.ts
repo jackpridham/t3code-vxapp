@@ -52,11 +52,20 @@ import type {
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetFileDiffInput,
   OrchestrationGetFileDiffResult,
+  OrchestrationGetCurrentStateResult,
   OrchestrationGetReadinessResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationListOrchestratorWakesInput,
+  OrchestrationListOrchestratorWakesResult,
   OrchestrationListSessionThreadsInput,
   OrchestrationListSessionThreadsResult,
+  OrchestrationListThreadActivitiesInput,
+  OrchestrationListThreadActivitiesResult,
+  OrchestrationListThreadMessagesInput,
+  OrchestrationListThreadMessagesResult,
+  OrchestrationListThreadSessionsInput,
+  OrchestrationListThreadSessionsResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
@@ -200,6 +209,7 @@ export interface NativeApi {
     getBootstrapSummary: () => Promise<OrchestrationReadModel>;
     getSnapshot: (input?: OrchestrationGetSnapshotInput) => Promise<OrchestrationReadModel>;
     getReadiness: () => Promise<OrchestrationGetReadinessResult>;
+    getCurrentState: () => Promise<OrchestrationGetCurrentStateResult>;
     listProjects: () => Promise<OrchestrationListProjectsResult>;
     getProjectByWorkspace: (
       input: OrchestrationGetProjectByWorkspaceInput,
@@ -210,6 +220,18 @@ export interface NativeApi {
     listSessionThreads: (
       input: OrchestrationListSessionThreadsInput,
     ) => Promise<OrchestrationListSessionThreadsResult>;
+    listThreadMessages: (
+      input: OrchestrationListThreadMessagesInput,
+    ) => Promise<OrchestrationListThreadMessagesResult>;
+    listThreadActivities: (
+      input: OrchestrationListThreadActivitiesInput,
+    ) => Promise<OrchestrationListThreadActivitiesResult>;
+    listThreadSessions: (
+      input: OrchestrationListThreadSessionsInput,
+    ) => Promise<OrchestrationListThreadSessionsResult>;
+    listOrchestratorWakes: (
+      input: OrchestrationListOrchestratorWakesInput,
+    ) => Promise<OrchestrationListOrchestratorWakesResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFileDiff: (input: OrchestrationGetFileDiffInput) => Promise<OrchestrationGetFileDiffResult>;

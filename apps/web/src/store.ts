@@ -309,6 +309,7 @@ function mapProject(project: OrchestrationReadModel["projects"][number]): Projec
 function mergeThreads(
   existingThreads: Thread[],
   incomingThreads: ReadonlyArray<OrchestrationReadModel["threads"][number]>,
+  snapshotProfile: OrchestrationReadModel["snapshotProfile"],
 ): Thread[] {
   const nextThreads = [...existingThreads];
   const indexByThreadId = new Map(nextThreads.map((thread, index) => [thread.id, index] as const));
@@ -330,7 +331,39 @@ function mergeThreads(
       indexByThreadId.set(mappedThread.id, nextThreads.push(mappedThread) - 1);
       continue;
     }
-    nextThreads[existingIndex] = mappedThread;
+    const existingThread = nextThreads[existingIndex];
+    const coverage = thread.snapshotCoverage;
+    const preservesSummaryDetail =
+      snapshotProfile === "bootstrap-summary" && coverage === undefined;
+    const preservesMessages = preservesSummaryDetail || coverage?.messageLimit === 0;
+    const preservesProposedPlans = preservesSummaryDetail || coverage?.proposedPlanLimit === 0;
+    const preservesActivities = preservesSummaryDetail || coverage?.activityLimit === 0;
+    const preservesCheckpoints = preservesSummaryDetail || coverage?.checkpointLimit === 0;
+    nextThreads[existingIndex] =
+      existingThread &&
+      (preservesMessages || preservesProposedPlans || preservesActivities || preservesCheckpoints)
+        ? {
+            ...mappedThread,
+            messages: preservesMessages ? existingThread.messages : mappedThread.messages,
+            proposedPlans: preservesProposedPlans
+              ? existingThread.proposedPlans
+              : mappedThread.proposedPlans,
+            turnDiffSummaries: preservesCheckpoints
+              ? existingThread.turnDiffSummaries
+              : mappedThread.turnDiffSummaries,
+            persistedFileChanges: preservesCheckpoints
+              ? existingThread.persistedFileChanges
+              : mappedThread.persistedFileChanges,
+            activities: preservesActivities ? existingThread.activities : mappedThread.activities,
+            snapshotCoverage:
+              preservesMessages &&
+              preservesProposedPlans &&
+              preservesActivities &&
+              preservesCheckpoints
+                ? existingThread.snapshotCoverage
+                : mappedThread.snapshotCoverage,
+          }
+        : mappedThread;
   }
 
   return nextThreads;
@@ -574,7 +607,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     ? mergeProjects(state.projects, readModel.projects)
     : readModel.projects.filter((project) => project.deletedAt === null).map(mapProject);
   const threads = isPartialReadModel(readModel)
-    ? mergeThreads(state.threads, readModel.threads)
+    ? mergeThreads(state.threads, readModel.threads, readModel.snapshotProfile)
     : readModel.threads
         .filter((thread) => thread.deletedAt === null)
         .map((thread) => mapThread(thread as OrchestrationThreadWithLabels));

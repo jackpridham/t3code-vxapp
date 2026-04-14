@@ -13,6 +13,7 @@ import {
   invalidateOrchestrationSessionCatalogs,
   orchestrationSessionThreadsQueryOptions,
 } from "../../lib/orchestrationReactQuery";
+import { loadCurrentStateWithThreadDetail } from "../../lib/orchestrationCurrentStateHydration";
 import { newCommandId, newThreadId } from "../../lib/utils";
 
 export interface SessionReactivationPlan {
@@ -261,11 +262,8 @@ export async function reactivateOrchestrationSession(input: {
     ),
   );
 
-  const snapshot = await input.api.orchestration.getSnapshot({
-    profile: "active-thread",
-    threadId: plan.rootThreadIdToHydrate,
-  });
-  input.syncServerReadModel(snapshot);
+  const readModel = await loadCurrentStateWithThreadDetail(input.api, plan.rootThreadIdToHydrate);
+  input.syncServerReadModel(readModel);
 
   await input.queryClient.fetchQuery(
     orchestrationSessionThreadsQueryOptions({
@@ -345,11 +343,8 @@ export async function createNewOrchestrationSession(input: {
     ),
   );
 
-  const snapshot = await input.api.orchestration.getSnapshot({
-    profile: "active-thread",
-    threadId: newRootThreadId,
-  });
-  input.syncServerReadModel(snapshot);
+  const readModel = await loadCurrentStateWithThreadDetail(input.api, newRootThreadId);
+  input.syncServerReadModel(readModel);
 
   await input.queryClient.fetchQuery(
     orchestrationSessionThreadsQueryOptions({

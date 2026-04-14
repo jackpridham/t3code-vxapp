@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { CheckpointRef, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import { CheckpointRef, NonNegativeInt, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -767,6 +767,252 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
       assert.equal(missingContext.threadFound, false);
       assert.equal(missingContext.workspaceCwd, null);
       assert.deepEqual(missingContext.checkpoints, []);
+    }),
+  );
+
+  it.effect("returns current state without history and pages thread detail separately", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionOperationalQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_orchestrator_wakes`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          kind,
+          current_session_root_thread_id,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-current',
+          'Current Project',
+          '/tmp/project-current',
+          'orchestrator',
+          'thread-current',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '[]',
+          '2026-04-06T00:00:00.000Z',
+          '2026-04-06T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          labels_json,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at,
+          spawn_role,
+          workflow_id
+        )
+        VALUES (
+          'thread-current',
+          'project-current',
+          'Current Thread',
+          '[]',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          'turn-current',
+          '2026-04-06T00:00:02.000Z',
+          '2026-04-06T00:00:03.000Z',
+          NULL,
+          NULL,
+          'orchestrator',
+          'wf-current'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_sessions (
+          thread_id,
+          status,
+          provider_name,
+          provider_session_id,
+          provider_thread_id,
+          runtime_mode,
+          active_turn_id,
+          last_error,
+          updated_at
+        )
+        VALUES (
+          'thread-current',
+          'running',
+          'codex',
+          'session-current',
+          'provider-thread-current',
+          'full-access',
+          'turn-current',
+          NULL,
+          '2026-04-06T00:00:04.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id,
+          turn_id,
+          pending_message_id,
+          assistant_message_id,
+          state,
+          requested_at,
+          started_at,
+          completed_at,
+          checkpoint_files_json
+        )
+        VALUES (
+          'thread-current',
+          'turn-current',
+          NULL,
+          'msg-3',
+          'running',
+          '2026-04-06T00:00:05.000Z',
+          '2026-04-06T00:00:06.000Z',
+          NULL,
+          '[]'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          attachments_json,
+          created_at,
+          updated_at
+        )
+        VALUES
+          ('msg-1', 'thread-current', 'turn-current', 'user', 'one', 0, '[]', '2026-04-06T00:00:07.000Z', '2026-04-06T00:00:07.000Z'),
+          ('msg-2', 'thread-current', 'turn-current', 'assistant', 'two', 0, '[]', '2026-04-06T00:00:08.000Z', '2026-04-06T00:00:08.000Z'),
+          ('msg-3', 'thread-current', 'turn-current', 'assistant', 'three', 0, '[]', '2026-04-06T00:00:09.000Z', '2026-04-06T00:00:09.000Z')
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          ('activity-1', 'thread-current', 'turn-current', 'info', 'tool.one', 'one', '{}', 1, '2026-04-06T00:00:10.000Z'),
+          ('activity-2', 'thread-current', 'turn-current', 'tool', 'tool.two', 'two', '{}', 2, '2026-04-06T00:00:11.000Z'),
+          ('activity-3', 'thread-current', 'turn-current', 'tool', 'tool.three', 'three', '{}', 3, '2026-04-06T00:00:12.000Z')
+      `;
+
+      yield* sql`
+        INSERT INTO projection_orchestrator_wakes (
+          wake_id,
+          orchestrator_thread_id,
+          orchestrator_project_id,
+          worker_thread_id,
+          worker_project_id,
+          worker_turn_id,
+          workflow_id,
+          worker_title_snapshot,
+          outcome,
+          summary,
+          queued_at,
+          state,
+          delivery_message_id,
+          delivered_at,
+          consumed_at,
+          consume_reason
+        )
+        VALUES
+          ('wake-1', 'thread-current', 'project-current', 'worker-1', 'project-worker', 'turn-worker-1', 'wf-current', 'Worker One', 'completed', 'first wake', '2026-04-06T00:00:13.000Z', 'pending', NULL, NULL, NULL, NULL),
+          ('wake-2', 'thread-current', 'project-current', 'worker-2', 'project-worker', 'turn-worker-2', 'wf-current', 'Worker Two', 'failed', 'second wake', '2026-04-06T00:00:14.000Z', 'pending', NULL, NULL, NULL, NULL)
+      `;
+
+      const currentState = yield* query.getCurrentState();
+      assert.equal(currentState.snapshotProfile, "bootstrap-summary");
+      assert.equal(currentState.threads.length, 1);
+      assert.equal(currentState.threads[0]?.messages.length, 0);
+      assert.equal(currentState.threads[0]?.activities.length, 0);
+      assert.equal(currentState.threads[0]?.session?.status, "running");
+      assert.equal(currentState.threads[0]?.latestTurn?.state, "running");
+      assert.equal(currentState.orchestratorWakeItems.length, 0);
+
+      const messages = yield* query.listThreadMessages({
+        threadId: ThreadId.makeUnsafe("thread-current"),
+        limit: NonNegativeInt.makeUnsafe(2),
+      });
+      assert.deepEqual(
+        messages.map((message) => message.id),
+        ["msg-2", "msg-3"],
+      );
+
+      const olderMessages = yield* query.listThreadMessages({
+        threadId: ThreadId.makeUnsafe("thread-current"),
+        limit: NonNegativeInt.makeUnsafe(2),
+        beforeCreatedAt: "2026-04-06T00:00:09.000Z",
+      });
+      assert.deepEqual(
+        olderMessages.map((message) => message.id),
+        ["msg-1", "msg-2"],
+      );
+
+      const activities = yield* query.listThreadActivities({
+        threadId: ThreadId.makeUnsafe("thread-current"),
+        limit: NonNegativeInt.makeUnsafe(2),
+        beforeSequence: NonNegativeInt.makeUnsafe(3),
+      });
+      assert.deepEqual(
+        activities.map((activity) => activity.sequence),
+        [1, 2],
+      );
+
+      const sessions = yield* query.listThreadSessions({
+        threadId: ThreadId.makeUnsafe("thread-current"),
+      });
+      assert.equal(sessions[0]?.status, "running");
+
+      const wakes = yield* query.listOrchestratorWakes({
+        orchestratorThreadId: ThreadId.makeUnsafe("thread-current"),
+        limit: NonNegativeInt.makeUnsafe(1),
+      });
+      assert.deepEqual(
+        wakes.map((wake) => wake.wakeId),
+        ["wake-2"],
+      );
     }),
   );
 });

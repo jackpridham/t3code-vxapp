@@ -31,6 +31,11 @@ import {
   resolveEffectiveChangesPanelOpen,
 } from "../lib/chatChangesPanelLayout";
 import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
+import {
+  hydrateRouteThreadHistory,
+  threadNeedsRouteHistoryHydration,
+} from "../lib/routeThreadHistoryHydration";
+import { readNativeApi } from "../nativeApi";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
@@ -121,11 +126,13 @@ function ChatThreadRouteView() {
     select: (params) => ThreadId.makeUnsafe(params.threadId),
   });
   const search = Route.useSearch();
-  const threadExists = useStore((store) => store.threads.some((thread) => thread.id === threadId));
+  const routeThread = useStore((store) => store.threads.find((thread) => thread.id === threadId));
+  const threadExists = routeThread !== undefined;
   const draftThreadExists = useComposerDraftStore((store) =>
     Object.hasOwn(store.draftThreadsByThreadId, threadId),
   );
   const routeThreadExists = threadExists || draftThreadExists;
+  const routeHistoryHydrationInFlightRef = useRef(new Set<ThreadId>());
 
   const settings = useSettings();
   const showChangesPanelByDefault = settings.changesDrawerVisibility === "always_show";
@@ -176,6 +183,37 @@ function ChatThreadRouteView() {
       return;
     }
   }, [bootstrapComplete, navigate, routeThreadExists, threadId]);
+
+  useEffect(() => {
+    if (!bootstrapComplete || !routeThread || !threadNeedsRouteHistoryHydration(routeThread)) {
+      return;
+    }
+    const api = readNativeApi();
+    if (!api || routeHistoryHydrationInFlightRef.current.has(threadId)) {
+      return;
+    }
+
+    let cancelled = false;
+    routeHistoryHydrationInFlightRef.current.add(threadId);
+    void hydrateRouteThreadHistory({
+      api,
+      threadId,
+      thread: routeThread,
+      syncServerReadModel: (readModel) => {
+        if (!cancelled) {
+          useStore.getState().syncServerReadModel(readModel);
+        }
+      },
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        routeHistoryHydrationInFlightRef.current.delete(threadId);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bootstrapComplete, routeThread, threadId]);
 
   const setChangesPanelOpen = useCallback(
     (open: boolean) => {

@@ -42,10 +42,15 @@ function makeProjectionOperationalQuery(
   const unused = () => Effect.die("unexpected ProjectionOperationalQuery call");
   return {
     getReadiness: unused,
+    getCurrentState: unused,
     listProjects: unused,
     getProjectByWorkspace: unused,
     listProjectThreads: unused,
     listSessionThreads: unused,
+    listThreadMessages: unused,
+    listThreadActivities: unused,
+    listThreadSessions: unused,
+    listOrchestratorWakes: unused,
     getThreadCheckpointContext: () => Effect.succeed(context),
   };
 }
