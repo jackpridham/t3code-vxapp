@@ -12,7 +12,7 @@
 3. [Orchestration Model](#orchestration-model) — concepts, lineage, wake queue state machine
 4. [Provider Runtime](#provider-runtime) — Codex + Claude Agent ingestion into orchestration events
 5. [Model Selection & Balancing](#model-selection--balancing) — pattern-based routing, fallback chains, rate-limit ledger
-6. [Skill Packs](#skill-packs) — 44 global + 135 repo + 5 task packs, context modes, closeout authorities
+6. [Skill Packs](#skill-packs) — selective worker context, runtime contracts, authority gates
 7. [Agent Runtime Configuration](#agent-runtime-configuration) — role workspaces, pack profiles, dispatch contracts
 8. [Planning Tools — `vx plan`](#planning-tools--vx-plan) — JSON plan DSL, phases, steps, acceptance, dispatch-link
 9. [Artifact Tools — `vx artifacts`](#artifact-tools--vx-artifacts) — structured records, task lifecycle, worker summaries
@@ -226,63 +226,120 @@ Both the T3 server and workers honor the same options, so a case-selected model 
 
 ## Skill Packs
 
-Workers don't get a global skill dump. They get a **selected set** materialized into `.claude/skills/` based on role, repo, task class, context mode, and closeout authority.
+Skill packs are the context packaging layer that keeps worker prompts small without making workers blind.
 
-**Pack inventory** (canonical source: `agents-vxapp/agent-runtime/`):
+A normal coding agent has two bad options:
 
-| scope     | count | purpose                                                                                          |
-| --------- | ----: | ------------------------------------------------------------------------------------------------ |
-| global    |    44 | shared command-surface + lifecycle packs                                                         |
-| repo      |   135 | per-repo orientation, implementation, tests, review, closeout, specialist                        |
-| task      |     5 | cross-repo task-specific packs (runtime tools, workspace, websocket control, tracker, telemetry) |
-| schemas   |     7 | pack, profile, dispatch-contract, instruction-stack-audit, role-profile, installed-packs         |
-| fragments |    20 | runtime-generated CLAUDE.md fragments per repo × mode                                            |
+- Give every worker the whole instruction universe, which burns tokens and creates instruction conflicts.
+- Give workers a tiny prompt and hope they rediscover repo commands, plans, commit rules, and validation paths by searching.
 
-**Global pack numbering**:
+T3 Code uses a third option: **selective runtime context**. The orchestrator describes the repo, task class, context mode, and closeout authority; the runtime resolver turns that into a bounded set of skill packs; the worker receives only the instructions it needs for that lane.
 
-| range     | purpose                                                                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `000-009` | safety kernel + T3 worker basics                                                                                                           |
-| `010-019` | `vx apps` command surface (base, dispatch, worktree lanes, artifacts, plan, sync, install/deploy)                                          |
-| `020-029` | `vx plan` lifecycle (lifecycle, create, audit, refine, implement, implement-phase, review-refine, tests, tests-implement-refine, parallel) |
-| `030-039` | `vx t3` control plane (control-plane, dispatch, workers, lanes, health, threads, git/workspace)                                            |
-| `040-049` | records, docs, knowledge, memory/handoff                                                                                                   |
-| `050-059` | git read, closeout authority, GitHub PR                                                                                                    |
-| `060-069` | dev server, diagnostics, deploy authority                                                                                                  |
-| `070-079` | skill authoring, Claude Code setup                                                                                                         |
+Each pack is a small folder:
 
-**Repo pack slot convention** (applied to every repo):
+```text
+pack-name/
+  pack.json        # metadata, scope, capabilities, dependencies
+  SKILL.md         # the instructions the agent may load
+  references/      # optional deeper material, loaded only when needed
+```
 
-| slot      | purpose                                                                                                                 |
-| --------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `100`     | repo orientation                                                                                                        |
-| `101-109` | repo map, stack, conventions, domain, env, risks, escalation                                                            |
-| `110-119` | plan execution (implement, phase/step, edit rules, validation, state updates, dependency sequencing, blockers, handoff) |
-| `120-129` | test authoring (unit, integration, fixtures, refine, coverage contracts)                                                |
-| `130-139` | review (architecture, regression, security, plan-compliance)                                                            |
-| `140-149` | closeout (commit, push, PR, branch hygiene)                                                                             |
-| `150+`    | repo specialists (e.g. `152-api-agent-tools-runtime`, `154-vue-ui-state-boundaries`, `150-t3-domain-modeling`)          |
+That shape matters. `pack.json` is machine-readable, so dispatch can validate the pack before a worker starts. `SKILL.md` is model-readable, so the worker gets the actual operating procedure. `references/` keeps detailed guidance out of the hot path until the model has a reason to open it.
 
-**Context modes** — drive how much repo context a worker inherits:
+**The core rule:** packs are selected, never dumped.
 
-| mode           | effect                                          |
-| -------------- | ----------------------------------------------- |
-| `isolated`     | minimum viable packs; worker is self-contained  |
-| `pack-managed` | packs own all context; no repo-guided CLAUDE.md |
-| `repo-guided`  | pack + curated repo CLAUDE.md sections          |
-| `review-only`  | read-only inspection set + closeout telemetry   |
-| `closeout`     | commit/push/PR surfaces enabled under authority |
+The resolver combines several signals:
 
-**Closeout authorities** — what the worker is allowed to do at end of turn:
+| signal             | why it matters                                                                  |
+| ------------------ | ------------------------------------------------------------------------------- |
+| role               | an orchestrator, reviewer, implementation worker, and closeout worker differ    |
+| repo               | `api-vxapp`, `vue-vxapp`, `t3code-vxapp`, etc. have different commands/rules    |
+| task class         | planning, implementation, audit, tests, docs, repair, and closeout need context |
+| context mode       | controls whether repo guidance, isolated packs, or review-only packs are used   |
+| closeout authority | decides whether the worker can edit, test, commit, push, deploy, or only report |
 
-| authority                | permits                   |
-| ------------------------ | ------------------------- |
-| `code_only`              | edit + local tests only   |
-| `code_tests`             | code + run test suites    |
-| `code_tests_commit`      | ↑ + create commits        |
-| `code_tests_commit_push` | ↑ + push branch + open PR |
+The result is a worker-local skill surface under the prepared worktree:
 
-Every repo has a `pack-profile.json` that maps `task_class × context_mode → packs[] + grants[] + forbids[]`. At dispatch time, `vortex-scripts` resolves the final pack list, materializes symlinks into the worktree's `.claude/skills/`, runs an instruction-stack audit, and only then releases the worker.
+```text
+.agents/skills/              # selected skills for Codex-compatible runtimes
+.claude/skills/              # selected skills for Claude-compatible runtimes
+.agents/runtime/
+  context-plan.json
+  dispatch-contract.json
+  installed-packs.json
+  instruction-stack-audit.json
+```
+
+Those runtime JSON files are the enforcement layer. They let T3 Code answer:
+
+- What context was this worker supposed to receive?
+- Which packs were actually installed?
+- What capabilities were granted or forbidden?
+- Did the resolved instruction stack match the dispatch contract?
+- Is this worker allowed to commit, push, deploy, or only leave a report?
+
+That is the difference between "the prompt said be careful" and a dispatch contract the control plane can inspect.
+
+**Pack scopes**:
+
+| scope  | purpose                                                                                          |
+| ------ | ------------------------------------------------------------------------------------------------ |
+| global | shared command surfaces and lifecycle rules, such as `vx apps`, `vx plan`, `vx t3`, git, deploy  |
+| repo   | repo-specific orientation, stack commands, conventions, validation, review, closeout, gotchas    |
+| task   | cross-repo specialist context for recurring work types                                           |
+| role   | long-lived role skills for Jasper, Observer, Spectator, post-flight, and branch lifecycle agents |
+
+Global packs teach common mechanics. Repo packs teach local truth. Task packs add specialist context. Role skills shape long-running agents like Jasper and Observer. Workers get the selected intersection, not the whole catalog.
+
+**Global pack ranges**:
+
+| range     | purpose                                                                   |
+| --------- | ------------------------------------------------------------------------- |
+| `000-009` | safety kernel, worker basics, provider/model routing, telemetry           |
+| `010-019` | `vx apps` command surface: dispatch, worktrees, artifacts, plans, deploy  |
+| `020-029` | `vx plan` lifecycle: create, audit, refine, implement, tests, parallelism |
+| `030-039` | `vx t3` control plane: threads, workers, lanes, health, git/workspace RPC |
+| `040-049` | artifacts, records, docs, knowledge, memory, handoff                      |
+| `050-059` | source control, closeout authority, GitHub PRs                            |
+| `060-069` | dev servers, diagnostics, deployment                                      |
+| `070-079` | skill authoring and runtime/bootstrap setup                               |
+
+**Repo pack slots** use the same numbering convention across repos:
+
+| slot      | purpose                                           |
+| --------- | ------------------------------------------------- |
+| `100`     | repo orientation                                  |
+| `101-109` | repo map, stack, conventions, domain rules, risks |
+| `110-119` | plan execution, edit rules, validation, blockers  |
+| `120-129` | test authoring and test refinement                |
+| `130-139` | review, architecture, regression, security        |
+| `140-149` | closeout, commit, push, PR, branch hygiene        |
+| `150+`    | repo specialists and domain-specific subsystems   |
+
+**Context modes** decide how much the worker inherits:
+
+| mode           | behavior                                                                      |
+| -------------- | ----------------------------------------------------------------------------- |
+| `isolated`     | minimum viable pack set; worker should be self-contained                      |
+| `pack-managed` | packs are the source of truth; broad repo `CLAUDE.md` guidance is suppressed  |
+| `repo-guided`  | selected packs plus curated repo guidance                                     |
+| `review-only`  | read-only context for audit/review lanes                                      |
+| `closeout`     | closeout packs and authority surfaces are available when explicitly permitted |
+
+**Closeout authorities** are separate from instructions:
+
+| authority                | permits                                     |
+| ------------------------ | ------------------------------------------- |
+| `code_only`              | inspect and edit                            |
+| `code_tests`             | inspect, edit, and run local validation     |
+| `code_tests_commit`      | code/test authority plus local commit       |
+| `code_tests_commit_push` | code/test/commit authority plus branch push |
+
+Separating context from authority is deliberate. A worker may need to know how closeout works without being allowed to push. A reviewer may need repo conventions without edit authority. A cheap implementation worker can follow a precise phase plan without carrying every orchestration policy in its prompt.
+
+At dispatch time, `vortex-scripts` resolves the profile for the target repo, writes the runtime files, installs selected pack symlinks into the worktree, audits the instruction stack, and refuses to start the worker if the selected context is missing or contradictory.
+
+That makes skill packs a scaling primitive: Jasper can dispatch smaller, cheaper, more focused workers because the reusable knowledge lives in audited packs and runtime contracts instead of ever-growing prompts.
 
 ---
 
