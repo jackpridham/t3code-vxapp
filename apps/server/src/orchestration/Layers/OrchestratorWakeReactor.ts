@@ -1468,7 +1468,7 @@ const make = Effect.gen(function* () {
           return worker.enqueue({ source: "domain", event });
         }),
       );
-      yield* reconcileWakesOnStart;
+      yield* Effect.forkScoped(reconcileWakesOnStart);
     });
 
   return {
