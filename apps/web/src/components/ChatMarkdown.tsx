@@ -21,7 +21,7 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { resolveScratchArtifactHref } from "../lib/scratchArtifactLinks";
 import { readNativeApi } from "../nativeApi";
-import { slugifyMarkdownHeading } from "../lib/markdownHeadings";
+import { slugifyMarkdownHeading, type ParsedMarkdownHeading } from "../lib/markdownHeadings";
 import {
   createHighlightCacheKey,
   estimateHighlightedSize,
@@ -68,7 +68,7 @@ interface ChatMarkdownProps {
   isStreaming?: boolean;
   variant?: "chat" | "document";
   className?: string;
-  headingIds?: readonly string[];
+  headingAnchors?: readonly ParsedMarkdownHeading[];
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -216,7 +216,7 @@ function ChatMarkdown({
   isStreaming = false,
   variant = "chat",
   className,
-  headingIds,
+  headingAnchors,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
@@ -227,18 +227,21 @@ function ChatMarkdown({
   headingSlugCountsRef.current = new Map<string, number>();
 
   const resolveHeadingId = useCallback(
-    (children: ReactNode): string => {
-      const index = headingIdIndexRef.current;
-      headingIdIndexRef.current += 1;
-      const provided = headingIds?.[index];
-      if (provided) {
-        return provided;
+    (children: ReactNode, level: number): string => {
+      const textHeading = nodeToPlainText(children).trim();
+      const anchors = headingAnchors ?? [];
+
+      for (let index = headingIdIndexRef.current; index < anchors.length; index += 1) {
+        const anchor = anchors[index];
+        if (anchor && anchor.level === level && anchor.text === textHeading) {
+          headingIdIndexRef.current = index + 1;
+          return anchor.id;
+        }
       }
 
-      const textHeading = nodeToPlainText(children);
       return slugifyMarkdownHeading(textHeading, headingSlugCountsRef.current);
     },
-    [headingIds],
+    [headingAnchors],
   );
 
   const markdownComponents = useMemo<Components>(
@@ -301,42 +304,42 @@ function ChatMarkdown({
       },
       h1({ node: _node, children, ...props }) {
         return (
-          <h1 {...props} id={resolveHeadingId(children)}>
+          <h1 {...props} id={resolveHeadingId(children, 1)}>
             {children}
           </h1>
         );
       },
       h2({ node: _node, children, ...props }) {
         return (
-          <h2 {...props} id={resolveHeadingId(children)}>
+          <h2 {...props} id={resolveHeadingId(children, 2)}>
             {children}
           </h2>
         );
       },
       h3({ node: _node, children, ...props }) {
         return (
-          <h3 {...props} id={resolveHeadingId(children)}>
+          <h3 {...props} id={resolveHeadingId(children, 3)}>
             {children}
           </h3>
         );
       },
       h4({ node: _node, children, ...props }) {
         return (
-          <h4 {...props} id={resolveHeadingId(children)}>
+          <h4 {...props} id={resolveHeadingId(children, 4)}>
             {children}
           </h4>
         );
       },
       h5({ node: _node, children, ...props }) {
         return (
-          <h5 {...props} id={resolveHeadingId(children)}>
+          <h5 {...props} id={resolveHeadingId(children, 5)}>
             {children}
           </h5>
         );
       },
       h6({ node: _node, children, ...props }) {
         return (
-          <h6 {...props} id={resolveHeadingId(children)}>
+          <h6 {...props} id={resolveHeadingId(children, 6)}>
             {children}
           </h6>
         );

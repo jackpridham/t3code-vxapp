@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -27,7 +27,6 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import {
   buildMarkdownHeadingTree,
   extractMarkdownHeadings,
-  markdownHeadingIds,
   type MarkdownHeadingNode,
 } from "~/lib/markdownHeadings";
 import {
@@ -190,6 +189,8 @@ function ArtifactMarkdownHeadingsNav({
 
 function ArtifactDetailPageContent({ targetId, artifactTitle }: ArtifactDetailPageProps) {
   const navigate = useNavigate();
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const markdownRef = useRef<HTMLDivElement | null>(null);
   const backHref = buildArtifactsTargetHref({ targetId });
   const appsQuery = useQuery(vortexAppsListQueryOptions());
   const {
@@ -241,15 +242,27 @@ function ArtifactDetailPageContent({ targetId, artifactTitle }: ArtifactDetailPa
     [fileContent.data],
   );
   const headingTree = useMemo(() => buildMarkdownHeadingTree(markdownHeadings), [markdownHeadings]);
-  const headingIds = useMemo(() => markdownHeadingIds(markdownHeadings), [markdownHeadings]);
 
   const scrollToHeading = useCallback((headingId: string) => {
-    const heading = document.getElementById(headingId);
-    if (heading) {
-      heading.tabIndex = -1;
-      heading.scrollIntoView({ behavior: "smooth", block: "start" });
-      heading.focus();
+    const scrollContainer = scrollContainerRef.current;
+    const markdownRoot = markdownRef.current;
+    if (!scrollContainer || !markdownRoot) {
+      return;
     }
+
+    const heading = Array.from(markdownRoot.querySelectorAll<HTMLElement>("[id]")).find(
+      (element) => element.id === headingId,
+    );
+    if (!heading) {
+      return;
+    }
+
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const headingRect = heading.getBoundingClientRect();
+    const nextScrollTop = scrollContainer.scrollTop + headingRect.top - containerRect.top - 12;
+    scrollContainer.scrollTo({ top: Math.max(0, nextScrollTop), behavior: "smooth" });
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
   }, []);
 
   if (isArtifactListLoading) {
@@ -331,7 +344,10 @@ function ArtifactDetailPageContent({ targetId, artifactTitle }: ArtifactDetailPa
   }
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-y-auto bg-background text-foreground">
+    <main
+      ref={scrollContainerRef}
+      className="flex h-dvh min-h-0 flex-col overflow-y-auto bg-background text-foreground"
+    >
       <article className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-6">
         <a
           className="text-xs text-muted-foreground hover:text-foreground"
@@ -442,64 +458,60 @@ function ArtifactDetailPageContent({ targetId, artifactTitle }: ArtifactDetailPa
           ) : null}
         </header>
 
-        <div className="min-h-0 pb-10">
-          <div className="flex min-h-0 gap-2">
-            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-              <ChatMarkdown
-                text={fileContent.data ?? ""}
-                cwd={targetProject?.path}
-                headingIds={headingIds}
-                variant="document"
-              />
-            </div>
-            <div className="shrink-0 transition-[width] duration-200 ease-in-out">
-              <div
-                className={`h-full min-h-0 ${
-                  headingNavOpen
-                    ? "w-80 border-l border-border/70"
-                    : "w-12 border-l border-border/70"
-                } sticky top-4`}
-              >
-                <button
-                  type="button"
-                  className="mx-auto flex h-9 w-9 items-center justify-center rounded-md border border-border/75 bg-background/90 text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => setHeadingNavOpen((value) => !value)}
-                  aria-expanded={headingNavOpen}
-                  aria-controls="artifact-markdown-headings-nav"
-                  title={headingNavOpen ? "Hide markdown headings" : "Show markdown headings"}
-                >
-                  {headingNavOpen ? (
-                    <ChevronRightIcon className="size-4" />
-                  ) : (
-                    <ChevronLeftIcon className="size-4" />
-                  )}
-                </button>
-                {headingNavOpen ? (
-                  <div
-                    id="artifact-markdown-headings-nav"
-                    className="mt-2 flex min-h-0 flex-col border-t border-border/40"
-                  >
-                    <div className="flex items-center gap-1 border-b border-border/60 px-2 py-2">
-                      <ListIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                      <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                        Headings
-                      </p>
-                    </div>
-                    <ScrollArea className="h-[min(26rem,calc(100dvh-11rem))]">
-                      <div className="px-2 py-2">
-                        <ArtifactMarkdownHeadingsNav
-                          nodes={headingTree}
-                          onNavigate={scrollToHeading}
-                        />
-                      </div>
-                    </ScrollArea>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
+        <div ref={markdownRef} className="min-h-0 pb-10">
+          <ChatMarkdown
+            text={fileContent.data ?? ""}
+            cwd={targetProject?.path}
+            headingAnchors={markdownHeadings}
+            variant="document"
+          />
         </div>
       </article>
+
+      {headingNavOpen ? (
+        <aside
+          id="artifact-markdown-headings-nav"
+          className="fixed top-4 right-4 bottom-4 z-40 flex w-[calc(100vw-2rem)] max-w-80 flex-col rounded-lg border border-border/70 bg-card/95 shadow-lg backdrop-blur"
+          aria-label="Markdown headings"
+        >
+          <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/60 px-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ListIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <p className="truncate text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Headings
+              </p>
+            </div>
+            <button
+              type="button"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/80 hover:text-foreground"
+              onClick={() => setHeadingNavOpen(false)}
+              aria-label="Hide markdown headings"
+              aria-expanded={headingNavOpen}
+              aria-controls="artifact-markdown-headings-nav"
+              title="Hide markdown headings"
+            >
+              <ChevronRightIcon className="size-4" />
+            </button>
+          </div>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="px-2 py-2">
+              <ArtifactMarkdownHeadingsNav nodes={headingTree} onNavigate={scrollToHeading} />
+            </div>
+          </ScrollArea>
+        </aside>
+      ) : (
+        <button
+          type="button"
+          className="fixed top-4 right-4 z-40 flex size-9 items-center justify-center rounded-md border border-border/75 bg-card/95 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:text-foreground"
+          onClick={() => setHeadingNavOpen(true)}
+          aria-label="Show markdown headings"
+          aria-expanded={headingNavOpen}
+          aria-controls="artifact-markdown-headings-nav"
+          title="Show markdown headings"
+        >
+          <ChevronLeftIcon className="size-4" />
+        </button>
+      )}
     </main>
   );
 }
