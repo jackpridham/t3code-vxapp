@@ -1,4 +1,13 @@
-import { CheckpointRef, EventId, MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  CheckpointRef,
+  EventId,
+  MessageId,
+  ProgramId,
+  ProgramNotificationId,
+  ProjectId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -9,6 +18,9 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQu
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
+const asProgramId = (value: string): ProgramId => ProgramId.makeUnsafe(value);
+const asProgramNotificationId = (value: string): ProgramNotificationId =>
+  ProgramNotificationId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
@@ -26,6 +38,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const sql = yield* SqlClient.SqlClient;
 
       yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_program_notifications`;
+      yield* sql`DELETE FROM projection_programs`;
       yield* sql`DELETE FROM projection_state`;
       yield* sql`DELETE FROM projection_orchestrator_wakes`;
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
@@ -51,6 +65,78 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '2026-02-24T00:00:00.000Z',
           '2026-02-24T00:00:01.000Z',
           NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_programs (
+          program_id,
+          title,
+          objective,
+          status,
+          executive_project_id,
+          executive_thread_id,
+          current_orchestrator_thread_id,
+          created_at,
+          updated_at,
+          completed_at,
+          deleted_at
+        )
+        VALUES (
+          'program-cto',
+          'Founder task',
+          'Convert founder request into Jasper orchestration.',
+          'active',
+          'project-1',
+          'thread-1',
+          'thread-1',
+          '2026-02-24T00:00:01.250Z',
+          '2026-02-24T00:00:01.500Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_program_notifications (
+          notification_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id,
+          orchestrator_thread_id,
+          kind,
+          severity,
+          summary,
+          evidence_json,
+          state,
+          queued_at,
+          delivered_at,
+          consumed_at,
+          dropped_at,
+          consume_reason,
+          drop_reason,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'notif-cto',
+          'program-cto',
+          'project-1',
+          'thread-1',
+          'thread-1',
+          'decision_required',
+          'warning',
+          'Choose the deployment lane.',
+          '{"workerThreadId":"thread-worker-1"}',
+          'pending',
+          '2026-02-24T00:00:01.750Z',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          '2026-02-24T00:00:01.750Z',
+          '2026-02-24T00:00:01.750Z'
         )
       `;
 
@@ -305,6 +391,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         wakeItemCount: 1,
         wakeItemLimit: 100,
         wakeItemsTruncated: false,
+        warnings: [],
       });
       assert.deepEqual(snapshot.projects, [
         {
@@ -329,6 +416,43 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
           deletedAt: null,
+        },
+      ]);
+      assert.deepEqual(snapshot.programs, [
+        {
+          id: asProgramId("program-cto"),
+          title: "Founder task",
+          objective: "Convert founder request into Jasper orchestration.",
+          status: "active",
+          executiveProjectId: asProjectId("project-1"),
+          executiveThreadId: asThreadId("thread-1"),
+          currentOrchestratorThreadId: asThreadId("thread-1"),
+          createdAt: "2026-02-24T00:00:01.250Z",
+          updatedAt: "2026-02-24T00:00:01.500Z",
+          completedAt: null,
+          deletedAt: null,
+        },
+      ]);
+      assert.deepEqual(snapshot.programNotifications, [
+        {
+          notificationId: asProgramNotificationId("notif-cto"),
+          programId: asProgramId("program-cto"),
+          executiveProjectId: asProjectId("project-1"),
+          executiveThreadId: asThreadId("thread-1"),
+          orchestratorThreadId: asThreadId("thread-1"),
+          kind: "decision_required",
+          severity: "warning",
+          summary: "Choose the deployment lane.",
+          evidence: { workerThreadId: "thread-worker-1" },
+          state: "pending",
+          queuedAt: "2026-02-24T00:00:01.750Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          consumeReason: undefined,
+          dropReason: undefined,
+          createdAt: "2026-02-24T00:00:01.750Z",
+          updatedAt: "2026-02-24T00:00:01.750Z",
         },
       ]);
       assert.deepEqual(snapshot.orchestratorWakeItems, [
@@ -440,6 +564,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           checkpointCount: 1,
           checkpointLimit: 50,
           checkpointsTruncated: false,
+          warnings: [],
         },
         session: {
           threadId: ThreadId.makeUnsafe("thread-1"),
@@ -456,9 +581,34 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         spawnRole: undefined,
         spawnedBy: undefined,
         workflowId: undefined,
+        programId: undefined,
+        executiveProjectId: undefined,
+        executiveThreadId: undefined,
       });
       assert.equal(snapshot.threads[1]?.archivedAt, "2026-02-24T00:00:09.500Z");
       assert.equal(snapshot.threads[1]?.messages.length, 0);
+
+      const commandStateSnapshot = yield* snapshotQuery.getSnapshot({ profile: "command-state" });
+      assert.equal(commandStateSnapshot.snapshotProfile, "command-state");
+      assert.deepEqual(commandStateSnapshot.snapshotCoverage, {
+        includeArchivedThreads: true,
+        wakeItemCount: 1,
+        wakeItemLimit: 100,
+        wakeItemsTruncated: false,
+        warnings: [],
+      });
+      assert.deepEqual(
+        commandStateSnapshot.threads.map((thread) => thread.id),
+        [asThreadId("thread-1"), asThreadId("thread-archived")],
+      );
+      const commandThread = commandStateSnapshot.threads.find((thread) => thread.id === "thread-1");
+      assert.equal(commandThread?.messages.length, 0);
+      assert.deepEqual(
+        commandThread?.proposedPlans.map((plan) => plan.id),
+        ["plan-1"],
+      );
+      assert.equal(commandThread?.activities.length, 0);
+      assert.equal(commandThread?.checkpoints.length, 0);
 
       const debugSnapshot = yield* snapshotQuery.getSnapshot({ profile: "debug-export" });
       assert.equal(debugSnapshot.snapshotProfile, "debug-export");
@@ -467,6 +617,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         wakeItemCount: 1,
         wakeItemLimit: null,
         wakeItemsTruncated: false,
+        warnings: [],
       });
       assert.equal(debugSnapshot.threads.length, 2);
       assert.equal(debugSnapshot.threads[1]?.id, ThreadId.makeUnsafe("thread-archived"));
@@ -763,6 +914,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           wakeItemCount: 105,
           wakeItemLimit: 100,
           wakeItemsTruncated: true,
+          warnings: [],
         });
         assert.equal(snapshot.orchestratorWakeItems.length, 100);
         assert.equal(snapshot.orchestratorWakeItems[0]?.wakeId, "wake-6");
@@ -792,6 +944,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           checkpointCount: 55,
           checkpointLimit: 50,
           checkpointsTruncated: true,
+          warnings: [],
         });
 
         const debugSnapshot = yield* snapshotQuery.getSnapshot({ profile: "debug-export" });
@@ -802,6 +955,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           wakeItemCount: 105,
           wakeItemLimit: null,
           wakeItemsTruncated: false,
+          warnings: [],
         });
         assert.equal(debugSnapshot.orchestratorWakeItems.length, 105);
         assert.equal(debugThread?.messages.length, 205);
@@ -821,6 +975,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           checkpointCount: 55,
           checkpointLimit: null,
           checkpointsTruncated: false,
+          warnings: [],
         });
       }),
   );

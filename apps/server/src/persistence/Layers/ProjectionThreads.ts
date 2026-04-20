@@ -69,7 +69,10 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           parent_thread_id,
           spawn_role,
           spawned_by,
-          workflow_id
+          workflow_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id
         )
         VALUES (
           ${row.threadId},
@@ -91,7 +94,10 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.parentThreadId},
           ${row.spawnRole},
           ${row.spawnedBy},
-          ${row.workflowId}
+          ${row.workflowId},
+          ${row.programId},
+          ${row.executiveProjectId},
+          ${row.executiveThreadId}
         )
         ON CONFLICT (thread_id)
         DO UPDATE SET
@@ -113,7 +119,10 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           parent_thread_id = excluded.parent_thread_id,
           spawn_role = excluded.spawn_role,
           spawned_by = excluded.spawned_by,
-          workflow_id = excluded.workflow_id
+          workflow_id = excluded.workflow_id,
+          program_id = excluded.program_id,
+          executive_project_id = excluded.executive_project_id,
+          executive_thread_id = excluded.executive_thread_id
       `;
     },
   });
@@ -143,7 +152,10 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           parent_thread_id AS "parentThreadId",
           spawn_role AS "spawnRole",
           spawned_by AS "spawnedBy",
-          workflow_id AS "workflowId"
+          workflow_id AS "workflowId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId"
         FROM projection_threads
         WHERE thread_id = ${threadId}
       `,
@@ -174,7 +186,10 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           parent_thread_id AS "parentThreadId",
           spawn_role AS "spawnRole",
           spawned_by AS "spawnedBy",
-          workflow_id AS "workflowId"
+          workflow_id AS "workflowId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId"
         FROM projection_threads
         WHERE project_id = ${projectId}
         ORDER BY created_at ASC, thread_id ASC

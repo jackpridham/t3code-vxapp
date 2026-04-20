@@ -771,6 +771,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case ORCHESTRATION_WS_METHODS.getSnapshot: {
         const body = stripRequestTag(request.body);
+        if (body.profile === "debug-export" && body.allowDebugExport !== true) {
+          return yield* new RouteRequestError({
+            message: "debug-export snapshots require allowDebugExport=true",
+          });
+        }
         return yield* projectionReadModelQuery.getSnapshot(body);
       }
 

@@ -3,8 +3,11 @@ import {
   MessageId,
   ModelSelection,
   OrchestrationProjectKind,
+  OrchestrationProgramStatus,
   OrchestrationReadModel,
+  ProgramNotificationEvidence,
   ProjectId,
+  ProgramId,
   ProjectHooks,
   ProjectScript,
   ThreadId,
@@ -12,6 +15,8 @@ import {
   TurnId,
   type OrchestrationLatestTurn,
   type OrchestrationProject,
+  type OrchestrationProgram,
+  type OrchestrationProgramNotification,
   type OrchestrationSession,
   type OrchestrationThread,
   type OrchestratorWakeItem,
@@ -27,6 +32,8 @@ import {
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
 import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
+import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
+import { ProjectionProgram } from "../../persistence/Services/ProjectionPrograms.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
@@ -47,6 +54,24 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     hooks: Schema.fromJsonString(ProjectHooks),
+  }),
+);
+
+const ProjectionProgramDbRowSchema = ProjectionProgram.mapFields(
+  Struct.assign({
+    programId: ProgramId,
+    status: OrchestrationProgramStatus,
+    executiveProjectId: ProjectId,
+    executiveThreadId: ThreadId,
+    currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  }),
+);
+
+const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.mapFields(
+  Struct.assign({
+    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
+    consumeReason: Schema.NullOr(Schema.String),
+    dropReason: Schema.NullOr(Schema.String),
   }),
 );
 
@@ -76,6 +101,8 @@ const ProjectionStateDbRowSchema = ProjectionState;
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
+  ORCHESTRATION_PROJECTOR_NAMES.programs,
+  ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
   ORCHESTRATION_PROJECTOR_NAMES.threads,
   ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
@@ -150,6 +177,60 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
       `,
   });
 
+  const listProgramRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProgramDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          program_id AS "programId",
+          title,
+          objective,
+          status,
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId",
+          current_orchestrator_thread_id AS "currentOrchestratorThreadId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          completed_at AS "completedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_programs
+        WHERE deleted_at IS NULL
+        ORDER BY created_at ASC, program_id ASC
+      `,
+  });
+
+  const listProgramNotificationRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProgramNotificationDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          notification_id AS "notificationId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId",
+          orchestrator_thread_id AS "orchestratorThreadId",
+          kind,
+          severity,
+          summary,
+          evidence_json AS "evidence",
+          state,
+          queued_at AS "queuedAt",
+          delivered_at AS "deliveredAt",
+          consumed_at AS "consumedAt",
+          dropped_at AS "droppedAt",
+          consume_reason AS "consumeReason",
+          drop_reason AS "dropReason",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_program_notifications
+        WHERE state IN ('pending', 'delivering', 'delivered')
+        ORDER BY queued_at DESC, notification_id ASC
+        LIMIT 100
+      `,
+  });
+
   const listThreadRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadDbRowSchema,
@@ -175,7 +256,10 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           parent_thread_id AS "parentThreadId",
           spawn_role AS "spawnRole",
           spawned_by AS "spawnedBy",
-          workflow_id AS "workflowId"
+          workflow_id AS "workflowId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId"
         FROM projection_threads
         WHERE archived_at IS NULL
           AND deleted_at IS NULL
@@ -268,57 +352,81 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
     sql
       .withTransaction(
         Effect.gen(function* () {
-          const [projectRows, threadRows, sessionRows, latestTurnRows, wakeRows, stateRows] =
-            yield* Effect.all([
-              listProjectRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:decodeRows",
-                  ),
+          const [
+            projectRows,
+            programRows,
+            programNotificationRows,
+            threadRows,
+            sessionRows,
+            latestTurnRows,
+            wakeRows,
+            stateRows,
+          ] = yield* Effect.all([
+            listProjectRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:decodeRows",
                 ),
               ),
-              listThreadRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:decodeRows",
-                  ),
+            ),
+            listProgramRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:decodeRows",
                 ),
               ),
-              listThreadSessionRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:decodeRows",
-                  ),
+            ),
+            listProgramNotificationRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:decodeRows",
                 ),
               ),
-              listLatestTurnRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:decodeRows",
-                  ),
+            ),
+            listThreadRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:decodeRows",
                 ),
               ),
-              listOrchestratorWakeRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:decodeRows",
-                  ),
+            ),
+            listThreadSessionRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:decodeRows",
                 ),
               ),
-              listProjectionStateRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:decodeRows",
-                  ),
+            ),
+            listLatestTurnRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:decodeRows",
                 ),
               ),
-            ]);
+            ),
+            listOrchestratorWakeRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:decodeRows",
+                ),
+              ),
+            ),
+            listProjectionStateRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:decodeRows",
+                ),
+              ),
+            ),
+          ]);
 
           const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
           const sessionsByThread = new Map<string, OrchestrationSession>();
@@ -369,6 +477,12 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           for (const row of projectRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
+          for (const row of programRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+          for (const row of programNotificationRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
           for (const row of threadRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
@@ -398,6 +512,42 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 : undefined,
             ),
           );
+
+          const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) => ({
+            id: row.programId,
+            title: row.title,
+            objective: row.objective,
+            status: row.status,
+            executiveProjectId: row.executiveProjectId,
+            executiveThreadId: row.executiveThreadId,
+            currentOrchestratorThreadId: row.currentOrchestratorThreadId,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+            completedAt: row.completedAt,
+            deletedAt: row.deletedAt,
+          }));
+
+          const programNotifications: ReadonlyArray<OrchestrationProgramNotification> =
+            programNotificationRows.map((row) => ({
+              notificationId: row.notificationId,
+              programId: row.programId,
+              executiveProjectId: row.executiveProjectId,
+              executiveThreadId: row.executiveThreadId,
+              orchestratorThreadId: row.orchestratorThreadId,
+              kind: row.kind,
+              severity: row.severity,
+              summary: row.summary,
+              evidence: row.evidence,
+              state: row.state,
+              queuedAt: row.queuedAt,
+              deliveredAt: row.deliveredAt,
+              consumedAt: row.consumedAt,
+              droppedAt: row.droppedAt,
+              consumeReason: row.consumeReason ?? undefined,
+              dropReason: row.dropReason ?? undefined,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+            }));
 
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map(
             (row) =>
@@ -433,6 +583,13 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
                 row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
                 row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+                row.programId !== null ? { programId: row.programId } : undefined,
+                row.executiveProjectId !== null
+                  ? { executiveProjectId: row.executiveProjectId }
+                  : undefined,
+                row.executiveThreadId !== null
+                  ? { executiveThreadId: row.executiveThreadId }
+                  : undefined,
               ) satisfies OrchestrationThread,
           );
 
@@ -465,6 +622,8 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             snapshotSequence: computeSnapshotSequence(stateRows),
             snapshotProfile: "bootstrap-summary",
             projects,
+            programs,
+            programNotifications,
             threads,
             orchestratorWakeItems,
             updatedAt: updatedAt ?? new Date(0).toISOString(),

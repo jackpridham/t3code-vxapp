@@ -10,6 +10,7 @@ import {
   IsoDateTime,
   ModelSelection,
   ProjectId,
+  ProgramId,
   ProviderInteractionMode,
   RuntimeMode,
   ThreadLabels,
@@ -42,6 +43,9 @@ export const ProjectionThread = Schema.Struct({
   spawnRole: Schema.NullOr(Schema.Literals(["orchestrator", "worker", "supervisor"])),
   spawnedBy: Schema.NullOr(Schema.String),
   workflowId: Schema.NullOr(Schema.String),
+  programId: Schema.NullOr(ProgramId),
+  executiveProjectId: Schema.NullOr(ProjectId),
+  executiveThreadId: Schema.NullOr(ThreadId),
 });
 export type ProjectionThread = typeof ProjectionThread.Type;
 

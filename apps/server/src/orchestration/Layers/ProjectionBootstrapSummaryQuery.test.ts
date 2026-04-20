@@ -1,3 +1,4 @@
+import { ProgramId, ProgramNotificationId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -20,6 +21,8 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       const sql = yield* SqlClient.SqlClient;
 
       yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_program_notifications`;
+      yield* sql`DELETE FROM projection_programs`;
       yield* sql`DELETE FROM projection_threads`;
       yield* sql`DELETE FROM projection_thread_sessions`;
       yield* sql`DELETE FROM projection_turns`;
@@ -48,6 +51,78 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
           '2026-04-06T00:00:00.000Z',
           '2026-04-06T00:00:01.000Z',
           NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_programs (
+          program_id,
+          title,
+          objective,
+          status,
+          executive_project_id,
+          executive_thread_id,
+          current_orchestrator_thread_id,
+          created_at,
+          updated_at,
+          completed_at,
+          deleted_at
+        )
+        VALUES (
+          'program-active',
+          'Founder task',
+          'Run the first CTO-owned task.',
+          'active',
+          'project-1',
+          'thread-active',
+          'thread-active',
+          '2026-04-06T00:00:01.250Z',
+          '2026-04-06T00:00:01.500Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_program_notifications (
+          notification_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id,
+          orchestrator_thread_id,
+          kind,
+          severity,
+          summary,
+          evidence_json,
+          state,
+          queued_at,
+          delivered_at,
+          consumed_at,
+          dropped_at,
+          consume_reason,
+          drop_reason,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'notif-active',
+          'program-active',
+          'project-1',
+          'thread-active',
+          'thread-active',
+          'status_update',
+          'info',
+          'Worker lane is ready.',
+          '{}',
+          'pending',
+          '2026-04-06T00:00:01.750Z',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          '2026-04-06T00:00:01.750Z',
+          '2026-04-06T00:00:01.750Z'
         )
       `;
 
@@ -216,6 +291,43 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       assert.equal(summary.snapshotSequence, 10);
       assert.equal(summary.snapshotProfile, "bootstrap-summary");
       assert.equal(summary.projects.length, 1);
+      assert.deepEqual(summary.programs, [
+        {
+          id: ProgramId.makeUnsafe("program-active"),
+          title: "Founder task",
+          objective: "Run the first CTO-owned task.",
+          status: "active",
+          executiveProjectId: ProjectId.makeUnsafe("project-1"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-active"),
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("thread-active"),
+          createdAt: "2026-04-06T00:00:01.250Z",
+          updatedAt: "2026-04-06T00:00:01.500Z",
+          completedAt: null,
+          deletedAt: null,
+        },
+      ]);
+      assert.deepEqual(summary.programNotifications, [
+        {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-active"),
+          programId: ProgramId.makeUnsafe("program-active"),
+          executiveProjectId: ProjectId.makeUnsafe("project-1"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-active"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-active"),
+          kind: "status_update",
+          severity: "info",
+          summary: "Worker lane is ready.",
+          evidence: {},
+          state: "pending",
+          queuedAt: "2026-04-06T00:00:01.750Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          consumeReason: undefined,
+          dropReason: undefined,
+          createdAt: "2026-04-06T00:00:01.750Z",
+          updatedAt: "2026-04-06T00:00:01.750Z",
+        },
+      ]);
       assert.equal(summary.threads.length, 1);
       assert.equal(summary.threads[0]?.id, "thread-active");
       assert.deepEqual(summary.threads[0]?.messages, []);

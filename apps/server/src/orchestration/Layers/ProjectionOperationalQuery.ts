@@ -6,6 +6,9 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationReadModel,
   OrchestrationProjectKind,
+  OrchestrationProgramStatus,
+  ProgramId,
+  ProgramNotificationEvidence,
   OrchestratorWakeItem,
   ProjectId,
   ProjectHooks,
@@ -24,6 +27,8 @@ import {
   type OrchestrationListThreadSessionsResult,
   type OrchestrationListProjectsResult,
   type OrchestrationMessage,
+  type OrchestrationProgram,
+  type OrchestrationProgramNotification,
   type OrchestrationSession,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
@@ -41,6 +46,8 @@ import {
 } from "../../persistence/Errors.ts";
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
+import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
+import { ProjectionProgram } from "../../persistence/Services/ProjectionPrograms.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -65,6 +72,24 @@ const ProjectionProjectSummaryDbRowSchema = ProjectionProject.mapFields(
 );
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
+
+const ProjectionProgramDbRowSchema = ProjectionProgram.mapFields(
+  Struct.assign({
+    programId: ProgramId,
+    status: OrchestrationProgramStatus,
+    executiveProjectId: ProjectId,
+    executiveThreadId: ThreadId,
+    currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  }),
+);
+
+const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.mapFields(
+  Struct.assign({
+    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
+    consumeReason: Schema.NullOr(Schema.String),
+    dropReason: Schema.NullOr(Schema.String),
+  }),
+);
 
 const ProjectionThreadSummaryDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
@@ -181,6 +206,8 @@ function mapProjectRowToSummary(
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
+  ORCHESTRATION_PROJECTOR_NAMES.programs,
+  ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
   ORCHESTRATION_PROJECTOR_NAMES.threads,
   ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
@@ -281,6 +308,9 @@ function mapThreadSummaryRows(input: {
     spawnRole: row.spawnRole ?? undefined,
     spawnedBy: row.spawnedBy ?? undefined,
     workflowId: row.workflowId ?? undefined,
+    programId: row.programId ?? undefined,
+    executiveProjectId: row.executiveProjectId ?? undefined,
+    executiveThreadId: row.executiveThreadId ?? undefined,
     sessionWorkerThreadCount: row.sessionWorkerThreadCount ?? undefined,
   }));
 }
@@ -334,6 +364,13 @@ function mapSummaryToThread(summary: OrchestrationThreadSummary): OrchestrationT
     ...(summary.spawnRole !== undefined ? { spawnRole: summary.spawnRole } : {}),
     ...(summary.spawnedBy !== undefined ? { spawnedBy: summary.spawnedBy } : {}),
     ...(summary.workflowId !== undefined ? { workflowId: summary.workflowId } : {}),
+    ...(summary.programId !== undefined ? { programId: summary.programId } : {}),
+    ...(summary.executiveProjectId !== undefined
+      ? { executiveProjectId: summary.executiveProjectId }
+      : {}),
+    ...(summary.executiveThreadId !== undefined
+      ? { executiveThreadId: summary.executiveThreadId }
+      : {}),
   };
 }
 
@@ -361,6 +398,60 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
         FROM projection_projects
         WHERE deleted_at IS NULL
         ORDER BY created_at ASC, project_id ASC
+      `,
+  });
+
+  const listProgramRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProgramDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          program_id AS "programId",
+          title,
+          objective,
+          status,
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId",
+          current_orchestrator_thread_id AS "currentOrchestratorThreadId",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          completed_at AS "completedAt",
+          deleted_at AS "deletedAt"
+        FROM projection_programs
+        WHERE deleted_at IS NULL
+        ORDER BY created_at ASC, program_id ASC
+      `,
+  });
+
+  const listProgramNotificationRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionProgramNotificationDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          notification_id AS "notificationId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId",
+          orchestrator_thread_id AS "orchestratorThreadId",
+          kind,
+          severity,
+          summary,
+          evidence_json AS "evidence",
+          state,
+          queued_at AS "queuedAt",
+          delivered_at AS "deliveredAt",
+          consumed_at AS "consumedAt",
+          dropped_at AS "droppedAt",
+          consume_reason AS "consumeReason",
+          drop_reason AS "dropReason",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_program_notifications
+        WHERE state IN ('pending', 'delivering', 'delivered')
+        ORDER BY queued_at DESC, notification_id ASC
+        LIMIT 100
       `,
   });
 
@@ -420,7 +511,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             parent_thread_id AS "parentThreadId",
             spawn_role AS "spawnRole",
             spawned_by AS "spawnedBy",
-            workflow_id AS "workflowId"
+            workflow_id AS "workflowId",
+            program_id AS "programId",
+            executive_project_id AS "executiveProjectId",
+            executive_thread_id AS "executiveThreadId"
           FROM projection_threads
           WHERE project_id = ${projectId}
           ORDER BY created_at ASC, thread_id ASC
@@ -448,7 +542,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             parent_thread_id AS "parentThreadId",
             spawn_role AS "spawnRole",
             spawned_by AS "spawnedBy",
-            workflow_id AS "workflowId"
+            workflow_id AS "workflowId",
+            program_id AS "programId",
+            executive_project_id AS "executiveProjectId",
+            executive_thread_id AS "executiveThreadId"
           FROM projection_threads
           WHERE project_id = ${projectId}
             AND deleted_at IS NULL
@@ -477,7 +574,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             parent_thread_id AS "parentThreadId",
             spawn_role AS "spawnRole",
             spawned_by AS "spawnedBy",
-            workflow_id AS "workflowId"
+            workflow_id AS "workflowId",
+            program_id AS "programId",
+            executive_project_id AS "executiveProjectId",
+            executive_thread_id AS "executiveThreadId"
           FROM projection_threads
           WHERE project_id = ${projectId}
             AND archived_at IS NULL
@@ -505,7 +605,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           t.parent_thread_id AS "parentThreadId",
           t.spawn_role AS "spawnRole",
           t.spawned_by AS "spawnedBy",
-          t.workflow_id AS "workflowId"
+          t.workflow_id AS "workflowId",
+          t.program_id AS "programId",
+          t.executive_project_id AS "executiveProjectId",
+          t.executive_thread_id AS "executiveThreadId"
         FROM projection_threads t
         WHERE t.project_id = ${projectId}
           AND t.archived_at IS NULL
@@ -729,7 +832,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           t.parent_thread_id AS "parentThreadId",
           t.spawn_role AS "spawnRole",
           t.spawned_by AS "spawnedBy",
-          t.workflow_id AS "workflowId"
+          t.workflow_id AS "workflowId",
+          t.program_id AS "programId",
+          t.executive_project_id AS "executiveProjectId",
+          t.executive_thread_id AS "executiveThreadId"
         FROM projection_threads t
         INNER JOIN projection_projects p ON p.project_id = t.project_id
         WHERE t.archived_at IS NULL
@@ -798,7 +904,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             parent_thread_id AS "parentThreadId",
             spawn_role AS "spawnRole",
             spawned_by AS "spawnedBy",
-            workflow_id AS "workflowId"
+            workflow_id AS "workflowId",
+            program_id AS "programId",
+            executive_project_id AS "executiveProjectId",
+            executive_thread_id AS "executiveThreadId"
           FROM projection_threads
           WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
           ORDER BY created_at ASC, thread_id ASC
@@ -858,7 +967,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             parent_thread_id AS "parentThreadId",
             spawn_role AS "spawnRole",
             spawned_by AS "spawnedBy",
-            workflow_id AS "workflowId"
+            workflow_id AS "workflowId",
+            program_id AS "programId",
+            executive_project_id AS "executiveProjectId",
+            executive_thread_id AS "executiveThreadId"
           FROM projection_threads
           WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
             AND deleted_at IS NULL
@@ -919,7 +1031,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             parent_thread_id AS "parentThreadId",
             spawn_role AS "spawnRole",
             spawned_by AS "spawnedBy",
-            workflow_id AS "workflowId"
+            workflow_id AS "workflowId",
+            program_id AS "programId",
+            executive_project_id AS "executiveProjectId",
+            executive_thread_id AS "executiveThreadId"
           FROM projection_threads
           WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
             AND archived_at IS NULL
@@ -982,7 +1097,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           parent_thread_id AS "parentThreadId",
           spawn_role AS "spawnRole",
           spawned_by AS "spawnedBy",
-          workflow_id AS "workflowId"
+          workflow_id AS "workflowId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId"
         FROM projection_threads
         WHERE thread_id IN (SELECT thread_id FROM family_with_workflow)
           AND archived_at IS NULL
@@ -1366,6 +1484,22 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               ),
             ),
           );
+          const programRows = yield* listProgramRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionOperationalQuery.getCurrentState:listPrograms:query",
+                "ProjectionOperationalQuery.getCurrentState:listPrograms:decodeRows",
+              ),
+            ),
+          );
+          const programNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionOperationalQuery.getCurrentState:listProgramNotifications:query",
+                "ProjectionOperationalQuery.getCurrentState:listProgramNotifications:decodeRows",
+              ),
+            ),
+          );
 
           const threadRows = yield* listCurrentThreadRows(undefined).pipe(
             Effect.mapError(
@@ -1398,9 +1532,50 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             latestTurns: latestTurnRows,
           });
           const updatedAt =
-            [...projectRows.map((row) => row.updatedAt), ...stateRows.map((row) => row.updatedAt)]
+            [
+              ...projectRows.map((row) => row.updatedAt),
+              ...programRows.map((row) => row.updatedAt),
+              ...programNotificationRows.map((row) => row.updatedAt),
+              ...stateRows.map((row) => row.updatedAt),
+            ]
               .toSorted()
               .at(-1) ?? new Date(0).toISOString();
+
+          const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) => ({
+            id: row.programId,
+            title: row.title,
+            objective: row.objective,
+            status: row.status,
+            executiveProjectId: row.executiveProjectId,
+            executiveThreadId: row.executiveThreadId,
+            currentOrchestratorThreadId: row.currentOrchestratorThreadId,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+            completedAt: row.completedAt,
+            deletedAt: row.deletedAt,
+          }));
+
+          const programNotifications: ReadonlyArray<OrchestrationProgramNotification> =
+            programNotificationRows.map((row) => ({
+              notificationId: row.notificationId,
+              programId: row.programId,
+              executiveProjectId: row.executiveProjectId,
+              executiveThreadId: row.executiveThreadId,
+              orchestratorThreadId: row.orchestratorThreadId,
+              kind: row.kind,
+              severity: row.severity,
+              summary: row.summary,
+              evidence: row.evidence,
+              state: row.state,
+              queuedAt: row.queuedAt,
+              deliveredAt: row.deliveredAt,
+              consumedAt: row.consumedAt,
+              droppedAt: row.droppedAt,
+              consumeReason: row.consumeReason ?? undefined,
+              dropReason: row.dropReason ?? undefined,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+            }));
 
           const readModel = {
             snapshotSequence: computeSnapshotSequence(stateRows),
@@ -1412,6 +1587,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               wakeItemsTruncated: false,
             },
             projects: projectRows.map(mapProjectRowToReadModelProject),
+            programs,
+            programNotifications,
             threads: threadSummaries.map(mapSummaryToThread),
             orchestratorWakeItems: [],
             updatedAt,

@@ -17,6 +17,8 @@ import {
   OrchestrationLatestTurn,
   OrchestrationListProjectThreadsResult,
   OrchestrationReadModel,
+  OrchestrationProgram,
+  OrchestrationProgramNotification,
   OrchestrationSnapshotProfile,
   OrchestrationThread,
   OrchestratorWakeItem,
@@ -26,6 +28,9 @@ import {
   OrchestrationSession,
   ProjectCreateCommand,
   ThreadOrchestratorWakeUpsertedPayload,
+  ProgramCreateCommand,
+  ProgramCreatedPayload,
+  ProgramNotificationUpsertedPayload,
   ThreadMetaUpdatedPayload,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
@@ -63,11 +68,20 @@ const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLa
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
+const decodeOrchestrationProgram = Schema.decodeUnknownEffect(OrchestrationProgram);
+const decodeOrchestrationProgramNotification = Schema.decodeUnknownEffect(
+  OrchestrationProgramNotification,
+);
 const decodeOrchestrationReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeOrchestratorWakeItem = Schema.decodeUnknownEffect(OrchestratorWakeItem);
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
+const decodeProgramCreateCommand = Schema.decodeUnknownEffect(ProgramCreateCommand);
+const decodeProgramCreatedPayload = Schema.decodeUnknownEffect(ProgramCreatedPayload);
+const decodeProgramNotificationUpsertedPayload = Schema.decodeUnknownEffect(
+  ProgramNotificationUpsertedPayload,
+);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
 const decodeThreadOrchestratorWakeUpsertedPayload = Schema.decodeUnknownEffect(
   ThreadOrchestratorWakeUpsertedPayload,
@@ -926,6 +940,7 @@ it.effect("decodes bounded orchestration read results", () =>
     const snapshotInput = yield* decodeOrchestrationGetSnapshotInput({});
     assert.strictEqual(snapshotInput.profile, "operational");
     assert.strictEqual(snapshotInput.threadId, undefined);
+    assert.strictEqual(snapshotInput.allowDebugExport, false);
 
     const activeThreadSnapshotInput = yield* decodeOrchestrationGetSnapshotInput({
       profile: "active-thread",
@@ -933,6 +948,17 @@ it.effect("decodes bounded orchestration read results", () =>
     });
     assert.strictEqual(activeThreadSnapshotInput.profile, "active-thread");
     assert.strictEqual(activeThreadSnapshotInput.threadId, "thread-1");
+
+    const commandStateSnapshotInput = yield* decodeOrchestrationGetSnapshotInput({
+      profile: "command-state",
+    });
+    assert.strictEqual(commandStateSnapshotInput.profile, "command-state");
+
+    const debugSnapshotInput = yield* decodeOrchestrationGetSnapshotInput({
+      profile: "debug-export",
+      allowDebugExport: true,
+    });
+    assert.strictEqual(debugSnapshotInput.allowDebugExport, true);
 
     const bootstrapSummary = yield* decodeOrchestrationGetBootstrapSummaryResult({
       snapshotSequence: 6,
@@ -993,6 +1019,7 @@ it.effect("decodes bounded orchestration read results", () =>
         wakeItemCount: 4,
         wakeItemLimit: 100,
         wakeItemsTruncated: false,
+        warnings: ["orchestrator wake total 12000 exceeds warning threshold 10000."],
       },
       projects: [],
       threads: [
@@ -1031,6 +1058,7 @@ it.effect("decodes bounded orchestration read results", () =>
             checkpointCount: 1,
             checkpointLimit: 50,
             checkpointsTruncated: false,
+            warnings: ["thread thread-1 message total 12000 exceeds warning threshold 10000."],
           },
         },
       ],
@@ -1039,7 +1067,124 @@ it.effect("decodes bounded orchestration read results", () =>
     });
     assert.strictEqual(snapshot.snapshotProfile, "operational");
     assert.strictEqual(snapshot.snapshotCoverage?.includeArchivedThreads, true);
+    assert.deepStrictEqual(snapshot.snapshotCoverage?.warnings, [
+      "orchestrator wake total 12000 exceeds warning threshold 10000.",
+    ]);
     assert.strictEqual(snapshot.threads[0]?.snapshotCoverage?.messagesTruncated, true);
+  }),
+);
+
+it.effect("decodes executive program contracts and read-model defaults", () =>
+  Effect.gen(function* () {
+    const program = yield* decodeOrchestrationProgram({
+      id: "program-cto",
+      title: "Founder task",
+      objective: "Run founder task through CTO and Jasper.",
+      status: "active",
+      executiveProjectId: "project-cto",
+      executiveThreadId: "thread-cto",
+      currentOrchestratorThreadId: "thread-jasper",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:01.000Z",
+      completedAt: null,
+      deletedAt: null,
+    });
+    assert.strictEqual(program.id, "program-cto");
+    assert.strictEqual(program.status, "active");
+    assert.strictEqual(program.currentOrchestratorThreadId, "thread-jasper");
+
+    const createCommand = yield* decodeProgramCreateCommand({
+      type: "program.create",
+      commandId: "cmd-program",
+      programId: "program-cto",
+      title: "Founder task",
+      objective: "Run founder task through CTO and Jasper.",
+      executiveProjectId: "project-cto",
+      executiveThreadId: "thread-cto",
+      currentOrchestratorThreadId: "thread-jasper",
+      createdAt: "2026-04-20T00:00:00.000Z",
+    });
+    assert.strictEqual(createCommand.status, undefined);
+
+    const createdPayload = yield* decodeProgramCreatedPayload({
+      programId: "program-cto",
+      title: "Founder task",
+      objective: null,
+      status: "active",
+      executiveProjectId: "project-cto",
+      executiveThreadId: "thread-cto",
+      currentOrchestratorThreadId: null,
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      completedAt: null,
+    });
+    assert.strictEqual(createdPayload.currentOrchestratorThreadId, null);
+
+    const notification = yield* decodeOrchestrationProgramNotification({
+      notificationId: "notif-cto",
+      programId: "program-cto",
+      executiveProjectId: "project-cto",
+      executiveThreadId: "thread-cto",
+      orchestratorThreadId: "thread-jasper",
+      kind: "decision_required",
+      severity: "warning",
+      summary: "Choose the next lane.",
+      evidence: { workerThreadId: "thread-worker" },
+      state: "pending",
+      queuedAt: "2026-04-20T00:01:00.000Z",
+      deliveredAt: null,
+      consumedAt: null,
+      droppedAt: null,
+      createdAt: "2026-04-20T00:01:00.000Z",
+      updatedAt: "2026-04-20T00:01:00.000Z",
+    });
+    assert.strictEqual(notification.kind, "decision_required");
+    assert.deepStrictEqual(notification.evidence, { workerThreadId: "thread-worker" });
+
+    const notificationCommand = yield* decodeOrchestrationCommand({
+      type: "program.notification.upsert",
+      commandId: "cmd-notif",
+      notificationId: "notif-cto",
+      programId: "program-cto",
+      kind: "blocked",
+      severity: "critical",
+      summary: "The task is blocked.",
+      evidence: { reason: "missing approval" },
+      createdAt: "2026-04-20T00:01:00.000Z",
+    });
+    assert.strictEqual(notificationCommand.type, "program.notification.upsert");
+
+    const notificationPayload = yield* decodeProgramNotificationUpsertedPayload({
+      ...notification,
+      evidence: {},
+    });
+    assert.strictEqual(notificationPayload.notificationId, "notif-cto");
+
+    const notificationEvent = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "event-notif",
+      aggregateKind: "program",
+      aggregateId: "program-cto",
+      occurredAt: "2026-04-20T00:01:00.000Z",
+      commandId: "cmd-notif",
+      causationEventId: null,
+      correlationId: "cmd-notif",
+      metadata: {},
+      type: "program.notification-upserted",
+      payload: notificationPayload,
+    });
+    assert.strictEqual(notificationEvent.type, "program.notification-upserted");
+
+    const legacyReadModel = yield* decodeOrchestrationReadModel({
+      snapshotSequence: 1,
+      snapshotProfile: "operational",
+      projects: [],
+      threads: [],
+      orchestratorWakeItems: [],
+      updatedAt: "2026-04-20T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(legacyReadModel.programs, []);
+    assert.deepStrictEqual(legacyReadModel.programNotifications, []);
   }),
 );
 

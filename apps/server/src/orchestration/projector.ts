@@ -1,9 +1,17 @@
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationEvent,
+  OrchestrationReadModel,
+  ProgramId,
+  ProgramNotificationId,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestratorWakeItem,
   OrchestrationSession,
+  OrchestrationProgram,
+  OrchestrationProgramNotification,
   OrchestrationThread,
 } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
@@ -14,6 +22,12 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
+  ProgramCreatedPayload,
+  ProgramDeletedPayload,
+  ProgramMetaUpdatedPayload,
+  ProgramNotificationConsumedPayload,
+  ProgramNotificationDroppedPayload,
+  ProgramNotificationUpsertedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -30,6 +44,8 @@ import {
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
+type ProgramPatch = Partial<Omit<OrchestrationProgram, "id">>;
+type ProgramNotificationPatch = Partial<Omit<OrchestrationProgramNotification, "notificationId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 
@@ -53,6 +69,24 @@ function updateThread(
   patch: ThreadPatch,
 ): OrchestrationThread[] {
   return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
+}
+
+function updateProgram(
+  programs: ReadonlyArray<OrchestrationProgram>,
+  programId: ProgramId,
+  patch: ProgramPatch,
+): OrchestrationProgram[] {
+  return programs.map((program) => (program.id === programId ? { ...program, ...patch } : program));
+}
+
+function updateProgramNotification(
+  notifications: ReadonlyArray<OrchestrationProgramNotification>,
+  notificationId: ProgramNotificationId,
+  patch: ProgramNotificationPatch,
+): OrchestrationProgramNotification[] {
+  return notifications.map((notification) =>
+    notification.notificationId === notificationId ? { ...notification, ...patch } : notification,
+  );
 }
 
 function decodeForEvent<A>(
@@ -169,6 +203,8 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
     projects: [],
+    programs: [],
+    programNotifications: [],
     threads: [],
     orchestratorWakeItems: [],
     updatedAt: nowIso,
@@ -259,6 +295,144 @@ export function projectEvent(
         })),
       );
 
+    case "program.created":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ProgramCreatedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const program: OrchestrationProgram = yield* decodeForEvent(
+          OrchestrationProgram,
+          {
+            id: payload.programId,
+            title: payload.title,
+            objective: payload.objective,
+            status: payload.status,
+            executiveProjectId: payload.executiveProjectId,
+            executiveThreadId: payload.executiveThreadId,
+            currentOrchestratorThreadId: payload.currentOrchestratorThreadId,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            completedAt: payload.completedAt,
+            deletedAt: null,
+          },
+          event.type,
+          "program",
+        );
+        const programs = nextBase.programs ?? [];
+        const existing = programs.find((entry) => entry.id === program.id);
+        return {
+          ...nextBase,
+          programs: existing
+            ? programs.map((entry) => (entry.id === program.id ? program : entry))
+            : [...programs, program],
+        };
+      });
+
+    case "program.meta-updated":
+      return decodeForEvent(ProgramMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.objective !== undefined ? { objective: payload.objective } : {}),
+            ...(payload.status !== undefined ? { status: payload.status } : {}),
+            ...(payload.executiveProjectId !== undefined
+              ? { executiveProjectId: payload.executiveProjectId }
+              : {}),
+            ...(payload.executiveThreadId !== undefined
+              ? { executiveThreadId: payload.executiveThreadId }
+              : {}),
+            ...(payload.currentOrchestratorThreadId !== undefined
+              ? { currentOrchestratorThreadId: payload.currentOrchestratorThreadId }
+              : {}),
+            ...(payload.completedAt !== undefined ? { completedAt: payload.completedAt } : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "program.deleted":
+      return decodeForEvent(ProgramDeletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            deletedAt: payload.deletedAt,
+            updatedAt: payload.deletedAt,
+          }),
+        })),
+      );
+
+    case "program.notification-upserted":
+      return Effect.gen(function* () {
+        const notification = yield* decodeForEvent(
+          ProgramNotificationUpsertedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const notifications = nextBase.programNotifications ?? [];
+        const existing = notifications.find(
+          (entry) => entry.notificationId === notification.notificationId,
+        );
+        return {
+          ...nextBase,
+          programNotifications: existing
+            ? notifications.map((entry) =>
+                entry.notificationId === notification.notificationId ? notification : entry,
+              )
+            : [...notifications, notification],
+        };
+      });
+
+    case "program.notification-consumed":
+      return decodeForEvent(
+        ProgramNotificationConsumedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programNotifications: updateProgramNotification(
+            nextBase.programNotifications ?? [],
+            payload.notificationId,
+            {
+              state: "consumed",
+              consumedAt: payload.consumedAt,
+              ...(payload.consumeReason !== undefined
+                ? { consumeReason: payload.consumeReason }
+                : {}),
+              updatedAt: payload.updatedAt,
+            },
+          ),
+        })),
+      );
+
+    case "program.notification-dropped":
+      return decodeForEvent(
+        ProgramNotificationDroppedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programNotifications: updateProgramNotification(
+            nextBase.programNotifications ?? [],
+            payload.notificationId,
+            {
+              state: "dropped",
+              droppedAt: payload.droppedAt,
+              ...(payload.dropReason !== undefined ? { dropReason: payload.dropReason } : {}),
+              updatedAt: payload.updatedAt,
+            },
+          ),
+        })),
+      );
+
     case "thread.created":
       return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
@@ -294,6 +468,9 @@ export function projectEvent(
             spawnRole: payload.spawnRole,
             spawnedBy: payload.spawnedBy,
             workflowId: payload.workflowId,
+            programId: payload.programId,
+            executiveProjectId: payload.executiveProjectId,
+            executiveThreadId: payload.executiveThreadId,
           },
           event.type,
           "thread",
@@ -364,6 +541,13 @@ export function projectEvent(
             ...(payload.spawnRole !== undefined ? { spawnRole: payload.spawnRole } : {}),
             ...(payload.spawnedBy !== undefined ? { spawnedBy: payload.spawnedBy } : {}),
             ...(payload.workflowId !== undefined ? { workflowId: payload.workflowId } : {}),
+            ...(payload.programId !== undefined ? { programId: payload.programId } : {}),
+            ...(payload.executiveProjectId !== undefined
+              ? { executiveProjectId: payload.executiveProjectId }
+              : {}),
+            ...(payload.executiveThreadId !== undefined
+              ? { executiveThreadId: payload.executiveThreadId }
+              : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
