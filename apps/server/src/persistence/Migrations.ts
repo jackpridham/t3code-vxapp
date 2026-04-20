@@ -42,6 +42,7 @@ import Migration0026 from "./Migrations/026_ReconcileCompletedWakeTurnStatus.ts"
 import Migration0027 from "./Migrations/027_ProjectionPrograms.ts";
 import Migration0028 from "./Migrations/028_ProjectionSnapshotQueryIndexes.ts";
 import Migration0029 from "./Migrations/029_ProjectionProgramNotifications.ts";
+import Migration0030 from "./Migrations/030_RuntimeTtlCache.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -83,6 +84,7 @@ export const migrationEntries = [
   [27, "ProjectionPrograms", Migration0027],
   [28, "ProjectionSnapshotQueryIndexes", Migration0028],
   [29, "ProjectionProgramNotifications", Migration0029],
+  [30, "RuntimeTtlCache", Migration0030],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

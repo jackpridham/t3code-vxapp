@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SidebarRouteImport } from './routes/sidebar'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as ArtifactRouteImport } from './routes/artifact'
 import { Route as ChatRouteImport } from './routes/_chat'
+import { Route as ArtifactsIndexRouteImport } from './routes/artifacts.index'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SidebarThreadIdRouteImport } from './routes/sidebar.$threadId'
 import { Route as SettingsThreadsRouteImport } from './routes/settings.threads'
@@ -21,7 +23,10 @@ import { Route as SettingsNotificationsRouteImport } from './routes/settings.not
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChangesThreadIdRouteImport } from './routes/changes.$threadId'
+import { Route as ArtifactsTargetIdRouteImport } from './routes/artifacts.$targetId'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
+import { Route as ArtifactsTargetIdIndexRouteImport } from './routes/artifacts.$targetId.index'
+import { Route as ArtifactsTargetIdArtifactTitleRouteImport } from './routes/artifacts.$targetId.$artifactTitle'
 
 const SidebarRoute = SidebarRouteImport.update({
   id: '/sidebar',
@@ -33,6 +38,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArtifactsRoute = ArtifactsRouteImport.update({
+  id: '/artifacts',
+  path: '/artifacts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ArtifactRoute = ArtifactRouteImport.update({
   id: '/artifact',
   path: '/artifact',
@@ -41,6 +51,11 @@ const ArtifactRoute = ArtifactRouteImport.update({
 const ChatRoute = ChatRouteImport.update({
   id: '/_chat',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ArtifactsIndexRoute = ArtifactsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ArtifactsRoute,
 } as any)
 const ChatIndexRoute = ChatIndexRouteImport.update({
   id: '/',
@@ -82,18 +97,36 @@ const ChangesThreadIdRoute = ChangesThreadIdRouteImport.update({
   path: '/changes/$threadId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArtifactsTargetIdRoute = ArtifactsTargetIdRouteImport.update({
+  id: '/$targetId',
+  path: '/$targetId',
+  getParentRoute: () => ArtifactsRoute,
+} as any)
 const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
   getParentRoute: () => ChatRoute,
 } as any)
+const ArtifactsTargetIdIndexRoute = ArtifactsTargetIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ArtifactsTargetIdRoute,
+} as any)
+const ArtifactsTargetIdArtifactTitleRoute =
+  ArtifactsTargetIdArtifactTitleRouteImport.update({
+    id: '/$artifactTitle',
+    path: '/$artifactTitle',
+    getParentRoute: () => ArtifactsTargetIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/artifact': typeof ArtifactRoute
+  '/artifacts': typeof ArtifactsRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
+  '/artifacts/$targetId': typeof ArtifactsTargetIdRouteWithChildren
   '/changes/$threadId': typeof ChangesThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
@@ -101,6 +134,9 @@ export interface FileRoutesByFullPath {
   '/settings/orchestration': typeof SettingsOrchestrationRoute
   '/settings/threads': typeof SettingsThreadsRoute
   '/sidebar/$threadId': typeof SidebarThreadIdRoute
+  '/artifacts/': typeof ArtifactsIndexRoute
+  '/artifacts/$targetId/$artifactTitle': typeof ArtifactsTargetIdArtifactTitleRoute
+  '/artifacts/$targetId/': typeof ArtifactsTargetIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/artifact': typeof ArtifactRoute
@@ -115,14 +151,19 @@ export interface FileRoutesByTo {
   '/settings/threads': typeof SettingsThreadsRoute
   '/sidebar/$threadId': typeof SidebarThreadIdRoute
   '/': typeof ChatIndexRoute
+  '/artifacts': typeof ArtifactsIndexRoute
+  '/artifacts/$targetId/$artifactTitle': typeof ArtifactsTargetIdArtifactTitleRoute
+  '/artifacts/$targetId': typeof ArtifactsTargetIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
   '/artifact': typeof ArtifactRoute
+  '/artifacts': typeof ArtifactsRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/sidebar': typeof SidebarRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
+  '/artifacts/$targetId': typeof ArtifactsTargetIdRouteWithChildren
   '/changes/$threadId': typeof ChangesThreadIdRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
@@ -131,15 +172,20 @@ export interface FileRoutesById {
   '/settings/threads': typeof SettingsThreadsRoute
   '/sidebar/$threadId': typeof SidebarThreadIdRoute
   '/_chat/': typeof ChatIndexRoute
+  '/artifacts/': typeof ArtifactsIndexRoute
+  '/artifacts/$targetId/$artifactTitle': typeof ArtifactsTargetIdArtifactTitleRoute
+  '/artifacts/$targetId/': typeof ArtifactsTargetIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/artifact'
+    | '/artifacts'
     | '/settings'
     | '/sidebar'
     | '/$threadId'
+    | '/artifacts/$targetId'
     | '/changes/$threadId'
     | '/settings/archived'
     | '/settings/general'
@@ -147,6 +193,9 @@ export interface FileRouteTypes {
     | '/settings/orchestration'
     | '/settings/threads'
     | '/sidebar/$threadId'
+    | '/artifacts/'
+    | '/artifacts/$targetId/$artifactTitle'
+    | '/artifacts/$targetId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/artifact'
@@ -161,13 +210,18 @@ export interface FileRouteTypes {
     | '/settings/threads'
     | '/sidebar/$threadId'
     | '/'
+    | '/artifacts'
+    | '/artifacts/$targetId/$artifactTitle'
+    | '/artifacts/$targetId'
   id:
     | '__root__'
     | '/_chat'
     | '/artifact'
+    | '/artifacts'
     | '/settings'
     | '/sidebar'
     | '/_chat/$threadId'
+    | '/artifacts/$targetId'
     | '/changes/$threadId'
     | '/settings/archived'
     | '/settings/general'
@@ -176,11 +230,15 @@ export interface FileRouteTypes {
     | '/settings/threads'
     | '/sidebar/$threadId'
     | '/_chat/'
+    | '/artifacts/'
+    | '/artifacts/$targetId/$artifactTitle'
+    | '/artifacts/$targetId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   ArtifactRoute: typeof ArtifactRoute
+  ArtifactsRoute: typeof ArtifactsRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
   SidebarRoute: typeof SidebarRouteWithChildren
   ChangesThreadIdRoute: typeof ChangesThreadIdRoute
@@ -202,6 +260,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/artifacts': {
+      id: '/artifacts'
+      path: '/artifacts'
+      fullPath: '/artifacts'
+      preLoaderRoute: typeof ArtifactsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/artifact': {
       id: '/artifact'
       path: '/artifact'
@@ -215,6 +280,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/artifacts/': {
+      id: '/artifacts/'
+      path: '/'
+      fullPath: '/artifacts/'
+      preLoaderRoute: typeof ArtifactsIndexRouteImport
+      parentRoute: typeof ArtifactsRoute
     }
     '/_chat/': {
       id: '/_chat/'
@@ -272,12 +344,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChangesThreadIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/artifacts/$targetId': {
+      id: '/artifacts/$targetId'
+      path: '/$targetId'
+      fullPath: '/artifacts/$targetId'
+      preLoaderRoute: typeof ArtifactsTargetIdRouteImport
+      parentRoute: typeof ArtifactsRoute
+    }
     '/_chat/$threadId': {
       id: '/_chat/$threadId'
       path: '/$threadId'
       fullPath: '/$threadId'
       preLoaderRoute: typeof ChatThreadIdRouteImport
       parentRoute: typeof ChatRoute
+    }
+    '/artifacts/$targetId/': {
+      id: '/artifacts/$targetId/'
+      path: '/'
+      fullPath: '/artifacts/$targetId/'
+      preLoaderRoute: typeof ArtifactsTargetIdIndexRouteImport
+      parentRoute: typeof ArtifactsTargetIdRoute
+    }
+    '/artifacts/$targetId/$artifactTitle': {
+      id: '/artifacts/$targetId/$artifactTitle'
+      path: '/$artifactTitle'
+      fullPath: '/artifacts/$targetId/$artifactTitle'
+      preLoaderRoute: typeof ArtifactsTargetIdArtifactTitleRouteImport
+      parentRoute: typeof ArtifactsTargetIdRoute
     }
   }
 }
@@ -293,6 +386,33 @@ const ChatRouteChildren: ChatRouteChildren = {
 }
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
+
+interface ArtifactsTargetIdRouteChildren {
+  ArtifactsTargetIdArtifactTitleRoute: typeof ArtifactsTargetIdArtifactTitleRoute
+  ArtifactsTargetIdIndexRoute: typeof ArtifactsTargetIdIndexRoute
+}
+
+const ArtifactsTargetIdRouteChildren: ArtifactsTargetIdRouteChildren = {
+  ArtifactsTargetIdArtifactTitleRoute: ArtifactsTargetIdArtifactTitleRoute,
+  ArtifactsTargetIdIndexRoute: ArtifactsTargetIdIndexRoute,
+}
+
+const ArtifactsTargetIdRouteWithChildren =
+  ArtifactsTargetIdRoute._addFileChildren(ArtifactsTargetIdRouteChildren)
+
+interface ArtifactsRouteChildren {
+  ArtifactsTargetIdRoute: typeof ArtifactsTargetIdRouteWithChildren
+  ArtifactsIndexRoute: typeof ArtifactsIndexRoute
+}
+
+const ArtifactsRouteChildren: ArtifactsRouteChildren = {
+  ArtifactsTargetIdRoute: ArtifactsTargetIdRouteWithChildren,
+  ArtifactsIndexRoute: ArtifactsIndexRoute,
+}
+
+const ArtifactsRouteWithChildren = ArtifactsRoute._addFileChildren(
+  ArtifactsRouteChildren,
+)
 
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
@@ -328,6 +448,7 @@ const SidebarRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   ArtifactRoute: ArtifactRoute,
+  ArtifactsRoute: ArtifactsRouteWithChildren,
   SettingsRoute: SettingsRouteWithChildren,
   SidebarRoute: SidebarRouteWithChildren,
   ChangesThreadIdRoute: ChangesThreadIdRoute,

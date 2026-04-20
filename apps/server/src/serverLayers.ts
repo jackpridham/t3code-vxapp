@@ -42,6 +42,7 @@ import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import { ProjectHooksLive } from "./projectHooks/Layers/ProjectHooks.ts";
+import { VortexAppsLive } from "./vortexApps/Layers/VortexApps.ts";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -168,6 +169,7 @@ export function makeServerRuntimeServicesLayer() {
     workspaceEntriesLayer,
     workspaceFileSystemLayer,
     projectFaviconResolverLayer,
+    VortexAppsLive,
     gitManagerLayer,
     terminalLayer,
     KeybindingsLive,

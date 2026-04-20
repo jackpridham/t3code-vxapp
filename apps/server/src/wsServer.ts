@@ -84,6 +84,7 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
+import { VortexApps } from "./vortexApps/Services/VortexApps.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -188,6 +189,7 @@ export type ServerRuntimeServices =
   | WorkspaceFileSystem
   | WorkspacePaths
   | ProjectHooksService
+  | VortexApps
   | Open
   | AnalyticsService;
 
@@ -303,6 +305,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const workspaceFileSystem = yield* WorkspaceFileSystem;
   const workspacePaths = yield* WorkspacePaths;
   const projectHooksService = yield* ProjectHooksService;
+  const vortexApps = yield* VortexApps;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -1060,6 +1063,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.serverUpdateSettings: {
         const body = stripRequestTag(request.body);
         return yield* serverSettingsManager.updateSettings(body.patch);
+      }
+
+      case WS_METHODS.serverListVortexApps: {
+        return yield* vortexApps.listApps;
+      }
+
+      case WS_METHODS.serverListVortexAppArtifacts: {
+        const body = stripRequestTag(request.body);
+        return yield* vortexApps.listAppArtifacts(body);
       }
 
       default: {

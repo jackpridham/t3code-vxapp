@@ -216,6 +216,9 @@ export function createWsNativeApi(): NativeApi {
       upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),
       getSettings: () => transport.request(WS_METHODS.serverGetSettings),
       updateSettings: (patch) => transport.request(WS_METHODS.serverUpdateSettings, { patch }),
+      listVortexApps: () => transport.request(WS_METHODS.serverListVortexApps),
+      listVortexAppArtifacts: (input) =>
+        transport.request(WS_METHODS.serverListVortexAppArtifacts, input),
     },
     orchestration: {
       getBootstrapSummary: () => transport.request(ORCHESTRATION_WS_METHODS.getBootstrapSummary),

@@ -1,9 +1,19 @@
 import { useState, type ComponentType, type CSSProperties } from "react";
-import { ArrowLeftIcon, ChevronDownIcon, HomeIcon, MenuIcon, Settings2Icon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChevronDownIcon,
+  HomeIcon,
+  MenuIcon,
+  PackageIcon,
+  Settings2Icon,
+} from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 
 import { APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import { cn } from "../../lib/utils";
+import { buildArtifactsTargetHref } from "../../lib/artifactsRoute";
+import { vortexAppsListQueryOptions } from "../../lib/vortexAppsReactQuery";
 import { SETTINGS_NAV_ITEMS, type SettingsSectionPath } from "../settings/SettingsSidebarNav";
 import { Button } from "../ui/button";
 import {
@@ -37,7 +47,7 @@ type AppNavigationItem = {
   icon: ComponentType<{ className?: string }>;
   label: string;
   match: (pathname: string) => boolean;
-  to: "/" | SettingsSectionPath;
+  to: string;
 };
 
 type AppNavigationGroup = {
@@ -45,7 +55,7 @@ type AppNavigationGroup = {
   icon: ComponentType<{ className?: string }>;
   label: string;
   match: (pathname: string) => boolean;
-  to: SettingsSectionPath;
+  to: "/artifacts" | SettingsSectionPath;
 };
 
 type AppNavigationNode = AppNavigationItem | AppNavigationGroup;
@@ -56,6 +66,10 @@ function hasNavigationChildren(item: AppNavigationNode): item is AppNavigationGr
 
 function isSettingsNavigationPath(pathname: string): boolean {
   return pathname === "/settings" || pathname.startsWith("/settings/");
+}
+
+function isArtifactsNavigationPath(pathname: string): boolean {
+  return pathname === "/artifacts" || pathname.startsWith("/artifacts/");
 }
 
 function isUtilityWindowPath(pathname: string): boolean {
@@ -83,13 +97,6 @@ const APP_NAVIGATION_ITEMS: readonly AppNavigationNode[] = [
     match: (pathname) => !isSettingsNavigationPath(pathname) && !isUtilityWindowPath(pathname),
     to: "/",
   },
-  {
-    children: SETTINGS_NAVIGATION_CHILDREN,
-    icon: Settings2Icon,
-    label: "Settings",
-    match: isSettingsNavigationPath,
-    to: "/settings/general",
-  },
 ];
 
 const NAVIGATION_MENU_STYLE = {
@@ -104,6 +111,35 @@ function SidebarNavigationMenu() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [open, setOpen] = useState(false);
+  const appsQuery = useQuery({
+    ...vortexAppsListQueryOptions(),
+  });
+  const artifactChildren: readonly AppNavigationItem[] =
+    appsQuery.data?.catalog.projects.map((project) => ({
+      icon: PackageIcon,
+      label: project.display_name,
+      match: (pathname) =>
+        pathname === buildArtifactsTargetHref({ targetId: project.target_id }) ||
+        pathname.startsWith(`${buildArtifactsTargetHref({ targetId: project.target_id })}/`),
+      to: buildArtifactsTargetHref({ targetId: project.target_id }),
+    })) ?? [];
+  const navigationItems: readonly AppNavigationNode[] = [
+    ...APP_NAVIGATION_ITEMS,
+    {
+      children: artifactChildren,
+      icon: PackageIcon,
+      label: "Artifacts",
+      match: isArtifactsNavigationPath,
+      to: "/artifacts",
+    },
+    {
+      children: SETTINGS_NAVIGATION_CHILDREN,
+      icon: Settings2Icon,
+      label: "Settings",
+      match: isSettingsNavigationPath,
+      to: "/settings/general",
+    },
+  ];
 
   const navigateTo = (to: AppNavigationNode["to"]) => {
     setOpen(false);
@@ -155,7 +191,7 @@ function SidebarNavigationMenu() {
             <SidebarContent className="overflow-x-hidden">
               <SidebarGroup className="px-2 py-3">
                 <SidebarMenu>
-                  {APP_NAVIGATION_ITEMS.map((item) => {
+                  {navigationItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = item.match(pathname);
 
@@ -194,7 +230,7 @@ function SidebarNavigationMenu() {
                               const childIsActive = child.match(pathname);
 
                               return (
-                                <SidebarMenuSubItem key={child.to}>
+                                <SidebarMenuSubItem key={`${child.to}:${child.label}`}>
                                   <SidebarMenuSubButton
                                     className={
                                       childIsActive

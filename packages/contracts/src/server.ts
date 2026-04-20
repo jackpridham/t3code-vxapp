@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas";
+import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
@@ -95,3 +95,53 @@ export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });
 export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+
+export const VortexAppProject = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  display_name: TrimmedNonEmptyString,
+  repo_url: TrimmedNonEmptyString,
+  target_id: TrimmedNonEmptyString,
+  installed: Schema.Boolean,
+});
+export type VortexAppProject = typeof VortexAppProject.Type;
+
+export const VortexAppsList = Schema.Struct({
+  scanned_at: IsoDateTime,
+  work_dir: TrimmedNonEmptyString,
+  repo_filter: Schema.NullOr(Schema.String),
+  count: NonNegativeInt,
+  projects: Schema.Array(VortexAppProject),
+});
+export type VortexAppsList = typeof VortexAppsList.Type;
+
+export const ServerCacheEntryMeta = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  refreshed_at: IsoDateTime,
+  expires_at: IsoDateTime,
+  hit: Schema.Boolean,
+});
+export type ServerCacheEntryMeta = typeof ServerCacheEntryMeta.Type;
+
+export const ServerListVortexAppsResult = Schema.Struct({
+  catalog: VortexAppsList,
+  cache: ServerCacheEntryMeta,
+});
+export type ServerListVortexAppsResult = typeof ServerListVortexAppsResult.Type;
+
+export const ServerListVortexAppArtifactsInput = Schema.Struct({
+  target_id: TrimmedNonEmptyString,
+  includeArchived: Schema.optional(Schema.Boolean),
+});
+export type ServerListVortexAppArtifactsInput = typeof ServerListVortexAppArtifactsInput.Type;
+
+export const VortexAppArtifact = Schema.Record(Schema.String, Schema.Unknown);
+export type VortexAppArtifact = typeof VortexAppArtifact.Type;
+
+export const ServerListVortexAppArtifactsResult = Schema.Struct({
+  target_id: TrimmedNonEmptyString,
+  fetched_at: IsoDateTime,
+  total_results: NonNegativeInt,
+  artifacts: Schema.Array(VortexAppArtifact),
+});
+export type ServerListVortexAppArtifactsResult = typeof ServerListVortexAppArtifactsResult.Type;

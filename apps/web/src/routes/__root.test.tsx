@@ -105,6 +105,10 @@ vi.mock("../lib/artifactWindow", () => ({
   isArtifactWindowPath: vi.fn(() => false),
 }));
 
+vi.mock("../lib/artifactsRoute", () => ({
+  isArtifactsPath: vi.fn(() => false),
+}));
+
 vi.mock("../lib/changesWindow", () => ({
   isChangesWindowPath: vi.fn(() => false),
 }));
@@ -117,6 +121,7 @@ import {
 } from "./__root";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { isArtifactWindowPath } from "../lib/artifactWindow";
+import { isArtifactsPath } from "../lib/artifactsRoute";
 import { isChangesWindowPath } from "../lib/changesWindow";
 
 function makeReadModel(
@@ -437,9 +442,12 @@ describe("resolveRouteThreadId", () => {
 });
 
 describe("isStandaloneRootRoutePath", () => {
-  it("returns true for artifact and changes standalone routes", () => {
+  it("returns true for artifact, artifacts, and changes standalone routes", () => {
     vi.mocked(isArtifactWindowPath).mockReturnValueOnce(true);
     expect(isStandaloneRootRoutePath("/artifact")).toBe(true);
+
+    vi.mocked(isArtifactsPath).mockReturnValueOnce(true);
+    expect(isStandaloneRootRoutePath("/artifacts")).toBe(true);
 
     vi.mocked(isChangesWindowPath).mockReturnValueOnce(true);
     expect(isStandaloneRootRoutePath("/changes/thread-1")).toBe(true);

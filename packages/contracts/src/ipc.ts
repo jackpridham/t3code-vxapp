@@ -31,6 +31,9 @@ import type {
 } from "./project";
 import type {
   ServerConfig,
+  ServerListVortexAppArtifactsInput,
+  ServerListVortexAppArtifactsResult,
+  ServerListVortexAppsResult,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
 } from "./server";
@@ -204,6 +207,10 @@ export interface NativeApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    listVortexApps: () => Promise<ServerListVortexAppsResult>;
+    listVortexAppArtifacts: (
+      input: ServerListVortexAppArtifactsInput,
+    ) => Promise<ServerListVortexAppArtifactsResult>;
   };
   orchestration: {
     getBootstrapSummary: () => Promise<OrchestrationReadModel>;

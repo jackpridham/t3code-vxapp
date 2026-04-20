@@ -50,7 +50,11 @@ import {
 import { KeybindingRule } from "./keybindings";
 import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
-import { ServerConfigUpdatedPayload, ServerProviderUpdatedPayload } from "./server";
+import {
+  ServerConfigUpdatedPayload,
+  ServerListVortexAppArtifactsInput,
+  ServerProviderUpdatedPayload,
+} from "./server";
 import { ServerSettingsPatch } from "./settings";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
@@ -95,6 +99,8 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverListVortexApps: "server.listVortexApps",
+  serverListVortexAppArtifacts: "server.listVortexAppArtifacts",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -190,6 +196,8 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),
   tagRequestBody(WS_METHODS.serverGetSettings, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpdateSettings, Schema.Struct({ patch: ServerSettingsPatch })),
+  tagRequestBody(WS_METHODS.serverListVortexApps, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.serverListVortexAppArtifacts, ServerListVortexAppArtifactsInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

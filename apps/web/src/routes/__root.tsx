@@ -17,6 +17,7 @@ import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 
 import { ArtifactPanel } from "../components/ArtifactPanel";
+import { ArtifactsPreloader } from "../components/artifacts/ArtifactsPreloader";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
@@ -45,6 +46,7 @@ import {
 } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { isArtifactWindowPath } from "../lib/artifactWindow";
+import { isArtifactsPath } from "../lib/artifactsRoute";
 import { isChangesWindowPath } from "../lib/changesWindow";
 import { isSidebarWindowPath } from "../lib/sidebarWindow";
 import {
@@ -70,7 +72,9 @@ export const Route = createRootRouteWithContext<{
 });
 
 export function isStandaloneRootRoutePath(pathname: string): boolean {
-  return isArtifactWindowPath(pathname) || isChangesWindowPath(pathname);
+  return (
+    isArtifactWindowPath(pathname) || isArtifactsPath(pathname) || isChangesWindowPath(pathname)
+  );
 }
 
 type OrchestrationInvalidationThread = Pick<
@@ -182,6 +186,7 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
+        <ArtifactsPreloader />
         {isStandaloneWindowRoute ? (
           <Outlet />
         ) : isSidebarWindowRoute ? (
