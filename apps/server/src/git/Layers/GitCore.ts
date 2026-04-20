@@ -41,8 +41,8 @@ const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
-const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
-const STATUS_UPSTREAM_REFRESH_FAILURE_INTERVAL = Duration.seconds(60);
+const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(2);
+const STATUS_UPSTREAM_REFRESH_FAILURE_INTERVAL = Duration.minutes(10);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 
@@ -865,20 +865,23 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         ? STATUS_UPSTREAM_REFRESH_INTERVAL
         : STATUS_UPSTREAM_REFRESH_FAILURE_INTERVAL,
   });
+  const statusUpstreamRefreshSemaphore = yield* Semaphore.make(1);
 
   const refreshStatusUpstreamIfStale = Effect.fn("refreshStatusUpstreamIfStale")(function* (
     cwd: string,
   ) {
     const upstream = yield* resolveCurrentUpstream(cwd);
     if (!upstream) return;
-    yield* Cache.get(
-      statusUpstreamRefreshCache,
-      new StatusUpstreamRefreshCacheKey({
-        cwd,
-        upstreamRef: upstream.upstreamRef,
-        remoteName: upstream.remoteName,
-        upstreamBranch: upstream.upstreamBranch,
-      }),
+    yield* statusUpstreamRefreshSemaphore.withPermits(1)(
+      Cache.get(
+        statusUpstreamRefreshCache,
+        new StatusUpstreamRefreshCacheKey({
+          cwd,
+          upstreamRef: upstream.upstreamRef,
+          remoteName: upstream.remoteName,
+          upstreamBranch: upstream.upstreamBranch,
+        }),
+      ),
     );
   });
 
@@ -1114,11 +1117,12 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   });
 
   const statusDetails: GitCoreShape["statusDetails"] = Effect.fn("statusDetails")(function* (cwd) {
-    // Refresh upstream refs in the background so project/thread status stays
-    // responsive even when a remote fetch is slow or unavailable.
-    yield* Effect.sync(() => {
-      Effect.runFork(refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true })));
-    });
+    // Opportunistically refresh upstream refs, but cap the work tightly so
+    // slow remotes cannot hold WebSocket-facing status requests hostage.
+    yield* refreshStatusUpstreamIfStale(cwd).pipe(
+      Effect.timeoutOption(500),
+      Effect.ignoreCause({ log: true }),
+    );
 
     const [statusStdout, unstagedNumstatStdout, stagedNumstatStdout] = yield* Effect.all(
       [

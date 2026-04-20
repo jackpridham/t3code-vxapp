@@ -43,7 +43,7 @@ import {
   Stream,
   Struct,
 } from "effect";
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocket as WebSocketClient, WebSocketServer, type WebSocket } from "ws";
 
 import { createLogger } from "./logger";
 import { GitManager } from "./git/Services/GitManager.ts";
@@ -198,6 +198,72 @@ export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycl
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+function resolveListeningPort(server: http.Server): number | null {
+  const address = server.address();
+  return typeof address === "object" && address !== null ? address.port : null;
+}
+
+function probeWebSocketControlPlane(input: {
+  readonly port: number;
+  readonly authToken?: string | undefined;
+  readonly timeoutMs?: number | undefined;
+}): Promise<boolean> {
+  const timeoutMs = input.timeoutMs ?? 750;
+  const requestId = crypto.randomUUID();
+  const tokenQuery =
+    input.authToken && input.authToken.length > 0
+      ? `?token=${encodeURIComponent(input.authToken)}`
+      : "";
+  const url = `ws://127.0.0.1:${input.port}/${tokenQuery}`;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let ws: WebSocketClient | undefined;
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try {
+        ws?.close();
+      } catch {
+        // Ignore close failures during a health probe.
+      }
+      resolve(ok);
+    };
+
+    try {
+      ws = new WebSocketClient(url);
+    } catch {
+      finish(false);
+      return;
+    }
+
+    ws.on("open", () => {
+      ws.send(
+        JSON.stringify({
+          id: requestId,
+          body: { _tag: ORCHESTRATION_WS_METHODS.getReadiness },
+        }),
+      );
+    });
+    ws.on("message", (raw) => {
+      try {
+        const message = JSON.parse(String(raw)) as { id?: unknown; error?: unknown };
+        if (message.id !== requestId) {
+          return;
+        }
+        finish(message.error === undefined);
+      } catch {
+        // Ignore non-response frames such as welcome pushes.
+      }
+    });
+    ws.on("error", () => finish(false));
+    ws.on("close", () => finish(false));
+  });
+}
 
 class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("RouteRequestError", {
   message: Schema.String,
@@ -410,7 +476,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         }
 
         if (url.pathname === "/health/ready") {
-          const isReady = yield* readiness.isServerReady;
+          const baseReady = yield* readiness.isServerReady;
+          const listeningPort = resolveListeningPort(httpServer);
+          const controlPlaneReady =
+            baseReady && listeningPort !== null
+              ? yield* Effect.promise(() =>
+                  probeWebSocketControlPlane({
+                    port: listeningPort,
+                    authToken,
+                  }),
+                )
+              : false;
+          const isReady = baseReady && controlPlaneReady;
           respond(
             isReady ? 200 : 503,
             {

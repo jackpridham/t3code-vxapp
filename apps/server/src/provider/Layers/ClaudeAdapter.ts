@@ -6,6 +6,9 @@
  *
  * @module ClaudeAdapterLive
  */
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+
 import {
   type CanUseTool,
   query,
@@ -173,6 +176,16 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly close: () => void;
 }
 
+interface ProcScanOptions {
+  readonly procRoot?: string;
+  readonly currentPid?: number;
+}
+
+interface ProcReapOptions extends ProcScanOptions {
+  readonly processKiller?: (pid: number, signal: NodeJS.Signals) => void;
+  readonly forceKillDelayMs?: number;
+}
+
 export interface ClaudeAdapterLiveOptions {
   readonly createQuery?: (input: {
     readonly prompt: AsyncIterable<SDKUserMessage>;
@@ -180,6 +193,10 @@ export interface ClaudeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly procRoot?: string;
+  readonly currentPid?: number;
+  readonly processKiller?: (pid: number, signal: NodeJS.Signals) => void;
+  readonly forceKillDelayMs?: number;
 }
 
 function isUuid(value: string): boolean {
@@ -199,6 +216,79 @@ function toMessage(cause: unknown, fallback: string): string {
 
 function toError(cause: unknown, fallback: string): Error {
   return cause instanceof Error ? cause : new Error(toMessage(cause, fallback));
+}
+
+function readProcFile(procRoot: string, pid: number, fileName: "cmdline" | "environ"): string {
+  try {
+    return readFileSync(path.join(procRoot, String(pid), fileName), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function procValueContainsNullSeparatedValue(contents: string, expected: string): boolean {
+  return contents.split("\0").some((value) => value === expected);
+}
+
+function looksLikeClaudeRuntimeCommand(cmdline: string): boolean {
+  const args = cmdline.split("\0").filter((part) => part.length > 0);
+  const executable = args[0] ? path.basename(args[0]).toLowerCase() : "";
+  return (
+    executable === "claude" || args.some((part) => path.basename(part).toLowerCase() === "claude")
+  );
+}
+
+export function findClaudeProviderRuntimeProcessIdsForThread(
+  threadId: string,
+  options: ProcScanOptions = {},
+): number[] {
+  const procRoot = options.procRoot ?? "/proc";
+  const currentPid = options.currentPid ?? process.pid;
+  const expectedThreadEnv = `VX_T3_CURRENT_THREAD_ID=${threadId}`;
+  let entries: string[];
+
+  try {
+    entries = readdirSync(procRoot);
+  } catch {
+    return [];
+  }
+
+  return entries
+    .map((entry) => Number.parseInt(entry, 10))
+    .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== currentPid)
+    .filter((pid) => {
+      const environ = readProcFile(procRoot, pid, "environ");
+      if (!procValueContainsNullSeparatedValue(environ, expectedThreadEnv)) {
+        return false;
+      }
+      return looksLikeClaudeRuntimeCommand(readProcFile(procRoot, pid, "cmdline"));
+    });
+}
+
+function reapClaudeProviderRuntimeProcessesForThread(
+  threadId: string,
+  options: ProcReapOptions = {},
+): Effect.Effect<void> {
+  return Effect.sync(() => {
+    const processKiller = options.processKiller ?? ((pid, signal) => process.kill(pid, signal));
+    const forceKillDelayMs = options.forceKillDelayMs ?? 1_500;
+    for (const pid of findClaudeProviderRuntimeProcessIdsForThread(threadId, options)) {
+      try {
+        processKiller(pid, "SIGTERM");
+      } catch {
+        continue;
+      }
+
+      const killTimer = setTimeout(() => {
+        try {
+          processKiller(pid, "SIGKILL");
+        } catch {
+          // Process already exited.
+        }
+      }, forceKillDelayMs);
+      killTimer.unref();
+    }
+  });
 }
 
 function normalizeClaudeStreamMessages(cause: Cause.Cause<Error>): ReadonlyArray<string> {
@@ -251,6 +341,15 @@ function resultErrorsText(result: SDKResultMessage): string {
   return "errors" in result && Array.isArray(result.errors)
     ? result.errors.join(" ").toLowerCase()
     : "";
+}
+
+export function isClaudeProviderAuthFailureMessage(message: string | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+  return /API Error:\s*401|authentication_error|Invalid authentication credentials|Failed to authenticate/i.test(
+    message,
+  );
 }
 
 function isInterruptedResult(result: SDKResultMessage): boolean {
@@ -921,6 +1020,14 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           stream: "native",
         })
       : undefined);
+  const procReapOptions: ProcReapOptions = {
+    ...(options?.procRoot !== undefined ? { procRoot: options.procRoot } : {}),
+    ...(options?.currentPid !== undefined ? { currentPid: options.currentPid } : {}),
+    ...(options?.processKiller !== undefined ? { processKiller: options.processKiller } : {}),
+    ...(options?.forceKillDelayMs !== undefined
+      ? { forceKillDelayMs: options.forceKillDelayMs }
+      : {}),
+  };
 
   const createQuery =
     options?.createQuery ??
@@ -1488,6 +1595,19 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       updatedAt,
       ...(status === "failed" && errorMessage ? { lastError: errorMessage } : {}),
     };
+    if (status === "failed" && isClaudeProviderAuthFailureMessage(errorMessage)) {
+      yield* reapClaudeProviderRuntimeProcessesForThread(
+        context.session.threadId,
+        procReapOptions,
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to reap Claude provider runtime after auth failure", {
+            threadId: context.session.threadId,
+            cause,
+          }),
+        ),
+      );
+    }
     yield* updateResumeCursor(context);
   });
 
@@ -2311,6 +2431,17 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     } catch (cause) {
       yield* emitRuntimeError(context, "Failed to close Claude runtime query.", cause);
     }
+    yield* reapClaudeProviderRuntimeProcessesForThread(
+      context.session.threadId,
+      procReapOptions,
+    ).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("failed to reap Claude provider runtime processes", {
+          threadId: context.session.threadId,
+          cause,
+        }),
+      ),
+    );
 
     const updatedAt = yield* nowIso;
     context.session = {

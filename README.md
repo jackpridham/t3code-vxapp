@@ -1,28 +1,41 @@
 # T3 Code — Vortex Orchestration Workbench
 
 > A heavily-reworked fork of t3code, rebuilt as a **personal multi-repo agentic development control plane**.
-> Executive programs, orchestrators, workers, worktrees, wake queues, notifications, plans, artifacts, checkpoints, diffs, terminals, and provider sessions — one durable surface.
+> Executive programs, orchestrators, workers, worktrees, wake queues, notifications, plans, TODO state, artifacts, checkpoints, diffs, terminals, and provider sessions — one durable surface.
 
 ---
 
 ## Table of Contents
 
-1. [Why This Exists](#why-this-exists) — personal multi-codebase agentic development
-2. [Pipeline Architecture](#pipeline-architecture) — vx CLI → T3 server → providers, end-to-end
-3. [Orchestration Model](#orchestration-model) — concepts, lineage, wake queue state machine
-4. [Provider Runtime](#provider-runtime) — Codex + Claude Agent ingestion into orchestration events
-5. [Model Selection & Balancing](#model-selection--balancing) — pattern-based routing, fallback chains, rate-limit ledger
-6. [Skill Packs](#skill-packs) — selective worker context, runtime contracts, authority gates
-7. [Agent Runtime Configuration](#agent-runtime-configuration) — role workspaces, pack profiles, dispatch contracts
-8. [Planning Tools — `vx plan`](#planning-tools--vx-plan) — JSON plan DSL, phases, steps, acceptance, dispatch-link
-9. [Artifact Tools — `vx artifacts`](#artifact-tools--vx-artifacts) — structured records, task lifecycle, worker summaries
-10. [App Wrappers — `vx apps`](#app-wrappers--vx-apps) — per-target dispatch, worktree lanes, deploy, dev-server
-11. [T3 Native Control Plane — `vx t3`](#t3-native-control-plane--vx-t3) — direct engine access
-12. [Orchestrator Changes Panel](#orchestrator-changes-panel) — live files, diffs, artifacts, plans per thread
-13. [UI Surfaces](#ui-surfaces) — sidebar, panels, terminals, settings
-14. [Configuration](#configuration) — environment variables, data home
-15. [Repo Map](#repo-map) — what lives where
-16. [Dev Checks](#dev-checks) — lint, typecheck, test, contracts
+1. [Quick Start](#quick-start) — local control-plane commands and state boundaries
+2. [Why This Exists](#why-this-exists) — personal multi-codebase agentic development
+3. [Pipeline Architecture](#pipeline-architecture) — vx CLI → T3 server → providers, end-to-end
+4. [Orchestration Model](#orchestration-model) — concepts, lineage, wake queue state machine
+5. [Provider Runtime](#provider-runtime) — Codex + Claude Agent ingestion into orchestration events
+6. [Model Selection & Balancing](#model-selection--balancing) — pattern-based routing, fallback chains, rate-limit ledger
+7. [Skill Packs](#skill-packs) — selective worker context, runtime contracts, authority gates
+8. [Agent Runtime Configuration](#agent-runtime-configuration) — role workspaces, pack profiles, dispatch contracts
+9. [Planning Tools — `vx plan`](#planning-tools--vx-plan) — JSON plan DSL, phases, steps, acceptance, dispatch-link
+10. [Current-State TODOs (`vx todo`)](#current-state-todos-vx-todo) — JSON continuation state, not legacy backlog
+11. [Artifact Tools — `vx artifacts`](#artifact-tools--vx-artifacts) — structured records, task lifecycle, worker summaries
+12. [App Wrappers — `vx apps`](#app-wrappers--vx-apps) — per-target dispatch, worktree lanes, deploy, dev-server
+13. [T3 Native Control Plane — `vx t3`](#t3-native-control-plane--vx-t3) — direct engine access
+14. [Orchestrator Changes Panel](#orchestrator-changes-panel) — live files, diffs, artifacts, plans per thread
+15. [UI Surfaces](#ui-surfaces) — sidebar, panels, terminals, settings
+16. [Configuration](#configuration) — environment variables, data home
+17. [Repo Map](#repo-map) — what lives where
+18. [Technical Documentation](#technical-documentation) — linked docs and targeted notes
+19. [Dev Checks](#dev-checks) — lint, typecheck, test, contracts
+
+---
+
+## Quick Start
+
+Use `vx apps t3 --dev-server start` to run the managed local server, then `vx t3 doctor` and `vx t3 status` to verify the control plane.
+
+Use `vx apps <repo> --agent dispatch --worktree prepare ...` for repo-bound workers. Use `vx apps <repo> --plan ...` for worker phase state, `vx todo` for current agent continuation state, and `vx artifacts` for durable reports and closeout evidence.
+
+Before completing code changes in this repo, run `bun fmt`, `bun lint`, and `bun typecheck`. Use `bun run test`, not `bun test`, when test execution is required.
 
 ---
 
@@ -38,7 +51,7 @@ This fork is the control plane that makes that loop tractable:
 - **Durable.** Everything — commands, events, executive programs, notifications, lineage, wake items, plans, artifacts, checkpoints — is event-sourced in SQLite. Restart the server, close the browser, power-cycle the box: state survives.
 - **Observable.** The founder/CTO layer can see product-level program decisions and blockers, while Jasper can ask what workers belong to it, what each changed, and which wakes are still pending — without reading terminal scrollback.
 - **Wired into `vx`.** The Vortex CLI drives plans, artifacts, dispatch, worktrees, and deployment directly against the T3 engine via WebSocket RPC.
-- **Skill-pack aware.** Workers dispatched through `vx apps <repo> --agent dispatch` get a materialized `.claude/skills/` directory selected by role + repo + task class + context mode — not a global mirror.
+- **Skill-pack aware.** Workers dispatched through `vx apps <repo> --agent dispatch` get a materialized `.claude/skills/` directory selected by role + repo + task class + context mode — not a global mirror. Control-state packs such as `vx todo` are mounted only for lanes that need them.
 
 Opinionated about durable state, structured lineage, and observable orchestration. Built to answer "what is Jasper doing, what have the workers changed, and where are the blockers?" from the system itself.
 
@@ -129,6 +142,7 @@ stateDiagram-v2
 | **Worker**               | Thread with explicit `orchestratorProjectId`, `orchestratorThreadId`, `parentThreadId`, `spawnRole`, `spawnedBy`                                                                      |
 | **workflowId**           | Groups orchestrator + all workers into one durable run                                                                                                                                |
 | **Wake item**            | Worker-outcome record delivered back to the owning orchestrator                                                                                                                       |
+| **TODO state**           | Agent-scoped JSON continuation state for current orchestration, stored by `vx todo`; not the legacy markdown backlog                                                                  |
 | **Program notification** | CTO-visible program signal (`decision_required`, `blocked`, `milestone_completed`, `closeout_ready`, `risk_escalated`, `status_update`) with severity, state, and structured evidence |
 
 Lineage is structured identifiers only — no title parsing, no heuristics. That is what lets a worker in `/home/gizmo/worktrees/api-fix-auth-01` show up under the Jasper session that spawned it, even though the worker's project is a different repo.
@@ -140,6 +154,8 @@ Founder -> CTO executive thread -> Program -> Jasper orchestrator thread -> Work
 ```
 
 CTO/program linkage uses `programId`, `executiveProjectId`, and `executiveThreadId`. Worker lineage still belongs to Jasper and uses `orchestratorProjectId`, `orchestratorThreadId`, `parentThreadId`, `spawnRole`, `spawnedBy`, and `workflowId`. Those two relationships are separate on purpose: CTO decides what matters and when a decision is needed; Jasper coordinates execution and worker wake settlement.
+
+Current TODO state follows the same boundary. Jasper owns Jasper `vx todo` continuation records. CTO may inspect, create, update, or steer Jasper-owned TODO state while dispatching, recovering, or correcting a program, but that is executive steering of Jasper's current pointer, not a parallel implementation lane. Repo workers normally do not mutate `vx todo`; they work from JSON plans, dispatch contracts, and artifacts.
 
 Program notifications are not worker wake items. They are durable executive signals stored on the program aggregate with a lifecycle of `pending`, `delivering`, `delivered`, `consumed`, or `dropped`. They let Jasper or an operator surface blockers and decisions to CTO without creating a persistent CTO watcher or bypassing Jasper's orchestration lane.
 
@@ -316,7 +332,7 @@ Global packs teach common mechanics. Repo packs teach local truth. Task packs ad
 | `010-019` | `vx apps` command surface: dispatch, worktrees, artifacts, plans, deploy  |
 | `020-029` | `vx plan` lifecycle: create, audit, refine, implement, tests, parallelism |
 | `030-039` | `vx t3` control plane: threads, workers, lanes, health, git/workspace RPC |
-| `040-049` | artifacts, records, docs, knowledge, memory, handoff                      |
+| `040-049` | artifacts, records, TODO state, docs, knowledge, memory, handoff          |
 | `050-059` | source control, closeout authority, GitHub PRs                            |
 | `060-069` | dev servers, diagnostics, deployment                                      |
 | `070-079` | skill authoring and runtime/bootstrap setup                               |
@@ -375,14 +391,14 @@ worktrees/                    — per-task materialized runtime copies
 
 **Role workspaces** — each role is a distinct top-level directory with its own `CLAUDE.md`, `AGENTS.md`, and local `.claude/skills/`:
 
-| role                 | job                                                                                                                                                                                                                                                                                                                                           |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CTO**              | Executive layer above Jasper. Owns founder intent, product decisions, program state, and program-level notifications. It does not schedule normal workers directly.                                                                                                                                                                           |
-| **Jasper**           | Orchestrator. Plans, dispatches workers, tracks closeouts, manages SSOT artifacts. Uses `agents-orchestration`, `agents-multi-project-vx-plan`, `agents-vx-plan-worker-loop`, `agents-t3-dispatch`, `agents-t3-supervision`, `agents-ssot-program-manager`, and 6+ more role-local skills.                                                    |
-| **Observer**         | External auditor. Evaluates Jasper/T3 behavior from outside, converts repeated failures into new skills or runtime-pack changes, reruns bounded tests. Uses `orchestration-observer`, `orchestration-observer-autonomous`, `orchestration-three-lane-scheduler`, `orchestration-lineage-debug`, `orchestration-review-verdict-recovery`, etc. |
-| **Tai**              | Research and knowledge distillation. Lightweight, read-only, fast-model default.                                                                                                                                                                                                                                                              |
-| **Branch lifecycle** | Integration + push-gate closeout skills shared by Jasper and post-flight runs.                                                                                                                                                                                                                                                                |
-| **Post-flight**      | Verification, status reporting, and follow-up wake routing after a worker completes.                                                                                                                                                                                                                                                          |
+| role                 | job                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CTO**              | Executive layer above Jasper. Owns founder intent, product decisions, program state, roadmap, ledger, capability map, and program-level notifications. It may steer Jasper-owned TODO state when needed, but does not schedule normal workers directly.                                                                                                           |
+| **Jasper**           | Orchestrator. Plans, dispatches workers, tracks closeouts, owns wake settlement, manages SSOT artifacts, and owns Jasper `vx todo` current-state records. Uses `agents-orchestration`, `agents-multi-project-vx-plan`, `agents-vx-plan-worker-loop`, `agents-t3-dispatch`, `agents-t3-supervision`, `agents-ssot-program-manager`, and 6+ more role-local skills. |
+| **Observer**         | External auditor. Evaluates Jasper/T3 behavior from outside, converts repeated failures into new skills or runtime-pack changes, reruns bounded tests. Uses `orchestration-observer`, `orchestration-observer-autonomous`, `orchestration-three-lane-scheduler`, `orchestration-lineage-debug`, `orchestration-review-verdict-recovery`, etc.                     |
+| **Tai**              | Research and knowledge distillation. Lightweight, read-only, fast-model default.                                                                                                                                                                                                                                                                                  |
+| **Branch lifecycle** | Integration + push-gate closeout skills shared by Jasper and post-flight runs.                                                                                                                                                                                                                                                                                    |
+| **Post-flight**      | Verification, status reporting, and follow-up wake routing after a worker completes.                                                                                                                                                                                                                                                                              |
 
 **Skill link resolution**:
 
@@ -399,7 +415,7 @@ CTO uses a separate executive control surface instead of worker dispatch. `vx t3
 
 ## Planning Tools — `vx plan`
 
-Plans are durable JSON documents stored under `$VX_ARTIFACTS_PATH/@Plans/<repo>/<branch>/`. Each plan is a structured spec the orchestrator and workers update over time — not a markdown blob.
+Plans are durable JSON documents stored under `$VX_ARTIFACTS_PATH/@Plans/<repo>/<branch>/`. Each plan is a structured spec the orchestrator and workers update over time — not a markdown blob, not `vx todo`, and not the legacy `@Docs/@TODO` backlog.
 
 **Plan shape**:
 
@@ -455,6 +471,44 @@ sequenceDiagram
 | `--list` / `--search` / `--export`                                     | catalog operations                                         |
 
 Repo-scoped wrapper: `vx apps <repo> --plan <key>` forwards to `vx plan --repo <repo> <key>` with repo context auto-resolved.
+
+---
+
+## Current-State TODOs (`vx todo`)
+
+`vx todo` is the durable JSON continuation surface for current agent state. It is for the live pointer that lets Jasper or CTO recover what is active now, what should happen next, and which JSON plan or program context a continuation belongs to.
+
+Storage is `VX_TODOS_PATH` when set, otherwise `$VX_ARTIFACTS_PATH/@Todos`.
+
+**Use `vx todo` for**:
+
+- Jasper's active task pointer and next action after interruption.
+- Recent completed continuation records.
+- Links from current orchestration state to JSON plans, SSoTs, or program context.
+- CTO steering of Jasper-owned continuation state during dispatch, recovery, or correction.
+- Observer diagnostics when stale or missing current-state records are part of the failure.
+
+**Do not use `vx todo` for**:
+
+- Normal repo worker phase or step state; use `vx apps <repo> --plan ...`.
+- Worker closeout evidence; use `vx artifacts` or `vx apps <repo> --artifact ...`.
+- Human backlog and long-lived tech debt; use `vx-doc-todo` and `@Docs/@TODO/<repo>`.
+- A global mirror of every plan task.
+
+**Command surface**:
+
+| command                                                                                   | purpose                                   |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `vx todo current --agent jasper --json`                                                   | read the active continuation pointer      |
+| `vx todo list --agent jasper --status active --json`                                      | list active current-state records         |
+| `vx todo recent --agent jasper --status completed --limit 10 --json`                      | inspect recent completions                |
+| `vx todo search --agent jasper --query "<terms>" --json`                                  | find matching active or completed records |
+| `vx todo create --agent jasper --id <id> --title "<title>" --next-action "<next>" --json` | create a continuation record              |
+| `vx todo update <id> --agent jasper --status completed --json`                            | mutate status or continuation fields      |
+| `vx todo link-plan <id> --agent jasper --repo <repo> --plan <key> --json`                 | attach current state to a JSON plan       |
+| `vx todo unlink-plan <id> --agent jasper --repo <repo> --plan <key> --json`               | remove a plan link                        |
+
+The important boundary is authority, not file format. `vx todo` is current agent execution state. `@Docs/@TODO` is human-facing backlog, tech debt, historical markdown plans, and long-lived deferred work. Jasper should read legacy TODOs only when explicitly asked to inspect backlog/tech debt or when there is no structured state and the task is clearly historical research.
 
 ---
 
@@ -520,19 +574,20 @@ Per-repo command wrapper that knows the target's capabilities. Every target reso
 
 **Action surface per target**:
 
-| action                             | purpose                                             |
-| ---------------------------------- | --------------------------------------------------- | ------- | ------ | ------------------------- | ------- | --------------- |
-| `--status`                         | git health overview                                 |
-| `--list`                           | configured repo entries                             |
-| `--sync`                           | pull latest docs                                    |
-| `--install-dev` / `--install-prod` | bootstrap                                           |
-| `--deploy <env>`                   | deploy wrappers where supported                     |
-| `--dev-server start                | stop                                                | status  | logs`  | managed local dev runtime |
-| `--plan <key>` / `--plan create`   | plan operations (delegates to `vx plan`)            |
-| `--worktree list                   | create                                              | prepare | status | restore-guidance          | delete` | lane management |
-| `--agent dispatch`                 | prepare worktree + dispatch through T3 lane wrapper |
-| `--artifact <cmd>`                 | artifact operations (delegates to `vx artifacts`)   |
-| `--capabilities` / `--schema`      | machine-readable support matrix                     |
+| action                                                               | purpose                                                               |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `--status`                                                           | git health overview                                                   |
+| `--list`                                                             | configured repo entries                                               |
+| `--sync`                                                             | pull latest docs                                                      |
+| `--install-dev` / `--install-prod`                                   | bootstrap                                                             |
+| `--deploy <env>`                                                     | deploy wrappers where supported                                       |
+| `--dev-server start, stop, status, logs`                             | managed local dev runtime                                             |
+| `--plan <key>` / `--plan create`                                     | plan operations, delegated to `vx plan`                               |
+| `--todo <cmd>`                                                       | target-scoped TODO operations where supported, delegated to `vx todo` |
+| `--worktree list, create, prepare, status, restore-guidance, delete` | lane management                                                       |
+| `--agent dispatch`                                                   | prepare worktree + dispatch through T3 lane wrapper                   |
+| `--artifact <cmd>`                                                   | artifact operations, delegated to `vx artifacts`                      |
+| `--capabilities` / `--schema`                                        | machine-readable support matrix                                       |
 
 **Dispatch gate**: write/coding work must go through `vx apps <repo> --agent dispatch --worktree prepare --branch ... --task ...`. Raw `git worktree add` is not dispatch-ready — the CLI refuses to start a worker until `--worktree status --json` reports `prepared=true` (skill packs installed, dependency linkage confirmed, CLAUDE.md fragments rendered).
 
@@ -610,21 +665,22 @@ The sidebar, program metadata, thread metadata, wake queue, notification list, a
 
 ## Configuration
 
-| Variable                                                        | Purpose                                        |
-| --------------------------------------------------------------- | ---------------------------------------------- |
-| `T3CODE_PORT`                                                   | HTTP/WebSocket port (deployed default: `7421`) |
-| `T3CODE_HOST`                                                   | Bind host                                      |
-| `T3CODE_HOME`                                                   | Base directory for T3 data                     |
-| `T3CODE_MODE`                                                   | `development` or `production`                  |
-| `T3CODE_AUTH_TOKEN`                                             | Optional access token                          |
-| `T3CODE_NO_BROWSER`                                             | Suppress auto browser launch                   |
-| `T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD`                        | Auto-create project from `cwd` on startup      |
-| `T3CODE_LOG_WS_EVENTS`                                          | Log all WebSocket events (diagnostics)         |
-| `T3CODE_ALLOW_DEBUG_EXPORT`                                     | Permit full `debug-export` snapshots           |
-| `VX_ARTIFACTS_PATH`                                             | Root for plans + artifacts storage             |
-| `VX_T3_WORKER_MODEL_CASES_FILE`                                 | Override model-case policy file                |
-| `VX_T3_WORKER_MODEL_CAPS_FILE` / `VX_T3_WORKER_MODEL_CAPS_JSON` | Rate-limit caps                                |
-| `VX_T3_WORKER_MODEL_TRACKER_FILE`                               | Usage ledger location                          |
+| Variable                                                        | Purpose                                                                  |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `T3CODE_PORT`                                                   | HTTP/WebSocket port (deployed default: `7421`)                           |
+| `T3CODE_HOST`                                                   | Bind host                                                                |
+| `T3CODE_HOME`                                                   | Base directory for T3 data                                               |
+| `T3CODE_MODE`                                                   | `development` or `production`                                            |
+| `T3CODE_AUTH_TOKEN`                                             | Optional access token                                                    |
+| `T3CODE_NO_BROWSER`                                             | Suppress auto browser launch                                             |
+| `T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD`                        | Auto-create project from `cwd` on startup                                |
+| `T3CODE_LOG_WS_EVENTS`                                          | Log all WebSocket events (diagnostics)                                   |
+| `T3CODE_ALLOW_DEBUG_EXPORT`                                     | Permit full `debug-export` snapshots                                     |
+| `VX_ARTIFACTS_PATH`                                             | Root for plans + artifacts storage                                       |
+| `VX_TODOS_PATH`                                                 | Optional override for `vx todo`; defaults to `$VX_ARTIFACTS_PATH/@Todos` |
+| `VX_T3_WORKER_MODEL_CASES_FILE`                                 | Override model-case policy file                                          |
+| `VX_T3_WORKER_MODEL_CAPS_FILE` / `VX_T3_WORKER_MODEL_CAPS_JSON` | Rate-limit caps                                                          |
+| `VX_T3_WORKER_MODEL_TRACKER_FILE`                               | Usage ledger location                                                    |
 
 SQLite: `~/.t3/userdata/state.sqlite`
 
@@ -644,12 +700,23 @@ SQLite: `~/.t3/userdata/state.sqlite`
 
 ---
 
+## Technical Documentation
+
+| Document                                                                                     | Purpose                                                                                                          |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [`@Docs/@TechnicalDocs/t3code-vxapp/README.md`](@Docs/@TechnicalDocs/t3code-vxapp/README.md) | Targeted knowledge-bridge integration notes and current caveats.                                                 |
+| [`docs/`](docs/)                                                                             | Local design notes, specs, and implementation checklists that are not part of the shared `@Docs` knowledge tree. |
+
+The root README is the current high-level architecture source for orchestration, runtime packs, plans, TODO state, artifacts, and T3 server/UI boundaries.
+
+---
+
 ## Dev Checks
 
 ```bash
-bun run typecheck
-bun run lint
-bun run fmt:check
+bun fmt
+bun lint
+bun typecheck
 bun run test          # Vitest — use `bun run test`, not `bun test`
 bun run build:contracts   # regenerate + validate after protocol changes
 ```

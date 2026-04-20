@@ -25,7 +25,12 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { ClaudeAdapter } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapterLive, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  findClaudeProviderRuntimeProcessIdsForThread,
+  isClaudeProviderAuthFailureMessage,
+  makeClaudeAdapterLive,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 
 class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   private readonly queue: Array<SDKMessage> = [];
@@ -136,6 +141,10 @@ function makeHarness(config?: {
   readonly nativeEventLogger?: ClaudeAdapterLiveOptions["nativeEventLogger"];
   readonly cwd?: string;
   readonly baseDir?: string;
+  readonly procRoot?: string;
+  readonly currentPid?: number;
+  readonly processKiller?: ClaudeAdapterLiveOptions["processKiller"];
+  readonly forceKillDelayMs?: number;
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -159,6 +168,12 @@ function makeHarness(config?: {
       ? {
           nativeEventLogPath: config.nativeEventLogPath,
         }
+      : {}),
+    ...(config?.procRoot ? { procRoot: config.procRoot } : {}),
+    ...(config?.currentPid !== undefined ? { currentPid: config.currentPid } : {}),
+    ...(config?.processKiller ? { processKiller: config.processKiller } : {}),
+    ...(config?.forceKillDelayMs !== undefined
+      ? { forceKillDelayMs: config.forceKillDelayMs }
       : {}),
   };
 
@@ -238,6 +253,111 @@ const THREAD_ID = ThreadId.makeUnsafe("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.makeUnsafe("thread-claude-resume");
 
 describe("ClaudeAdapterLive", () => {
+  it("finds Claude runtime processes scoped by T3 thread env", () => {
+    const procRoot = mkdtempSync(path.join(os.tmpdir(), "t3-claude-proc-"));
+    try {
+      mkdirSync(path.join(procRoot, "1001"));
+      writeFileSync(
+        path.join(procRoot, "1001", "environ"),
+        "PATH=/usr/bin\0VX_T3_CURRENT_THREAD_ID=thread-live\0",
+      );
+      writeFileSync(
+        path.join(procRoot, "1001", "cmdline"),
+        "/usr/local/bin/claude\0--output-format\0stream-json\0",
+      );
+
+      mkdirSync(path.join(procRoot, "1002"));
+      writeFileSync(
+        path.join(procRoot, "1002", "environ"),
+        "PATH=/usr/bin\0VX_T3_CURRENT_THREAD_ID=thread-other\0",
+      );
+      writeFileSync(
+        path.join(procRoot, "1002", "cmdline"),
+        "/usr/local/bin/claude\0--output-format\0stream-json\0",
+      );
+
+      mkdirSync(path.join(procRoot, "1003"));
+      writeFileSync(
+        path.join(procRoot, "1003", "environ"),
+        "PATH=/usr/bin\0VX_T3_CURRENT_THREAD_ID=thread-live\0",
+      );
+      writeFileSync(path.join(procRoot, "1003", "cmdline"), "/usr/bin/node\0server.js\0");
+
+      assert.deepEqual(
+        findClaudeProviderRuntimeProcessIdsForThread("thread-live", {
+          procRoot,
+          currentPid: 9999,
+        }),
+        [1001],
+      );
+    } finally {
+      rmSync(procRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.effect("reaps Claude runtime processes when a turn fails with provider auth", () => {
+    const procRoot = mkdtempSync(path.join(os.tmpdir(), "t3-claude-auth-proc-"));
+    const killCalls: Array<{ readonly pid: number; readonly signal: NodeJS.Signals }> = [];
+    const harness = makeHarness({
+      procRoot,
+      currentPid: 9999,
+      forceKillDelayMs: 60_000,
+      processKiller: (pid, signal) => {
+        killCalls.push({ pid, signal });
+      },
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => rmSync(procRoot, { recursive: true, force: true })),
+      );
+
+      mkdirSync(path.join(procRoot, "1001"));
+      writeFileSync(
+        path.join(procRoot, "1001", "environ"),
+        `PATH=/usr/bin\0VX_T3_CURRENT_THREAD_ID=${THREAD_ID}\0`,
+      );
+      writeFileSync(
+        path.join(procRoot, "1001", "cmdline"),
+        "/usr/local/bin/claude\0--output-format\0stream-json\0",
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      const authError =
+        'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}';
+      assert.equal(isClaudeProviderAuthFailureMessage(authError), true);
+      harness.query.emit({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        errors: [authError],
+        stop_reason: "error",
+        session_id: "sdk-session-auth-failed",
+        uuid: "result-auth-failed",
+      } as unknown as SDKMessage);
+
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      assert.deepEqual(killCalls, [{ pid: 1001, signal: "SIGTERM" }]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
