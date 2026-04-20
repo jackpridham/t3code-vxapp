@@ -34,10 +34,14 @@ export function vortexAppArtifactsQueryOptions(input: {
     queryKey: vortexAppsQueryKeys.artifacts.list(input.targetId, includeArchived),
     queryFn: async () => {
       const api = ensureNativeApi();
-      return api.server.listVortexAppArtifacts({
-        target_id: input.targetId,
-        includeArchived,
-      });
+      return api.server.listVortexAppArtifacts(
+        includeArchived
+          ? {
+              target_id: input.targetId,
+              includeArchived: true,
+            }
+          : { target_id: input.targetId },
+      );
     },
     enabled: input.enabled ?? true,
     staleTime: input.staleTime ?? 60_000,

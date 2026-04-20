@@ -27,6 +27,15 @@ describe("resolveMarkdownFileLinkTarget", () => {
     );
   });
 
+  it("resolves @Docs scratch artifact paths against cwd", () => {
+    expect(
+      resolveMarkdownFileLinkTarget(
+        "@Docs/@Scratch/slave/mediawiki-knowledge-base-feature-design.md",
+        "/Users/julius/project",
+      ),
+    ).toBe("/Users/julius/project/@Docs/@Scratch/slave/mediawiki-knowledge-base-feature-design.md");
+  });
+
   it("maps #L line anchors to editor line suffixes", () => {
     expect(resolveMarkdownFileLinkTarget("/Users/julius/project/src/main.ts#L42C7")).toBe(
       "/Users/julius/project/src/main.ts:42:7",

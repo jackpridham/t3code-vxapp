@@ -450,7 +450,6 @@ export default function ChatView({
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const toggleProjectLabelFilter = useUiStateStore((store) => store.toggleProjectLabelFilter);
-  const openArtifactPanel = useUiStateStore((store) => store.openArtifactPanel);
   const activeThreadLastVisitedAt = useUiStateStore(
     (store) => store.threadLastVisitedAtById[threadId],
   );
@@ -4033,7 +4032,6 @@ export default function ChatView({
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
-                onArtifactLinkClick={openArtifactPanel}
               />
             </div>
 

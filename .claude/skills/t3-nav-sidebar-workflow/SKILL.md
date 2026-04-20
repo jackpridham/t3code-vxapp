@@ -34,6 +34,8 @@ Use a hardcoded tree like:
 
 ```text
 Chat
+Artifacts
+  <configured app display names>
 Settings
   General
   Threads
@@ -46,12 +48,22 @@ Why:
 
 - Settings is not a useful top-level route in the app mental model.
 - The settings sections should be visually subordinate to `Settings`.
+- Artifacts is a useful top-level route, but its children come from the configured Vortex app catalog, not from route scanning.
 - A hardcoded tree gives better control over grouping, ordering, icons, indentation, labels, and future hiding/showing rules.
 - Do not dynamically dump every route into this menu.
 
 When adding new top-level destinations, add them as explicit top-level nodes.
 
 When adding new settings sections, update `SETTINGS_NAV_ITEMS` first, then let the nav sidebar reuse it as settings children.
+
+When adding or changing artifact navigation:
+
+- Use `server.listVortexApps` through `vortexAppsListQueryOptions()`.
+- Use `project.display_name` for labels.
+- Use `project.target_id` for routes and matching.
+- Link children to `/artifacts/:targetId`, not to the blank `/artifacts` root.
+- Mark an artifact app child active for both `/artifacts/:targetId` and `/artifacts/:targetId/*`.
+- Keep the `Artifacts` parent active for `/artifacts` and every nested artifacts route.
 
 ## Layout Rules
 
@@ -115,7 +127,7 @@ type AppNavigationItem = {
   icon: ComponentType<{ className?: string }>;
   label: string;
   match: (pathname: string) => boolean;
-  to: "/" | SettingsSectionPath;
+  to: string;
 };
 
 type AppNavigationGroup = {
@@ -123,7 +135,7 @@ type AppNavigationGroup = {
   icon: ComponentType<{ className?: string }>;
   label: string;
   match: (pathname: string) => boolean;
-  to: SettingsSectionPath;
+  to: "/artifacts" | SettingsSectionPath;
 };
 ```
 
@@ -169,6 +181,8 @@ Active matching guidance:
 
 - `Settings` parent should be active for `/settings` and `/settings/*`.
 - Settings children should be active only for their exact route.
+- `Artifacts` parent should be active for `/artifacts` and `/artifacts/*`.
+- Artifact app children should be active for exact target routes and nested detail routes.
 - `Chat` should be active for regular chat/thread routes, but not utility windows like `/artifact`, `/artifacts`, `/changes/*`, or `/sidebar`.
 
 ## What To Avoid
@@ -177,6 +191,7 @@ Active matching guidance:
 - Do not duplicate the logo/header JSX in both sidebars.
 - Do not derive nav items by scanning route files.
 - Do not flatten settings children into top-level rows.
+- Do not flatten artifact app children into unrelated top-level rows.
 - Do not use project/thread/orchestration row components for global app navigation.
 - Do not persist open/closed state unless the user asks for durable behavior.
 - Do not introduce another overlay primitive when `Sheet` already fits.

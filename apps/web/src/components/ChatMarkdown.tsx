@@ -19,7 +19,9 @@ import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
+import { resolveScratchArtifactHref } from "../lib/scratchArtifactLinks";
 import { readNativeApi } from "../nativeApi";
+import { slugifyMarkdownHeading } from "../lib/markdownHeadings";
 import {
   createHighlightCacheKey,
   estimateHighlightedSize,
@@ -66,7 +68,7 @@ interface ChatMarkdownProps {
   isStreaming?: boolean;
   variant?: "chat" | "document";
   className?: string;
-  onArtifactLinkClick?: ((path: string) => void) | undefined;
+  headingIds?: readonly string[];
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -214,10 +216,31 @@ function ChatMarkdown({
   isStreaming = false,
   variant = "chat",
   className,
-  onArtifactLinkClick,
+  headingIds,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const headingIdIndexRef = useRef(0);
+  const headingSlugCountsRef = useRef(new Map<string, number>());
+
+  headingIdIndexRef.current = 0;
+  headingSlugCountsRef.current = new Map<string, number>();
+
+  const resolveHeadingId = useCallback(
+    (children: ReactNode): string => {
+      const index = headingIdIndexRef.current;
+      headingIdIndexRef.current += 1;
+      const provided = headingIds?.[index];
+      if (provided) {
+        return provided;
+      }
+
+      const textHeading = nodeToPlainText(children);
+      return slugifyMarkdownHeading(textHeading, headingSlugCountsRef.current);
+    },
+    [headingIds],
+  );
+
   const markdownComponents = useMemo<Components>(
     () => ({
       a({ node: _node, href, ...props }) {
@@ -226,8 +249,10 @@ function ChatMarkdown({
           return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
 
-        // Route all resolved file links to the ArtifactPanel (if handler provided)
-        const isArtifactLink = onArtifactLinkClick != null;
+        const artifactHref = resolveScratchArtifactHref(targetPath);
+        if (artifactHref) {
+          return <a {...props} href={artifactHref} />;
+        }
 
         return (
           <a
@@ -236,10 +261,6 @@ function ChatMarkdown({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (isArtifactLink) {
-                onArtifactLinkClick(targetPath);
-                return;
-              }
               const api = readNativeApi();
               if (api) {
                 void openInPreferredEditor(api, targetPath);
@@ -278,8 +299,50 @@ function ChatMarkdown({
           </MarkdownCodeBlock>
         );
       },
+      h1({ node: _node, children, ...props }) {
+        return (
+          <h1 {...props} id={resolveHeadingId(children)}>
+            {children}
+          </h1>
+        );
+      },
+      h2({ node: _node, children, ...props }) {
+        return (
+          <h2 {...props} id={resolveHeadingId(children)}>
+            {children}
+          </h2>
+        );
+      },
+      h3({ node: _node, children, ...props }) {
+        return (
+          <h3 {...props} id={resolveHeadingId(children)}>
+            {children}
+          </h3>
+        );
+      },
+      h4({ node: _node, children, ...props }) {
+        return (
+          <h4 {...props} id={resolveHeadingId(children)}>
+            {children}
+          </h4>
+        );
+      },
+      h5({ node: _node, children, ...props }) {
+        return (
+          <h5 {...props} id={resolveHeadingId(children)}>
+            {children}
+          </h5>
+        );
+      },
+      h6({ node: _node, children, ...props }) {
+        return (
+          <h6 {...props} id={resolveHeadingId(children)}>
+            {children}
+          </h6>
+        );
+      },
     }),
-    [cwd, diffThemeName, isStreaming, onArtifactLinkClick],
+    [cwd, diffThemeName, isStreaming, resolveHeadingId],
   );
 
   return (

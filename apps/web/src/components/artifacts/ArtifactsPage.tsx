@@ -10,12 +10,12 @@ export function ArtifactsPage() {
 
   if (appsQuery.isLoading && projects.length === 0) {
     return (
-      <main className="flex h-dvh min-h-0 bg-background text-foreground">
+      <main className="flex h-dvh min-h-0 overflow-y-auto bg-background text-foreground">
         <section
           aria-label="Artifacts"
           className="mx-auto flex w-full max-w-5xl items-start px-4 py-6"
         >
-          <p className="text-sm text-muted-foreground">Loading artifact apps…</p>
+          <p className="text-sm text-muted-foreground">Loading artifact apps...</p>
         </section>
       </main>
     );
@@ -23,7 +23,7 @@ export function ArtifactsPage() {
 
   if (projects.length === 0) {
     return (
-      <main className="flex h-dvh min-h-0 bg-background text-foreground">
+      <main className="flex h-dvh min-h-0 overflow-y-auto bg-background text-foreground">
         <section aria-label="Artifacts" className="mx-auto flex w-full max-w-5xl flex-1 px-4 py-6">
           <p className="rounded-lg border border-dashed border-border bg-card/75 p-4 text-sm text-muted-foreground">
             No artifact targets were found yet.
@@ -34,7 +34,7 @@ export function ArtifactsPage() {
   }
 
   return (
-    <main className="min-h-0 flex h-dvh bg-background text-foreground">
+    <main className="flex h-dvh min-h-0 overflow-y-auto bg-background text-foreground">
       <section aria-label="Artifacts" className="mx-auto flex w-full max-w-5xl flex-1 px-4 py-6">
         <div className="min-w-0 rounded-lg border border-border bg-card/90 p-4">
           <h1 className="text-lg font-semibold">Artifacts</h1>

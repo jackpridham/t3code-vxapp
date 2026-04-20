@@ -30,6 +30,10 @@ function filenameFromPath(pathValue: string): string {
   return slashIndex >= 0 ? normalized.slice(slashIndex + 1) : normalized;
 }
 
+function titleFromPath(pathValue: string): string {
+  return filenameFromPath(pathValue).replace(/\.md$/i, "");
+}
+
 function artifactRecordTitle(record: ArtifactRecord): string | null {
   return toStringValue(record.title) ?? toStringValue(record.Name) ?? null;
 }
@@ -62,6 +66,22 @@ function artifactRecordKind(record: ArtifactRecord): string | null {
 
 function artifactRecordPreview(record: ArtifactRecord): string | null {
   return toStringValue(record.preview);
+}
+
+function artifactRecordStatus(record: ArtifactRecord): string | null {
+  return toStringValue(record.status);
+}
+
+function artifactRecordThreadId(record: ArtifactRecord): string | null {
+  return toStringValue(record.threadId) ?? toStringValue(record.thread_id);
+}
+
+function artifactRecordPlanKey(record: ArtifactRecord): string | null {
+  return toStringValue(record.planKey) ?? toStringValue(record.plan_key);
+}
+
+function artifactRecordWorker(record: ArtifactRecord): string | null {
+  return toStringValue(record.worker);
 }
 
 function booleanValue(value: unknown): boolean {
@@ -109,7 +129,7 @@ export function artifactRecordSlug(record: ArtifactRecord): string {
     return "artifact";
   }
 
-  return normalizeArtifactSlug(filenameFromPath(recordPath));
+  return normalizeArtifactSlug(titleFromPath(recordPath));
 }
 
 export function readArtifactPreloadPayload(
@@ -163,7 +183,7 @@ export function findArtifactBySlug(input: {
 
     const recordPath = artifactRecordPath(artifact);
     if (!titleFallbackMatch && recordPath) {
-      const fallbackTitle = filenameFromPath(recordPath);
+      const fallbackTitle = titleFromPath(recordPath);
       if (normalizeArtifactSlug(fallbackTitle) === requestedSlug) {
         titleFallbackMatch = artifact;
       }
@@ -182,6 +202,10 @@ export function artifactRecordMeta(record: ArtifactRecord): {
   updatedAt: string | null;
   kind: string | null;
   preview: string | null;
+  status: string | null;
+  threadId: string | null;
+  planKey: string | null;
+  worker: string | null;
   pinned: boolean;
   archived: boolean;
 } {
@@ -192,6 +216,10 @@ export function artifactRecordMeta(record: ArtifactRecord): {
   const updatedAt = artifactRecordUpdatedAt(record);
   const kind = artifactRecordKind(record);
   const preview = artifactRecordPreview(record);
+  const status = artifactRecordStatus(record);
+  const threadId = artifactRecordThreadId(record);
+  const planKey = artifactRecordPlanKey(record);
+  const worker = artifactRecordWorker(record);
 
   return {
     title,
@@ -202,6 +230,10 @@ export function artifactRecordMeta(record: ArtifactRecord): {
     updatedAt: updatedAt ?? null,
     kind: kind ?? null,
     preview: preview ?? null,
+    status: status ?? null,
+    threadId: threadId ?? null,
+    planKey: planKey ?? null,
+    worker: worker ?? null,
     pinned: artifactRecordPinned(record),
     archived: artifactRecordArchived(record),
   };

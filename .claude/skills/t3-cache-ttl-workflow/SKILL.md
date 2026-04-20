@@ -100,9 +100,22 @@ For background refresh:
 - `staleTime` should match expected freshness.
 - `refetchInterval` can drive periodic checks while the app is open.
 - Keep query keys stable and narrow.
+- Include behavior-changing options in query keys, for example archived-inclusive artifact lists must not share a query key with active-only artifact lists.
 - Query functions should call `ensureNativeApi()`, not shell commands.
 
 Do not set a query to `enabled: open` if the data must be preloaded before the user opens a drawer or route.
+
+When an RPC input adds an optional flag, avoid sending false values unless the server contract explicitly requires them. This reduces breakage during rolling local dev sessions where browser code may refresh before the server has restarted with the new schema.
+
+For user-opened detail views where stale data is actively harmful, render cached data as an immediate placeholder but still force a refresh on entry:
+
+- Use the durable/local cache only for instant metadata or initial route resolution.
+- Set the detail query to `staleTime: 0`.
+- Set `refetchOnMount: "always"` so revisiting the route revalidates immediately.
+- Include the resolved backing resource in the query key, for example an artifact content query should key on `targetId` and the resolved absolute artifact path.
+- Use `dataUpdatedAt` or server `fetched_at` to display "last refreshed" state in the UI.
+
+This pattern is different from background preloading. It intentionally spends one read on route entry so users can trust detail content that may have changed on disk.
 
 ## Concurrency And Load Rules
 
@@ -120,6 +133,7 @@ Do not set a query to `enabled: open` if the data must be preloaded before the u
 - Do not introduce a second SQL cache table when `runtime_ttl_cache` fits.
 - Do not mutate cached payloads in place; write a new envelope.
 - Do not forget schema versioning for localStorage.
+- Do not let an archived-inclusive response overwrite an active-only preload cache unless the cache schema explicitly models that distinction.
 
 ## Validation
 
@@ -133,6 +147,7 @@ For browser cache:
 - Verify missing localStorage fetches.
 - Verify fresh localStorage skips.
 - Verify expired localStorage refreshes and only replaces changed records.
+- Verify detail pages that display cached data still refetch on mount and update their visible refreshed-at timestamp.
 
 Final repo checks:
 

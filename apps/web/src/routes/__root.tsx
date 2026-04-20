@@ -303,6 +303,7 @@ export function resolveRouteThreadId(pathname: string): ThreadId | null {
   if (
     !routeThreadId ||
     routeThreadId === "artifact" ||
+    routeThreadId === "artifacts" ||
     routeThreadId === "changes" ||
     routeThreadId === "settings" ||
     routeThreadId === "sidebar"

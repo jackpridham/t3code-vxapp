@@ -438,6 +438,7 @@ describe("resolveRouteThreadId", () => {
     expect(resolveRouteThreadId("/changes/thread-1")).toBeNull();
     expect(resolveRouteThreadId("/sidebar/thread-1")).toBeNull();
     expect(resolveRouteThreadId("/artifact")).toBeNull();
+    expect(resolveRouteThreadId("/artifacts/api/example")).toBeNull();
   });
 });
 

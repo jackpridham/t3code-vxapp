@@ -65,6 +65,12 @@ Use app wrappers for artifact lists:
 vx apps <target> --artifact list --json --limit 100 --page <n>
 ```
 
+Include archived artifacts only when the UI explicitly requests them:
+
+```bash
+vx apps <target> --artifact list --json --limit 100 --page <n> --include-archived
+```
+
 The wrapper caps large limits, so page until backend pagination is complete.
 
 Preferred result shape in T3:
@@ -85,8 +91,15 @@ Artifact records are pass-through metadata objects. Known useful fields include:
 - `status`
 - `pinned`
 - `archived`
+- `archivedAt`
+- `threadId`
+- `planKey`
+- `worker`
+- `updatedAt` may be absent; use `createdAt` as the fallback for recently-updated ordering.
 
 Do not over-normalize artifact records unless a consumer needs a stable field. Keep the raw record available so future UI can use new metadata without another server change.
+
+For UI metadata helpers, normalize only the fields needed for stable display/routing and keep the original record alongside them. If `title` is absent, derive the display/routing fallback from the artifact path basename without a trailing `.md`.
 
 ## Adding a New Vx Apps RPC
 
@@ -107,6 +120,8 @@ If a contracts type changes and the dev server is running, restart the managed d
 vx apps t3 --dev-server stop
 vx apps t3 --dev-server start --daemon
 ```
+
+For optional request flags such as `includeArchived`, keep the field optional in contracts and only send it from the browser when true unless the server requires an explicit false. This keeps the browser compatible during local restart windows.
 
 ## Command Execution Rules
 
@@ -131,9 +146,14 @@ Map errors into a tagged service error that includes:
 
 - Use `ensureNativeApi()` in query functions.
 - Use stable query keys.
+- Include meaningful request options in query keys. For example, `listVortexAppArtifacts(targetId, includeArchived)` needs distinct keys for active-only and archived-inclusive lists.
 - Do not call NativeApi directly from render.
 - Do not duplicate app catalog state into component-local state unless it is transient UI state.
 - Use display names for labels and target IDs for route/cache keys.
+
+Artifact metadata can include absolute paths outside the target app workspace, commonly under a shared knowledge/artifact store. If a UI needs file content, first try the existing workspace read helper path. If it cannot safely read the absolute artifact path, add the smallest read-only server RPC rather than broadening unrelated write APIs.
+
+Artifact detail routes may use preloaded artifact metadata for instant display, but should refetch `server.listVortexAppArtifacts` on mount and write the fresh response back through the artifact preload cache helper. This keeps localStorage current without waiting for the background 5 minute preloader.
 
 ## Footguns
 
@@ -142,6 +162,8 @@ Map errors into a tagged service error that includes:
 - Do not forget to rebuild/restart after contracts changes.
 - Do not add WS tags without updating `NativeApi` and `wsNativeApi`.
 - Do not fetch only page 1 when pagination reports more pages.
+- Do not use the active-only artifact preload cache as the source of truth for archived-inclusive views.
+- Do not assume `title` is always present; path-derived fallback slugs must strip `.md`.
 - Do not assume all repos expose every wrapper; check wrapper support if adding a new workflow.
 - Do not use deprecated `vx projects ...` aliases.
 
