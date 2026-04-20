@@ -2,6 +2,7 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectId,
+  ProgramId,
   ThreadId,
 } from "@t3tools/contracts";
 import { OrchestrationCommand } from "@t3tools/contracts";
@@ -23,6 +24,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
+import { ORCHESTRATION_COMMAND_READ_MODEL_PROFILE } from "../commandReadModelProfile.ts";
 import type { ProjectionAttachmentSideEffects } from "../Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -33,8 +35,8 @@ interface CommandEnvelope {
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: "project" | "thread";
-  readonly aggregateId: ProjectId | ThreadId;
+  readonly aggregateKind: "project" | "program" | "thread";
+  readonly aggregateId: ProjectId | ProgramId | ThreadId;
 } {
   switch (command.type) {
     case "project.create":
@@ -43,6 +45,16 @@ function commandToAggregateRef(command: OrchestrationCommand): {
       return {
         aggregateKind: "project",
         aggregateId: command.projectId,
+      };
+    case "program.create":
+    case "program.meta.update":
+    case "program.delete":
+    case "program.notification.upsert":
+    case "program.notification.consume":
+    case "program.notification.drop":
+      return {
+        aggregateKind: "program",
+        aggregateId: command.programId,
       };
     default:
       return {
@@ -207,7 +219,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   yield* projectionPipeline.bootstrap;
 
-  readModel = yield* projectionSnapshotQuery.getSnapshot({ profile: "operational" });
+  readModel = yield* projectionSnapshotQuery.getSnapshot({
+    profile: ORCHESTRATION_COMMAND_READ_MODEL_PROFILE,
+  });
 
   const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
   yield* Effect.forkScoped(worker);

@@ -11,6 +11,8 @@ import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../per
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
 import { ProjectionOrchestratorWakeRepository } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
+import { ProjectionProgramNotificationRepository } from "../../persistence/Services/ProjectionProgramNotifications.ts";
+import { ProjectionProgramRepository } from "../../persistence/Services/ProjectionPrograms.ts";
 import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -31,6 +33,8 @@ import {
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionOrchestratorWakeRepositoryLive } from "../../persistence/Layers/ProjectionOrchestratorWakes.ts";
+import { ProjectionProgramNotificationRepositoryLive } from "../../persistence/Layers/ProjectionProgramNotifications.ts";
+import { ProjectionProgramRepositoryLive } from "../../persistence/Layers/ProjectionPrograms.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
 import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers/ProjectionThreadActivities.ts";
@@ -54,6 +58,8 @@ import {
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
+  programs: "projection.programs",
+  programNotifications: "projection.program-notifications",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
@@ -406,6 +412,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const eventStore = yield* OrchestrationEventStore;
     const projectionStateRepository = yield* ProjectionStateRepository;
     const projectionProjectRepository = yield* ProjectionProjectRepository;
+    const projectionProgramRepository = yield* ProjectionProgramRepository;
+    const projectionProgramNotificationRepository = yield* ProjectionProgramNotificationRepository;
     const projectionThreadRepository = yield* ProjectionThreadRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
@@ -516,6 +524,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             spawnRole: event.payload.spawnRole ?? null,
             spawnedBy: event.payload.spawnedBy ?? null,
             workflowId: event.payload.workflowId ?? null,
+            programId: event.payload.programId ?? null,
+            executiveProjectId: event.payload.executiveProjectId ?? null,
+            executiveThreadId: event.payload.executiveThreadId ?? null,
           });
           return;
 
@@ -584,6 +595,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : {}),
             ...(event.payload.workflowId !== undefined
               ? { workflowId: event.payload.workflowId }
+              : {}),
+            ...(event.payload.programId !== undefined
+              ? { programId: event.payload.programId }
+              : {}),
+            ...(event.payload.executiveProjectId !== undefined
+              ? { executiveProjectId: event.payload.executiveProjectId }
+              : {}),
+            ...(event.payload.executiveThreadId !== undefined
+              ? { executiveThreadId: event.payload.executiveThreadId }
               : {}),
             updatedAt: event.payload.updatedAt,
           });
@@ -708,6 +728,143 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             latestTurnId: null,
             updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
+    const applyProgramsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyProgramsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "program.created":
+          yield* projectionProgramRepository.upsert({
+            programId: event.payload.programId,
+            title: event.payload.title,
+            objective: event.payload.objective,
+            status: event.payload.status,
+            executiveProjectId: event.payload.executiveProjectId,
+            executiveThreadId: event.payload.executiveThreadId,
+            currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId,
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.updatedAt,
+            completedAt: event.payload.completedAt,
+            deletedAt: null,
+          });
+          return;
+
+        case "program.meta-updated": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+            ...(event.payload.objective !== undefined
+              ? { objective: event.payload.objective }
+              : {}),
+            ...(event.payload.status !== undefined ? { status: event.payload.status } : {}),
+            ...(event.payload.executiveProjectId !== undefined
+              ? { executiveProjectId: event.payload.executiveProjectId }
+              : {}),
+            ...(event.payload.executiveThreadId !== undefined
+              ? { executiveThreadId: event.payload.executiveThreadId }
+              : {}),
+            ...(event.payload.currentOrchestratorThreadId !== undefined
+              ? { currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId }
+              : {}),
+            ...(event.payload.completedAt !== undefined
+              ? { completedAt: event.payload.completedAt }
+              : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.deleted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            deletedAt: event.payload.deletedAt,
+            updatedAt: event.payload.deletedAt,
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
+    const applyProgramNotificationsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyProgramNotificationsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "program.notification-upserted":
+          yield* projectionProgramNotificationRepository.upsert({
+            notificationId: event.payload.notificationId,
+            programId: event.payload.programId,
+            executiveProjectId: event.payload.executiveProjectId,
+            executiveThreadId: event.payload.executiveThreadId,
+            orchestratorThreadId: event.payload.orchestratorThreadId,
+            kind: event.payload.kind,
+            severity: event.payload.severity,
+            summary: event.payload.summary,
+            evidence: event.payload.evidence,
+            state: event.payload.state,
+            queuedAt: event.payload.queuedAt,
+            deliveredAt: event.payload.deliveredAt,
+            consumedAt: event.payload.consumedAt,
+            droppedAt: event.payload.droppedAt,
+            consumeReason: event.payload.consumeReason,
+            dropReason: event.payload.dropReason,
+            createdAt: event.payload.createdAt,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+
+        case "program.notification-consumed": {
+          const existingRow = yield* projectionProgramNotificationRepository.getById({
+            notificationId: event.payload.notificationId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramNotificationRepository.upsert({
+            ...existingRow.value,
+            state: "consumed",
+            consumedAt: event.payload.consumedAt,
+            consumeReason: event.payload.consumeReason,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.notification-dropped": {
+          const existingRow = yield* projectionProgramNotificationRepository.getById({
+            notificationId: event.payload.notificationId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramNotificationRepository.upsert({
+            ...existingRow.value,
+            state: "dropped",
+            droppedAt: event.payload.droppedAt,
+            dropReason: event.payload.dropReason,
+            updatedAt: event.payload.updatedAt,
           });
           return;
         }
@@ -1393,6 +1550,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyProjectsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.programs,
+        apply: applyProgramsProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
+        apply: applyProgramNotificationsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -1547,6 +1712,8 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
 ).pipe(
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(ProjectionProjectRepositoryLive),
+  Layer.provideMerge(ProjectionProgramRepositoryLive),
+  Layer.provideMerge(ProjectionProgramNotificationRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),

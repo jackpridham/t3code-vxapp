@@ -829,8 +829,20 @@ describe("WebSocket Server", () => {
     const debugSnapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot, {
       profile: "debug-export",
     });
-    expect(debugSnapshotResponse.error).toBeUndefined();
-    expect(debugSnapshotResponse.result).toEqual(
+    expect(debugSnapshotResponse.error?.message).toContain(
+      "debug-export snapshots require allowDebugExport=true",
+    );
+
+    const authorizedDebugSnapshotResponse = await sendRequest(
+      ws,
+      ORCHESTRATION_WS_METHODS.getSnapshot,
+      {
+        profile: "debug-export",
+        allowDebugExport: true,
+      },
+    );
+    expect(authorizedDebugSnapshotResponse.error).toBeUndefined();
+    expect(authorizedDebugSnapshotResponse.result).toEqual(
       expect.objectContaining({
         snapshotProfile: "debug-export",
       }),

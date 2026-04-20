@@ -1,7 +1,7 @@
 # T3 Code — Vortex Orchestration Workbench
 
 > A heavily-reworked fork of t3code, rebuilt as a **personal multi-repo agentic development control plane**.
-> Orchestrators, workers, worktrees, wake queues, plans, artifacts, checkpoints, diffs, terminals, and provider sessions — one durable surface.
+> Executive programs, orchestrators, workers, worktrees, wake queues, notifications, plans, artifacts, checkpoints, diffs, terminals, and provider sessions — one durable surface.
 
 ---
 
@@ -35,8 +35,8 @@ The upstream t3code is a clean browser UI for one assistant at a time. The momen
 This fork is the control plane that makes that loop tractable:
 
 - **Spans repos.** One orchestrator supervises workers checked out in worktrees across every registered repo, each with its own provider session and pack-profile.
-- **Durable.** Everything — commands, events, lineage, wake items, plans, artifacts, checkpoints — is event-sourced in SQLite. Restart the server, close the browser, power-cycle the box: state survives.
-- **Observable.** The orchestrator can ask the system what Jasper is doing, which workers belong to it, what each has changed, and which wakes are still pending — without reading terminal scrollback.
+- **Durable.** Everything — commands, events, executive programs, notifications, lineage, wake items, plans, artifacts, checkpoints — is event-sourced in SQLite. Restart the server, close the browser, power-cycle the box: state survives.
+- **Observable.** The founder/CTO layer can see product-level program decisions and blockers, while Jasper can ask what workers belong to it, what each changed, and which wakes are still pending — without reading terminal scrollback.
 - **Wired into `vx`.** The Vortex CLI drives plans, artifacts, dispatch, worktrees, and deployment directly against the T3 engine via WebSocket RPC.
 - **Skill-pack aware.** Workers dispatched through `vx apps <repo> --agent dispatch` get a materialized `.claude/skills/` directory selected by role + repo + task class + context mode — not a global mirror.
 
@@ -49,8 +49,10 @@ Opinionated about durable state, structured lineage, and observable orchestratio
 ```mermaid
 flowchart TB
   subgraph Orchestrator["Orchestrator layer"]
+    CTO["CTO / executive thread\nprogram intent + product decisions"]
     Jasper["Jasper (Claude Code session)\norchestration skills + memory"]
     VX["vx CLI\nplan · artifacts · apps · t3"]
+    CTO --> Jasper
     Jasper --> VX
   end
 
@@ -117,21 +119,36 @@ stateDiagram-v2
   Pending --> Dropped : worker thread deleted
 ```
 
-| Concept          | Meaning                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Project**      | Workspace root, worktree, or orchestration root                                                                  |
-| **Thread**       | Provider conversation or orchestration lane                                                                      |
-| **Orchestrator** | Jasper session — holds the `workflowId` and owns workers                                                         |
-| **Worker**       | Thread with explicit `orchestratorProjectId`, `orchestratorThreadId`, `parentThreadId`, `spawnRole`, `spawnedBy` |
-| **workflowId**   | Groups orchestrator + all workers into one durable run                                                           |
-| **Wake item**    | Worker-outcome record delivered back to the owning orchestrator                                                  |
+| Concept                  | Meaning                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Project**              | Workspace root, worktree, or orchestration root                                                                                                                                       |
+| **Executive project**    | CTO/founder-facing workspace (`kind: "executive"`) that owns product intent, not worker scheduling                                                                                    |
+| **Program**              | Durable executive initiative linking CTO intent to one or more Jasper orchestrator runs                                                                                               |
+| **Thread**               | Provider conversation or orchestration lane                                                                                                                                           |
+| **Orchestrator**         | Jasper session — holds the `workflowId` and owns workers                                                                                                                              |
+| **Worker**               | Thread with explicit `orchestratorProjectId`, `orchestratorThreadId`, `parentThreadId`, `spawnRole`, `spawnedBy`                                                                      |
+| **workflowId**           | Groups orchestrator + all workers into one durable run                                                                                                                                |
+| **Wake item**            | Worker-outcome record delivered back to the owning orchestrator                                                                                                                       |
+| **Program notification** | CTO-visible program signal (`decision_required`, `blocked`, `milestone_completed`, `closeout_ready`, `risk_escalated`, `status_update`) with severity, state, and structured evidence |
 
 Lineage is structured identifiers only — no title parsing, no heuristics. That is what lets a worker in `/home/gizmo/worktrees/api-fix-auth-01` show up under the Jasper session that spawned it, even though the worker's project is a different repo.
+
+The current executive flow is intentionally layered:
+
+```text
+Founder -> CTO executive thread -> Program -> Jasper orchestrator thread -> Workers
+```
+
+CTO/program linkage uses `programId`, `executiveProjectId`, and `executiveThreadId`. Worker lineage still belongs to Jasper and uses `orchestratorProjectId`, `orchestratorThreadId`, `parentThreadId`, `spawnRole`, `spawnedBy`, and `workflowId`. Those two relationships are separate on purpose: CTO decides what matters and when a decision is needed; Jasper coordinates execution and worker wake settlement.
+
+Program notifications are not worker wake items. They are durable executive signals stored on the program aggregate with a lifecycle of `pending`, `delivering`, `delivered`, `consumed`, or `dropped`. They let Jasper or an operator surface blockers and decisions to CTO without creating a persistent CTO watcher or bypassing Jasper's orchestration lane.
 
 Worker visibility has two sidebar modes:
 
 - `selected-session` — workers owned by the active orchestrator
 - `project-diagnostic` — every worker in the same workspace root, for cross-project runs
+
+Workers with `spawnRole=worker` but missing authoritative Jasper lineage are shown as direct/orphan operations rather than hidden under a healthy orchestrator tree. Normal dispatch guards also reserve `jasper` for primary orchestrator threads; `worker/jasper` is not a valid routine worker path.
 
 ---
 
@@ -360,6 +377,7 @@ worktrees/                    — per-task materialized runtime copies
 
 | role                 | job                                                                                                                                                                                                                                                                                                                                           |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CTO**              | Executive layer above Jasper. Owns founder intent, product decisions, program state, and program-level notifications. It does not schedule normal workers directly.                                                                                                                                                                           |
 | **Jasper**           | Orchestrator. Plans, dispatches workers, tracks closeouts, manages SSOT artifacts. Uses `agents-orchestration`, `agents-multi-project-vx-plan`, `agents-vx-plan-worker-loop`, `agents-t3-dispatch`, `agents-t3-supervision`, `agents-ssot-program-manager`, and 6+ more role-local skills.                                                    |
 | **Observer**         | External auditor. Evaluates Jasper/T3 behavior from outside, converts repeated failures into new skills or runtime-pack changes, reruns bounded tests. Uses `orchestration-observer`, `orchestration-observer-autonomous`, `orchestration-three-lane-scheduler`, `orchestration-lineage-debug`, `orchestration-review-verdict-recovery`, etc. |
 | **Tai**              | Research and knowledge distillation. Lightweight, read-only, fast-model default.                                                                                                                                                                                                                                                              |
@@ -374,6 +392,8 @@ worktrees/                    — per-task materialized runtime copies
 4. Workers get dispatch-time-computed sets, not role-inherited ones.
 
 **Dispatch contract** (`schemas/dispatch-contract.schema.json`) binds a specific resolved pack list, context mode, closeout authority, grants, and forbids to a worker dispatch. `vortex-scripts` refuses to start a worker whose resolved context doesn't match its declared contract.
+
+CTO uses a separate executive control surface instead of worker dispatch. `vx t3 cto request-orchestration` creates a CTO-owned program envelope and links it to the current Jasper primary orchestrator when present. Jasper remains the only normal owner of worker scheduling and worker wake settlement.
 
 ---
 
@@ -524,21 +544,36 @@ Per-repo command wrapper that knows the target's capabilities. Every target reso
 
 Direct entry point into the T3 server, independent of the `vx apps` wrappers. Useful for orchestrator introspection, doctor checks, and low-level dispatch.
 
-| group         | commands                                                                                                                                                                    |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------- |
-| **Health**    | `doctor`, `status`, `snapshot`                                                                                                                                              |
-| **Events**    | `events replay [--from N]` — replay domain events from a sequence cursor                                                                                                    |
-| **Projects**  | `list`, `inspect`, `alias set                                                                                                                                               | list`, `ensure --workspace` |
-| **Threads**   | `list`, `current`, `archive-current`, `create`, `start`, `watch`, `status`, `inspect-limit`, `interrupt`, `stop`, `approve`, `reply`, `revert`, `archive`, `delete`, `diff` |
-| **Dispatch**  | `dispatch --project ... --task ...` (direct create project+thread+start turn)                                                                                               |
-| **Workers**   | `workers dispatch                                                                                                                                                           | prompt                      | doctor` |
-| **Supervise** | `supervise` — one-shot classification for active threads (used by wake-flow post-processing)                                                                                |
-| **Workspace** | `workspace` — search + write RPC wrappers                                                                                                                                   |
-| **Git**       | `git` — status, pull, branches, worktree RPC wrappers                                                                                                                       |
-| **Terminal**  | `terminal` — open, write, resize, close                                                                                                                                     |
-| **Server**    | `server` — config, settings, provider refresh, keybindings                                                                                                                  |
+| group         | commands                                                                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Health**    | `doctor`, `status`, `snapshot`                                                                                                                                                      |
+| **Events**    | `events replay [--from N]` — replay domain events from a sequence cursor                                                                                                            |
+| **Projects**  | `projects list`, `inspect`, `alias set`, `alias list`, `ensure --workspace`, `delete`                                                                                               |
+| **Programs**  | `programs list`, `create`, `update`, `delete`, `notifications`, `notify`, `ack-notification`, `drop-notification`                                                                   |
+| **CTO**       | `cto status`, `ensure`, `request-orchestration`, `notifications`, `ack-notification`, `validate-first-task`                                                                         |
+| **Threads**   | `threads list`, `current`, `archive-current`, `create`, `start`, `watch`, `status`, `inspect-limit`, `interrupt`, `stop`, `approve`, `reply`, `revert`, `archive`, `delete`, `diff` |
+| **Dispatch**  | `dispatch --project ... --task ...` (direct create project+thread+start turn)                                                                                                       |
+| **Workers**   | `workers dispatch`, `prompt`, `doctor`, `agents`; routine `--agent jasper` worker dispatch is blocked                                                                               |
+| **Lanes**     | `lanes fresh-observer`, `dispatch-worker`, `watch-observer`, `settle-observer`, `run-observer-rerun`                                                                                |
+| **Supervise** | `supervise` — one-shot classification for active threads                                                                                                                            |
+| **Workspace** | `workspace` — search + write RPC wrappers                                                                                                                                           |
+| **Git**       | `git` — status, pull, branches, worktree RPC wrappers                                                                                                                               |
+| **Terminal**  | `terminal` — open, write, resize, close                                                                                                                                             |
+| **Server**    | `server` — config, settings, provider refresh, keybindings                                                                                                                          |
 
 `vx t3 doctor` is the first port of call on a sick harness: it verifies server URL, auth token, SQLite integrity, and WebSocket round-trip.
+
+CTO/program notification examples:
+
+```bash
+vx t3 cto ensure --json
+vx t3 cto request-orchestration --title "Ship next slice" --objective "Use Jasper for execution" --json
+vx t3 programs notify --program <program-id> --kind decision_required --severity warning --summary "Choose release path" --json
+vx t3 cto notifications --program <program-id> --json
+vx t3 cto ack-notification --program <program-id> --notification <notification-id> --reason "reviewed" --json
+```
+
+Routine snapshots are bounded for stability. Full debug export must be explicitly requested with the debug-export profile and the server-side debug-export allowance.
 
 ---
 
@@ -560,6 +595,7 @@ This is the panel the orchestrator reads to decide the next dispatch — files c
 ## UI Surfaces
 
 - **Orchestration Sidebar** — Jasper session selector, worker counts scoped to the active orchestrator, cross-project worker visibility, wake summaries, two visibility modes (`selected-session` / `project-diagnostic`).
+- **Executive/CTO grouping** — CTO executive projects and program-linked work sit above Jasper orchestrators, so founder-level decisions do not look like worker children.
 - **ChatView** — conversation rendering with activity cards, approvals, checkpoint markers, proposed-plan cards, wake notices.
 - **ChangesPanel** — the four tabs above.
 - **DiffPanel** — full file diff viewer with syntax highlighting.
@@ -568,7 +604,7 @@ This is the panel the orchestrator reads to decide the next dispatch — files c
 - **TerminalDrawer** — thread-attached PTY with resize/restart/close.
 - **Settings** — providers, model slugs, runtime modes, notifications, archived threads, keybindings, project hooks, project scripts.
 
-The sidebar, thread metadata, wake queue, and projections must agree on what belongs to what — the user should never have to reconstruct a run from memory.
+The sidebar, program metadata, thread metadata, wake queue, notification list, and projections must agree on what belongs to what — the user should never have to reconstruct a run from memory.
 
 ---
 
@@ -584,6 +620,7 @@ The sidebar, thread metadata, wake queue, and projections must agree on what bel
 | `T3CODE_NO_BROWSER`                                             | Suppress auto browser launch                   |
 | `T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD`                        | Auto-create project from `cwd` on startup      |
 | `T3CODE_LOG_WS_EVENTS`                                          | Log all WebSocket events (diagnostics)         |
+| `T3CODE_ALLOW_DEBUG_EXPORT`                                     | Permit full `debug-export` snapshots           |
 | `VX_ARTIFACTS_PATH`                                             | Root for plans + artifacts storage             |
 | `VX_T3_WORKER_MODEL_CASES_FILE`                                 | Override model-case policy file                |
 | `VX_T3_WORKER_MODEL_CAPS_FILE` / `VX_T3_WORKER_MODEL_CAPS_JSON` | Rate-limit caps                                |
@@ -598,7 +635,7 @@ SQLite: `~/.t3/userdata/state.sqlite`
 | Path                 | Role                                                                                                                 |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `apps/server`        | Orchestration engine, event store, projections, reactors, provider adapters, git, terminal, settings, static serving |
-| `apps/web`           | React/Vite UI — chat, sidebar, changes, artifacts, diffs, terminals, settings                                        |
+| `apps/web`           | React/Vite UI — chat, executive/sidebar state, changes, artifacts, diffs, terminals, settings                        |
 | `packages/contracts` | Effect Schema protocol — every RPC, push channel, event, and projection shape                                        |
 | `packages/shared`    | Shared runtime utilities (explicit subpath exports, no barrel)                                                       |
 | `scripts`            | Build, release, and maintenance helpers                                                                              |
@@ -617,4 +654,4 @@ bun run test          # Vitest — use `bun run test`, not `bun test`
 bun run build:contracts   # regenerate + validate after protocol changes
 ```
 
-When request, response, event, provider, orchestration, git, terminal, or settings shapes change — update `packages/contracts` first.
+When request, response, event, provider, orchestration, program/notification, git, terminal, or settings shapes change — update `packages/contracts` first.

@@ -69,6 +69,11 @@ function sameLabels(
   return left.every((label, index) => label === right[index]);
 }
 
+function labelsIncludeAgent(labels: ReadonlyArray<string>, agent: string): boolean {
+  const expected = `agent:${agent}`.toLowerCase();
+  return labels.some((label) => label.trim().toLowerCase() === expected);
+}
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
@@ -223,6 +228,301 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "program.create": {
+      const existing = (readModel.programs ?? []).find(
+        (program) => program.id === command.programId,
+      );
+      if (existing && existing.deletedAt === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program '${command.programId}' already exists.`,
+        });
+      }
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.executiveProjectId,
+      });
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.executiveThreadId,
+      });
+      if (
+        command.currentOrchestratorThreadId !== undefined &&
+        command.currentOrchestratorThreadId !== null
+      ) {
+        yield* requireThread({
+          readModel,
+          command,
+          threadId: command.currentOrchestratorThreadId,
+        });
+      }
+      const status = command.status ?? "active";
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "program.created",
+        payload: {
+          programId: command.programId,
+          title: command.title,
+          objective: command.objective ?? null,
+          status,
+          executiveProjectId: command.executiveProjectId,
+          executiveThreadId: command.executiveThreadId,
+          currentOrchestratorThreadId: command.currentOrchestratorThreadId ?? null,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+          completedAt: status === "completed" ? command.createdAt : null,
+        },
+      };
+    }
+
+    case "program.meta.update": {
+      const program = (readModel.programs ?? []).find(
+        (entry) => entry.id === command.programId && entry.deletedAt === null,
+      );
+      if (!program) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program '${command.programId}' does not exist.`,
+        });
+      }
+      if (command.executiveProjectId !== undefined) {
+        yield* requireProject({
+          readModel,
+          command,
+          projectId: command.executiveProjectId,
+        });
+      }
+      if (command.executiveThreadId !== undefined) {
+        yield* requireThread({
+          readModel,
+          command,
+          threadId: command.executiveThreadId,
+        });
+      }
+      if (
+        command.currentOrchestratorThreadId !== undefined &&
+        command.currentOrchestratorThreadId !== null
+      ) {
+        yield* requireThread({
+          readModel,
+          command,
+          threadId: command.currentOrchestratorThreadId,
+        });
+      }
+      const occurredAt = nowIso();
+      const nextStatus = command.status ?? program.status;
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.meta-updated",
+        payload: {
+          programId: command.programId,
+          ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.objective !== undefined ? { objective: command.objective } : {}),
+          ...(command.status !== undefined ? { status: command.status } : {}),
+          ...(command.executiveProjectId !== undefined
+            ? { executiveProjectId: command.executiveProjectId }
+            : {}),
+          ...(command.executiveThreadId !== undefined
+            ? { executiveThreadId: command.executiveThreadId }
+            : {}),
+          ...(command.currentOrchestratorThreadId !== undefined
+            ? { currentOrchestratorThreadId: command.currentOrchestratorThreadId }
+            : {}),
+          ...(command.completedAt !== undefined
+            ? { completedAt: command.completedAt }
+            : nextStatus === "completed" && program.completedAt === null
+              ? { completedAt: occurredAt }
+              : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.delete": {
+      const program = (readModel.programs ?? []).find(
+        (entry) => entry.id === command.programId && entry.deletedAt === null,
+      );
+      if (!program) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program '${command.programId}' does not exist.`,
+        });
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.deleted",
+        payload: {
+          programId: command.programId,
+          deletedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.notification.upsert": {
+      const program = (readModel.programs ?? []).find(
+        (entry) => entry.id === command.programId && entry.deletedAt === null,
+      );
+      if (!program) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program '${command.programId}' does not exist.`,
+        });
+      }
+      const executiveProjectId = command.executiveProjectId ?? program.executiveProjectId;
+      const executiveThreadId = command.executiveThreadId ?? program.executiveThreadId;
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: executiveProjectId,
+      });
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: executiveThreadId,
+      });
+      if (command.orchestratorThreadId !== undefined && command.orchestratorThreadId !== null) {
+        yield* requireThread({
+          readModel,
+          command,
+          threadId: command.orchestratorThreadId,
+        });
+      }
+      const existing = (readModel.programNotifications ?? []).find(
+        (entry) => entry.notificationId === command.notificationId,
+      );
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "program.notification-upserted",
+        payload: {
+          notificationId: command.notificationId,
+          programId: command.programId,
+          executiveProjectId,
+          executiveThreadId,
+          orchestratorThreadId:
+            command.orchestratorThreadId !== undefined
+              ? command.orchestratorThreadId
+              : (existing?.orchestratorThreadId ?? program.currentOrchestratorThreadId),
+          kind: command.kind,
+          severity: command.severity ?? existing?.severity ?? "info",
+          summary: command.summary,
+          evidence: command.evidence ?? existing?.evidence ?? {},
+          state: command.state ?? existing?.state ?? "pending",
+          queuedAt: command.queuedAt ?? existing?.queuedAt ?? command.createdAt,
+          deliveredAt:
+            command.deliveredAt !== undefined
+              ? command.deliveredAt
+              : (existing?.deliveredAt ?? null),
+          consumedAt: existing?.consumedAt ?? null,
+          droppedAt: existing?.droppedAt ?? null,
+          consumeReason: existing?.consumeReason,
+          dropReason: existing?.dropReason,
+          createdAt: existing?.createdAt ?? command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "program.notification.consume": {
+      const program = (readModel.programs ?? []).find(
+        (entry) => entry.id === command.programId && entry.deletedAt === null,
+      );
+      if (!program) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program '${command.programId}' does not exist.`,
+        });
+      }
+      const notification = (readModel.programNotifications ?? []).find(
+        (entry) =>
+          entry.notificationId === command.notificationId && entry.programId === command.programId,
+      );
+      if (!notification) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program notification '${command.notificationId}' does not exist.`,
+        });
+      }
+      const occurredAt = command.consumedAt ?? nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.notification-consumed",
+        payload: {
+          programId: command.programId,
+          notificationId: command.notificationId,
+          consumedAt: occurredAt,
+          ...(command.consumeReason !== undefined ? { consumeReason: command.consumeReason } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.notification.drop": {
+      const program = (readModel.programs ?? []).find(
+        (entry) => entry.id === command.programId && entry.deletedAt === null,
+      );
+      if (!program) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program '${command.programId}' does not exist.`,
+        });
+      }
+      const notification = (readModel.programNotifications ?? []).find(
+        (entry) =>
+          entry.notificationId === command.notificationId && entry.programId === command.programId,
+      );
+      if (!notification) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Program notification '${command.notificationId}' does not exist.`,
+        });
+      }
+      const occurredAt = command.droppedAt ?? nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.notification-dropped",
+        payload: {
+          programId: command.programId,
+          notificationId: command.notificationId,
+          droppedAt: occurredAt,
+          ...(command.dropReason !== undefined ? { dropReason: command.dropReason } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.create": {
       const project = yield* requireProject({
         readModel,
@@ -242,6 +542,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const labels =
         command.labels ??
         (project.kind === "orchestrator" ? buildOrchestratorThreadLabels(project.title) : []);
+      if (command.spawnRole === "worker" && labelsIncludeAgent(labels, "jasper")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Jasper is reserved for primary orchestrator threads and cannot be created as a worker.",
+        });
+      }
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -272,6 +579,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.spawnRole !== undefined ? { spawnRole: command.spawnRole } : {}),
           ...(command.spawnedBy !== undefined ? { spawnedBy: command.spawnedBy } : {}),
           ...(command.workflowId !== undefined ? { workflowId: command.workflowId } : {}),
+          ...(command.programId !== undefined ? { programId: command.programId } : {}),
+          ...(command.executiveProjectId !== undefined
+            ? { executiveProjectId: command.executiveProjectId }
+            : {}),
+          ...(command.executiveThreadId !== undefined
+            ? { executiveThreadId: command.executiveThreadId }
+            : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -391,6 +705,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.spawnRole !== undefined ? { spawnRole: command.spawnRole } : {}),
           ...(command.spawnedBy !== undefined ? { spawnedBy: command.spawnedBy } : {}),
           ...(command.workflowId !== undefined ? { workflowId: command.workflowId } : {}),
+          ...(command.programId !== undefined ? { programId: command.programId } : {}),
+          ...(command.executiveProjectId !== undefined
+            ? { executiveProjectId: command.executiveProjectId }
+            : {}),
+          ...(command.executiveThreadId !== undefined
+            ? { executiveThreadId: command.executiveThreadId }
+            : {}),
           updatedAt: occurredAt,
         },
       };

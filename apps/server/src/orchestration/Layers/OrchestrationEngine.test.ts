@@ -8,13 +8,31 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Effect, Layer, ManagedRuntime, Queue, Stream } from "effect";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  Effect,
+  FileSystem,
+  Layer,
+  ManagedRuntime,
+  Path as EffectPath,
+  PlatformError,
+  Queue,
+  Stream,
+} from "effect";
+import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { SqlError } from "effect/unstable/sql";
 import { describe, expect, it } from "vitest";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import {
+  makeSqlitePersistenceLive,
+  SqlitePersistenceMemory,
+} from "../../persistence/Layers/Sqlite.ts";
 import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
@@ -34,15 +52,28 @@ const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.makeUnsafe(value);
 
-async function createOrchestrationSystem() {
-  const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
-    prefix: "t3-orchestration-engine-test-",
-  });
+async function createOrchestrationSystem(
+  options: {
+    persistenceLayer?: Layer.Layer<
+      SqlClient.SqlClient,
+      SqlError.SqlError | MigrationError | PlatformError.PlatformError,
+      FileSystem.FileSystem | EffectPath.Path
+    >;
+    baseDir?: string;
+  } = {},
+) {
+  const ServerConfigLayer = ServerConfig.layerTest(
+    process.cwd(),
+    options.baseDir ?? {
+      prefix: "t3-orchestration-engine-test-",
+    },
+  );
+  const persistenceLayer = options.persistenceLayer ?? SqlitePersistenceMemory;
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    Layer.provide(SqlitePersistenceMemory),
+    Layer.provide(persistenceLayer),
     Layer.provideMerge(ServerConfigLayer),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -218,6 +249,84 @@ describe("OrchestrationEngine", () => {
     ).toBeNull();
 
     await system.dispose();
+  });
+
+  it("hydrates archived threads after restart so sessions can be reactivated", async () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-engine-restart-"));
+    const dbPath = path.join(baseDir, "state.sqlite");
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+    const createdAt = now();
+    const projectId = asProjectId("project-restart-unarchive");
+    const threadId = ThreadId.makeUnsafe("thread-restart-unarchive");
+
+    const firstSystem = await createOrchestrationSystem({
+      persistenceLayer,
+      baseDir,
+    });
+    await firstSystem.run(
+      firstSystem.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-project-restart-unarchive-create"),
+        projectId,
+        title: "Restart Unarchive Project",
+        workspaceRoot: "/tmp/project-restart-unarchive",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await firstSystem.run(
+      firstSystem.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-thread-restart-unarchive-create"),
+        threadId,
+        projectId,
+        title: "Archived across restart",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        spawnRole: "orchestrator",
+        createdAt,
+      }),
+    );
+    await firstSystem.run(
+      firstSystem.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("cmd-thread-restart-unarchive-archive"),
+        threadId,
+      }),
+    );
+    await firstSystem.dispose();
+
+    const restartedSystem = await createOrchestrationSystem({
+      persistenceLayer,
+      baseDir,
+    });
+    const restartedThread = (
+      await restartedSystem.run(restartedSystem.engine.getReadModel())
+    ).threads.find((thread) => thread.id === threadId);
+    expect(restartedThread?.archivedAt).not.toBeNull();
+
+    await restartedSystem.run(
+      restartedSystem.engine.dispatch({
+        type: "thread.unarchive",
+        commandId: CommandId.makeUnsafe("cmd-thread-restart-unarchive-unarchive"),
+        threadId,
+      }),
+    );
+    const unarchivedThread = (
+      await restartedSystem.run(restartedSystem.engine.getReadModel())
+    ).threads.find((thread) => thread.id === threadId);
+    expect(unarchivedThread?.archivedAt).toBeNull();
+
+    await restartedSystem.dispose();
   });
 
   it("replays append-only events from sequence", async () => {

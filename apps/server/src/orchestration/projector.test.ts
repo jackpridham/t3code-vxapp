@@ -1,6 +1,7 @@
 import {
   CommandId,
   EventId,
+  ProgramId,
   ProjectId,
   ThreadId,
   type OrchestrationEvent,
@@ -27,7 +28,9 @@ function makeEvent(input: {
     aggregateId:
       input.aggregateKind === "project"
         ? ProjectId.makeUnsafe(input.aggregateId)
-        : ThreadId.makeUnsafe(input.aggregateId),
+        : input.aggregateKind === "program"
+          ? ProgramId.makeUnsafe(input.aggregateId)
+          : ThreadId.makeUnsafe(input.aggregateId),
     occurredAt: input.occurredAt,
     commandId: input.commandId === null ? null : CommandId.makeUnsafe(input.commandId),
     causationEventId: null,
@@ -38,6 +41,220 @@ function makeEvent(input: {
 }
 
 describe("orchestration projector", () => {
+  it("applies program.created events", async () => {
+    const now = new Date().toISOString();
+    const model = createEmptyReadModel(now);
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "program.created",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: now,
+          commandId: "cmd-program-create",
+          payload: {
+            programId: "program-1",
+            title: "CTO program",
+            objective: "Ship the web-operated CTO layer.",
+            status: "active",
+            executiveProjectId: "project-cto",
+            executiveThreadId: "thread-cto",
+            currentOrchestratorThreadId: "thread-jasper",
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+        }),
+      ),
+    );
+
+    expect(next.programs).toEqual([
+      {
+        id: "program-1",
+        title: "CTO program",
+        objective: "Ship the web-operated CTO layer.",
+        status: "active",
+        executiveProjectId: "project-cto",
+        executiveThreadId: "thread-cto",
+        currentOrchestratorThreadId: "thread-jasper",
+        createdAt: now,
+        updatedAt: now,
+        completedAt: null,
+        deletedAt: null,
+      },
+    ]);
+  });
+
+  it("applies program.meta-updated and program.deleted events", async () => {
+    const now = new Date().toISOString();
+    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "program.created",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: now,
+          commandId: "cmd-program-create",
+          payload: {
+            programId: "program-1",
+            title: "CTO program",
+            objective: null,
+            status: "active",
+            executiveProjectId: "project-cto",
+            executiveThreadId: "thread-cto",
+            currentOrchestratorThreadId: null,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+        }),
+      ),
+    );
+
+    const updated = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "program.meta-updated",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-update",
+          payload: {
+            programId: "program-1",
+            objective: "Founder-to-CTO task envelope",
+            status: "completed",
+            currentOrchestratorThreadId: "thread-jasper",
+            completedAt: later,
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    expect((updated.programs ?? [])[0]).toMatchObject({
+      id: "program-1",
+      objective: "Founder-to-CTO task envelope",
+      status: "completed",
+      currentOrchestratorThreadId: "thread-jasper",
+      completedAt: later,
+      updatedAt: later,
+      deletedAt: null,
+    });
+
+    const deleted = await Effect.runPromise(
+      projectEvent(
+        updated,
+        makeEvent({
+          sequence: 3,
+          type: "program.deleted",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-delete",
+          payload: {
+            programId: "program-1",
+            deletedAt: later,
+          },
+        }),
+      ),
+    );
+    expect((deleted.programs ?? [])[0]?.deletedAt).toBe(later);
+  });
+
+  it("applies program notification lifecycle events", async () => {
+    const now = new Date().toISOString();
+    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "program.notification-upserted",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: now,
+          commandId: "cmd-notify",
+          payload: {
+            notificationId: "notif-1",
+            programId: "program-1",
+            executiveProjectId: "project-cto",
+            executiveThreadId: "thread-cto",
+            orchestratorThreadId: "thread-jasper",
+            kind: "blocked",
+            severity: "critical",
+            summary: "The task is blocked.",
+            evidence: { workerThreadId: "thread-worker" },
+            state: "pending",
+            queuedAt: now,
+            deliveredAt: null,
+            consumedAt: null,
+            droppedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    expect(created.programNotifications).toEqual([
+      {
+        notificationId: "notif-1",
+        programId: "program-1",
+        executiveProjectId: "project-cto",
+        executiveThreadId: "thread-cto",
+        orchestratorThreadId: "thread-jasper",
+        kind: "blocked",
+        severity: "critical",
+        summary: "The task is blocked.",
+        evidence: { workerThreadId: "thread-worker" },
+        state: "pending",
+        queuedAt: now,
+        deliveredAt: null,
+        consumedAt: null,
+        droppedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    const consumed = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "program.notification-consumed",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-notify-consume",
+          payload: {
+            programId: "program-1",
+            notificationId: "notif-1",
+            consumedAt: later,
+            consumeReason: "reviewed",
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    expect((consumed.programNotifications ?? [])[0]).toMatchObject({
+      notificationId: "notif-1",
+      state: "consumed",
+      consumedAt: later,
+      consumeReason: "reviewed",
+      updatedAt: later,
+    });
+  });
+
   it("applies thread.created events", async () => {
     const now = new Date().toISOString();
     const model = createEmptyReadModel(now);
@@ -91,10 +308,20 @@ describe("orchestration projector", () => {
         updatedAt: now,
         archivedAt: null,
         deletedAt: null,
+        orchestratorProjectId: undefined,
+        orchestratorThreadId: undefined,
+        parentThreadId: undefined,
+        spawnRole: undefined,
+        spawnedBy: undefined,
+        workflowId: undefined,
+        programId: undefined,
+        executiveProjectId: undefined,
+        executiveThreadId: undefined,
         messages: [],
         proposedPlans: [],
         activities: [],
         checkpoints: [],
+        snapshotCoverage: undefined,
         session: null,
       },
     ]);

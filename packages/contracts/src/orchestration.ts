@@ -10,6 +10,8 @@ import {
   MessageId,
   NonNegativeInt,
   ProjectId,
+  ProgramId,
+  ProgramNotificationId,
   ProviderItemId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -164,11 +166,51 @@ export const ThreadLabels = Schema.Array(ThreadLabel).check(
 );
 export type ThreadLabels = typeof ThreadLabels.Type;
 
-export const OrchestrationProjectKind = Schema.Literals(["project", "orchestrator"]);
+export const OrchestrationProjectKind = Schema.Literals(["project", "orchestrator", "executive"]);
 export type OrchestrationProjectKind = typeof OrchestrationProjectKind.Type;
+
+export const OrchestrationProgramStatus = Schema.Literals([
+  "active",
+  "blocked",
+  "completed",
+  "cancelled",
+]);
+export type OrchestrationProgramStatus = typeof OrchestrationProgramStatus.Type;
+
+export const OrchestrationProgramNotificationKind = Schema.Literals([
+  "decision_required",
+  "blocked",
+  "milestone_completed",
+  "closeout_ready",
+  "risk_escalated",
+  "status_update",
+]);
+export type OrchestrationProgramNotificationKind = typeof OrchestrationProgramNotificationKind.Type;
+
+export const OrchestrationProgramNotificationSeverity = Schema.Literals([
+  "info",
+  "warning",
+  "critical",
+]);
+export type OrchestrationProgramNotificationSeverity =
+  typeof OrchestrationProgramNotificationSeverity.Type;
+
+export const OrchestrationProgramNotificationState = Schema.Literals([
+  "pending",
+  "delivering",
+  "delivered",
+  "consumed",
+  "dropped",
+]);
+export type OrchestrationProgramNotificationState =
+  typeof OrchestrationProgramNotificationState.Type;
+
+export const ProgramNotificationEvidence = Schema.Record(Schema.String, Schema.Unknown);
+export type ProgramNotificationEvidence = typeof ProgramNotificationEvidence.Type;
 
 export const OrchestrationSnapshotProfile = Schema.Literals([
   "bootstrap-summary",
+  "command-state",
   "operational",
   "active-thread",
   "debug-export",
@@ -190,6 +232,47 @@ export const OrchestrationProject = Schema.Struct({
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
+
+export const OrchestrationProgram = Schema.Struct({
+  id: ProgramId,
+  title: TrimmedNonEmptyString,
+  objective: Schema.NullOr(TrimmedNonEmptyString),
+  status: OrchestrationProgramStatus,
+  executiveProjectId: ProjectId,
+  executiveThreadId: ThreadId,
+  currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationProgram = typeof OrchestrationProgram.Type;
+
+export const OrchestrationProgramNotification = Schema.Struct({
+  notificationId: ProgramNotificationId,
+  programId: ProgramId,
+  executiveProjectId: ProjectId,
+  executiveThreadId: ThreadId,
+  orchestratorThreadId: Schema.NullOr(ThreadId),
+  kind: OrchestrationProgramNotificationKind,
+  severity: OrchestrationProgramNotificationSeverity,
+  summary: TrimmedNonEmptyString,
+  evidence: ProgramNotificationEvidence.pipe(Schema.withDecodingDefault(() => ({}))),
+  state: OrchestrationProgramNotificationState,
+  queuedAt: IsoDateTime,
+  deliveredAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consumedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  droppedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  consumeReason: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  dropReason: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationProgramNotification = typeof OrchestrationProgramNotification.Type;
 
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
@@ -321,6 +404,7 @@ export const OrchestrationThreadSnapshotCoverage = Schema.Struct({
   checkpointCount: NonNegativeInt,
   checkpointLimit: Schema.NullOr(NonNegativeInt),
   checkpointsTruncated: Schema.Boolean,
+  warnings: Schema.optional(Schema.Array(Schema.String)).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type OrchestrationThreadSnapshotCoverage = typeof OrchestrationThreadSnapshotCoverage.Type;
 
@@ -363,6 +447,9 @@ export const OrchestrationThread = Schema.Struct({
   workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(() => undefined),
   ),
+  programId: Schema.optional(ProgramId).pipe(Schema.withDecodingDefault(() => undefined)),
+  executiveProjectId: Schema.optional(ProjectId).pipe(Schema.withDecodingDefault(() => undefined)),
+  executiveThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -412,6 +499,9 @@ export const OrchestrationThreadSummary = Schema.Struct({
   workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(() => undefined),
   ),
+  programId: Schema.optional(ProgramId).pipe(Schema.withDecodingDefault(() => undefined)),
+  executiveProjectId: Schema.optional(ProjectId).pipe(Schema.withDecodingDefault(() => undefined)),
+  executiveThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
   sessionWorkerThreadCount: Schema.optional(NonNegativeInt).pipe(
     Schema.withDecodingDefault(() => undefined),
   ),
@@ -479,6 +569,7 @@ export const OrchestrationSnapshotCoverage = Schema.Struct({
   wakeItemCount: NonNegativeInt,
   wakeItemLimit: Schema.NullOr(NonNegativeInt),
   wakeItemsTruncated: Schema.Boolean,
+  warnings: Schema.optional(Schema.Array(Schema.String)).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type OrchestrationSnapshotCoverage = typeof OrchestrationSnapshotCoverage.Type;
 
@@ -487,6 +578,12 @@ export const OrchestrationReadModel = Schema.Struct({
   snapshotProfile: Schema.optional(OrchestrationSnapshotProfile),
   snapshotCoverage: Schema.optional(OrchestrationSnapshotCoverage),
   projects: Schema.Array(OrchestrationProject),
+  programs: Schema.optional(Schema.Array(OrchestrationProgram)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  programNotifications: Schema.optional(Schema.Array(OrchestrationProgramNotification)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
   threads: Schema.Array(OrchestrationThread),
   orchestratorWakeItems: Schema.Array(OrchestratorWakeItem).pipe(
     Schema.withDecodingDefault(() => []),
@@ -504,6 +601,74 @@ export const ProjectCreateCommand = Schema.Struct({
   kind: Schema.optional(OrchestrationProjectKind),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   createdAt: IsoDateTime,
+});
+
+export const ProgramCreateCommand = Schema.Struct({
+  type: Schema.Literal("program.create"),
+  commandId: CommandId,
+  programId: ProgramId,
+  title: TrimmedNonEmptyString,
+  objective: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  status: Schema.optional(OrchestrationProgramStatus),
+  executiveProjectId: ProjectId,
+  executiveThreadId: ThreadId,
+  currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  createdAt: IsoDateTime,
+});
+
+const ProgramMetaUpdateCommand = Schema.Struct({
+  type: Schema.Literal("program.meta.update"),
+  commandId: CommandId,
+  programId: ProgramId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  objective: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  status: Schema.optional(OrchestrationProgramStatus),
+  executiveProjectId: Schema.optional(ProjectId),
+  executiveThreadId: Schema.optional(ThreadId),
+  currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  completedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+});
+
+const ProgramDeleteCommand = Schema.Struct({
+  type: Schema.Literal("program.delete"),
+  commandId: CommandId,
+  programId: ProgramId,
+});
+
+const ProgramNotificationUpsertCommand = Schema.Struct({
+  type: Schema.Literal("program.notification.upsert"),
+  commandId: CommandId,
+  notificationId: ProgramNotificationId,
+  programId: ProgramId,
+  executiveProjectId: Schema.optional(ProjectId),
+  executiveThreadId: Schema.optional(ThreadId),
+  orchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  kind: OrchestrationProgramNotificationKind,
+  severity: Schema.optional(OrchestrationProgramNotificationSeverity),
+  summary: TrimmedNonEmptyString,
+  evidence: Schema.optional(ProgramNotificationEvidence),
+  state: Schema.optional(OrchestrationProgramNotificationState),
+  queuedAt: Schema.optional(IsoDateTime),
+  deliveredAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  createdAt: IsoDateTime,
+});
+
+const ProgramNotificationConsumeCommand = Schema.Struct({
+  type: Schema.Literal("program.notification.consume"),
+  commandId: CommandId,
+  programId: ProgramId,
+  notificationId: ProgramNotificationId,
+  consumeReason: Schema.optional(TrimmedNonEmptyString),
+  consumedAt: Schema.optional(IsoDateTime),
+});
+
+const ProgramNotificationDropCommand = Schema.Struct({
+  type: Schema.Literal("program.notification.drop"),
+  commandId: CommandId,
+  programId: ProgramId,
+  notificationId: ProgramNotificationId,
+  dropReason: Schema.optional(TrimmedNonEmptyString),
+  droppedAt: Schema.optional(IsoDateTime),
 });
 
 const ProjectMetaUpdateCommand = Schema.Struct({
@@ -546,6 +711,9 @@ const ThreadCreateCommand = Schema.Struct({
   spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])),
   spawnedBy: Schema.optional(TrimmedNonEmptyString),
   workflowId: Schema.optional(TrimmedNonEmptyString),
+  programId: Schema.optional(ProgramId),
+  executiveProjectId: Schema.optional(ProjectId),
+  executiveThreadId: Schema.optional(ThreadId),
   createdAt: IsoDateTime,
 });
 
@@ -582,6 +750,9 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])),
   spawnedBy: Schema.optional(TrimmedNonEmptyString),
   workflowId: Schema.optional(TrimmedNonEmptyString),
+  programId: Schema.optional(ProgramId),
+  executiveProjectId: Schema.optional(ProjectId),
+  executiveThreadId: Schema.optional(ThreadId),
 });
 
 const ThreadRuntimeModeSetCommand = Schema.Struct({
@@ -684,6 +855,12 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  ProgramCreateCommand,
+  ProgramMetaUpdateCommand,
+  ProgramDeleteCommand,
+  ProgramNotificationUpsertCommand,
+  ProgramNotificationConsumeCommand,
+  ProgramNotificationDropCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -705,6 +882,12 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
+  ProgramCreateCommand,
+  ProgramMetaUpdateCommand,
+  ProgramDeleteCommand,
+  ProgramNotificationUpsertCommand,
+  ProgramNotificationConsumeCommand,
+  ProgramNotificationDropCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
@@ -816,6 +999,12 @@ export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
   "project.deleted",
+  "program.created",
+  "program.meta-updated",
+  "program.deleted",
+  "program.notification-upserted",
+  "program.notification-consumed",
+  "program.notification-dropped",
   "thread.created",
   "thread.deleted",
   "thread.archived",
@@ -839,7 +1028,7 @@ export const OrchestrationEventType = Schema.Literals([
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread"]);
+export const OrchestrationAggregateKind = Schema.Literals(["project", "program", "thread"]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -875,6 +1064,54 @@ export const ProjectDeletedPayload = Schema.Struct({
   deletedAt: IsoDateTime,
 });
 
+export const ProgramCreatedPayload = Schema.Struct({
+  programId: ProgramId,
+  title: TrimmedNonEmptyString,
+  objective: Schema.NullOr(TrimmedNonEmptyString),
+  status: OrchestrationProgramStatus,
+  executiveProjectId: ProjectId,
+  executiveThreadId: ThreadId,
+  currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+});
+
+export const ProgramMetaUpdatedPayload = Schema.Struct({
+  programId: ProgramId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  objective: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  status: Schema.optional(OrchestrationProgramStatus),
+  executiveProjectId: Schema.optional(ProjectId),
+  executiveThreadId: Schema.optional(ThreadId),
+  currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  completedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  updatedAt: IsoDateTime,
+});
+
+export const ProgramDeletedPayload = Schema.Struct({
+  programId: ProgramId,
+  deletedAt: IsoDateTime,
+});
+
+export const ProgramNotificationUpsertedPayload = OrchestrationProgramNotification;
+
+export const ProgramNotificationConsumedPayload = Schema.Struct({
+  programId: ProgramId,
+  notificationId: ProgramNotificationId,
+  consumedAt: IsoDateTime,
+  consumeReason: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
+export const ProgramNotificationDroppedPayload = Schema.Struct({
+  programId: ProgramId,
+  notificationId: ProgramNotificationId,
+  droppedAt: IsoDateTime,
+  dropReason: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+
 export const ThreadCreatedPayload = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
@@ -901,6 +1138,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   workflowId: Schema.optional(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(() => undefined),
   ),
+  programId: Schema.optional(ProgramId).pipe(Schema.withDecodingDefault(() => undefined)),
+  executiveProjectId: Schema.optional(ProjectId).pipe(Schema.withDecodingDefault(() => undefined)),
+  executiveThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -934,6 +1174,9 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   spawnRole: Schema.optional(Schema.Literals(["orchestrator", "worker", "supervisor"])),
   spawnedBy: Schema.optional(TrimmedNonEmptyString),
   workflowId: Schema.optional(TrimmedNonEmptyString),
+  programId: Schema.optional(ProgramId),
+  executiveProjectId: Schema.optional(ProjectId),
+  executiveThreadId: Schema.optional(ThreadId),
   updatedAt: IsoDateTime,
 });
 
@@ -1056,7 +1299,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId]),
+  aggregateId: Schema.Union([ProjectId, ProgramId, ThreadId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -1079,6 +1322,36 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.deleted"),
     payload: ProjectDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.created"),
+    payload: ProgramCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.meta-updated"),
+    payload: ProgramMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.deleted"),
+    payload: ProgramDeletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.notification-upserted"),
+    payload: ProgramNotificationUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.notification-consumed"),
+    payload: ProgramNotificationConsumedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.notification-dropped"),
+    payload: ProgramNotificationDroppedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1261,6 +1534,7 @@ export const OrchestrationGetSnapshotInput = Schema.Struct({
     Schema.withDecodingDefault(() => "operational"),
   ),
   threadId: Schema.optional(ThreadId),
+  allowDebugExport: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
 });
 export type OrchestrationGetSnapshotInput = typeof OrchestrationGetSnapshotInput.Type;
 const OrchestrationGetSnapshotResult = OrchestrationReadModel;
