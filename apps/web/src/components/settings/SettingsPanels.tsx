@@ -22,6 +22,9 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_UNIFIED_SETTINGS,
+  type SidebarWorkerActivityFilter,
+  type SidebarWorkerLineageFilter,
+  type SidebarWorkerVisibilityScope,
   type ChangesDrawerVisibility,
   type ChangesPanelFilesChangedViewType,
   type ChangesPanelWindowNavigationMode,
@@ -490,6 +493,22 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled
         ? ["Orchestration mode"]
         : []),
+      ...(settings.sidebarGroupWorktreesWithParentProject !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarGroupWorktreesWithParentProject
+        ? ["Worktree project grouping"]
+        : []),
+      ...(settings.sidebarWorkerVisibilityScope !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarWorkerVisibilityScope
+        ? ["Worker visibility scope"]
+        : []),
+      ...(settings.sidebarWorkerLineageFilter !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarWorkerLineageFilter
+        ? ["Worker lineage filter"]
+        : []),
+      ...(settings.sidebarWorkerActivityFilter !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarWorkerActivityFilter
+        ? ["Worker activity filter"]
+        : []),
       ...(settings.workerChatViewVisibility !== DEFAULT_UNIFIED_SETTINGS.workerChatViewVisibility
         ? ["Worker chat view"]
         : []),
@@ -556,8 +575,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableAssistantStreaming,
       settings.maxProjectThreadsBeforeFolding,
       settings.notifyActiveOrchestratorOnRejectedWorkerWake,
+      settings.sidebarGroupWorktreesWithParentProject,
       settings.sidebarOrchestrationModeEnabled,
       settings.sidebarProjectSortOrder,
+      settings.sidebarWorkerActivityFilter,
+      settings.sidebarWorkerLineageFilter,
+      settings.sidebarWorkerVisibilityScope,
       settings.showGitignoredFilesInMentions,
       settings.timestampFormat,
       settings.workerChatViewVisibility,
@@ -619,6 +642,23 @@ const WORKER_ORCHESTRATION_NOTICES_VISIBILITY_LABELS: Record<
 > = {
   always_show: "Always Show",
   always_hide: "Always Hide",
+};
+
+const SIDEBAR_WORKER_VISIBILITY_SCOPE_LABELS: Record<SidebarWorkerVisibilityScope, string> = {
+  current_orchestrator: "Current Orchestrator",
+  all_orchestrators: "All Orchestrators",
+};
+
+const SIDEBAR_WORKER_LINEAGE_FILTER_LABELS: Record<SidebarWorkerLineageFilter, string> = {
+  hide_invalid: "Hide Problems",
+  show_invalid: "Show Problems",
+  only_invalid: "Only Problems",
+};
+
+const SIDEBAR_WORKER_ACTIVITY_FILTER_LABELS: Record<SidebarWorkerActivityFilter, string> = {
+  all: "All",
+  active: "Active",
+  needs_attention: "Needs Attention",
 };
 
 export function GeneralSettingsPanel() {
@@ -1718,7 +1758,196 @@ export function OrchestrationSettingsPanel() {
             />
           }
         />
+      </SettingsSection>
 
+      <SettingsSection title="Sidebar">
+        <SettingsRow
+          title="Group Worktrees With Parent Project"
+          description={
+            orchestrationModeEnabled
+              ? "Keep generated worktree projects under their configured parent project."
+              : "Enable orchestration mode to configure worktree project grouping."
+          }
+          resetAction={
+            settings.sidebarGroupWorktreesWithParentProject !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarGroupWorktreesWithParentProject ? (
+              <SettingResetButton
+                label="worktree project grouping"
+                onClick={() =>
+                  updateSettings({
+                    sidebarGroupWorktreesWithParentProject:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarGroupWorktreesWithParentProject,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              disabled={!orchestrationModeEnabled}
+              checked={settings.sidebarGroupWorktreesWithParentProject}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarGroupWorktreesWithParentProject: Boolean(checked) })
+              }
+              aria-label="Group worktrees with parent project"
+            />
+          }
+        />
+        <SettingsRow
+          title="Worker Visibility"
+          description={
+            orchestrationModeEnabled
+              ? "Choose whether the sidebar shows only workers assigned to the current orchestrator or every worker in the project bucket."
+              : "Enable orchestration mode to configure worker sidebar visibility."
+          }
+          resetAction={
+            settings.sidebarWorkerVisibilityScope !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarWorkerVisibilityScope ? (
+              <SettingResetButton
+                label="worker visibility"
+                onClick={() =>
+                  updateSettings({
+                    sidebarWorkerVisibilityScope:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarWorkerVisibilityScope,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              disabled={!orchestrationModeEnabled}
+              value={settings.sidebarWorkerVisibilityScope}
+              onValueChange={(value) => {
+                if (value === "current_orchestrator" || value === "all_orchestrators") {
+                  updateSettings({ sidebarWorkerVisibilityScope: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-48" aria-label="Worker visibility">
+                <SelectValue>
+                  {SIDEBAR_WORKER_VISIBILITY_SCOPE_LABELS[settings.sidebarWorkerVisibilityScope]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="current_orchestrator">
+                  {SIDEBAR_WORKER_VISIBILITY_SCOPE_LABELS.current_orchestrator}
+                </SelectItem>
+                <SelectItem hideIndicator value="all_orchestrators">
+                  {SIDEBAR_WORKER_VISIBILITY_SCOPE_LABELS.all_orchestrators}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Worker Lineage Problems"
+          description={
+            orchestrationModeEnabled
+              ? "Choose how workers with missing orchestrator thread lineage appear in the sidebar."
+              : "Enable orchestration mode to configure worker lineage problem visibility."
+          }
+          resetAction={
+            settings.sidebarWorkerLineageFilter !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarWorkerLineageFilter ? (
+              <SettingResetButton
+                label="worker lineage problems"
+                onClick={() =>
+                  updateSettings({
+                    sidebarWorkerLineageFilter: DEFAULT_UNIFIED_SETTINGS.sidebarWorkerLineageFilter,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              disabled={!orchestrationModeEnabled}
+              value={settings.sidebarWorkerLineageFilter}
+              onValueChange={(value) => {
+                if (
+                  value === "hide_invalid" ||
+                  value === "show_invalid" ||
+                  value === "only_invalid"
+                ) {
+                  updateSettings({ sidebarWorkerLineageFilter: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Worker lineage problems">
+                <SelectValue>
+                  {SIDEBAR_WORKER_LINEAGE_FILTER_LABELS[settings.sidebarWorkerLineageFilter]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="hide_invalid">
+                  {SIDEBAR_WORKER_LINEAGE_FILTER_LABELS.hide_invalid}
+                </SelectItem>
+                <SelectItem hideIndicator value="show_invalid">
+                  {SIDEBAR_WORKER_LINEAGE_FILTER_LABELS.show_invalid}
+                </SelectItem>
+                <SelectItem hideIndicator value="only_invalid">
+                  {SIDEBAR_WORKER_LINEAGE_FILTER_LABELS.only_invalid}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Worker Activity"
+          description={
+            orchestrationModeEnabled
+              ? "Filter workers by current activity or conditions that need attention."
+              : "Enable orchestration mode to configure worker activity filtering."
+          }
+          resetAction={
+            settings.sidebarWorkerActivityFilter !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarWorkerActivityFilter ? (
+              <SettingResetButton
+                label="worker activity"
+                onClick={() =>
+                  updateSettings({
+                    sidebarWorkerActivityFilter:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarWorkerActivityFilter,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              disabled={!orchestrationModeEnabled}
+              value={settings.sidebarWorkerActivityFilter}
+              onValueChange={(value) => {
+                if (value === "all" || value === "active" || value === "needs_attention") {
+                  updateSettings({ sidebarWorkerActivityFilter: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Worker activity">
+                <SelectValue>
+                  {SIDEBAR_WORKER_ACTIVITY_FILTER_LABELS[settings.sidebarWorkerActivityFilter]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="all">
+                  {SIDEBAR_WORKER_ACTIVITY_FILTER_LABELS.all}
+                </SelectItem>
+                <SelectItem hideIndicator value="active">
+                  {SIDEBAR_WORKER_ACTIVITY_FILTER_LABELS.active}
+                </SelectItem>
+                <SelectItem hideIndicator value="needs_attention">
+                  {SIDEBAR_WORKER_ACTIVITY_FILTER_LABELS.needs_attention}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Workers">
         <SettingsRow
           title="Worker Chat View"
           description={

@@ -62,7 +62,7 @@ import {
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
-import { gitResolveRepoIdentityQueryOptions, gitStatusQueryOptions } from "../lib/gitReactQuery";
+import { gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -104,6 +104,7 @@ import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import {
   buildCopyThreadIdErrorDescription,
+  buildSidebarProgramNotificationGroups,
   filterThreadsByLabels,
   getUniqueLabelsFromThreads,
   getVisibleSidebarThreadIds,
@@ -136,6 +137,8 @@ import {
   type SortableProjectHandleProps,
   T3Wordmark,
 } from "./sidebar/SidebarShared";
+import { ProgramNotificationsPanel } from "./sidebar/ProgramNotificationsPanel";
+import { useOrchestrationProjectBuckets } from "./sidebar/useOrchestrationProjectBuckets";
 import {
   buildPrStatusIndicator,
   buildTerminalStatusIndicator,
@@ -154,9 +157,8 @@ import {
   buildOrchestrationModeRowDescriptor,
   buildOrchestrationSessionCatalog,
   filterProjectThreadsForOrchestrationMode,
-  resolveConfiguredProjectBuckets,
 } from "../lib/orchestrationMode";
-import { getWorkerLineageIndicator } from "../lib/workerLineage";
+import { getThreadOperationsIndicator, getWorkerLineageIndicator } from "../lib/workerLineage";
 import {
   orchestrationProjectThreadsQueryOptions,
   orchestrationSessionThreadsQueryOptions,
@@ -179,6 +181,7 @@ type SidebarThreadSnapshot = Pick<
   | "archivedAt"
   | "branch"
   | "createdAt"
+  | "error"
   | "id"
   | "interactionMode"
   | "latestTurn"
@@ -244,6 +247,7 @@ function toSidebarThreadSnapshot(
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
+    error: thread.error,
     latestTurn: thread.latestTurn,
     labels: thread.labels ? [...thread.labels] : undefined,
     modelSelection: thread.modelSelection,
@@ -298,6 +302,7 @@ function toSidebarThreadSummarySnapshot(
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
+    error: null,
     latestTurn: thread.latestTurn,
     labels: thread.labels ? [...thread.labels] : undefined,
     modelSelection: thread.modelSelection,
@@ -344,6 +349,8 @@ function mergeSidebarSnapshotsFromStoreAndSummary(input: {
 export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
+  const programs = useStore((store) => store.programs ?? []);
+  const programNotifications = useStore((store) => store.programNotifications ?? []);
   const serverThreads = useStore((store) => store.threads);
   const orchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById, labelFiltersByProject } =
@@ -437,66 +444,12 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       ),
     [serverThreads, threadLastVisitedAtById],
   );
-  const regularSidebarProjects = useMemo(
-    () =>
-      sidebarProjects.filter(
-        (project) =>
-          resolveSidebarProjectKind({
-            project,
-            orchestratorProjectCwds,
-          }) === "project",
-      ),
-    [orchestratorProjectCwds, sidebarProjects],
-  );
-  const repoIdentityQueryProjectTargets = useMemo(
-    () =>
-      sidebarProjects
-        .filter(
-          (project) =>
-            appSettings.sidebarOrchestrationModeEnabled &&
-            resolveSidebarProjectKind({ project, orchestratorProjectCwds }) === "project",
-        )
-        .map((project) => ({ cwd: project.cwd, projectId: project.id })),
-    [appSettings.sidebarOrchestrationModeEnabled, orchestratorProjectCwds, sidebarProjects],
-  );
-  const repoIdentityQueryCwds = useMemo(
-    () => [...new Set(repoIdentityQueryProjectTargets.map((target) => target.cwd))],
-    [repoIdentityQueryProjectTargets],
-  );
-  const projectRepoIdentityQueries = useQueries({
-    queries: repoIdentityQueryCwds.map((cwd) => gitResolveRepoIdentityQueryOptions(cwd)),
+  const { bucketProjectIdByProjectId, visibleRegularProjectIds } = useOrchestrationProjectBuckets({
+    projects: sidebarProjects,
+    orchestratorProjectCwds,
+    orchestrationModeEnabled: appSettings.sidebarOrchestrationModeEnabled,
+    groupWorktreesWithParentProject: appSettings.sidebarGroupWorktreesWithParentProject,
   });
-  const repoIdentityByProjectId = useMemo(() => {
-    const identitiesByCwd = new Map<string, (typeof projectRepoIdentityQueries)[number]["data"]>();
-    for (const [index, cwd] of repoIdentityQueryCwds.entries()) {
-      const repoIdentity = projectRepoIdentityQueries[index]?.data;
-      if (repoIdentity) {
-        identitiesByCwd.set(cwd, repoIdentity);
-      }
-    }
-
-    const identitiesByProjectId = new Map<
-      ProjectId,
-      (typeof projectRepoIdentityQueries)[number]["data"]
-    >();
-    for (const target of repoIdentityQueryProjectTargets) {
-      const repoIdentity = identitiesByCwd.get(target.cwd);
-      if (repoIdentity) {
-        identitiesByProjectId.set(target.projectId, repoIdentity);
-      }
-    }
-    return identitiesByProjectId;
-  }, [projectRepoIdentityQueries, repoIdentityQueryCwds, repoIdentityQueryProjectTargets]);
-  const regularProjectBucketResolution = useMemo(
-    () =>
-      resolveConfiguredProjectBuckets({
-        projects: regularSidebarProjects,
-        repoIdentityByProjectId,
-      }),
-    [regularSidebarProjects, repoIdentityByProjectId],
-  );
-  const bucketProjectIdByProjectId = regularProjectBucketResolution.bucketProjectIdByProjectId;
-  const visibleRegularProjectIds = regularProjectBucketResolution.visibleProjectIds;
   const orchestrationProjectThreadQueryProjectIds = useMemo(
     () =>
       sidebarProjects
@@ -754,6 +707,10 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     () => buildSidebarWakeSummaryByThreadId(orchestratorWakeItems),
     [orchestratorWakeItems],
   );
+  const programNotificationGroups = useMemo(
+    () => buildSidebarProgramNotificationGroups({ programs, notifications: programNotifications }),
+    [programs, programNotifications],
+  );
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
@@ -876,73 +833,85 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     async (projectId: ProjectId, targetRootThreadId: ThreadId) => {
       const api = readNativeApi();
       if (!api) {
+        toastManager.add({
+          type: "error",
+          title: "Unable to switch orchestration session",
+          description: "The browser connection to the T3 control plane is not ready.",
+        });
         return;
       }
 
-      const projectRootThreads =
-        orchestrationProjectCatalogSummariesByProjectId.get(projectId) ?? [];
-      const targetRootThread = projectRootThreads.find(
-        (thread) => thread.id === targetRootThreadId,
-      );
-      if (!targetRootThread) {
-        await navigateToSelectedThread(targetRootThreadId);
-        return;
-      }
+      try {
+        const projectRootThreads = await queryClient.fetchQuery({
+          ...orchestrationProjectThreadsQueryOptions({
+            projectId,
+            includeArchived: true,
+          }),
+          staleTime: 0,
+        });
+        const targetRootThread = projectRootThreads.find(
+          (thread) => thread.id === targetRootThreadId,
+        );
+        if (!targetRootThread) {
+          await persistCurrentOrchestrationSessionRoot(projectId, targetRootThreadId);
+          await navigateToSelectedThread(targetRootThreadId);
+          return;
+        }
 
-      const activeRootThreadId =
-        [...projectRootThreads]
-          .filter((thread) => thread.archivedAt === null)
-          .toSorted(
-            (left, right) =>
-              right.updatedAt.localeCompare(left.updatedAt) ||
-              right.createdAt.localeCompare(left.createdAt),
-          )[0]?.id ?? null;
+        const activeRootThreadId =
+          [...projectRootThreads]
+            .filter((thread) => thread.archivedAt === null)
+            .toSorted(
+              (left, right) =>
+                right.updatedAt.localeCompare(left.updatedAt) ||
+                right.createdAt.localeCompare(left.createdAt),
+            )[0]?.id ?? null;
 
-      if (activeRootThreadId === targetRootThreadId && targetRootThread.archivedAt === null) {
-        await persistCurrentOrchestrationSessionRoot(projectId, targetRootThreadId);
-        await navigateToSelectedThread(targetRootThreadId);
-        return;
-      }
+        if (activeRootThreadId === targetRootThreadId && targetRootThread.archivedAt === null) {
+          await persistCurrentOrchestrationSessionRoot(projectId, targetRootThreadId);
+          await navigateToSelectedThread(targetRootThreadId);
+          return;
+        }
 
-      const activeSessionThreads =
-        activeRootThreadId === null
-          ? []
-          : (orchestrationSessionCatalogSummariesByRootId.get(activeRootThreadId) ??
-            (await queryClient.fetchQuery(
-              orchestrationSessionThreadsQueryOptions({
-                rootThreadId: activeRootThreadId,
-                includeArchived: true,
-              }),
-            )));
-      const targetSessionThreads =
-        orchestrationSessionCatalogSummariesByRootId.get(targetRootThreadId) ??
-        (await queryClient.fetchQuery(
-          orchestrationSessionThreadsQueryOptions({
+        const activeSessionThreads =
+          activeRootThreadId === null
+            ? []
+            : await queryClient.fetchQuery({
+                ...orchestrationSessionThreadsQueryOptions({
+                  rootThreadId: activeRootThreadId,
+                  includeArchived: true,
+                }),
+                staleTime: 0,
+              });
+        const targetSessionThreads = await queryClient.fetchQuery({
+          ...orchestrationSessionThreadsQueryOptions({
             rootThreadId: targetRootThreadId,
             includeArchived: true,
           }),
-        ));
+          staleTime: 0,
+        });
 
-      await reactivateOrchestrationSession({
-        api,
-        queryClient,
-        projectId,
-        activeRootThreadId,
-        targetRootThreadId,
-        activeSessionThreads,
-        targetSessionThreads,
-        projectRootThreads,
-        syncServerReadModel: useStore.getState().syncServerReadModel,
-        navigateToThread: navigateToSelectedThread,
-      });
+        await reactivateOrchestrationSession({
+          api,
+          queryClient,
+          projectId,
+          activeRootThreadId,
+          targetRootThreadId,
+          activeSessionThreads,
+          targetSessionThreads,
+          projectRootThreads,
+          syncServerReadModel: useStore.getState().syncServerReadModel,
+          navigateToThread: navigateToSelectedThread,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Failed to switch orchestration session",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      }
     },
-    [
-      navigateToSelectedThread,
-      orchestrationProjectCatalogSummariesByProjectId,
-      orchestrationSessionCatalogSummariesByRootId,
-      persistCurrentOrchestrationSessionRoot,
-      queryClient,
-    ],
+    [navigateToSelectedThread, persistCurrentOrchestrationSessionRoot, queryClient],
   );
 
   const handleCreateOrchestrationSession = useCallback(
@@ -1129,7 +1098,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     },
   });
   const shouldShowAddProjectForm =
-    addingProject && (!shouldBrowseForProjectImmediately || newProjectKind === "orchestrator");
+    addingProject && (!shouldBrowseForProjectImmediately || newProjectKind !== "project");
   const handleThreadContextMenu = useCallback(
     async (threadId: ThreadId, position: { x: number; y: number }) => {
       const api = readNativeApi();
@@ -1426,7 +1395,11 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     () =>
       sidebarProjects.filter((project) => {
         const projectKind = resolveSidebarProjectKind({ project, orchestratorProjectCwds });
-        return projectKind === "orchestrator" || visibleRegularProjectIds.has(project.id);
+        return (
+          projectKind === "executive" ||
+          projectKind === "orchestrator" ||
+          visibleRegularProjectIds.has(project.id)
+        );
       }),
     [orchestratorProjectCwds, sidebarProjects, visibleRegularProjectIds],
   );
@@ -1487,14 +1460,15 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
           });
         const usesProjectBucketMode =
           !isOrchestratorProject && appSettings.sidebarOrchestrationModeEnabled;
-        const workerVisibilityMode =
-          currentOrchestrationSessionRootIds.size > 0 ? "selected-session" : "project-diagnostic";
         const projectThreadsForDisplay = usesProjectBucketMode
           ? filterProjectThreadsForOrchestrationMode({
               threads: projectThreads,
               selectedSessionRootIds: currentOrchestrationSessionRootIds,
               threadsForResolution: threadsForOrchestrationResolution,
-              visibilityMode: workerVisibilityMode,
+              projects,
+              workerActivityFilter: appSettings.sidebarWorkerActivityFilter,
+              workerLineageFilter: appSettings.sidebarWorkerLineageFilter,
+              workerVisibilityScope: appSettings.sidebarWorkerVisibilityScope,
             })
           : projectThreads;
         const displayThreads =
@@ -1606,6 +1580,9 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     [
       appSettings.allowActiveThreadsInFold,
       appSettings.sidebarOrchestrationModeEnabled,
+      appSettings.sidebarWorkerActivityFilter,
+      appSettings.sidebarWorkerLineageFilter,
+      appSettings.sidebarWorkerVisibilityScope,
       bucketProjectIdByProjectId,
       currentOrchestrationSessionRootIds,
       appSettings.maxProjectThreadsBeforeFolding,
@@ -1624,6 +1601,17 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       threadsForOrchestrationResolution,
       visibleThreadsWithSelectedSessions,
     ],
+  );
+  const executiveRenderedProjects = useMemo(
+    () =>
+      renderedProjects.filter(
+        (renderedProject) =>
+          resolveSidebarProjectKind({
+            project: renderedProject.project,
+            orchestratorProjectCwds,
+          }) === "executive",
+      ),
+    [orchestratorProjectCwds, renderedProjects],
   );
   const orchestratorRenderedProjects = useMemo(
     () =>
@@ -1648,8 +1636,12 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     [orchestratorProjectCwds, renderedProjects],
   );
   const orderedRenderedProjects = useMemo(
-    () => [...orchestratorRenderedProjects, ...regularRenderedProjects],
-    [orchestratorRenderedProjects, regularRenderedProjects],
+    () => [
+      ...executiveRenderedProjects,
+      ...orchestratorRenderedProjects,
+      ...regularRenderedProjects,
+    ],
+    [executiveRenderedProjects, orchestratorRenderedProjects, regularRenderedProjects],
   );
   const visibleSidebarThreadIds = useMemo(
     () => getVisibleSidebarThreadIds(orderedRenderedProjects),
@@ -1800,6 +1792,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       usesOrchestrationMode,
     } = renderedProject;
     const isOrchestratorProject = projectKind === "orchestrator";
+    const isExecutiveProject = projectKind === "executive";
     const projectDraftThreadId = projectDraftThreadIdByProjectId[project.id] ?? null;
     const showInlineOrchestrationSelector =
       isOrchestratorProject && appSettings.sidebarOrchestrationModeEnabled;
@@ -1839,6 +1832,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
         threads: threadsForOrchestrationResolution,
         projects,
       });
+      const threadOperationsIndicator = getThreadOperationsIndicator({ thread });
       const isConfirmingArchive = confirmingArchiveThreadId === thread.id && !isThreadRunning;
       const orchestrationRowDescriptor = usesProjectBucketMode
         ? buildOrchestrationModeRowDescriptor({
@@ -1875,6 +1869,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
           prStatus={prStatus}
           terminalStatus={terminalStatus}
           workerLineageIndicator={workerLineageIndicator}
+          threadOperationsIndicator={threadOperationsIndicator}
           isThreadRunning={isThreadRunning}
           isConfirmingArchive={isConfirmingArchive}
           confirmThreadArchive={appSettings.confirmThreadArchive}
@@ -2065,6 +2060,10 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     const projectIcon = isOrchestratorProject ? (
       <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
         <BotIcon className="size-3" />
+      </span>
+    ) : isExecutiveProject ? (
+      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+        <NetworkIcon className="size-3" />
       </span>
     ) : (
       <ProjectFavicon cwd={project.cwd} />
@@ -2707,6 +2706,37 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
                         <button
                           type="button"
                           aria-label={
+                            shouldShowAddProjectForm && newProjectKind === "executive"
+                              ? "Cancel add CTO"
+                              : "Add CTO"
+                          }
+                          aria-pressed={shouldShowAddProjectForm && newProjectKind === "executive"}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => handleStartAddProject("executive")}
+                        >
+                          <NetworkIcon
+                            className={`size-3.5 transition-transform duration-150 ${
+                              shouldShowAddProjectForm && newProjectKind === "executive"
+                                ? "scale-110"
+                                : "scale-100"
+                            }`}
+                          />
+                          <span className="text-[11px] font-medium">CTO</span>
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="right">
+                      {shouldShowAddProjectForm && newProjectKind === "executive"
+                        ? "Cancel add CTO"
+                        : "Add CTO"}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={
                             shouldShowAddProjectForm && newProjectKind === "orchestrator"
                               ? "Cancel add orchestrator"
                               : "Add orchestrator"
@@ -2780,7 +2810,9 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
                       placeholder={
                         newProjectKind === "orchestrator"
                           ? "/path/to/orchestrator"
-                          : "/path/to/project"
+                          : newProjectKind === "executive"
+                            ? "/path/to/cto"
+                            : "/path/to/project"
                       }
                       value={newCwd}
                       onChange={(event) => {
@@ -2808,7 +2840,9 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
                         ? "Adding..."
                         : newProjectKind === "orchestrator"
                           ? "Add orchestrator"
-                          : "Add project"}
+                          : newProjectKind === "executive"
+                            ? "Add CTO"
+                            : "Add project"}
                     </button>
                   </div>
                   {addProjectError && (
@@ -2816,6 +2850,60 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
                       {addProjectError}
                     </p>
                   )}
+                </div>
+              )}
+            </SidebarGroup>
+
+            <ProgramNotificationsPanel groups={programNotificationGroups} />
+
+            <SidebarGroup className="px-2 py-2">
+              <div className="mb-1 flex items-center gap-1.5 pl-2 pr-1.5">
+                <NetworkIcon className="size-3.5 text-emerald-600/85 dark:text-emerald-300/80" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                  Executive
+                </span>
+              </div>
+              {isManualProjectSorting ? (
+                <DndContext
+                  sensors={projectDnDSensors}
+                  collisionDetection={projectCollisionDetection}
+                  modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                  onDragStart={handleProjectDragStart}
+                  onDragEnd={handleProjectDragEnd}
+                  onDragCancel={handleProjectDragCancel}
+                >
+                  <SidebarMenu>
+                    <SortableContext
+                      items={executiveRenderedProjects.map(
+                        (renderedProject) => renderedProject.project.id,
+                      )}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {executiveRenderedProjects.map((renderedProject) => (
+                        <SortableProjectItem
+                          key={renderedProject.project.id}
+                          projectId={renderedProject.project.id}
+                        >
+                          {(dragHandleProps) =>
+                            renderProjectItem(renderedProject, "executive", dragHandleProps)
+                          }
+                        </SortableProjectItem>
+                      ))}
+                    </SortableContext>
+                  </SidebarMenu>
+                </DndContext>
+              ) : (
+                <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+                  {executiveRenderedProjects.map((renderedProject) => (
+                    <SidebarMenuItem key={renderedProject.project.id} className="rounded-md">
+                      {renderProjectItem(renderedProject, "executive", null)}
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              )}
+              {executiveRenderedProjects.length === 0 && !shouldShowAddProjectForm && (
+                <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
+                  No CTO workspace yet
                 </div>
               )}
             </SidebarGroup>

@@ -295,6 +295,10 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
             cwd.split(/[/\\]/).findLast(isNonEmptyString) ??
             cwd)
           : null;
+      const resolvedExecutiveName =
+        projectKind === "executive"
+          ? rawOrchestratorName?.trim() || cwd.split(/[/\\]/).findLast(isNonEmptyString) || cwd
+          : null;
       const normalizedOrchestratorName =
         projectKind === "orchestrator"
           ? normalizeOrchestratorLabel(resolvedOrchestratorName)
@@ -332,6 +336,22 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
           } as never);
           input.markProjectOrchestratorCwd(cwd);
           await openOrCreateOrchestratorSession(existing.id);
+        } else if (projectKind === "executive") {
+          await api.orchestration.dispatchCommand({
+            type: "project.meta.update",
+            commandId: newCommandId(),
+            projectId: existing.id,
+            kind: "executive",
+            ...(resolvedExecutiveName !== null ? { title: resolvedExecutiveName } : {}),
+          } as never);
+          const latestThread = getLatestActiveThreadForProject(existing.id);
+          if (latestThread) {
+            await input.navigateToSelectedThread(latestThread.id);
+          } else {
+            await handleSidebarNewThread(existing.id, {
+              envMode: input.defaultNewThreadEnvMode,
+            });
+          }
         } else {
           focusMostRecentThreadForProject(existing.id);
         }
@@ -342,7 +362,10 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
       const projectId = newProjectId();
       const createdAt = new Date().toISOString();
       const title =
-        resolvedOrchestratorName ?? cwd.split(/[/\\]/).findLast(isNonEmptyString) ?? cwd;
+        resolvedOrchestratorName ??
+        resolvedExecutiveName ??
+        cwd.split(/[/\\]/).findLast(isNonEmptyString) ??
+        cwd;
       try {
         const createCommand = {
           type: "project.create",
@@ -357,8 +380,8 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
           createdAt,
         };
         await api.orchestration.dispatchCommand(
-          (projectKind === "orchestrator"
-            ? { ...createCommand, kind: "orchestrator" }
+          (projectKind !== "project"
+            ? { ...createCommand, kind: projectKind }
             : createCommand) as never,
         );
         await handleSidebarNewThread(projectId, {
@@ -368,7 +391,7 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
         const description =
           error instanceof Error
             ? error.message
-            : `An error occurred while adding the ${projectKind === "orchestrator" ? "orchestrator" : "project"}.`;
+            : `An error occurred while adding the ${projectKind}.`;
         setIsAddingProject(false);
         if (input.shouldBrowseForProjectImmediately) {
           toastManager.add({
@@ -376,7 +399,9 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
             title:
               projectKind === "orchestrator"
                 ? "Failed to add orchestrator"
-                : "Failed to add project",
+                : projectKind === "executive"
+                  ? "Failed to add executive"
+                  : "Failed to add project",
             description,
           });
         } else {
@@ -392,6 +417,7 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
     },
     [
       focusMostRecentThreadForProject,
+      getLatestActiveThreadForProject,
       handleSidebarNewThread,
       input,
       isAddingProject,

@@ -24,6 +24,12 @@ export interface WorkerLineageIndicator {
   issues: WorkerLineageIssue[];
 }
 
+export interface ThreadOperationsIndicator {
+  key: "direct-ops";
+  label: string;
+  description: string;
+}
+
 const ISSUE_SEVERITY_BY_KEY: Record<WorkerLineageIssueKey, WorkerLineageIssueSeverity> = {
   "missing-orchestrator-project-id": "error",
   "missing-orchestrator-thread-id": "error",
@@ -156,5 +162,23 @@ export function getWorkerLineageIndicator(input: {
     label,
     description: `${label}: ${issues.map((issue) => issue.message).join(" ")}`,
     issues,
+  };
+}
+
+export function getThreadOperationsIndicator(input: {
+  thread: Pick<Thread, "labels">;
+}): ThreadOperationsIndicator | null {
+  const hasDirectOpsLabel = (input.thread.labels ?? []).some(
+    (label) => label.trim().toLowerCase() === "direct-ops",
+  );
+  if (!hasDirectOpsLabel) {
+    return null;
+  }
+
+  return {
+    key: "direct-ops",
+    label: "Direct",
+    description:
+      "Direct operations lane. This thread was dispatched outside the CTO to Jasper orchestration path.",
   };
 }

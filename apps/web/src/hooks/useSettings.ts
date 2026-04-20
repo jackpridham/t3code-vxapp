@@ -32,10 +32,16 @@ import {
   DEFAULT_CHANGES_DRAWER_VISIBILITY,
   DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE,
   DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH,
+  DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER,
+  DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER,
+  DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE,
   DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY,
   DEFAULT_WORKER_CHAT_VIEW_VISIBILITY,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
+  SidebarWorkerActivityFilter,
+  SidebarWorkerLineageFilter,
+  SidebarWorkerVisibilityScope,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
@@ -222,6 +228,29 @@ export function buildLegacyClientSettingsMigrationPatch(
 
   if (Predicate.isBoolean(legacySettings.sidebarOrchestrationModeEnabled)) {
     patch.sidebarOrchestrationModeEnabled = legacySettings.sidebarOrchestrationModeEnabled;
+  }
+
+  if (Predicate.isBoolean(legacySettings.sidebarGroupWorktreesWithParentProject)) {
+    patch.sidebarGroupWorktreesWithParentProject =
+      legacySettings.sidebarGroupWorktreesWithParentProject;
+  }
+
+  if (Schema.is(SidebarWorkerVisibilityScope)(legacySettings.sidebarWorkerVisibilityScope)) {
+    patch.sidebarWorkerVisibilityScope = legacySettings.sidebarWorkerVisibilityScope;
+  } else if (legacySettings.sidebarWorkerVisibilityScope === undefined) {
+    patch.sidebarWorkerVisibilityScope = DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE;
+  }
+
+  if (Schema.is(SidebarWorkerLineageFilter)(legacySettings.sidebarWorkerLineageFilter)) {
+    patch.sidebarWorkerLineageFilter = legacySettings.sidebarWorkerLineageFilter;
+  } else if (legacySettings.sidebarWorkerLineageFilter === undefined) {
+    patch.sidebarWorkerLineageFilter = DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER;
+  }
+
+  if (Schema.is(SidebarWorkerActivityFilter)(legacySettings.sidebarWorkerActivityFilter)) {
+    patch.sidebarWorkerActivityFilter = legacySettings.sidebarWorkerActivityFilter;
+  } else if (legacySettings.sidebarWorkerActivityFilter === undefined) {
+    patch.sidebarWorkerActivityFilter = DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER;
   }
 
   if (Schema.is(ChatViewInputWhenScrolling)(legacySettings.chatViewInputWhenScrolling)) {
