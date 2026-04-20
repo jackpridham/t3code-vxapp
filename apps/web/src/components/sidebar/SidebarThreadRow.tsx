@@ -15,7 +15,7 @@ import { Badge } from "../ui/badge";
 import { SidebarMenuSubButton, SidebarMenuSubItem } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkerLineageWarningIcon } from "../thread/WorkerLineageWarningIcon";
-import type { WorkerLineageIndicator } from "../../lib/workerLineage";
+import type { ThreadOperationsIndicator, WorkerLineageIndicator } from "../../lib/workerLineage";
 
 export interface TerminalStatusIndicator {
   label: "Terminal process running";
@@ -130,6 +130,7 @@ export interface SidebarThreadRowProps {
   prStatus: PrStatusIndicator | null;
   terminalStatus: TerminalStatusIndicator | null;
   workerLineageIndicator: WorkerLineageIndicator | null;
+  threadOperationsIndicator: ThreadOperationsIndicator | null;
   isThreadRunning: boolean;
   isConfirmingArchive: boolean;
   confirmThreadArchive: boolean;
@@ -159,6 +160,7 @@ export function SidebarThreadRow({
   prStatus,
   terminalStatus,
   workerLineageIndicator,
+  threadOperationsIndicator,
   isThreadRunning,
   isConfirmingArchive,
   confirmThreadArchive,
@@ -223,6 +225,24 @@ export function SidebarThreadRow({
           )}
           {threadStatus && <ThreadStatusLabel status={threadStatus} />}
           <WorkerLineageWarningIcon indicator={workerLineageIndicator} />
+          {threadOperationsIndicator && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Badge
+                    variant="outline"
+                    aria-label={threadOperationsIndicator.description}
+                    className="h-4 shrink-0 border-amber-300/70 bg-amber-50 px-1 text-[9px] font-medium text-amber-700 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-200"
+                  >
+                    {threadOperationsIndicator.label}
+                  </Badge>
+                }
+              />
+              <TooltipPopup side="top" className="max-w-72 text-xs">
+                {threadOperationsIndicator.description}
+              </TooltipPopup>
+            </Tooltip>
+          )}
           {children}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">

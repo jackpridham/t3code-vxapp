@@ -46,10 +46,39 @@ export const WorkerOrchestrationNoticesVisibility = Schema.Literals(["always_sho
 export type WorkerOrchestrationNoticesVisibility = typeof WorkerOrchestrationNoticesVisibility.Type;
 export const DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY: WorkerOrchestrationNoticesVisibility =
   "always_hide";
+export const SidebarWorkerVisibilityScope = Schema.Literals([
+  "current_orchestrator",
+  "all_orchestrators",
+]);
+export type SidebarWorkerVisibilityScope = typeof SidebarWorkerVisibilityScope.Type;
+export const DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE: SidebarWorkerVisibilityScope =
+  "current_orchestrator";
+export const SidebarWorkerLineageFilter = Schema.Literals([
+  "hide_invalid",
+  "show_invalid",
+  "only_invalid",
+]);
+export type SidebarWorkerLineageFilter = typeof SidebarWorkerLineageFilter.Type;
+export const DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER: SidebarWorkerLineageFilter = "hide_invalid";
+export const SidebarWorkerActivityFilter = Schema.Literals(["all", "active", "needs_attention"]);
+export type SidebarWorkerActivityFilter = typeof SidebarWorkerActivityFilter.Type;
+export const DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER: SidebarWorkerActivityFilter = "all";
 
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  sidebarGroupWorktreesWithParentProject: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(() => true),
+  ),
+  sidebarWorkerVisibilityScope: SidebarWorkerVisibilityScope.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE),
+  ),
+  sidebarWorkerLineageFilter: SidebarWorkerLineageFilter.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER),
+  ),
+  sidebarWorkerActivityFilter: SidebarWorkerActivityFilter.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER),
+  ),
   chatViewInputWhenScrolling: ChatViewInputWhenScrolling.pipe(
     Schema.withDecodingDefault(() => DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING),
   ),

@@ -6,6 +6,10 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 
 const CREATE_NEW_SESSION_VALUE = "__new_orchestration_session__";
 
+function stopSidebarSelectionEvent(event: { stopPropagation: () => void }) {
+  event.stopPropagation();
+}
+
 function describeSessionOption(session: OrchestrationModeSessionCatalogEntry): string {
   const activityLabel =
     session.archivedAt === null
@@ -30,7 +34,12 @@ export function OrchestrationSessionSelector(props: {
   const iconOnly = props.iconOnly ?? false;
 
   return (
-    <div className={cn(compact || iconOnly ? "min-w-0" : "px-2 pb-2", props.className)}>
+    <div
+      className={cn(compact || iconOnly ? "min-w-0" : "px-2 pb-2", props.className)}
+      onClick={stopSidebarSelectionEvent}
+      onKeyDown={stopSidebarSelectionEvent}
+      onPointerDown={stopSidebarSelectionEvent}
+    >
       {compact || iconOnly ? null : (
         <div className="mb-1 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
           Sessions

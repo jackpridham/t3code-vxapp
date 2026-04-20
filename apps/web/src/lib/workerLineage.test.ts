@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 
 import type { Project, Thread } from "../types";
-import { getWorkerLineageIndicator } from "./workerLineage";
+import { getThreadOperationsIndicator, getWorkerLineageIndicator } from "./workerLineage";
 
 function makeThread(
   overrides: Partial<
@@ -11,6 +11,7 @@ function makeThread(
       | "id"
       | "projectId"
       | "title"
+      | "labels"
       | "spawnRole"
       | "orchestratorProjectId"
       | "orchestratorThreadId"
@@ -23,6 +24,7 @@ function makeThread(
   | "id"
   | "projectId"
   | "title"
+  | "labels"
   | "spawnRole"
   | "orchestratorProjectId"
   | "orchestratorThreadId"
@@ -33,6 +35,7 @@ function makeThread(
     id: ThreadId.makeUnsafe("thread-1"),
     projectId: ProjectId.makeUnsafe("project-1"),
     title: "Thread",
+    labels: [],
     spawnRole: "worker",
     orchestratorProjectId: ProjectId.makeUnsafe("project-orchestrator"),
     orchestratorThreadId: ThreadId.makeUnsafe("root-1"),
@@ -57,6 +60,28 @@ const orchestratorProject = makeProject({
   id: ProjectId.makeUnsafe("project-orchestrator"),
   name: "Jasper",
   cwd: "/tmp/jasper",
+});
+
+describe("getThreadOperationsIndicator", () => {
+  it("labels direct operations threads separately from normal worker lineage", () => {
+    expect(
+      getThreadOperationsIndicator({
+        thread: makeThread({ labels: ["worker", "direct-ops"] }),
+      }),
+    ).toMatchObject({
+      key: "direct-ops",
+      label: "Direct",
+      description: expect.stringContaining("outside the CTO to Jasper orchestration path"),
+    });
+  });
+
+  it("returns null for ordinary orchestration threads", () => {
+    expect(
+      getThreadOperationsIndicator({
+        thread: makeThread({ labels: ["worker"] }),
+      }),
+    ).toBeNull();
+  });
 });
 
 const rootThread = makeThread({

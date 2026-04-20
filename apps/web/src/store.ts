@@ -17,6 +17,8 @@ import { dispatchNotification } from "./notificationDispatch";
 import {
   type ChatMessage,
   type PersistedFileChange,
+  type Program,
+  type ProgramNotification,
   type Project,
   type Thread,
   type TurnDiffSummary,
@@ -26,6 +28,8 @@ import {
 
 export interface AppState {
   projects: Project[];
+  programs?: Program[];
+  programNotifications?: ProgramNotification[];
   threads: Thread[];
   orchestratorWakeItems: OrchestratorWakeItem[];
   bootstrapComplete: boolean;
@@ -33,6 +37,8 @@ export interface AppState {
 
 const initialState: AppState = {
   projects: [],
+  programs: [],
+  programNotifications: [],
   threads: [],
   orchestratorWakeItems: [],
   bootstrapComplete: false,
@@ -76,6 +82,76 @@ function updateProject(
     return updated;
   });
   return changed ? next : projects;
+}
+
+type ReadModelProgram = NonNullable<OrchestrationReadModel["programs"]>[number];
+type ReadModelProgramNotification = NonNullable<
+  OrchestrationReadModel["programNotifications"]
+>[number];
+
+function mapProgram(program: ReadModelProgram): Program {
+  return { ...program };
+}
+
+function mapProgramNotification(notification: ReadModelProgramNotification): ProgramNotification {
+  return { ...notification };
+}
+
+function mergePrograms(
+  existingPrograms: Program[],
+  incomingPrograms: ReadonlyArray<ReadModelProgram>,
+): Program[] {
+  const nextPrograms = [...existingPrograms];
+  const indexByProgramId = new Map(
+    nextPrograms.map((program, index) => [program.id, index] as const),
+  );
+
+  for (const program of incomingPrograms) {
+    const existingIndex = indexByProgramId.get(program.id);
+    if (program.deletedAt !== null) {
+      if (existingIndex === undefined) {
+        continue;
+      }
+      nextPrograms.splice(existingIndex, 1);
+      indexByProgramId.clear();
+      nextPrograms.forEach((entry, index) => indexByProgramId.set(entry.id, index));
+      continue;
+    }
+
+    const mappedProgram = mapProgram(program);
+    if (existingIndex === undefined) {
+      indexByProgramId.set(mappedProgram.id, nextPrograms.push(mappedProgram) - 1);
+      continue;
+    }
+    nextPrograms[existingIndex] = mappedProgram;
+  }
+
+  return nextPrograms;
+}
+
+function mergeProgramNotifications(
+  existingNotifications: ProgramNotification[],
+  incomingNotifications: ReadonlyArray<ReadModelProgramNotification>,
+): ProgramNotification[] {
+  const nextNotifications = [...existingNotifications];
+  const indexByNotificationId = new Map(
+    nextNotifications.map((notification, index) => [notification.notificationId, index] as const),
+  );
+
+  for (const notification of incomingNotifications) {
+    const existingIndex = indexByNotificationId.get(notification.notificationId);
+    const mappedNotification = mapProgramNotification(notification);
+    if (existingIndex === undefined) {
+      indexByNotificationId.set(
+        mappedNotification.notificationId,
+        nextNotifications.push(mappedNotification) - 1,
+      );
+      continue;
+    }
+    nextNotifications[existingIndex] = mappedNotification;
+  }
+
+  return nextNotifications;
 }
 
 function mergeProjects(
@@ -286,6 +362,9 @@ function mapThread(thread: OrchestrationThreadWithLabels): Thread {
     spawnRole: thread.spawnRole,
     spawnedBy: thread.spawnedBy,
     workflowId: thread.workflowId,
+    programId: thread.programId,
+    executiveProjectId: thread.executiveProjectId,
+    executiveThreadId: thread.executiveThreadId,
   };
 }
 
@@ -607,6 +686,15 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
   const projects = isPartialReadModel(readModel)
     ? mergeProjects(state.projects, readModel.projects)
     : readModel.projects.filter((project) => project.deletedAt === null).map(mapProject);
+  const programs = isPartialReadModel(readModel)
+    ? mergePrograms(state.programs ?? [], readModel.programs ?? [])
+    : (readModel.programs ?? []).filter((program) => program.deletedAt === null).map(mapProgram);
+  const programNotifications = isPartialReadModel(readModel)
+    ? mergeProgramNotifications(
+        state.programNotifications ?? [],
+        readModel.programNotifications ?? [],
+      )
+    : (readModel.programNotifications ?? []).map(mapProgramNotification);
   const threads = isPartialReadModel(readModel)
     ? mergeThreads(state.threads, readModel.threads, readModel.snapshotProfile)
     : readModel.threads
@@ -615,6 +703,8 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
   return {
     ...state,
     projects,
+    programs,
+    programNotifications,
     threads,
     orchestratorWakeItems: readModel.orchestratorWakeItems.map(mapOrchestratorWakeItem),
     bootstrapComplete: true,
@@ -686,6 +776,119 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       return projects.length === state.projects.length ? state : { ...state, projects };
     }
 
+    case "program.created": {
+      const currentPrograms = state.programs ?? [];
+      const existing = currentPrograms.find((program) => program.id === event.payload.programId);
+      const nextProgram = mapProgram({
+        id: event.payload.programId,
+        title: event.payload.title,
+        objective: event.payload.objective,
+        status: event.payload.status,
+        executiveProjectId: event.payload.executiveProjectId,
+        executiveThreadId: event.payload.executiveThreadId,
+        currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId,
+        createdAt: event.payload.createdAt,
+        updatedAt: event.payload.updatedAt,
+        completedAt: event.payload.completedAt,
+        deletedAt: null,
+      });
+      const programs = existing
+        ? currentPrograms.map((program) => (program.id === nextProgram.id ? nextProgram : program))
+        : [...currentPrograms, nextProgram];
+      return { ...state, programs };
+    }
+
+    case "program.meta-updated": {
+      let changed = false;
+      const currentPrograms = state.programs ?? [];
+      const programs = currentPrograms.map((program) => {
+        if (program.id !== event.payload.programId) {
+          return program;
+        }
+        changed = true;
+        return {
+          ...program,
+          ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+          ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
+          ...(event.payload.status !== undefined ? { status: event.payload.status } : {}),
+          ...(event.payload.executiveProjectId !== undefined
+            ? { executiveProjectId: event.payload.executiveProjectId }
+            : {}),
+          ...(event.payload.executiveThreadId !== undefined
+            ? { executiveThreadId: event.payload.executiveThreadId }
+            : {}),
+          ...(event.payload.currentOrchestratorThreadId !== undefined
+            ? { currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId }
+            : {}),
+          ...(event.payload.completedAt !== undefined
+            ? { completedAt: event.payload.completedAt }
+            : {}),
+          updatedAt: event.payload.updatedAt,
+        };
+      });
+      return changed ? { ...state, programs } : state;
+    }
+
+    case "program.deleted": {
+      const currentPrograms = state.programs ?? [];
+      const programs = currentPrograms.filter((program) => program.id !== event.payload.programId);
+      return programs.length === currentPrograms.length ? state : { ...state, programs };
+    }
+
+    case "program.notification-upserted": {
+      const currentNotifications = state.programNotifications ?? [];
+      const nextNotification = mapProgramNotification(event.payload);
+      const existing = currentNotifications.find(
+        (notification) => notification.notificationId === nextNotification.notificationId,
+      );
+      const programNotifications = existing
+        ? currentNotifications.map((notification) =>
+            notification.notificationId === nextNotification.notificationId
+              ? nextNotification
+              : notification,
+          )
+        : [nextNotification, ...currentNotifications];
+      return { ...state, programNotifications };
+    }
+
+    case "program.notification-consumed": {
+      const currentNotifications = state.programNotifications ?? [];
+      let changed = false;
+      const programNotifications = currentNotifications.map((notification) => {
+        if (notification.notificationId !== event.payload.notificationId) {
+          return notification;
+        }
+        changed = true;
+        return {
+          ...notification,
+          state: "consumed" as const,
+          consumedAt: event.payload.consumedAt,
+          consumeReason: event.payload.consumeReason,
+          updatedAt: event.payload.updatedAt,
+        };
+      });
+      return changed ? { ...state, programNotifications } : state;
+    }
+
+    case "program.notification-dropped": {
+      const currentNotifications = state.programNotifications ?? [];
+      let changed = false;
+      const programNotifications = currentNotifications.map((notification) => {
+        if (notification.notificationId !== event.payload.notificationId) {
+          return notification;
+        }
+        changed = true;
+        return {
+          ...notification,
+          state: "dropped" as const,
+          droppedAt: event.payload.droppedAt,
+          dropReason: event.payload.dropReason,
+          updatedAt: event.payload.updatedAt,
+        };
+      });
+      return changed ? { ...state, programNotifications } : state;
+    }
+
     case "thread.created": {
       const existing = state.threads.find((thread) => thread.id === event.payload.threadId);
       const threadLabels = (event.payload as { labels?: readonly string[] | undefined }).labels;
@@ -715,6 +918,9 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         spawnRole: event.payload.spawnRole,
         spawnedBy: event.payload.spawnedBy,
         workflowId: event.payload.workflowId,
+        programId: event.payload.programId,
+        executiveProjectId: event.payload.executiveProjectId,
+        executiveThreadId: event.payload.executiveThreadId,
       });
       const threads = existing
         ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
@@ -776,6 +982,13 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         ...(event.payload.spawnRole !== undefined ? { spawnRole: event.payload.spawnRole } : {}),
         ...(event.payload.spawnedBy !== undefined ? { spawnedBy: event.payload.spawnedBy } : {}),
         ...(event.payload.workflowId !== undefined ? { workflowId: event.payload.workflowId } : {}),
+        ...(event.payload.programId !== undefined ? { programId: event.payload.programId } : {}),
+        ...(event.payload.executiveProjectId !== undefined
+          ? { executiveProjectId: event.payload.executiveProjectId }
+          : {}),
+        ...(event.payload.executiveThreadId !== undefined
+          ? { executiveThreadId: event.payload.executiveThreadId }
+          : {}),
         updatedAt: event.payload.updatedAt,
       }));
       if (threads !== state.threads && threadLabels !== undefined) {

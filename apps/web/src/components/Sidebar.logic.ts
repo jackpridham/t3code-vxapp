@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import type { Project, Thread } from "../types";
+import type { Program, ProgramNotification, Project, Thread } from "../types";
 import { getDisplayThreadLabelEntries } from "../lib/threadLabels";
 import { cn } from "../lib/utils";
 import {
@@ -16,7 +16,7 @@ import {
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
-export type SidebarProjectKind = "project" | "orchestrator";
+export type SidebarProjectKind = "project" | "orchestrator" | "executive";
 type SidebarProject = Pick<Project, "id" | "name" | "cwd" | "kind"> & {
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
@@ -24,6 +24,14 @@ type SidebarProject = Pick<Project, "id" | "name" | "cwd" | "kind"> & {
 type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
   latestUserMessageAt?: string | null;
   messages?: ReadonlyArray<Pick<Thread["messages"][number], "createdAt" | "role">>;
+};
+
+export type SidebarProgramNotificationGroup = {
+  programId: ProgramNotification["programId"];
+  programTitle: string;
+  notifications: ProgramNotification[];
+  criticalCount: number;
+  warningCount: number;
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
@@ -48,6 +56,21 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Connecting: 3,
   "Plan Ready": 2,
   Completed: 1,
+};
+
+const PROGRAM_NOTIFICATION_SEVERITY_PRIORITY: Record<ProgramNotification["severity"], number> = {
+  critical: 3,
+  warning: 2,
+  info: 1,
+};
+
+const PROGRAM_NOTIFICATION_KIND_LABELS: Record<ProgramNotification["kind"], string> = {
+  decision_required: "Decision",
+  blocked: "Blocked",
+  milestone_completed: "Milestone",
+  closeout_ready: "Closeout",
+  risk_escalated: "Risk",
+  status_update: "Status",
 };
 
 type ThreadStatusInput = Pick<
@@ -176,6 +199,59 @@ export function buildCopyThreadIdErrorDescription(input: {
   return `${message}\nThread ID: ${input.threadId}`;
 }
 
+export function getSidebarProgramNotificationKindLabel(kind: ProgramNotification["kind"]): string {
+  return PROGRAM_NOTIFICATION_KIND_LABELS[kind];
+}
+
+export function buildSidebarProgramNotificationGroups(input: {
+  programs: readonly Program[];
+  notifications: readonly ProgramNotification[];
+}): SidebarProgramNotificationGroup[] {
+  const programById = new Map(input.programs.map((program) => [program.id, program] as const));
+  const activeNotifications = input.notifications
+    .filter(
+      (notification) => notification.state === "pending" || notification.state === "delivering",
+    )
+    .toSorted(
+      (left, right) =>
+        PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[right.severity] -
+          PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[left.severity] ||
+        right.queuedAt.localeCompare(left.queuedAt) ||
+        left.notificationId.localeCompare(right.notificationId),
+    );
+  const groupsByProgramId = new Map<ProgramNotification["programId"], ProgramNotification[]>();
+
+  for (const notification of activeNotifications) {
+    const existing = groupsByProgramId.get(notification.programId);
+    if (existing) {
+      existing.push(notification);
+    } else {
+      groupsByProgramId.set(notification.programId, [notification]);
+    }
+  }
+
+  return [...groupsByProgramId.entries()]
+    .map(([programId, notifications]) => {
+      const program = programById.get(programId);
+      return {
+        programId,
+        programTitle: program?.title ?? `Program ${String(programId).slice(0, 8)}`,
+        notifications,
+        criticalCount: notifications.filter((notification) => notification.severity === "critical")
+          .length,
+        warningCount: notifications.filter((notification) => notification.severity === "warning")
+          .length,
+      };
+    })
+    .toSorted(
+      (left, right) =>
+        right.criticalCount - left.criticalCount ||
+        right.warningCount - left.warningCount ||
+        right.notifications.length - left.notifications.length ||
+        left.programTitle.localeCompare(right.programTitle),
+    );
+}
+
 function toNormalizedCwdSegments(cwd: string): string[] {
   return cwd
     .split(/[/\\]+/)
@@ -188,7 +264,11 @@ export function resolveSidebarProjectKind(input: {
   orchestratorProjectCwds?: ReadonlySet<string> | readonly string[];
 }): SidebarProjectKind {
   const { project } = input;
-  if (project.kind === "orchestrator" || project.kind === "project") {
+  if (
+    project.kind === "orchestrator" ||
+    project.kind === "executive" ||
+    project.kind === "project"
+  ) {
     return project.kind;
   }
 
@@ -202,6 +282,9 @@ export function resolveSidebarProjectKind(input: {
 
   const normalizedName = project.name.trim().toLowerCase();
   const normalizedSegments = toNormalizedCwdSegments(project.cwd);
+  if (normalizedName.includes("cto") || normalizedSegments.includes("cto")) {
+    return "executive";
+  }
   if (normalizedName.includes("jasper") || normalizedSegments.includes("jasper")) {
     return "orchestrator";
   }
@@ -213,9 +296,11 @@ export function partitionProjectsForSidebar<TProject extends SidebarProject>(inp
   projects: readonly TProject[];
   orchestratorProjectCwds?: ReadonlySet<string> | readonly string[];
 }): {
+  executiveProjects: TProject[];
   orchestratorProjects: TProject[];
   regularProjects: TProject[];
 } {
+  const executiveProjects: TProject[] = [];
   const orchestratorProjects: TProject[] = [];
   const regularProjects: TProject[] = [];
   for (const project of input.projects) {
@@ -227,13 +312,15 @@ export function partitionProjectsForSidebar<TProject extends SidebarProject>(inp
             orchestratorProjectCwds: input.orchestratorProjectCwds,
           },
     );
-    if (projectKind === "orchestrator") {
+    if (projectKind === "executive") {
+      executiveProjects.push(project);
+    } else if (projectKind === "orchestrator") {
       orchestratorProjects.push(project);
     } else {
       regularProjects.push(project);
     }
   }
-  return { orchestratorProjects, regularProjects };
+  return { executiveProjects, orchestratorProjects, regularProjects };
 }
 
 export function orderItemsByPreferredIds<TItem, TId>(input: {

@@ -238,12 +238,11 @@ describe("filterProjectThreadsForOrchestrationMode", () => {
         threads: [r23Worker, historicalMalformedWorker],
         selectedSessionRootIds: [selectedRoot.id],
         threadsForResolution: [selectedRoot, r23Worker, historicalMalformedWorker],
-        visibilityMode: "selected-session",
       }).map((thread) => thread.id),
     ).toEqual(["r23-worker"]);
   });
 
-  it("keeps malformed workers visible in project-diagnostic mode", () => {
+  it("keeps malformed workers visible when all orchestrators and invalid lineage are enabled", () => {
     const selectedRoot = makeThread({
       id: ThreadId.makeUnsafe("r23-root"),
       spawnRole: "orchestrator",
@@ -269,9 +268,44 @@ describe("filterProjectThreadsForOrchestrationMode", () => {
         threads: [r23Worker, historicalMalformedWorker],
         selectedSessionRootIds: [selectedRoot.id],
         threadsForResolution: [selectedRoot, r23Worker, historicalMalformedWorker],
-        visibilityMode: "project-diagnostic",
+        workerLineageFilter: "show_invalid",
+        workerVisibilityScope: "all_orchestrators",
       }).map((thread) => thread.id),
     ).toEqual(["r23-worker", "old-vortex-scripts-worker"]);
+  });
+
+  it("shows only malformed workers when the lineage filter is diagnostic", () => {
+    const selectedRoot = makeThread({
+      id: ThreadId.makeUnsafe("r23-root"),
+      spawnRole: "orchestrator",
+      workflowId: "wf-r23-root",
+    });
+    const r23Worker = makeThread({
+      id: ThreadId.makeUnsafe("r23-worker"),
+      spawnRole: "worker",
+      orchestratorProjectId: ProjectId.makeUnsafe("project-1"),
+      orchestratorThreadId: selectedRoot.id,
+      parentThreadId: selectedRoot.id,
+      workflowId: "wf-r23-root",
+    });
+    const historicalMalformedWorker = makeThread({
+      id: ThreadId.makeUnsafe("old-vortex-scripts-worker"),
+      spawnRole: "worker",
+      orchestratorProjectId: undefined,
+      orchestratorThreadId: undefined,
+      parentThreadId: undefined,
+      workflowId: undefined,
+    });
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads: [r23Worker, historicalMalformedWorker],
+        selectedSessionRootIds: [selectedRoot.id],
+        threadsForResolution: [selectedRoot, r23Worker, historicalMalformedWorker],
+        workerLineageFilter: "only_invalid",
+        workerVisibilityScope: "all_orchestrators",
+      }).map((thread) => thread.id),
+    ).toEqual(["old-vortex-scripts-worker"]);
   });
 
   it("keeps worker visibility when orchestratorThreadId matches selected root even without parent/workflow", () => {
@@ -326,6 +360,96 @@ describe("filterProjectThreadsForOrchestrationMode", () => {
         threadsForResolution: threads,
       }).map((thread) => thread.id),
     ).toEqual(["worker-current"]);
+  });
+
+  it("can show all workers regardless of selected orchestrator", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-current"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
+        parentThreadId: ThreadId.makeUnsafe("root-current"),
+        workflowId: "wf-current",
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-old"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-old"),
+        parentThreadId: ThreadId.makeUnsafe("root-old"),
+        workflowId: "wf-old",
+      }),
+    ];
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads,
+        selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
+        threadsForResolution: threads,
+        workerVisibilityScope: "all_orchestrators",
+      }).map((thread) => thread.id),
+    ).toEqual(["worker-current", "worker-old"]);
+  });
+
+  it("can show only active workers", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-active"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
+        session: {
+          provider: "codex",
+          status: "running",
+          createdAt: "2026-04-10T00:00:00.000Z",
+          updatedAt: "2026-04-10T00:00:00.000Z",
+          orchestrationStatus: "running",
+        },
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-idle"),
+        spawnRole: "worker",
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
+      }),
+    ];
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads,
+        selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
+        threadsForResolution: threads,
+        workerActivityFilter: "active",
+      }).map((thread) => thread.id),
+    ).toEqual(["worker-active"]);
+  });
+
+  it("can show only workers that need attention", () => {
+    const root = makeThread({
+      id: ThreadId.makeUnsafe("root-current"),
+      spawnRole: "orchestrator",
+    });
+    const threads = [
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-error"),
+        spawnRole: "worker",
+        orchestratorProjectId: ProjectId.makeUnsafe("project-1"),
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
+        error: "Worker failed",
+      }),
+      makeThread({
+        id: ThreadId.makeUnsafe("worker-ok"),
+        spawnRole: "worker",
+        orchestratorProjectId: ProjectId.makeUnsafe("project-1"),
+        orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
+      }),
+    ];
+
+    expect(
+      filterProjectThreadsForOrchestrationMode({
+        threads,
+        selectedSessionRootIds: [ThreadId.makeUnsafe("root-current")],
+        threadsForResolution: [root, ...threads],
+        workerActivityFilter: "needs_attention",
+      }).map((thread) => thread.id),
+    ).toEqual(["worker-error"]);
   });
 });
 
@@ -597,6 +721,62 @@ describe("resolveConfiguredProjectBuckets", () => {
     expect(result.visibleProjectIds.has(scriptsParent.id)).toBe(true);
     expect(result.visibleProjectIds.has(childProject.id)).toBe(false);
     expect(result.visibleProjectIds.has(scriptsChild.id)).toBe(false);
+  });
+
+  it("groups generated lane names with embedded repo aliases when git identity is unavailable", () => {
+    const vueParent = makeProject({
+      id: ProjectId.makeUnsafe("project-vue"),
+      name: "vue-vxapp",
+      cwd: "/repos/vue-vxapp",
+    });
+    const vueLane = makeProject({
+      id: ProjectId.makeUnsafe("project-r27-vue"),
+      name: "r27-vue-ai-first-spa-phase1",
+      cwd: "/home/gizmo/worktrees/r27-vue-ai-first-spa-phase1",
+    });
+    const agentsParent = makeProject({
+      id: ProjectId.makeUnsafe("project-agents"),
+      name: "agents-vxapp",
+      cwd: "/repos/agents-vxapp",
+    });
+    const agentsLane = makeProject({
+      id: ProjectId.makeUnsafe("project-pr39-agents"),
+      name: "pr39-agents-oop-implement-p1",
+      cwd: "/home/gizmo/worktrees/pr39-agents-oop-implement-p1",
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [vueParent, vueLane, agentsParent, agentsLane],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(vueLane.id)).toBe(vueParent.id);
+    expect(result.bucketProjectIdByProjectId.get(agentsLane.id)).toBe(agentsParent.id);
+    expect(result.visibleProjectIds.has(vueParent.id)).toBe(true);
+    expect(result.visibleProjectIds.has(agentsParent.id)).toBe(true);
+    expect(result.visibleProjectIds.has(vueLane.id)).toBe(false);
+    expect(result.visibleProjectIds.has(agentsLane.id)).toBe(false);
+  });
+
+  it("does not treat embedded aliases from non-vxapp project names as worktree parents", () => {
+    const serverProject = makeProject({
+      id: ProjectId.makeUnsafe("project-server"),
+      name: "server",
+      cwd: "/repos/server",
+    });
+    const t3ServerProject = makeProject({
+      id: ProjectId.makeUnsafe("project-t3-server"),
+      name: "t3-server-runtime-probe",
+      cwd: "/home/gizmo/worktrees/t3-server-runtime-probe",
+    });
+
+    const result = resolveConfiguredProjectBuckets({
+      projects: [serverProject, t3ServerProject],
+      repoIdentityByProjectId: new Map(),
+    });
+
+    expect(result.bucketProjectIdByProjectId.get(t3ServerProject.id)).toBe(t3ServerProject.id);
+    expect(result.visibleProjectIds.has(t3ServerProject.id)).toBe(true);
   });
 
   it("groups unmatched scripts worktrees under vortex-scripts when configured", () => {

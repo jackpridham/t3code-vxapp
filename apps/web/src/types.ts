@@ -1,6 +1,8 @@
 import type {
   ModelSelection,
   OrchestrationLatestTurn,
+  OrchestrationProgram,
+  OrchestrationProgramNotification,
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
@@ -97,7 +99,10 @@ export interface PersistedFileChange {
   lastTurnId: string;
 }
 
-export type ProjectKind = "project" | "orchestrator";
+export type ProjectKind = "project" | "orchestrator" | "executive";
+
+export type Program = OrchestrationProgram;
+export type ProgramNotification = OrchestrationProgramNotification;
 
 export interface Project {
   id: ProjectId;
@@ -145,6 +150,9 @@ export interface Thread {
   spawnRole?: "orchestrator" | "worker" | "supervisor" | undefined;
   spawnedBy?: string | undefined;
   workflowId?: string | undefined;
+  programId?: string | undefined;
+  executiveProjectId?: string | undefined;
+  executiveThreadId?: string | undefined;
   sessionWorkerThreadCount?: number | undefined;
 }
 

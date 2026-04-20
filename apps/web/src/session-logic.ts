@@ -458,10 +458,17 @@ export function hasActionableProposedPlan(
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
+  options: { latestTurnSettled?: boolean } = {},
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries = ordered
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+    .filter(
+      (activity) =>
+        !(
+          options.latestTurnSettled === true && isTransientRuntimeRetryDiagnosticActivity(activity)
+        ),
+    )
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.kind !== "context-window.updated")
@@ -471,6 +478,21 @@ export function deriveWorkLogEntries(
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+function isTransientRuntimeRetryDiagnosticActivity(activity: OrchestrationThreadActivity): boolean {
+  if (activity.kind !== "runtime.warning") {
+    return false;
+  }
+  const payload =
+    activity.payload && typeof activity.payload === "object"
+      ? (activity.payload as Record<string, unknown>)
+      : null;
+  const detail =
+    payload?.detail && typeof payload.detail === "object" && !Array.isArray(payload.detail)
+      ? (payload.detail as Record<string, unknown>)
+      : null;
+  return detail?.willRetry === true || payload?.willRetry === true;
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {

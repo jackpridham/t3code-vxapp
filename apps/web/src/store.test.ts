@@ -3,6 +3,8 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   EventId,
   MessageId,
+  ProgramId,
+  ProgramNotificationId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -928,6 +930,122 @@ describe("lineage metadata mapping", () => {
     expect(next.threads[0]?.spawnRole).toBe("worker");
     expect(next.threads[0]?.spawnedBy).toBe("jasper");
     expect(next.threads[0]?.workflowId).toBe("wf-abc");
+  });
+
+  it("syncServerReadModel hydrates program notifications", () => {
+    const next = syncServerReadModel(
+      { ...makeState(makeThread()), programs: [], programNotifications: [] },
+      makeReadModel(makeReadModelThread({}), {
+        programs: [
+          {
+            id: ProgramId.makeUnsafe("program-cto"),
+            title: "CTO task",
+            objective: null,
+            status: "active",
+            executiveProjectId: ProjectId.makeUnsafe("project-1"),
+            executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+            currentOrchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+            createdAt: "2026-04-20T00:00:00.000Z",
+            updatedAt: "2026-04-20T00:00:00.000Z",
+            completedAt: null,
+            deletedAt: null,
+          },
+        ],
+        programNotifications: [
+          {
+            notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+            programId: ProgramId.makeUnsafe("program-cto"),
+            executiveProjectId: ProjectId.makeUnsafe("project-1"),
+            executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+            orchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+            kind: "decision_required",
+            severity: "warning",
+            summary: "Choose the deployment lane.",
+            evidence: { workerThreadId: "thread-worker" },
+            state: "pending",
+            queuedAt: "2026-04-20T00:01:00.000Z",
+            deliveredAt: null,
+            consumedAt: null,
+            droppedAt: null,
+            createdAt: "2026-04-20T00:01:00.000Z",
+            updatedAt: "2026-04-20T00:01:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    expect(next.programNotifications).toEqual([
+      expect.objectContaining({
+        notificationId: "notif-cto",
+        programId: "program-cto",
+        kind: "decision_required",
+        severity: "warning",
+        state: "pending",
+        evidence: { workerThreadId: "thread-worker" },
+      }),
+    ]);
+  });
+
+  it("applies program notification lifecycle events", () => {
+    const state: AppState = { ...makeState(makeThread()), programNotifications: [] };
+    const upserted = applyOrchestrationEvent(
+      state,
+      makeEvent(
+        "program.notification-upserted",
+        {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+          programId: ProgramId.makeUnsafe("program-cto"),
+          executiveProjectId: ProjectId.makeUnsafe("project-1"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+          kind: "blocked",
+          severity: "critical",
+          summary: "The task is blocked.",
+          evidence: {},
+          state: "pending",
+          queuedAt: "2026-04-20T00:01:00.000Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: "2026-04-20T00:01:00.000Z",
+          updatedAt: "2026-04-20T00:01:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+    expect(upserted.programNotifications?.[0]).toMatchObject({
+      notificationId: "notif-cto",
+      state: "pending",
+      summary: "The task is blocked.",
+    });
+
+    const consumed = applyOrchestrationEvent(
+      upserted,
+      makeEvent(
+        "program.notification-consumed",
+        {
+          programId: ProgramId.makeUnsafe("program-cto"),
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+          consumedAt: "2026-04-20T00:02:00.000Z",
+          consumeReason: "reviewed",
+          updatedAt: "2026-04-20T00:02:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+
+    expect(consumed.programNotifications?.[0]).toMatchObject({
+      notificationId: "notif-cto",
+      state: "consumed",
+      consumedAt: "2026-04-20T00:02:00.000Z",
+      consumeReason: "reviewed",
+    });
   });
 
   it("thread.meta-updated can set lineage fields on a thread that had none", () => {

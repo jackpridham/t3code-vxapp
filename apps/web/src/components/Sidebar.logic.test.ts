@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildCopyThreadIdErrorDescription,
+  buildSidebarProgramNotificationGroups,
   createThreadJumpHintVisibilityController,
   filterThreadsByLabels,
   getVisibleSidebarThreadIds,
@@ -17,6 +18,7 @@ import {
   partitionProjectsForSidebar,
   resolveProjectStatusIndicator,
   getSidebarThreadLabels,
+  getSidebarProgramNotificationKindLabel,
   getUniqueLabelsFromThreads,
   resolveSidebarProjectKind,
   resolveSidebarNewThreadEnvMode,
@@ -30,10 +32,18 @@ import {
   threadHasLineage,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
-import { OrchestrationLatestTurn, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  OrchestrationLatestTurn,
+  ProgramId,
+  ProgramNotificationId,
+  ProjectId,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  type Program,
+  type ProgramNotification,
   type Project,
   type Thread,
 } from "../types";
@@ -195,6 +205,102 @@ describe("buildCopyThreadIdErrorDescription", () => {
   });
 });
 
+describe("buildSidebarProgramNotificationGroups", () => {
+  it("groups active notifications by program and orders urgent work first", () => {
+    const programAlphaId = ProgramId.makeUnsafe("program-alpha");
+    const programBetaId = ProgramId.makeUnsafe("program-beta");
+    const groups = buildSidebarProgramNotificationGroups({
+      programs: [
+        makeProgram({ id: programAlphaId, title: "Alpha launch" }),
+        makeProgram({ id: programBetaId, title: "Beta cleanup" }),
+      ],
+      notifications: [
+        makeProgramNotification({
+          notificationId: ProgramNotificationId.makeUnsafe("notification-info"),
+          programId: programAlphaId,
+          kind: "status_update",
+          severity: "info",
+          summary: "Alpha status update",
+          queuedAt: "2026-04-20T00:01:00.000Z",
+        }),
+        makeProgramNotification({
+          notificationId: ProgramNotificationId.makeUnsafe("notification-critical"),
+          programId: programBetaId,
+          kind: "blocked",
+          severity: "critical",
+          summary: "Beta is blocked",
+          queuedAt: "2026-04-20T00:00:00.000Z",
+        }),
+        makeProgramNotification({
+          notificationId: ProgramNotificationId.makeUnsafe("notification-consumed"),
+          programId: programBetaId,
+          state: "consumed",
+          summary: "Already handled",
+        }),
+      ],
+    });
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.programTitle).toBe("Beta cleanup");
+    expect(groups[0]?.criticalCount).toBe(1);
+    expect(groups[0]?.notifications.map((notification) => notification.summary)).toEqual([
+      "Beta is blocked",
+    ]);
+    expect(groups[1]?.programTitle).toBe("Alpha launch");
+    expect(groups[1]?.notifications.map((notification) => notification.summary)).toEqual([
+      "Alpha status update",
+    ]);
+  });
+
+  it("renders human labels for notification kinds", () => {
+    expect(getSidebarProgramNotificationKindLabel("decision_required")).toBe("Decision");
+    expect(getSidebarProgramNotificationKindLabel("risk_escalated")).toBe("Risk");
+  });
+});
+
+function makeProgram(overrides: Partial<Program> = {}): Program {
+  return {
+    id: ProgramId.makeUnsafe("program-1"),
+    title: "Program",
+    objective: null,
+    status: "active",
+    executiveProjectId: ProjectId.makeUnsafe("executive-project-1"),
+    executiveThreadId: ThreadId.makeUnsafe("executive-thread-1"),
+    currentOrchestratorThreadId: null,
+    createdAt: "2026-04-20T00:00:00.000Z",
+    updatedAt: "2026-04-20T00:00:00.000Z",
+    completedAt: null,
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+function makeProgramNotification(
+  overrides: Partial<ProgramNotification> = {},
+): ProgramNotification {
+  return {
+    notificationId: ProgramNotificationId.makeUnsafe("notification-1"),
+    programId: ProgramId.makeUnsafe("program-1"),
+    executiveProjectId: ProjectId.makeUnsafe("executive-project-1"),
+    executiveThreadId: ThreadId.makeUnsafe("executive-thread-1"),
+    orchestratorThreadId: ThreadId.makeUnsafe("orchestrator-thread-1"),
+    kind: "decision_required",
+    severity: "warning",
+    summary: "Decision required",
+    evidence: {},
+    state: "pending",
+    queuedAt: "2026-04-20T00:00:00.000Z",
+    deliveredAt: null,
+    consumedAt: null,
+    droppedAt: null,
+    consumeReason: undefined,
+    dropReason: undefined,
+    createdAt: "2026-04-20T00:00:00.000Z",
+    updatedAt: "2026-04-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("resolveSidebarProjectKind", () => {
   it("prefers the persisted project kind when present", () => {
     expect(
@@ -202,6 +308,12 @@ describe("resolveSidebarProjectKind", () => {
         project: makeProject({ kind: "orchestrator" }),
       }),
     ).toBe("orchestrator");
+
+    expect(
+      resolveSidebarProjectKind({
+        project: makeProject({ kind: "executive" }),
+      }),
+    ).toBe("executive");
   });
 
   it("falls back to remembered orchestrator cwd state", () => {
@@ -211,6 +323,18 @@ describe("resolveSidebarProjectKind", () => {
         orchestratorProjectCwds: ["/home/gizmo/agents-vxapp/Jasper"],
       }),
     ).toBe("orchestrator");
+  });
+
+  it("falls back to executive kind for CTO workspaces", () => {
+    expect(
+      resolveSidebarProjectKind({
+        project: makeProject({
+          kind: undefined,
+          name: "CTO",
+          cwd: "/home/gizmo/agents-vxapp/CTO",
+        }),
+      }),
+    ).toBe("executive");
   });
 });
 
@@ -298,7 +422,13 @@ describe("resolveSelectedOrchestrationSessionRootId", () => {
 });
 
 describe("partitionProjectsForSidebar", () => {
-  it("splits orchestrators from regular projects while preserving relative order", () => {
+  it("splits executive, orchestrator, and regular projects while preserving relative order", () => {
+    const cto = makeProject({
+      id: ProjectId.makeUnsafe("project-cto"),
+      name: "CTO",
+      cwd: "/home/gizmo/agents-vxapp/CTO",
+      kind: "executive",
+    });
     const jasper = makeProject({
       id: ProjectId.makeUnsafe("project-jasper"),
       name: "Jasper",
@@ -317,9 +447,10 @@ describe("partitionProjectsForSidebar", () => {
     });
 
     const result = partitionProjectsForSidebar({
-      projects: [app, jasper, docs],
+      projects: [app, cto, jasper, docs],
     });
 
+    expect(result.executiveProjects.map((project) => project.id)).toEqual([cto.id]);
     expect(result.orchestratorProjects.map((project) => project.id)).toEqual([jasper.id]);
     expect(result.regularProjects.map((project) => project.id)).toEqual([app.id, docs.id]);
   });

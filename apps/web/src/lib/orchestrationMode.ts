@@ -1,6 +1,16 @@
 import type { GitResolveRepoIdentityResult } from "@t3tools/contracts";
+import {
+  DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER,
+  DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER,
+  DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE,
+  type SidebarWorkerActivityFilter,
+  type SidebarWorkerLineageFilter,
+  type SidebarWorkerVisibilityScope,
+} from "@t3tools/contracts/settings";
 import type { Project, Thread } from "../types";
+import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
 import { getDisplayThreadLabelEntries } from "./threadLabels";
+import { getWorkerLineageIssues } from "./workerLineage";
 
 export interface OrchestrationSessionRoot {
   rootThreadId: Thread["id"];
@@ -32,6 +42,11 @@ export interface OrchestrationModeConfiguredProjectBuckets {
   visibleProjectIds: Set<Project["id"]>;
 }
 
+interface ProjectNameAlias {
+  value: string;
+  allowEmbeddedMatch: boolean;
+}
+
 export interface OrchestrationModeRowBadge {
   key: string;
   label: string;
@@ -43,10 +58,123 @@ export interface OrchestrationModeRowDescriptor {
   visibleBadges: OrchestrationModeRowBadge[];
 }
 
-export type OrchestrationWorkerVisibilityMode = "selected-session" | "project-diagnostic";
+type OrchestrationWorkerVisibilityMode = "selected-session" | "project-diagnostic";
+
+type WorkerVisibilityThread = Pick<
+  Thread,
+  | "id"
+  | "spawnRole"
+  | "parentThreadId"
+  | "spawnedBy"
+  | "orchestratorProjectId"
+  | "orchestratorThreadId"
+  | "workflowId"
+  | "session"
+  | "latestTurn"
+  | "error"
+  | "activities"
+>;
 
 function isNonEmptyString(value: string | null | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function resolveWorkerVisibilityMode(
+  visibilityScope: SidebarWorkerVisibilityScope,
+): OrchestrationWorkerVisibilityMode {
+  return visibilityScope === "all_orchestrators" ? "project-diagnostic" : "selected-session";
+}
+
+function getWorkerLineageErrors(input: {
+  thread: WorkerVisibilityThread;
+  threads: readonly Pick<Thread, "id">[];
+  projects?: readonly Pick<Project, "id">[];
+}) {
+  return getWorkerLineageIssues({
+    thread: input.thread,
+    threads: input.threads,
+    ...(input.projects ? { projects: input.projects } : {}),
+  }).filter((issue) => issue.severity === "error");
+}
+
+function hasWorkerOrchestratorLineageError(input: {
+  thread: WorkerVisibilityThread;
+  threads: readonly Pick<Thread, "id">[];
+  projects?: readonly Pick<Project, "id">[];
+}): boolean {
+  return getWorkerLineageErrors(input).some(
+    (issue) => issue.key === "missing-orchestrator-thread-id",
+  );
+}
+
+function hasPendingWorkerAction(thread: Pick<Thread, "activities">): boolean {
+  return (
+    derivePendingApprovals(thread.activities).length > 0 ||
+    derivePendingUserInputs(thread.activities).length > 0
+  );
+}
+
+function isActiveWorker(thread: WorkerVisibilityThread): boolean {
+  return (
+    thread.session?.status === "running" ||
+    thread.session?.status === "connecting" ||
+    thread.latestTurn?.state === "running"
+  );
+}
+
+function workerNeedsAttention(input: {
+  thread: WorkerVisibilityThread;
+  threads: readonly Pick<Thread, "id">[];
+  projects?: readonly Pick<Project, "id">[];
+}): boolean {
+  return (
+    getWorkerLineageErrors(input).length > 0 ||
+    isNonEmptyString(input.thread.error) ||
+    input.thread.session?.status === "error" ||
+    input.thread.latestTurn?.state === "error" ||
+    input.thread.latestTurn?.state === "interrupted" ||
+    hasPendingWorkerAction(input.thread)
+  );
+}
+
+function matchesWorkerLineageFilter(input: {
+  thread: WorkerVisibilityThread;
+  threads: readonly Pick<Thread, "id">[];
+  projects?: readonly Pick<Project, "id">[];
+  lineageFilter: SidebarWorkerLineageFilter;
+}): boolean {
+  if (input.thread.spawnRole !== "worker") {
+    return input.lineageFilter !== "only_invalid";
+  }
+
+  const hasLineageError = hasWorkerOrchestratorLineageError(input);
+
+  if (input.lineageFilter === "hide_invalid") {
+    return !hasLineageError;
+  }
+  if (input.lineageFilter === "only_invalid") {
+    return hasLineageError;
+  }
+  return true;
+}
+
+function matchesWorkerActivityFilter(input: {
+  thread: WorkerVisibilityThread;
+  threads: readonly Pick<Thread, "id">[];
+  projects?: readonly Pick<Project, "id">[];
+  activityFilter: SidebarWorkerActivityFilter;
+}): boolean {
+  if (input.thread.spawnRole !== "worker") {
+    return true;
+  }
+
+  if (input.activityFilter === "active") {
+    return isActiveWorker(input.thread);
+  }
+  if (input.activityFilter === "needs_attention") {
+    return workerNeedsAttention(input);
+  }
+  return true;
 }
 
 function normalizePath(path: string): string {
@@ -171,8 +299,8 @@ export function resolveConfiguredProjectBuckets(input: {
     }))
     .filter((entry) => entry.aliases.length > 0)
     .toSorted((left, right) => {
-      const leftLongestAlias = Math.max(...left.aliases.map((alias) => alias.length));
-      const rightLongestAlias = Math.max(...right.aliases.map((alias) => alias.length));
+      const leftLongestAlias = Math.max(...left.aliases.map((alias) => alias.value.length));
+      const rightLongestAlias = Math.max(...right.aliases.map((alias) => alias.value.length));
       return rightLongestAlias - leftLongestAlias;
     });
 
@@ -193,7 +321,7 @@ export function resolveConfiguredProjectBuckets(input: {
     const matchedParent = parentProjectAliases.find(
       (candidate) =>
         candidate.projectId !== project.id &&
-        candidate.aliases.some((alias) => normalizedProjectName.startsWith(`${alias}-`)),
+        candidate.aliases.some((alias) => projectNameMatchesAlias(normalizedProjectName, alias)),
     );
     if (!matchedParent) {
       continue;
@@ -262,28 +390,47 @@ function hasProjectNameToken(project: Pick<Project, "name" | "cwd">, token: stri
   );
 }
 
-function buildProjectNameAliases(name: string): string[] {
+function buildProjectNameAliases(name: string): ProjectNameAlias[] {
   const normalizedName = normalizeProjectName(name);
   if (normalizedName === null) {
     return [];
   }
 
-  const aliases = new Set<string>([normalizedName]);
+  const aliases = new Map<string, ProjectNameAlias>();
+  aliases.set(normalizedName, {
+    value: normalizedName,
+    allowEmbeddedMatch: false,
+  });
   if (normalizedName.endsWith("-vxapp")) {
     const baseName = normalizedName.slice(0, "-vxapp".length * -1);
     if (baseName.length > 0) {
-      aliases.add(baseName);
+      aliases.set(baseName, {
+        value: baseName,
+        allowEmbeddedMatch: true,
+      });
     }
   }
 
-  return [...aliases];
+  return [...aliases.values()];
+}
+
+function projectNameMatchesAlias(normalizedProjectName: string, alias: ProjectNameAlias): boolean {
+  if (normalizedProjectName.startsWith(`${alias.value}-`)) {
+    return true;
+  }
+
+  if (!alias.allowEmbeddedMatch) {
+    return false;
+  }
+
+  return (
+    normalizedProjectName.includes(`-${alias.value}-`) ||
+    normalizedProjectName.endsWith(`-${alias.value}`)
+  );
 }
 
 export function filterProjectThreadsForOrchestrationMode<
-  TThread extends Pick<
-    Thread,
-    "id" | "spawnRole" | "parentThreadId" | "spawnedBy" | "orchestratorThreadId" | "workflowId"
-  >,
+  TThread extends WorkerVisibilityThread,
 >(input: {
   threads: readonly TThread[];
   selectedSessionRootIds: ReadonlySet<Thread["id"]> | readonly Thread["id"][];
@@ -291,16 +438,42 @@ export function filterProjectThreadsForOrchestrationMode<
     Thread,
     "id" | "parentThreadId" | "spawnRole" | "spawnedBy" | "orchestratorThreadId" | "workflowId"
   >[];
-  visibilityMode?: OrchestrationWorkerVisibilityMode;
+  projects?: readonly Pick<Project, "id">[];
+  workerVisibilityScope?: SidebarWorkerVisibilityScope;
+  workerLineageFilter?: SidebarWorkerLineageFilter;
+  workerActivityFilter?: SidebarWorkerActivityFilter;
 }): TThread[] {
   const selectedSessionRootIds =
     input.selectedSessionRootIds instanceof Set
       ? input.selectedSessionRootIds
       : new Set(input.selectedSessionRootIds);
-  const visibilityMode = input.visibilityMode ?? "selected-session";
+  const visibilityMode = resolveWorkerVisibilityMode(
+    input.workerVisibilityScope ?? DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE,
+  );
+  const lineageFilter = input.workerLineageFilter ?? DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER;
+  const activityFilter = input.workerActivityFilter ?? DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER;
+  const workerFilterContext = {
+    threads: input.threadsForResolution,
+    ...(input.projects ? { projects: input.projects } : {}),
+  };
 
   return input.threads.filter((thread) => {
     if (thread.spawnRole === "orchestrator") {
+      return false;
+    }
+
+    if (
+      !matchesWorkerLineageFilter({
+        thread,
+        ...workerFilterContext,
+        lineageFilter,
+      }) ||
+      !matchesWorkerActivityFilter({
+        thread,
+        ...workerFilterContext,
+        activityFilter,
+      })
+    ) {
       return false;
     }
 

@@ -780,6 +780,51 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.rawPayload).toContain('"willRetry": true');
   });
 
+  it("omits transient runtime retry diagnostics after the latest turn settles", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "runtime-warning",
+        turnId: "turn-1",
+        kind: "runtime.warning",
+        summary: "Runtime warning",
+        tone: "info",
+        payload: {
+          message: "Reconnecting... 5/5",
+          detail: {
+            error: {
+              message: "Reconnecting... 5/5",
+            },
+            willRetry: true,
+            threadId: "thread-1",
+            turnId: "turn-1",
+          },
+        },
+      }),
+      makeActivity({
+        id: "runtime-error",
+        turnId: "turn-1",
+        kind: "runtime.error",
+        summary: "Runtime error",
+        tone: "error",
+        payload: {
+          detail: {
+            error: {
+              message: "Provider failed",
+            },
+            willRetry: false,
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-1"), {
+      latestTurnSettled: true,
+    });
+
+    expect(entries.map((entry) => entry.id)).toEqual(["runtime-error"]);
+    expect(entries[0]?.detail).toBe("Provider failed");
+  });
+
   it("extracts changed file paths for file-change tool activities", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

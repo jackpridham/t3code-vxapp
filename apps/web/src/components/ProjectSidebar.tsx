@@ -102,6 +102,7 @@ import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import {
   buildCopyThreadIdErrorDescription,
+  buildSidebarProgramNotificationGroups,
   filterThreadsByLabels,
   getUniqueLabelsFromThreads,
   getVisibleSidebarThreadIds,
@@ -129,6 +130,7 @@ import {
   type SortableProjectHandleProps,
   T3Wordmark,
 } from "./sidebar/SidebarShared";
+import { ProgramNotificationsPanel } from "./sidebar/ProgramNotificationsPanel";
 import {
   buildPrStatusIndicator,
   buildTerminalStatusIndicator,
@@ -143,7 +145,7 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import type { Project, Thread } from "../types";
 import { resolveThreadRouteTarget } from "../lib/sidebarWindow";
-import { getWorkerLineageIndicator } from "../lib/workerLineage";
+import { getThreadOperationsIndicator, getWorkerLineageIndicator } from "../lib/workerLineage";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_LABEL_ARRAY: readonly string[] = [];
@@ -243,6 +245,8 @@ function toSidebarThreadSnapshot(
 export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
+  const programs = useStore((store) => store.programs ?? []);
+  const programNotifications = useStore((store) => store.programNotifications ?? []);
   const serverThreads = useStore((store) => store.threads);
   const orchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById, labelFiltersByProject } =
@@ -338,6 +342,10 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
   const orchestratorWakeSummaryByThreadId = useMemo(
     () => buildSidebarWakeSummaryByThreadId(orchestratorWakeItems),
     [orchestratorWakeItems],
+  );
+  const programNotificationGroups = useMemo(
+    () => buildSidebarProgramNotificationGroups({ programs, notifications: programNotifications }),
+    [programs, programNotifications],
   );
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
@@ -576,7 +584,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
     copyPathToClipboard: (value, data) => copyPathToClipboard(value, data ?? {}),
   });
   const shouldShowAddProjectForm =
-    addingProject && (!shouldBrowseForProjectImmediately || newProjectKind === "orchestrator");
+    addingProject && (!shouldBrowseForProjectImmediately || newProjectKind !== "project");
   const handleThreadContextMenu = useCallback(
     async (threadId: ThreadId, position: { x: number; y: number }) => {
       const api = readNativeApi();
@@ -939,6 +947,17 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
       visibleThreads,
     ],
   );
+  const executiveRenderedProjects = useMemo(
+    () =>
+      renderedProjects.filter(
+        (renderedProject) =>
+          resolveSidebarProjectKind({
+            project: renderedProject.project,
+            orchestratorProjectCwds,
+          }) === "executive",
+      ),
+    [orchestratorProjectCwds, renderedProjects],
+  );
   const orchestratorRenderedProjects = useMemo(
     () =>
       renderedProjects.filter(
@@ -962,8 +981,12 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
     [orchestratorProjectCwds, renderedProjects],
   );
   const orderedRenderedProjects = useMemo(
-    () => [...orchestratorRenderedProjects, ...regularRenderedProjects],
-    [orchestratorRenderedProjects, regularRenderedProjects],
+    () => [
+      ...executiveRenderedProjects,
+      ...orchestratorRenderedProjects,
+      ...regularRenderedProjects,
+    ],
+    [executiveRenderedProjects, orchestratorRenderedProjects, regularRenderedProjects],
   );
   const visibleSidebarThreadIds = useMemo(
     () => getVisibleSidebarThreadIds(orderedRenderedProjects),
@@ -1106,6 +1129,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
       isThreadListExpanded,
     } = renderedProject;
     const isOrchestratorProject = projectKind === "orchestrator";
+    const isExecutiveProject = projectKind === "executive";
     const projectDraftThreadId = projectDraftThreadIdByProjectId[project.id] ?? null;
     const hasOrchestratorSession = projectDraftThreadId !== null || projectThreads.length > 0;
     const isProjectActive =
@@ -1134,6 +1158,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
         threads,
         projects,
       });
+      const threadOperationsIndicator = getThreadOperationsIndicator({ thread });
       const isConfirmingArchive = confirmingArchiveThreadId === thread.id && !isThreadRunning;
 
       return (
@@ -1152,6 +1177,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
           prStatus={prStatus}
           terminalStatus={terminalStatus}
           workerLineageIndicator={workerLineageIndicator}
+          threadOperationsIndicator={threadOperationsIndicator}
           isThreadRunning={isThreadRunning}
           isConfirmingArchive={isConfirmingArchive}
           confirmThreadArchive={appSettings.confirmThreadArchive}
@@ -1303,6 +1329,10 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
     const projectIcon = isOrchestratorProject ? (
       <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
         <BotIcon className="size-3" />
+      </span>
+    ) : isExecutiveProject ? (
+      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+        <NetworkIcon className="size-3" />
       </span>
     ) : (
       <ProjectFavicon cwd={project.cwd} />
@@ -1838,6 +1868,37 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
                         <button
                           type="button"
                           aria-label={
+                            shouldShowAddProjectForm && newProjectKind === "executive"
+                              ? "Cancel add CTO"
+                              : "Add CTO"
+                          }
+                          aria-pressed={shouldShowAddProjectForm && newProjectKind === "executive"}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => handleStartAddProject("executive")}
+                        >
+                          <NetworkIcon
+                            className={`size-3.5 transition-transform duration-150 ${
+                              shouldShowAddProjectForm && newProjectKind === "executive"
+                                ? "scale-110"
+                                : "scale-100"
+                            }`}
+                          />
+                          <span className="text-[11px] font-medium">CTO</span>
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="right">
+                      {shouldShowAddProjectForm && newProjectKind === "executive"
+                        ? "Cancel add CTO"
+                        : "Add CTO"}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={
                             shouldShowAddProjectForm && newProjectKind === "orchestrator"
                               ? "Cancel add orchestrator"
                               : "Add orchestrator"
@@ -1911,7 +1972,9 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
                       placeholder={
                         newProjectKind === "orchestrator"
                           ? "/path/to/orchestrator"
-                          : "/path/to/project"
+                          : newProjectKind === "executive"
+                            ? "/path/to/cto"
+                            : "/path/to/project"
                       }
                       value={newCwd}
                       onChange={(event) => {
@@ -1939,7 +2002,9 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
                         ? "Adding..."
                         : newProjectKind === "orchestrator"
                           ? "Add orchestrator"
-                          : "Add project"}
+                          : newProjectKind === "executive"
+                            ? "Add CTO"
+                            : "Add project"}
                     </button>
                   </div>
                   {addProjectError && (
@@ -1947,6 +2012,60 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
                       {addProjectError}
                     </p>
                   )}
+                </div>
+              )}
+            </SidebarGroup>
+
+            <ProgramNotificationsPanel groups={programNotificationGroups} />
+
+            <SidebarGroup className="px-2 py-2">
+              <div className="mb-1 flex items-center gap-1.5 pl-2 pr-1.5">
+                <NetworkIcon className="size-3.5 text-emerald-600/85 dark:text-emerald-300/80" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                  Executive
+                </span>
+              </div>
+              {isManualProjectSorting ? (
+                <DndContext
+                  sensors={projectDnDSensors}
+                  collisionDetection={projectCollisionDetection}
+                  modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                  onDragStart={handleProjectDragStart}
+                  onDragEnd={handleProjectDragEnd}
+                  onDragCancel={handleProjectDragCancel}
+                >
+                  <SidebarMenu>
+                    <SortableContext
+                      items={executiveRenderedProjects.map(
+                        (renderedProject) => renderedProject.project.id,
+                      )}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      {executiveRenderedProjects.map((renderedProject) => (
+                        <SortableProjectItem
+                          key={renderedProject.project.id}
+                          projectId={renderedProject.project.id}
+                        >
+                          {(dragHandleProps) =>
+                            renderProjectItem(renderedProject, "executive", dragHandleProps)
+                          }
+                        </SortableProjectItem>
+                      ))}
+                    </SortableContext>
+                  </SidebarMenu>
+                </DndContext>
+              ) : (
+                <SidebarMenu ref={attachProjectListAutoAnimateRef}>
+                  {executiveRenderedProjects.map((renderedProject) => (
+                    <SidebarMenuItem key={renderedProject.project.id} className="rounded-md">
+                      {renderProjectItem(renderedProject, "executive", null)}
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              )}
+              {executiveRenderedProjects.length === 0 && !shouldShowAddProjectForm && (
+                <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
+                  No CTO workspace yet
                 </div>
               )}
             </SidebarGroup>
