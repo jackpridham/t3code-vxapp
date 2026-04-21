@@ -5,6 +5,7 @@ import {
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
+  CtoAttentionId,
   EventId,
   IsoDateTime,
   MessageId,
@@ -183,9 +184,36 @@ export const OrchestrationProgramNotificationKind = Schema.Literals([
   "milestone_completed",
   "closeout_ready",
   "risk_escalated",
+  "founder_update_required",
+  "final_review_ready",
+  "program_completed",
+  "worker_started",
+  "worker_progress",
+  "worker_completed",
+  "routine_status",
+  "test_retry",
+  "implementation_progress",
   "status_update",
 ]);
 export type OrchestrationProgramNotificationKind = typeof OrchestrationProgramNotificationKind.Type;
+
+export const OrchestrationCtoAttentionKind = Schema.Literals([
+  "decision_required",
+  "blocked",
+  "risk_escalated",
+  "founder_update_required",
+  "final_review_ready",
+  "program_completed",
+]);
+export type OrchestrationCtoAttentionKind = typeof OrchestrationCtoAttentionKind.Type;
+
+export const OrchestrationCtoAttentionState = Schema.Literals([
+  "required",
+  "acknowledged",
+  "resolved",
+  "dropped",
+]);
+export type OrchestrationCtoAttentionState = typeof OrchestrationCtoAttentionState.Type;
 
 export const OrchestrationProgramNotificationSeverity = Schema.Literals([
   "info",
@@ -273,6 +301,29 @@ export const OrchestrationProgramNotification = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type OrchestrationProgramNotification = typeof OrchestrationProgramNotification.Type;
+
+export const OrchestrationCtoAttentionItem = Schema.Struct({
+  attentionId: CtoAttentionId,
+  attentionKey: TrimmedNonEmptyString,
+  notificationId: ProgramNotificationId,
+  programId: ProgramId,
+  executiveProjectId: ProjectId,
+  executiveThreadId: ThreadId,
+  sourceThreadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
+  sourceRole: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
+  kind: OrchestrationCtoAttentionKind,
+  severity: OrchestrationProgramNotificationSeverity,
+  summary: TrimmedNonEmptyString,
+  evidence: ProgramNotificationEvidence.pipe(Schema.withDecodingDefault(() => ({}))),
+  state: OrchestrationCtoAttentionState,
+  queuedAt: IsoDateTime,
+  acknowledgedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  resolvedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  droppedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(() => null)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationCtoAttentionItem = typeof OrchestrationCtoAttentionItem.Type;
 
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
@@ -582,6 +633,9 @@ export const OrchestrationReadModel = Schema.Struct({
     Schema.withDecodingDefault(() => []),
   ),
   programNotifications: Schema.optional(Schema.Array(OrchestrationProgramNotification)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  ctoAttentionItems: Schema.optional(Schema.Array(OrchestrationCtoAttentionItem)).pipe(
     Schema.withDecodingDefault(() => []),
   ),
   threads: Schema.Array(OrchestrationThread),

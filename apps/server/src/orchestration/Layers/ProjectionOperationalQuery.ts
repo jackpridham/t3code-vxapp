@@ -4,6 +4,7 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
+  OrchestrationCtoAttentionItem,
   OrchestrationReadModel,
   OrchestrationProjectKind,
   OrchestrationProgramStatus,
@@ -45,6 +46,7 @@ import {
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
+import { ProjectionCtoAttention } from "../../persistence/Services/ProjectionCtoAttention.ts";
 import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
 import { ProjectionProgram } from "../../persistence/Services/ProjectionPrograms.ts";
@@ -55,6 +57,7 @@ import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionTh
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
+import { selectOperationalCtoAttentionItems } from "../projectionCtoAttention.ts";
 import {
   ProjectionOperationalQuery,
   type ProjectionOperationalQueryShape,
@@ -88,6 +91,11 @@ const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.m
     evidence: Schema.fromJsonString(ProgramNotificationEvidence),
     consumeReason: Schema.NullOr(Schema.String),
     dropReason: Schema.NullOr(Schema.String),
+  }),
+);
+const ProjectionCtoAttentionDbRowSchema = ProjectionCtoAttention.mapFields(
+  Struct.assign({
+    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
   }),
 );
 
@@ -452,6 +460,36 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
         WHERE state IN ('pending', 'delivering', 'delivered')
         ORDER BY queued_at DESC, notification_id ASC
         LIMIT 100
+      `,
+  });
+
+  const listCtoAttentionRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionCtoAttentionDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          attention_id AS "attentionId",
+          attention_key AS "attentionKey",
+          notification_id AS "notificationId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId",
+          source_thread_id AS "sourceThreadId",
+          source_role AS "sourceRole",
+          kind,
+          severity,
+          summary,
+          evidence_json AS "evidence",
+          state,
+          queued_at AS "queuedAt",
+          acknowledged_at AS "acknowledgedAt",
+          resolved_at AS "resolvedAt",
+          dropped_at AS "droppedAt",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_cto_attention
+        ORDER BY updated_at DESC, attention_id ASC
       `,
   });
 
@@ -1500,6 +1538,14 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               ),
             ),
           );
+          const ctoAttentionRows = yield* listCtoAttentionRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionOperationalQuery.getCurrentState:listCtoAttention:query",
+                "ProjectionOperationalQuery.getCurrentState:listCtoAttention:decodeRows",
+              ),
+            ),
+          );
 
           const threadRows = yield* listCurrentThreadRows(undefined).pipe(
             Effect.mapError(
@@ -1536,6 +1582,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               ...projectRows.map((row) => row.updatedAt),
               ...programRows.map((row) => row.updatedAt),
               ...programNotificationRows.map((row) => row.updatedAt),
+              ...ctoAttentionRows.map((row) => row.updatedAt),
               ...stateRows.map((row) => row.updatedAt),
             ]
               .toSorted()
@@ -1576,6 +1623,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             }));
+          const ctoAttentionItems: ReadonlyArray<OrchestrationCtoAttentionItem> =
+            selectOperationalCtoAttentionItems(ctoAttentionRows);
 
           const readModel = {
             snapshotSequence: computeSnapshotSequence(stateRows),
@@ -1589,6 +1638,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             projects: projectRows.map(mapProjectRowToReadModelProject),
             programs,
             programNotifications,
+            ctoAttentionItems,
             threads: threadSummaries.map(mapSummaryToThread),
             orchestratorWakeItems: [],
             updatedAt,

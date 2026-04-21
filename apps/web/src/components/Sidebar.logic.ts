@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import type { Program, ProgramNotification, Project, Thread } from "../types";
+import type { CtoAttentionItem, Program, ProgramNotification, Project, Thread } from "../types";
 import { getDisplayThreadLabelEntries } from "../lib/threadLabels";
 import { cn } from "../lib/utils";
 import {
@@ -12,6 +12,7 @@ import {
   hasActionableProposedPlan,
   isLatestTurnSettled,
 } from "../session-logic";
+import { isCtoActionableProgramNotificationKind } from "@t3tools/shared/ctoAttention";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -26,10 +27,24 @@ type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
   messages?: ReadonlyArray<Pick<Thread["messages"][number], "createdAt" | "role">>;
 };
 
+type SidebarProgramItemGroup<TItem> = {
+  programId: ProgramNotification["programId"];
+  programTitle: string;
+  items: TItem[];
+  criticalCount: number;
+  warningCount: number;
+};
 export type SidebarProgramNotificationGroup = {
   programId: ProgramNotification["programId"];
   programTitle: string;
   notifications: ProgramNotification[];
+  criticalCount: number;
+  warningCount: number;
+};
+export type SidebarCtoAttentionGroup = {
+  programId: ProgramNotification["programId"];
+  programTitle: string;
+  attentionItems: CtoAttentionItem[];
   criticalCount: number;
   warningCount: number;
 };
@@ -70,7 +85,16 @@ const PROGRAM_NOTIFICATION_KIND_LABELS: Record<ProgramNotification["kind"], stri
   milestone_completed: "Milestone",
   closeout_ready: "Closeout",
   risk_escalated: "Risk",
-  status_update: "Status",
+  founder_update_required: "Founder update",
+  final_review_ready: "Final review",
+  program_completed: "Program completed",
+  worker_started: "Worker started",
+  worker_progress: "Worker progress",
+  worker_completed: "Worker completed",
+  routine_status: "Routine status",
+  test_retry: "Test retry",
+  implementation_progress: "Implementation progress",
+  status_update: "Status update",
 };
 
 type ThreadStatusInput = Pick<
@@ -203,53 +227,95 @@ export function getSidebarProgramNotificationKindLabel(kind: ProgramNotification
   return PROGRAM_NOTIFICATION_KIND_LABELS[kind];
 }
 
-export function buildSidebarProgramNotificationGroups(input: {
-  programs: readonly Program[];
-  notifications: readonly ProgramNotification[];
-}): SidebarProgramNotificationGroup[] {
-  const programById = new Map(input.programs.map((program) => [program.id, program] as const));
-  const activeNotifications = input.notifications
-    .filter(
-      (notification) => notification.state === "pending" || notification.state === "delivering",
-    )
-    .toSorted(
-      (left, right) =>
-        PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[right.severity] -
-          PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[left.severity] ||
-        right.queuedAt.localeCompare(left.queuedAt) ||
-        left.notificationId.localeCompare(right.notificationId),
-    );
-  const groupsByProgramId = new Map<ProgramNotification["programId"], ProgramNotification[]>();
+export function getSidebarCtoAttentionKindLabel(kind: CtoAttentionItem["kind"]): string {
+  return PROGRAM_NOTIFICATION_KIND_LABELS[kind];
+}
 
-  for (const notification of activeNotifications) {
-    const existing = groupsByProgramId.get(notification.programId);
+function buildSidebarProgramItemGroups<
+  TItem extends {
+    programId: ProgramNotification["programId"];
+    severity: ProgramNotification["severity"];
+    queuedAt: string;
+  },
+>(input: {
+  programs: readonly Program[];
+  items: readonly TItem[];
+  getSortKey: (item: TItem) => string;
+}): SidebarProgramItemGroup<TItem>[] {
+  const programById = new Map(input.programs.map((program) => [program.id, program] as const));
+  const groupsByProgramId = new Map<ProgramNotification["programId"], TItem[]>();
+
+  for (const item of input.items) {
+    const existing = groupsByProgramId.get(item.programId);
     if (existing) {
-      existing.push(notification);
+      existing.push(item);
     } else {
-      groupsByProgramId.set(notification.programId, [notification]);
+      groupsByProgramId.set(item.programId, [item]);
     }
   }
 
   return [...groupsByProgramId.entries()]
-    .map(([programId, notifications]) => {
+    .map(([programId, items]) => {
       const program = programById.get(programId);
       return {
         programId,
         programTitle: program?.title ?? `Program ${String(programId).slice(0, 8)}`,
-        notifications,
-        criticalCount: notifications.filter((notification) => notification.severity === "critical")
-          .length,
-        warningCount: notifications.filter((notification) => notification.severity === "warning")
-          .length,
+        items: items.toSorted(
+          (left, right) =>
+            PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[right.severity] -
+              PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[left.severity] ||
+            right.queuedAt.localeCompare(left.queuedAt) ||
+            input.getSortKey(left).localeCompare(input.getSortKey(right)),
+        ),
+        criticalCount: items.filter((item) => item.severity === "critical").length,
+        warningCount: items.filter((item) => item.severity === "warning").length,
       };
     })
     .toSorted(
       (left, right) =>
         right.criticalCount - left.criticalCount ||
         right.warningCount - left.warningCount ||
-        right.notifications.length - left.notifications.length ||
+        right.items.length - left.items.length ||
         left.programTitle.localeCompare(right.programTitle),
     );
+}
+
+export function buildSidebarProgramNotificationGroups(input: {
+  programs: readonly Program[];
+  notifications: readonly ProgramNotification[];
+}): SidebarProgramNotificationGroup[] {
+  return buildSidebarProgramItemGroups({
+    programs: input.programs,
+    items: input.notifications.filter(
+      (notification) =>
+        (notification.state === "pending" || notification.state === "delivering") &&
+        !isCtoActionableProgramNotificationKind(notification.kind),
+    ),
+    getSortKey: (notification) => String(notification.notificationId),
+  }).map((group) => ({
+    programId: group.programId,
+    programTitle: group.programTitle,
+    notifications: group.items,
+    criticalCount: group.criticalCount,
+    warningCount: group.warningCount,
+  }));
+}
+
+export function buildSidebarCtoAttentionGroups(input: {
+  programs: readonly Program[];
+  ctoAttentionItems: readonly CtoAttentionItem[];
+}): SidebarCtoAttentionGroup[] {
+  return buildSidebarProgramItemGroups({
+    programs: input.programs,
+    items: input.ctoAttentionItems.filter((attentionItem) => attentionItem.state === "required"),
+    getSortKey: (attentionItem) => String(attentionItem.attentionKey),
+  }).map((group) => ({
+    programId: group.programId,
+    programTitle: group.programTitle,
+    attentionItems: group.items,
+    criticalCount: group.criticalCount,
+    warningCount: group.warningCount,
+  }));
 }
 
 function toNormalizedCwdSegments(cwd: string): string[] {

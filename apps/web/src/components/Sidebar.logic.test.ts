@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildCopyThreadIdErrorDescription,
+  buildSidebarCtoAttentionGroups,
   buildSidebarProgramNotificationGroups,
   createThreadJumpHintVisibilityController,
   filterThreadsByLabels,
@@ -18,6 +19,7 @@ import {
   partitionProjectsForSidebar,
   resolveProjectStatusIndicator,
   getSidebarThreadLabels,
+  getSidebarCtoAttentionKindLabel,
   getSidebarProgramNotificationKindLabel,
   getUniqueLabelsFromThreads,
   resolveSidebarProjectKind,
@@ -34,6 +36,7 @@ import {
 } from "./Sidebar.logic";
 import {
   OrchestrationLatestTurn,
+  CtoAttentionId,
   ProgramId,
   ProgramNotificationId,
   ProjectId,
@@ -42,6 +45,7 @@ import {
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  type CtoAttentionItem,
   type Program,
   type ProgramNotification,
   type Project,
@@ -206,7 +210,7 @@ describe("buildCopyThreadIdErrorDescription", () => {
 });
 
 describe("buildSidebarProgramNotificationGroups", () => {
-  it("groups active notifications by program and orders urgent work first", () => {
+  it("groups passive notifications by program, skips actionable attention, and orders urgent work first", () => {
     const programAlphaId = ProgramId.makeUnsafe("program-alpha");
     const programBetaId = ProgramId.makeUnsafe("program-beta");
     const groups = buildSidebarProgramNotificationGroups({
@@ -226,10 +230,18 @@ describe("buildSidebarProgramNotificationGroups", () => {
         makeProgramNotification({
           notificationId: ProgramNotificationId.makeUnsafe("notification-critical"),
           programId: programBetaId,
-          kind: "blocked",
-          severity: "critical",
-          summary: "Beta is blocked",
+          kind: "worker_progress",
+          severity: "warning",
+          summary: "Beta progress update",
           queuedAt: "2026-04-20T00:00:00.000Z",
+        }),
+        makeProgramNotification({
+          notificationId: ProgramNotificationId.makeUnsafe("notification-actionable"),
+          programId: programAlphaId,
+          kind: "decision_required",
+          severity: "warning",
+          summary: "Alpha requires a decision",
+          queuedAt: "2026-04-20T00:02:00.000Z",
         }),
         makeProgramNotification({
           notificationId: ProgramNotificationId.makeUnsafe("notification-consumed"),
@@ -242,19 +254,64 @@ describe("buildSidebarProgramNotificationGroups", () => {
 
     expect(groups).toHaveLength(2);
     expect(groups[0]?.programTitle).toBe("Beta cleanup");
-    expect(groups[0]?.criticalCount).toBe(1);
+    expect(groups[0]?.warningCount).toBe(1);
     expect(groups[0]?.notifications.map((notification) => notification.summary)).toEqual([
-      "Beta is blocked",
+      "Beta progress update",
     ]);
     expect(groups[1]?.programTitle).toBe("Alpha launch");
     expect(groups[1]?.notifications.map((notification) => notification.summary)).toEqual([
       "Alpha status update",
     ]);
+    expect(
+      groups.flatMap((group) => group.notifications.map((notification) => notification.kind)),
+    ).toEqual(["worker_progress", "status_update"]);
   });
 
   it("renders human labels for notification kinds", () => {
     expect(getSidebarProgramNotificationKindLabel("decision_required")).toBe("Decision");
     expect(getSidebarProgramNotificationKindLabel("risk_escalated")).toBe("Risk");
+    expect(getSidebarProgramNotificationKindLabel("worker_completed")).toBe("Worker completed");
+    expect(getSidebarCtoAttentionKindLabel("final_review_ready")).toBe("Final review");
+  });
+});
+
+describe("buildSidebarCtoAttentionGroups", () => {
+  it("groups required CTO attention by program and skips non-required states", () => {
+    const programAlphaId = ProgramId.makeUnsafe("program-alpha");
+    const programBetaId = ProgramId.makeUnsafe("program-beta");
+    const groups = buildSidebarCtoAttentionGroups({
+      programs: [
+        makeProgram({ id: programAlphaId, title: "Alpha launch" }),
+        makeProgram({ id: programBetaId, title: "Beta cleanup" }),
+      ],
+      ctoAttentionItems: [
+        makeCtoAttentionItem({
+          attentionId: "attention-alpha-1" as never,
+          programId: programAlphaId,
+          summary: "Alpha needs a decision",
+          queuedAt: "2026-04-20T00:02:00.000Z",
+        }),
+        makeCtoAttentionItem({
+          attentionId: "attention-alpha-2" as never,
+          programId: programAlphaId,
+          state: "acknowledged",
+          summary: "Already acknowledged",
+        }),
+        makeCtoAttentionItem({
+          attentionId: "attention-beta-1" as never,
+          programId: programBetaId,
+          summary: "Beta is blocked",
+          queuedAt: "2026-04-20T00:01:00.000Z",
+        }),
+      ],
+    });
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.programTitle).toBe("Alpha launch");
+    expect(groups[0]?.attentionItems).toHaveLength(1);
+    expect(groups[0]?.attentionItems[0]?.state).toBe("required");
+    expect(groups[1]?.programTitle).toBe("Beta cleanup");
+    expect(groups[1]?.attentionItems[0]?.summary).toBe("Beta is blocked");
   });
 });
 
@@ -295,6 +352,32 @@ function makeProgramNotification(
     droppedAt: null,
     consumeReason: undefined,
     dropReason: undefined,
+    createdAt: "2026-04-20T00:00:00.000Z",
+    updatedAt: "2026-04-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeCtoAttentionItem(overrides: Partial<CtoAttentionItem> = {}): CtoAttentionItem {
+  return {
+    attentionId: CtoAttentionId.makeUnsafe("attention-1"),
+    attentionKey:
+      "program:program-1|kind:blocked|source-thread:thread-worker|source-role:worker|correlation:notif-1",
+    notificationId: ProgramNotificationId.makeUnsafe("notification-1"),
+    programId: ProgramId.makeUnsafe("program-1"),
+    executiveProjectId: ProjectId.makeUnsafe("executive-project-1"),
+    executiveThreadId: ThreadId.makeUnsafe("executive-thread-1"),
+    sourceThreadId: ThreadId.makeUnsafe("thread-worker"),
+    sourceRole: "worker",
+    kind: "blocked",
+    severity: "critical",
+    summary: "Blocked",
+    evidence: {},
+    state: "required",
+    queuedAt: "2026-04-20T00:00:00.000Z",
+    acknowledgedAt: null,
+    resolvedAt: null,
+    droppedAt: null,
     createdAt: "2026-04-20T00:00:00.000Z",
     updatedAt: "2026-04-20T00:00:00.000Z",
     ...overrides,

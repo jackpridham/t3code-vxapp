@@ -1,5 +1,14 @@
 import { assert, it } from "@effect/vitest";
-import { CheckpointRef, NonNegativeInt, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  CheckpointRef,
+  CtoAttentionId,
+  NonNegativeInt,
+  ProgramId,
+  ProgramNotificationId,
+  ProjectId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -11,6 +20,8 @@ import { ProjectionOperationalQuery } from "../Services/ProjectionOperationalQue
 const projectionOperationalQueryLayer = it.layer(
   OrchestrationProjectionOperationalQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
 );
+
+const asCtoAttentionId = (value: string): CtoAttentionId => CtoAttentionId.makeUnsafe(value);
 
 projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
   it.effect("lists project summaries and resolves readiness counts", () =>
@@ -864,6 +875,7 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
       yield* sql`DELETE FROM projection_orchestrator_wakes`;
       yield* sql`DELETE FROM projection_thread_activities`;
       yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_cto_attention`;
       yield* sql`DELETE FROM projection_thread_sessions`;
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_threads`;
@@ -1048,6 +1060,109 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
           ('wake-2', 'thread-current', 'project-current', 'worker-2', 'project-worker', 'turn-worker-2', 'wf-current', 'Worker Two', 'failed', 'second wake', '2026-04-06T00:00:14.000Z', 'pending', NULL, NULL, NULL, NULL)
       `;
 
+      yield* sql`
+        INSERT INTO projection_cto_attention (
+          attention_id,
+          attention_key,
+          notification_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id,
+          source_thread_id,
+          source_role,
+          kind,
+          severity,
+          summary,
+          evidence_json,
+          state,
+          queued_at,
+          acknowledged_at,
+          resolved_at,
+          dropped_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'program:program-current|kind:decision_required|source-thread:thread-source|source-role:worker|correlation:notif-required',
+          'program:program-current|kind:decision_required|source-thread:thread-source|source-role:worker|correlation:notif-required',
+          'notif-required',
+          'program-current',
+          'project-current',
+          'thread-current',
+          'thread-source',
+          'worker',
+          'decision_required',
+          'warning',
+          'Required decision',
+          '{"workerThreadId":"thread-source"}',
+          'required',
+          '2026-04-06T00:00:00.500Z',
+          NULL,
+          NULL,
+          NULL,
+          '2026-04-06T00:00:00.500Z',
+          '2026-04-06T00:00:00.500Z'
+        )
+      `;
+
+      for (let index = 1; index <= 26; index += 1) {
+        const updatedAt = new Date(
+          Date.parse("2026-04-06T00:00:01.000Z") + index * 1_000,
+        ).toISOString();
+        const notificationId = `notif-terminal-${index}`;
+        const kind =
+          index % 3 === 1
+            ? "final_review_ready"
+            : index % 3 === 2
+              ? "blocked"
+              : "program_completed";
+        const state = index % 3 === 1 ? "acknowledged" : index % 3 === 2 ? "resolved" : "dropped";
+        yield* sql`
+          INSERT INTO projection_cto_attention (
+            attention_id,
+            attention_key,
+            notification_id,
+            program_id,
+            executive_project_id,
+            executive_thread_id,
+            source_thread_id,
+            source_role,
+            kind,
+            severity,
+            summary,
+            evidence_json,
+            state,
+            queued_at,
+            acknowledged_at,
+            resolved_at,
+            dropped_at,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${`program:program-current|kind:${kind}|source-thread:thread-source|source-role:worker|correlation:${notificationId}`},
+            ${`program:program-current|kind:${kind}|source-thread:thread-source|source-role:worker|correlation:${notificationId}`},
+            ${notificationId},
+            'program-current',
+            'project-current',
+            'thread-current',
+            'thread-source',
+            'worker',
+            ${kind},
+            'warning',
+            ${`Terminal attention ${index}`},
+            '{"workerThreadId":"thread-source"}',
+            ${state},
+            ${updatedAt},
+            ${state === "acknowledged" ? updatedAt : null},
+            ${state === "resolved" ? updatedAt : null},
+            ${state === "dropped" ? updatedAt : null},
+            ${updatedAt},
+            ${updatedAt}
+          )
+        `;
+      }
+
       const currentState = yield* query.getCurrentState();
       assert.equal(currentState.snapshotProfile, "bootstrap-summary");
       assert.equal(
@@ -1060,6 +1175,21 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
       assert.equal(currentState.threads[0]?.session?.status, "running");
       assert.equal(currentState.threads[0]?.latestTurn?.state, "running");
       assert.equal(currentState.orchestratorWakeItems.length, 0);
+      const ctoAttentionItems = currentState.ctoAttentionItems ?? [];
+      assert.equal(ctoAttentionItems.length, 26);
+      assert.equal(ctoAttentionItems[0]?.state, "required");
+      assert.equal(
+        ctoAttentionItems.some(
+          (item) => item.notificationId === ProgramNotificationId.makeUnsafe("notif-terminal-1"),
+        ),
+        false,
+      );
+      assert.equal(
+        ctoAttentionItems.some(
+          (item) => item.notificationId === ProgramNotificationId.makeUnsafe("notif-terminal-26"),
+        ),
+        true,
+      );
 
       const messages = yield* query.listThreadMessages({
         threadId: ThreadId.makeUnsafe("thread-current"),

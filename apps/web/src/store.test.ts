@@ -1,5 +1,6 @@
 import {
   CheckpointRef,
+  CtoAttentionId,
   DEFAULT_MODEL_BY_PROVIDER,
   EventId,
   MessageId,
@@ -24,7 +25,12 @@ import {
   syncServerReadModel,
   type AppState,
 } from "./store";
-import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
+import {
+  DEFAULT_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
+  type CtoAttentionItem,
+  type Thread,
+} from "./types";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
@@ -74,6 +80,7 @@ function makeState(thread: Thread): AppState {
         hooks: [],
       },
     ],
+    ctoAttentionItems: [],
     threads: [thread],
     orchestratorWakeItems: [],
     bootstrapComplete: true,
@@ -160,6 +167,7 @@ function makeReadModel(
     ],
     threads: [thread],
     orchestratorWakeItems: [],
+    ctoAttentionItems: [],
     ...overrides,
   };
 }
@@ -180,6 +188,32 @@ function makeReadModelProject(
     deletedAt: null,
     scripts: [],
     hooks: [],
+    ...overrides,
+  };
+}
+
+function makeCtoAttentionItem(overrides: Partial<CtoAttentionItem> = {}): CtoAttentionItem {
+  return {
+    attentionId: CtoAttentionId.makeUnsafe("attention-1"),
+    attentionKey:
+      "program:program-cto|kind:blocked|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
+    notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+    programId: ProgramId.makeUnsafe("program-cto"),
+    executiveProjectId: ProjectId.makeUnsafe("project-1"),
+    executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+    sourceThreadId: ThreadId.makeUnsafe("thread-worker"),
+    sourceRole: "worker",
+    kind: "blocked",
+    severity: "critical",
+    summary: "The task is blocked.",
+    evidence: { workerThreadId: "thread-worker" },
+    state: "required",
+    queuedAt: "2026-04-20T00:01:00.000Z",
+    acknowledgedAt: null,
+    resolvedAt: null,
+    droppedAt: null,
+    createdAt: "2026-04-20T00:01:00.000Z",
+    updatedAt: "2026-04-20T00:01:00.000Z",
     ...overrides,
   };
 }
@@ -986,6 +1020,96 @@ describe("lineage metadata mapping", () => {
     ]);
   });
 
+  it("syncServerReadModel hydrates cto attention items", () => {
+    const next = syncServerReadModel(
+      { ...makeState(makeThread()), programs: [], ctoAttentionItems: [] },
+      makeReadModel(makeReadModelThread({}), {
+        programs: [
+          {
+            id: ProgramId.makeUnsafe("program-cto"),
+            title: "CTO task",
+            objective: null,
+            status: "active",
+            executiveProjectId: ProjectId.makeUnsafe("project-1"),
+            executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+            currentOrchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+            createdAt: "2026-04-20T00:00:00.000Z",
+            updatedAt: "2026-04-20T00:00:00.000Z",
+            completedAt: null,
+            deletedAt: null,
+          },
+        ],
+        ctoAttentionItems: [
+          makeCtoAttentionItem({
+            attentionId: CtoAttentionId.makeUnsafe("attention-cto"),
+            attentionKey:
+              "program:program-cto|kind:blocked|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
+            summary: "Choose the deployment lane.",
+            updatedAt: "2026-04-20T00:01:00.000Z",
+          }),
+        ],
+      }),
+    );
+
+    expect(next.ctoAttentionItems).toEqual([
+      expect.objectContaining({
+        attentionId: "attention-cto",
+        attentionKey:
+          "program:program-cto|kind:blocked|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
+        notificationId: "notif-cto",
+        programId: "program-cto",
+        kind: "blocked",
+        severity: "critical",
+        state: "required",
+        summary: "Choose the deployment lane.",
+      }),
+    ]);
+  });
+
+  it("merges partial CTO attention snapshots by attentionId", () => {
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      ctoAttentionItems: [
+        makeCtoAttentionItem({
+          attentionId: CtoAttentionId.makeUnsafe("attention-cto-1"),
+          summary: "Old summary",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+        }),
+        makeCtoAttentionItem({
+          attentionId: CtoAttentionId.makeUnsafe("attention-cto-2"),
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto-2"),
+          summary: "Keep me",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+        }),
+      ],
+    };
+
+    const next = syncServerReadModel(
+      initialState,
+      makeReadModel(makeReadModelThread({}), {
+        snapshotProfile: "active-thread",
+        ctoAttentionItems: [
+          makeCtoAttentionItem({
+            attentionId: CtoAttentionId.makeUnsafe("attention-cto-1"),
+            summary: "Fresh summary",
+            updatedAt: "2026-04-20T00:02:00.000Z",
+          }),
+        ],
+      }),
+    );
+
+    expect(next.ctoAttentionItems).toEqual([
+      expect.objectContaining({
+        attentionId: "attention-cto-1",
+        summary: "Fresh summary",
+      }),
+      expect.objectContaining({
+        attentionId: "attention-cto-2",
+        summary: "Keep me",
+      }),
+    ]);
+  });
+
   it("applies program notification lifecycle events", () => {
     const state: AppState = { ...makeState(makeThread()), programNotifications: [] };
     const upserted = applyOrchestrationEvent(
@@ -1045,6 +1169,193 @@ describe("lineage metadata mapping", () => {
       state: "consumed",
       consumedAt: "2026-04-20T00:02:00.000Z",
       consumeReason: "reviewed",
+    });
+  });
+
+  it("projects actionable notification upserts into CTO attention and dedupes by key", () => {
+    const state: AppState = {
+      ...makeState(makeThread()),
+      programNotifications: [],
+      ctoAttentionItems: [],
+    };
+    const first = applyOrchestrationEvent(
+      state,
+      makeEvent(
+        "program.notification-upserted",
+        {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+          programId: ProgramId.makeUnsafe("program-cto"),
+          executiveProjectId: ProjectId.makeUnsafe("project-1"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+          kind: "blocked",
+          severity: "critical",
+          summary: "The task is blocked.",
+          evidence: { workerThreadId: "thread-worker" },
+          state: "pending",
+          queuedAt: "2026-04-20T00:01:00.000Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: "2026-04-20T00:01:00.000Z",
+          updatedAt: "2026-04-20T00:01:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+    const second = applyOrchestrationEvent(
+      first,
+      makeEvent(
+        "program.notification-upserted",
+        {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+          programId: ProgramId.makeUnsafe("program-cto"),
+          executiveProjectId: ProjectId.makeUnsafe("project-1"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+          kind: "blocked",
+          severity: "critical",
+          summary: "The task is still blocked.",
+          evidence: { workerThreadId: "thread-worker" },
+          state: "pending",
+          queuedAt: "2026-04-20T00:01:00.000Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: "2026-04-20T00:01:00.000Z",
+          updatedAt: "2026-04-20T00:03:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+
+    expect(second.programNotifications).toHaveLength(1);
+    expect(second.ctoAttentionItems).toHaveLength(1);
+    expect(second.ctoAttentionItems?.[0]).toMatchObject({
+      notificationId: "notif-cto",
+      attentionKey:
+        "program:program-cto|kind:blocked|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
+      summary: "The task is still blocked.",
+      state: "required",
+    });
+  });
+
+  it("keeps passive program notifications out of CTO attention", () => {
+    const next = applyOrchestrationEvent(
+      { ...makeState(makeThread()), programNotifications: [], ctoAttentionItems: [] },
+      makeEvent(
+        "program.notification-upserted",
+        {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-passive"),
+          programId: ProgramId.makeUnsafe("program-cto"),
+          executiveProjectId: ProjectId.makeUnsafe("project-1"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+          kind: "worker_progress",
+          severity: "info",
+          summary: "Worker progress update.",
+          evidence: {},
+          state: "pending",
+          queuedAt: "2026-04-20T00:01:00.000Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: "2026-04-20T00:01:00.000Z",
+          updatedAt: "2026-04-20T00:01:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+
+    expect(next.programNotifications).toHaveLength(1);
+    expect(next.ctoAttentionItems).toEqual([]);
+  });
+
+  it("updates CTO attention state when actionable notifications are consumed or dropped", () => {
+    const upserted = applyOrchestrationEvent(
+      { ...makeState(makeThread()), programNotifications: [], ctoAttentionItems: [] },
+      makeEvent(
+        "program.notification-upserted",
+        {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+          programId: ProgramId.makeUnsafe("program-cto"),
+          executiveProjectId: ProjectId.makeUnsafe("project-1"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-1"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-1"),
+          kind: "blocked",
+          severity: "critical",
+          summary: "The task is blocked.",
+          evidence: {},
+          state: "pending",
+          queuedAt: "2026-04-20T00:01:00.000Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: "2026-04-20T00:01:00.000Z",
+          updatedAt: "2026-04-20T00:01:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+
+    const consumed = applyOrchestrationEvent(
+      upserted,
+      makeEvent(
+        "program.notification-consumed",
+        {
+          programId: ProgramId.makeUnsafe("program-cto"),
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+          consumedAt: "2026-04-20T00:02:00.000Z",
+          consumeReason: "reviewed",
+          updatedAt: "2026-04-20T00:02:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+
+    expect(consumed.ctoAttentionItems?.[0]).toMatchObject({
+      notificationId: "notif-cto",
+      state: "acknowledged",
+      acknowledgedAt: "2026-04-20T00:02:00.000Z",
+    });
+
+    const dropped = applyOrchestrationEvent(
+      consumed,
+      makeEvent(
+        "program.notification-dropped",
+        {
+          programId: ProgramId.makeUnsafe("program-cto"),
+          notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+          droppedAt: "2026-04-20T00:03:00.000Z",
+          dropReason: "superseded",
+          updatedAt: "2026-04-20T00:03:00.000Z",
+        },
+        {
+          aggregateKind: "program",
+          aggregateId: ProgramId.makeUnsafe("program-cto"),
+        },
+      ),
+    );
+
+    expect(dropped.ctoAttentionItems?.[0]).toMatchObject({
+      notificationId: "notif-cto",
+      state: "dropped",
+      droppedAt: "2026-04-20T00:03:00.000Z",
     });
   });
 

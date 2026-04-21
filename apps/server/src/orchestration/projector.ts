@@ -42,6 +42,13 @@ import {
   ThreadTurnDiffCompletedPayload,
   ThreadOrchestratorWakeUpsertedPayload,
 } from "./Schemas.ts";
+import {
+  acknowledgeCtoAttentionItem,
+  dropCtoAttentionItem,
+  projectCtoAttentionFromProgramNotification,
+  upsertCtoAttentionItemByKey,
+  updateCtoAttentionItemByNotificationId,
+} from "./projectionCtoAttention.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 type ProgramPatch = Partial<Omit<OrchestrationProgram, "id">>;
@@ -205,6 +212,7 @@ export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
     projects: [],
     programs: [],
     programNotifications: [],
+    ctoAttentionItems: [],
     threads: [],
     orchestratorWakeItems: [],
     updatedAt: nowIso,
@@ -377,6 +385,12 @@ export function projectEvent(
         const existing = notifications.find(
           (entry) => entry.notificationId === notification.notificationId,
         );
+        const nextCtoAttention =
+          projectCtoAttentionFromProgramNotification({
+            ...notification,
+            commandId: event.commandId,
+            correlationId: event.correlationId,
+          }) ?? null;
         return {
           ...nextBase,
           programNotifications: existing
@@ -384,6 +398,10 @@ export function projectEvent(
                 entry.notificationId === notification.notificationId ? notification : entry,
               )
             : [...notifications, notification],
+          ctoAttentionItems:
+            nextCtoAttention === null
+              ? (nextBase.ctoAttentionItems ?? [])
+              : upsertCtoAttentionItemByKey(nextBase.ctoAttentionItems ?? [], nextCtoAttention),
         };
       });
 
@@ -408,6 +426,11 @@ export function projectEvent(
               updatedAt: payload.updatedAt,
             },
           ),
+          ctoAttentionItems: updateCtoAttentionItemByNotificationId(
+            nextBase.ctoAttentionItems ?? [],
+            payload.notificationId,
+            (item) => acknowledgeCtoAttentionItem(item, payload.consumedAt, payload.updatedAt),
+          ),
         })),
       );
 
@@ -429,6 +452,11 @@ export function projectEvent(
               ...(payload.dropReason !== undefined ? { dropReason: payload.dropReason } : {}),
               updatedAt: payload.updatedAt,
             },
+          ),
+          ctoAttentionItems: updateCtoAttentionItemByNotificationId(
+            nextBase.ctoAttentionItems ?? [],
+            payload.notificationId,
+            (item) => dropCtoAttentionItem(item, payload.droppedAt, payload.updatedAt),
           ),
         })),
       );

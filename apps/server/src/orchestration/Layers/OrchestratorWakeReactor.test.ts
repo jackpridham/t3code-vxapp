@@ -9,6 +9,8 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
+  ProgramId,
+  ProgramNotificationId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -200,6 +202,7 @@ async function createWorkerThread(
   input?: {
     readonly threadId?: ThreadId;
     readonly projectId?: ProjectId;
+    readonly programId?: ProgramId | undefined;
     readonly orchestratorProjectId?: ProjectId | undefined;
     readonly orchestratorThreadId?: ThreadId | undefined;
     readonly parentThreadId?: ThreadId | null;
@@ -230,6 +233,7 @@ async function createWorkerThread(
       ...(input?.orchestratorThreadId !== undefined
         ? { orchestratorThreadId: input.orchestratorThreadId }
         : { orchestratorThreadId: asThreadId("thread-orch") }),
+      ...(input?.programId !== undefined ? { programId: input.programId } : {}),
       ...(input?.workflowId !== null ? { workflowId: input?.workflowId ?? "wf-thread-orch" } : {}),
       ...(input?.parentThreadId !== null
         ? { parentThreadId: input?.parentThreadId ?? asThreadId("thread-orch") }
@@ -325,6 +329,104 @@ describe("OrchestratorWakeReactor", () => {
       state: "pending",
       outcome: "completed",
     });
+  });
+
+  it("keeps CTO attention empty for a Jasper-linked worker wake until a separate program notification is emitted", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    const programId = ProgramId.makeUnsafe("program-jasper-linked");
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "program.create",
+        commandId: CommandId.makeUnsafe("cmd-program-jasper-linked"),
+        programId,
+        title: "Jasper linked program",
+        objective: "Keep wake handling separate from CTO attention.",
+        executiveProjectId: asProjectId("project-orch"),
+        executiveThreadId: asThreadId("thread-orch"),
+        currentOrchestratorThreadId: asThreadId("thread-orch"),
+        createdAt: "2026-04-05T11:58:00.000Z",
+      }),
+    );
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "running",
+      activeTurnId: asTurnId("turn-orch-active"),
+      updatedAt: "2026-04-05T11:59:00.000Z",
+    });
+    await createWorkerThread(harness.engine, {
+      programId,
+      orchestratorProjectId: asProjectId("project-orch"),
+      orchestratorThreadId: asThreadId("thread-orch"),
+    });
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-complete-jasper-linked"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:00:00.000Z",
+      threadId: asThreadId("thread-worker"),
+      turnId: asTurnId("turn-jasper-linked"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const wakeReadModel = await waitForReadModel(
+      harness.engine,
+      (model) =>
+        model.orchestratorWakeItems.some(
+          (item) => item.workerTurnId === asTurnId("turn-jasper-linked"),
+        ) && (model.ctoAttentionItems?.length ?? 0) === 0,
+    );
+    const wakeItem = wakeReadModel.orchestratorWakeItems.find(
+      (item) => item.workerTurnId === asTurnId("turn-jasper-linked"),
+    );
+
+    expect(wakeItem).toMatchObject({
+      orchestratorThreadId: asThreadId("thread-orch"),
+      workerThreadId: asThreadId("thread-worker"),
+      state: "pending",
+      outcome: "completed",
+    });
+    expect(wakeReadModel.ctoAttentionItems ?? []).toHaveLength(0);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "program.notification.upsert",
+        commandId: CommandId.makeUnsafe("cmd-jasper-linked-notification"),
+        notificationId: ProgramNotificationId.makeUnsafe("notif-jasper-linked"),
+        programId,
+        kind: "final_review_ready",
+        summary: "Jasper review is ready.",
+        evidence: {
+          workerThreadId: "thread-worker",
+        },
+        createdAt: "2026-04-05T12:00:10.000Z",
+      }),
+    );
+
+    const notificationReadModel = await waitForReadModel(
+      harness.engine,
+      (model) => (model.ctoAttentionItems?.length ?? 0) === 1,
+    );
+    expect(notificationReadModel.orchestratorWakeItems).toContainEqual(
+      expect.objectContaining({
+        wakeId: "wake:thread-worker:turn-jasper-linked:completed",
+        orchestratorThreadId: asThreadId("thread-orch"),
+      }),
+    );
+    expect(notificationReadModel.ctoAttentionItems).toEqual([
+      expect.objectContaining({
+        notificationId: ProgramNotificationId.makeUnsafe("notif-jasper-linked"),
+        programId,
+        kind: "final_review_ready",
+        state: "required",
+      }),
+    ]);
   });
 
   it("creates a pending interrupted wake from a turn diff when runtime completion was missed", async () => {

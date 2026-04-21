@@ -16,6 +16,7 @@ import {
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
   OrchestrationListProjectThreadsResult,
+  OrchestrationCtoAttentionItem,
   OrchestrationReadModel,
   OrchestrationProgram,
   OrchestrationProgramNotification,
@@ -71,6 +72,9 @@ const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread
 const decodeOrchestrationProgram = Schema.decodeUnknownEffect(OrchestrationProgram);
 const decodeOrchestrationProgramNotification = Schema.decodeUnknownEffect(
   OrchestrationProgramNotification,
+);
+const decodeOrchestrationCtoAttentionItem = Schema.decodeUnknownEffect(
+  OrchestrationCtoAttentionItem,
 );
 const decodeOrchestrationReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeOrchestratorWakeItem = Schema.decodeUnknownEffect(OrchestratorWakeItem);
@@ -1141,6 +1145,46 @@ it.effect("decodes executive program contracts and read-model defaults", () =>
     assert.strictEqual(notification.kind, "decision_required");
     assert.deepStrictEqual(notification.evidence, { workerThreadId: "thread-worker" });
 
+    const finalReviewNotification = yield* decodeOrchestrationProgramNotification({
+      notificationId: "notif-final-review",
+      programId: "program-cto",
+      executiveProjectId: "project-cto",
+      executiveThreadId: "thread-cto",
+      orchestratorThreadId: null,
+      kind: "final_review_ready",
+      severity: "info",
+      summary: "The review is ready.",
+      evidence: {},
+      state: "pending",
+      queuedAt: "2026-04-20T00:02:00.000Z",
+      deliveredAt: null,
+      consumedAt: null,
+      droppedAt: null,
+      createdAt: "2026-04-20T00:02:00.000Z",
+      updatedAt: "2026-04-20T00:02:00.000Z",
+    });
+    assert.strictEqual(finalReviewNotification.kind, "final_review_ready");
+
+    const closeoutReadyNotification = yield* decodeOrchestrationProgramNotification({
+      notificationId: "notif-closeout",
+      programId: "program-cto",
+      executiveProjectId: "project-cto",
+      executiveThreadId: "thread-cto",
+      orchestratorThreadId: null,
+      kind: "closeout_ready",
+      severity: "warning",
+      summary: "Legacy closeout notification.",
+      evidence: {},
+      state: "pending",
+      queuedAt: "2026-04-20T00:03:00.000Z",
+      deliveredAt: null,
+      consumedAt: null,
+      droppedAt: null,
+      createdAt: "2026-04-20T00:03:00.000Z",
+      updatedAt: "2026-04-20T00:03:00.000Z",
+    });
+    assert.strictEqual(closeoutReadyNotification.kind, "closeout_ready");
+
     const notificationCommand = yield* decodeOrchestrationCommand({
       type: "program.notification.upsert",
       commandId: "cmd-notif",
@@ -1159,6 +1203,31 @@ it.effect("decodes executive program contracts and read-model defaults", () =>
       evidence: {},
     });
     assert.strictEqual(notificationPayload.notificationId, "notif-cto");
+
+    const ctoAttentionItem = yield* decodeOrchestrationCtoAttentionItem({
+      attentionId: "attention-cto",
+      attentionKey:
+        "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-final-review",
+      notificationId: "notif-final-review",
+      programId: "program-cto",
+      executiveProjectId: "project-cto",
+      executiveThreadId: "thread-cto",
+      sourceThreadId: "thread-worker",
+      sourceRole: "worker",
+      kind: "final_review_ready",
+      severity: "info",
+      summary: "The review is ready.",
+      evidence: { correlationId: "notif-final-review" },
+      state: "required",
+      queuedAt: "2026-04-20T00:02:00.000Z",
+      acknowledgedAt: null,
+      resolvedAt: null,
+      droppedAt: null,
+      createdAt: "2026-04-20T00:02:00.000Z",
+      updatedAt: "2026-04-20T00:02:00.000Z",
+    });
+    assert.strictEqual(ctoAttentionItem.state, "required");
+    assert.strictEqual(ctoAttentionItem.kind, "final_review_ready");
 
     const notificationEvent = yield* decodeOrchestrationEvent({
       sequence: 1,
@@ -1185,6 +1254,7 @@ it.effect("decodes executive program contracts and read-model defaults", () =>
     });
     assert.deepStrictEqual(legacyReadModel.programs, []);
     assert.deepStrictEqual(legacyReadModel.programNotifications, []);
+    assert.deepStrictEqual(legacyReadModel.ctoAttentionItems, []);
   }),
 );
 

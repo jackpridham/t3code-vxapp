@@ -2,6 +2,7 @@ import {
   CommandId,
   EventId,
   ProgramId,
+  ProgramNotificationId,
   ProjectId,
   ThreadId,
   type OrchestrationEvent,
@@ -183,7 +184,7 @@ describe("orchestration projector", () => {
           occurredAt: now,
           commandId: "cmd-notify",
           payload: {
-            notificationId: "notif-1",
+            notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
             programId: "program-1",
             executiveProjectId: "project-cto",
             executiveThreadId: "thread-cto",
@@ -206,7 +207,7 @@ describe("orchestration projector", () => {
 
     expect(created.programNotifications).toEqual([
       {
-        notificationId: "notif-1",
+        notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
         programId: "program-1",
         executiveProjectId: "project-cto",
         executiveThreadId: "thread-cto",
@@ -237,7 +238,7 @@ describe("orchestration projector", () => {
           commandId: "cmd-notify-consume",
           payload: {
             programId: "program-1",
-            notificationId: "notif-1",
+            notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
             consumedAt: later,
             consumeReason: "reviewed",
             updatedAt: later,
@@ -247,12 +248,141 @@ describe("orchestration projector", () => {
     );
 
     expect((consumed.programNotifications ?? [])[0]).toMatchObject({
-      notificationId: "notif-1",
+      notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
       state: "consumed",
       consumedAt: later,
       consumeReason: "reviewed",
       updatedAt: later,
     });
+  });
+
+  it("projects actionable CTO attention and ignores passive notification kinds", async () => {
+    const now = new Date().toISOString();
+    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const actionable = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "program.notification-upserted",
+          aggregateKind: "program",
+          aggregateId: "program-cto",
+          occurredAt: now,
+          commandId: "cmd-attention-upsert",
+          payload: {
+            notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
+            programId: "program-cto",
+            executiveProjectId: "project-cto",
+            executiveThreadId: "thread-cto",
+            orchestratorThreadId: "thread-jasper",
+            kind: "final_review_ready",
+            severity: "info",
+            summary: "The review is ready.",
+            evidence: { workerThreadId: "thread-worker" },
+            state: "pending",
+            queuedAt: now,
+            deliveredAt: null,
+            consumedAt: null,
+            droppedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    expect(actionable.ctoAttentionItems).toEqual([
+      {
+        attentionId:
+          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-attention",
+        attentionKey:
+          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-attention",
+        notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
+        programId: "program-cto",
+        executiveProjectId: "project-cto",
+        executiveThreadId: "thread-cto",
+        sourceThreadId: "thread-worker",
+        sourceRole: "worker",
+        kind: "final_review_ready",
+        severity: "info",
+        summary: "The review is ready.",
+        evidence: { workerThreadId: "thread-worker" },
+        state: "required",
+        queuedAt: now,
+        acknowledgedAt: null,
+        resolvedAt: null,
+        droppedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    const consumed = await Effect.runPromise(
+      projectEvent(
+        actionable,
+        makeEvent({
+          sequence: 2,
+          type: "program.notification-consumed",
+          aggregateKind: "program",
+          aggregateId: "program-cto",
+          occurredAt: later,
+          commandId: "cmd-attention-consume",
+          payload: {
+            programId: "program-cto",
+            notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
+            consumedAt: later,
+            consumeReason: "reviewed",
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    const consumedAttentionItems = consumed.ctoAttentionItems ?? [];
+    expect(consumedAttentionItems[0]).toMatchObject({
+      notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
+      state: "acknowledged",
+      acknowledgedAt: later,
+      updatedAt: later,
+    });
+
+    const withPassive = await Effect.runPromise(
+      projectEvent(
+        consumed,
+        makeEvent({
+          sequence: 3,
+          type: "program.notification-upserted",
+          aggregateKind: "program",
+          aggregateId: "program-cto",
+          occurredAt: later,
+          commandId: "cmd-passive",
+          payload: {
+            notificationId: ProgramNotificationId.makeUnsafe("notif-passive"),
+            programId: "program-cto",
+            executiveProjectId: "project-cto",
+            executiveThreadId: "thread-cto",
+            orchestratorThreadId: "thread-jasper",
+            kind: "status_update",
+            severity: "info",
+            summary: "FYI only.",
+            evidence: {},
+            state: "pending",
+            queuedAt: later,
+            deliveredAt: null,
+            consumedAt: null,
+            droppedAt: null,
+            createdAt: later,
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    const passiveAttentionItems = withPassive.ctoAttentionItems ?? [];
+    expect(passiveAttentionItems).toHaveLength(1);
+    expect(passiveAttentionItems[0]?.notificationId).toBe(
+      ProgramNotificationId.makeUnsafe("notif-attention"),
+    );
   });
 
   it("applies thread.created events", async () => {

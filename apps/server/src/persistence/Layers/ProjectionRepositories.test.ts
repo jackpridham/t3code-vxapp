@@ -1,4 +1,5 @@
 import {
+  CtoAttentionId,
   MessageId,
   ProgramId,
   ProgramNotificationId,
@@ -11,7 +12,9 @@ import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
+import { ProjectionCtoAttentionRepositoryLive } from "./ProjectionCtoAttention.ts";
 import { ProjectionOrchestratorWakeRepositoryLive } from "./ProjectionOrchestratorWakes.ts";
+import { ProjectionCtoAttentionRepository } from "../Services/ProjectionCtoAttention.ts";
 import { ProjectionProgramNotificationRepositoryLive } from "./ProjectionProgramNotifications.ts";
 import { ProjectionProgramRepositoryLive } from "./ProjectionPrograms.ts";
 import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
@@ -29,6 +32,7 @@ const projectionRepositoriesLayer = it.layer(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionProgramRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionProgramNotificationRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionCtoAttentionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionTurnRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionOrchestratorWakeRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
@@ -259,6 +263,73 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         workerThreadId: "thread-worker",
       });
       assert.strictEqual(Option.getOrNull(persisted)?.kind, "decision_required");
+    }),
+  );
+
+  it.effect("upserts CTO attention rows by stable attention key", () =>
+    Effect.gen(function* () {
+      const ctoAttention = yield* ProjectionCtoAttentionRepository;
+      const sql = yield* SqlClient.SqlClient;
+
+      const firstRow = {
+        attentionId: CtoAttentionId.makeUnsafe(
+          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
+        ),
+        attentionKey:
+          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
+        notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+        programId: ProgramId.makeUnsafe("program-cto"),
+        executiveProjectId: ProjectId.makeUnsafe("project-cto"),
+        executiveThreadId: ThreadId.makeUnsafe("thread-cto"),
+        sourceThreadId: ThreadId.makeUnsafe("thread-worker"),
+        sourceRole: "worker",
+        kind: "final_review_ready",
+        severity: "info",
+        summary: "The review is ready.",
+        evidence: { workerThreadId: "thread-worker" },
+        state: "required",
+        queuedAt: "2026-04-20T00:01:00.000Z",
+        acknowledgedAt: null,
+        resolvedAt: null,
+        droppedAt: null,
+        createdAt: "2026-04-20T00:01:00.000Z",
+        updatedAt: "2026-04-20T00:01:00.000Z",
+      } as const;
+
+      yield* ctoAttention.upsert(firstRow);
+      yield* ctoAttention.upsert({
+        ...firstRow,
+        state: "acknowledged",
+        acknowledgedAt: "2026-04-20T00:02:00.000Z",
+        updatedAt: "2026-04-20T00:02:00.000Z",
+      });
+
+      const rows = yield* sql<{
+        readonly attentionId: string;
+        readonly attentionKey: string;
+        readonly state: string;
+        readonly acknowledgedAt: string | null;
+      }>`
+        SELECT
+          attention_id AS "attentionId",
+          attention_key AS "attentionKey",
+          state,
+          acknowledged_at AS "acknowledgedAt"
+        FROM projection_cto_attention
+      `;
+      assert.deepEqual(rows, [
+        {
+          attentionId: firstRow.attentionId,
+          attentionKey: firstRow.attentionKey,
+          state: "acknowledged",
+          acknowledgedAt: "2026-04-20T00:02:00.000Z",
+        },
+      ]);
+
+      const persisted = yield* ctoAttention.getByNotificationId({
+        notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+      });
+      assert.strictEqual(Option.getOrNull(persisted)?.state, "acknowledged");
     }),
   );
 

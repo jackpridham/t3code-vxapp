@@ -1,5 +1,6 @@
 import {
   CheckpointRef,
+  CtoAttentionId,
   EventId,
   MessageId,
   ProgramId,
@@ -21,6 +22,7 @@ const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asProgramId = (value: string): ProgramId => ProgramId.makeUnsafe(value);
 const asProgramNotificationId = (value: string): ProgramNotificationId =>
   ProgramNotificationId.makeUnsafe(value);
+const asCtoAttentionId = (value: string): CtoAttentionId => CtoAttentionId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
@@ -39,6 +41,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_program_notifications`;
+      yield* sql`DELETE FROM projection_cto_attention`;
       yield* sql`DELETE FROM projection_programs`;
       yield* sql`DELETE FROM projection_state`;
       yield* sql`DELETE FROM projection_orchestrator_wakes`;
@@ -138,6 +141,73 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '2026-02-24T00:00:01.750Z',
           '2026-02-24T00:00:01.750Z'
         )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_cto_attention (
+          attention_id,
+          attention_key,
+          notification_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id,
+          source_thread_id,
+          source_role,
+          kind,
+          severity,
+          summary,
+          evidence_json,
+          state,
+          queued_at,
+          acknowledged_at,
+          resolved_at,
+          dropped_at,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'program:program-cto|kind:decision_required|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto',
+            'program:program-cto|kind:decision_required|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto',
+            'notif-cto',
+            'program-cto',
+            'project-1',
+            'thread-1',
+            'thread-worker-1',
+            'worker',
+            'decision_required',
+            'warning',
+            'Choose the deployment lane.',
+            '{"workerThreadId":"thread-worker-1"}',
+            'required',
+            '2026-02-24T00:00:01.750Z',
+            NULL,
+            NULL,
+            NULL,
+            '2026-02-24T00:00:01.750Z',
+            '2026-02-24T00:00:01.750Z'
+          ),
+          (
+            'program:program-cto|kind:final_review_ready|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto-terminal',
+            'program:program-cto|kind:final_review_ready|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto-terminal',
+            'notif-cto-terminal',
+            'program-cto',
+            'project-1',
+            'thread-1',
+            'thread-worker-1',
+            'worker',
+            'final_review_ready',
+            'info',
+            'Review is ready and later resolved.',
+            '{"workerThreadId":"thread-worker-1"}',
+            'resolved',
+            '2026-02-24T00:00:02.250Z',
+            NULL,
+            '2026-02-24T00:00:02.500Z',
+            NULL,
+            '2026-02-24T00:00:02.250Z',
+            '2026-02-24T00:00:02.500Z'
+          )
       `;
 
       yield* sql`
@@ -451,6 +521,56 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           droppedAt: null,
           consumeReason: undefined,
           dropReason: undefined,
+          createdAt: "2026-02-24T00:00:01.750Z",
+          updatedAt: "2026-02-24T00:00:01.750Z",
+        },
+      ]);
+      assert.deepEqual(snapshot.ctoAttentionItems, [
+        {
+          attentionId: asCtoAttentionId(
+            "program:program-cto|kind:final_review_ready|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto-terminal",
+          ),
+          attentionKey:
+            "program:program-cto|kind:final_review_ready|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto-terminal",
+          notificationId: asProgramNotificationId("notif-cto-terminal"),
+          programId: asProgramId("program-cto"),
+          executiveProjectId: asProjectId("project-1"),
+          executiveThreadId: asThreadId("thread-1"),
+          sourceThreadId: asThreadId("thread-worker-1"),
+          sourceRole: "worker",
+          kind: "final_review_ready",
+          severity: "info",
+          summary: "Review is ready and later resolved.",
+          evidence: { workerThreadId: "thread-worker-1" },
+          state: "resolved",
+          queuedAt: "2026-02-24T00:00:02.250Z",
+          acknowledgedAt: null,
+          resolvedAt: "2026-02-24T00:00:02.500Z",
+          droppedAt: null,
+          createdAt: "2026-02-24T00:00:02.250Z",
+          updatedAt: "2026-02-24T00:00:02.500Z",
+        },
+        {
+          attentionId: asCtoAttentionId(
+            "program:program-cto|kind:decision_required|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto",
+          ),
+          attentionKey:
+            "program:program-cto|kind:decision_required|source-thread:thread-worker-1|source-role:worker|correlation:notif-cto",
+          notificationId: asProgramNotificationId("notif-cto"),
+          programId: asProgramId("program-cto"),
+          executiveProjectId: asProjectId("project-1"),
+          executiveThreadId: asThreadId("thread-1"),
+          sourceThreadId: asThreadId("thread-worker-1"),
+          sourceRole: "worker",
+          kind: "decision_required",
+          severity: "warning",
+          summary: "Choose the deployment lane.",
+          evidence: { workerThreadId: "thread-worker-1" },
+          state: "required",
+          queuedAt: "2026-02-24T00:00:01.750Z",
+          acknowledgedAt: null,
+          resolvedAt: null,
+          droppedAt: null,
           createdAt: "2026-02-24T00:00:01.750Z",
           updatedAt: "2026-02-24T00:00:01.750Z",
         },

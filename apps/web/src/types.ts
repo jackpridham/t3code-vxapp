@@ -1,4 +1,5 @@
 import type {
+  OrchestrationCtoAttentionItem,
   ModelSelection,
   OrchestrationLatestTurn,
   OrchestrationProgram,
@@ -103,6 +104,7 @@ export type ProjectKind = "project" | "orchestrator" | "executive";
 
 export type Program = OrchestrationProgram;
 export type ProgramNotification = OrchestrationProgramNotification;
+export type CtoAttentionItem = OrchestrationCtoAttentionItem;
 
 export interface Project {
   id: ProjectId;

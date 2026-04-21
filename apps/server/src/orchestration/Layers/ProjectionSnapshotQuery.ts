@@ -4,6 +4,7 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
+  OrchestrationCtoAttentionItem,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
   ThreadLabels,
@@ -41,6 +42,7 @@ import {
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
+import { ProjectionCtoAttention } from "../../persistence/Services/ProjectionCtoAttention.ts";
 import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
 import { ProjectionProgram } from "../../persistence/Services/ProjectionPrograms.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
@@ -52,6 +54,7 @@ import { ProjectionThreadProposedPlan } from "../../persistence/Services/Project
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
+import { selectSnapshotCtoAttentionItems } from "../projectionCtoAttention.ts";
 import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
@@ -82,6 +85,11 @@ const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.m
     evidence: Schema.fromJsonString(ProgramNotificationEvidence),
     consumeReason: Schema.NullOr(Schema.String),
     dropReason: Schema.NullOr(Schema.String),
+  }),
+);
+const ProjectionCtoAttentionDbRowSchema = ProjectionCtoAttention.mapFields(
+  Struct.assign({
+    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -365,6 +373,36 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt"
         FROM projection_program_notifications
         ORDER BY queued_at DESC, notification_id ASC
+      `,
+  });
+
+  const listCtoAttentionRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionCtoAttentionDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          attention_id AS "attentionId",
+          attention_key AS "attentionKey",
+          notification_id AS "notificationId",
+          program_id AS "programId",
+          executive_project_id AS "executiveProjectId",
+          executive_thread_id AS "executiveThreadId",
+          source_thread_id AS "sourceThreadId",
+          source_role AS "sourceRole",
+          kind,
+          severity,
+          summary,
+          evidence_json AS "evidence",
+          state,
+          queued_at AS "queuedAt",
+          acknowledged_at AS "acknowledgedAt",
+          resolved_at AS "resolvedAt",
+          dropped_at AS "droppedAt",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_cto_attention
+        ORDER BY updated_at DESC, attention_id ASC
       `,
   });
 
@@ -949,6 +987,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             projectRows,
             programRows,
             programNotificationRows,
+            ctoAttentionRows,
             threadRows,
             messageRows,
             messageCountRows,
@@ -985,6 +1024,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 toPersistenceSqlOrDecodeError(
                   "ProjectionSnapshotQuery.getSnapshot:listProgramNotifications:query",
                   "ProjectionSnapshotQuery.getSnapshot:listProgramNotifications:decodeRows",
+                ),
+              ),
+            ),
+            listCtoAttentionRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getSnapshot:listCtoAttention:query",
+                  "ProjectionSnapshotQuery.getSnapshot:listCtoAttention:decodeRows",
                 ),
               ),
             ),
@@ -1152,6 +1199,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
           for (const row of stateRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+          for (const row of ctoAttentionRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
 
@@ -1380,6 +1430,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             }));
+          const ctoAttentionItems: ReadonlyArray<OrchestrationCtoAttentionItem> =
+            selectSnapshotCtoAttentionItems(ctoAttentionRows);
 
           const threads: ReadonlyArray<OrchestrationThread> = scopedThreadRows.map((row) => {
             const boundedMessages = takeTailBounded(
@@ -1494,6 +1546,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             projects,
             programs,
             programNotifications,
+            ctoAttentionItems,
             threads,
             orchestratorWakeItems: boundedWakeItems.values,
             updatedAt: updatedAt ?? new Date(0).toISOString(),

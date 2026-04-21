@@ -10,6 +10,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { toPersistenceSqlError, type ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionPendingApprovalRepository } from "../../persistence/Services/ProjectionPendingApprovals.ts";
+import { ProjectionCtoAttentionRepository } from "../../persistence/Services/ProjectionCtoAttention.ts";
 import { ProjectionOrchestratorWakeRepository } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionProgramNotificationRepository } from "../../persistence/Services/ProjectionProgramNotifications.ts";
 import { ProjectionProgramRepository } from "../../persistence/Services/ProjectionPrograms.ts";
@@ -32,6 +33,7 @@ import {
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProjectionCtoAttentionRepositoryLive } from "../../persistence/Layers/ProjectionCtoAttention.ts";
 import { ProjectionOrchestratorWakeRepositoryLive } from "../../persistence/Layers/ProjectionOrchestratorWakes.ts";
 import { ProjectionProgramNotificationRepositoryLive } from "../../persistence/Layers/ProjectionProgramNotifications.ts";
 import { ProjectionProgramRepositoryLive } from "../../persistence/Layers/ProjectionPrograms.ts";
@@ -44,6 +46,11 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
+import {
+  acknowledgeCtoAttentionItem,
+  dropCtoAttentionItem,
+  projectCtoAttentionFromProgramNotification,
+} from "../projectionCtoAttention.ts";
 import {
   OrchestrationProjectionPipeline,
   type ProjectionAttachmentSideEffects,
@@ -60,6 +67,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
   programs: "projection.programs",
   programNotifications: "projection.program-notifications",
+  ctoAttention: "projection.cto-attention",
   threads: "projection.threads",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
@@ -414,6 +422,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionProjectRepository = yield* ProjectionProjectRepository;
     const projectionProgramRepository = yield* ProjectionProgramRepository;
     const projectionProgramNotificationRepository = yield* ProjectionProgramNotificationRepository;
+    const projectionCtoAttentionRepository = yield* ProjectionCtoAttentionRepository;
     const projectionThreadRepository = yield* ProjectionThreadRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
@@ -866,6 +875,63 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             dropReason: event.payload.dropReason,
             updatedAt: event.payload.updatedAt,
           });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
+    const applyCtoAttentionProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyCtoAttentionProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "program.notification-upserted": {
+          const nextAttention =
+            projectCtoAttentionFromProgramNotification({
+              ...event.payload,
+              commandId: event.commandId,
+              correlationId: event.correlationId,
+            }) ?? null;
+          if (nextAttention === null) {
+            return;
+          }
+          yield* projectionCtoAttentionRepository.upsert(nextAttention);
+          return;
+        }
+
+        case "program.notification-consumed": {
+          const existingRow = yield* projectionCtoAttentionRepository.getByNotificationId({
+            notificationId: event.payload.notificationId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionCtoAttentionRepository.upsert(
+            acknowledgeCtoAttentionItem(
+              existingRow.value,
+              event.payload.consumedAt,
+              event.payload.updatedAt,
+            ),
+          );
+          return;
+        }
+
+        case "program.notification-dropped": {
+          const existingRow = yield* projectionCtoAttentionRepository.getByNotificationId({
+            notificationId: event.payload.notificationId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionCtoAttentionRepository.upsert(
+            dropCtoAttentionItem(
+              existingRow.value,
+              event.payload.droppedAt,
+              event.payload.updatedAt,
+            ),
+          );
           return;
         }
 
@@ -1558,6 +1624,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         apply: applyProgramNotificationsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.ctoAttention,
+        apply: applyCtoAttentionProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
         apply: applyThreadMessagesProjection,
       },
@@ -1714,6 +1784,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionProjectRepositoryLive),
   Layer.provideMerge(ProjectionProgramRepositoryLive),
   Layer.provideMerge(ProjectionProgramNotificationRepositoryLive),
+  Layer.provideMerge(ProjectionCtoAttentionRepositoryLive),
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),

@@ -166,6 +166,26 @@ Worker visibility has two sidebar modes:
 
 Workers with `spawnRole=worker` but missing authoritative Jasper lineage are shown as direct/orphan operations rather than hidden under a healthy orchestrator tree. Normal dispatch guards also reserve `jasper` for primary orchestrator threads; `worker/jasper` is not a valid routine worker path.
 
+### CTO Attention Layer
+
+The CTO attention layer is a bounded read surface for executive decisions and blockers.
+
+- `ctoAttentionItems` now appears on the orchestration read model and is hydrated by the server, web store, and sidebar.
+- Actionable kinds are `decision_required`, `blocked`, `risk_escalated`, `founder_update_required`, `final_review_ready`, and `program_completed`.
+- Passive kinds stay in `programNotifications`: `worker_started`, `worker_progress`, `worker_completed`, `routine_status`, `test_retry`, `implementation_progress`, and `status_update`.
+- `closeout_ready` remains a legacy alias that maps to `final_review_ready`.
+- CTO attention rows dedupe by `attentionKey`, which is derived from program id, normalized kind, source thread and role, and the best stable correlation token available.
+- Lifecycle states are `required`, `acknowledged`, `resolved`, and `dropped`.
+- Worker wakes remain Jasper-owned `orchestratorWakeItems` and must not be consumed as CTO attention.
+
+### Script Handoff
+
+The scripts follow-up is handled in the separate `enhance/cto-attention-cli-support` plan.
+
+- Scripts should prefer `ctoAttentionItems` for executive attention.
+- `programNotifications` is legacy/passive fallback data for notification-centric UIs.
+- T3 workers must not edit `vortex-scripts` for this lane.
+
 ---
 
 ## Provider Runtime

@@ -3,6 +3,10 @@ import {
   type OrchestrationMessage,
   type OrchestrationProposedPlan,
   type OrchestratorWakeItem,
+  CtoAttentionId,
+  ProgramId,
+  ProgramNotificationId,
+  ProjectId,
   type ProviderKind,
   ThreadId,
   type OrchestrationReadModel,
@@ -16,6 +20,7 @@ import { create } from "zustand";
 import { dispatchNotification } from "./notificationDispatch";
 import {
   type ChatMessage,
+  type CtoAttentionItem,
   type PersistedFileChange,
   type Program,
   type ProgramNotification,
@@ -23,6 +28,13 @@ import {
   type Thread,
   type TurnDiffSummary,
 } from "./types";
+import {
+  buildCtoAttentionKey,
+  deriveCtoAttentionStateFromProgramNotificationState,
+  extractCtoAttentionSource,
+  isCtoActionableProgramNotificationKind,
+  toCtoAttentionKind,
+} from "@t3tools/shared/ctoAttention";
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -30,6 +42,7 @@ export interface AppState {
   projects: Project[];
   programs?: Program[];
   programNotifications?: ProgramNotification[];
+  ctoAttentionItems?: CtoAttentionItem[];
   threads: Thread[];
   orchestratorWakeItems: OrchestratorWakeItem[];
   bootstrapComplete: boolean;
@@ -39,6 +52,7 @@ const initialState: AppState = {
   projects: [],
   programs: [],
   programNotifications: [],
+  ctoAttentionItems: [],
   threads: [],
   orchestratorWakeItems: [],
   bootstrapComplete: false,
@@ -88,6 +102,7 @@ type ReadModelProgram = NonNullable<OrchestrationReadModel["programs"]>[number];
 type ReadModelProgramNotification = NonNullable<
   OrchestrationReadModel["programNotifications"]
 >[number];
+type ReadModelCtoAttentionItem = NonNullable<OrchestrationReadModel["ctoAttentionItems"]>[number];
 
 function mapProgram(program: ReadModelProgram): Program {
   return { ...program };
@@ -95,6 +110,38 @@ function mapProgram(program: ReadModelProgram): Program {
 
 function mapProgramNotification(notification: ReadModelProgramNotification): ProgramNotification {
   return { ...notification };
+}
+
+function mergeProjects(
+  existingProjects: Project[],
+  incomingProjects: ReadonlyArray<OrchestrationReadModel["projects"][number]>,
+): Project[] {
+  const nextProjects = [...existingProjects];
+  const indexByProjectId = new Map(
+    nextProjects.map((project, index) => [project.id, index] as const),
+  );
+
+  for (const project of incomingProjects) {
+    const existingIndex = indexByProjectId.get(project.id);
+    if (project.deletedAt !== null) {
+      if (existingIndex === undefined) {
+        continue;
+      }
+      nextProjects.splice(existingIndex, 1);
+      indexByProjectId.clear();
+      nextProjects.forEach((entry, index) => indexByProjectId.set(entry.id, index));
+      continue;
+    }
+
+    const mappedProject = mapProject(project);
+    if (existingIndex === undefined) {
+      indexByProjectId.set(mappedProject.id, nextProjects.push(mappedProject) - 1);
+      continue;
+    }
+    nextProjects[existingIndex] = mappedProject;
+  }
+
+  return nextProjects;
 }
 
 function mergePrograms(
@@ -129,61 +176,110 @@ function mergePrograms(
   return nextPrograms;
 }
 
-function mergeProgramNotifications(
-  existingNotifications: ProgramNotification[],
-  incomingNotifications: ReadonlyArray<ReadModelProgramNotification>,
-): ProgramNotification[] {
-  const nextNotifications = [...existingNotifications];
-  const indexByNotificationId = new Map(
-    nextNotifications.map((notification, index) => [notification.notificationId, index] as const),
+function mergeCollectionByKey<TItem, TIncoming>(input: {
+  existing: readonly TItem[];
+  incoming: readonly TIncoming[];
+  getExistingKey: (item: TItem) => string;
+  getIncomingKey: (item: TIncoming) => string;
+  mapIncoming: (item: TIncoming) => TItem;
+}): TItem[] {
+  const nextItems = [...input.existing];
+  const indexByKey = new Map(
+    nextItems.map((item, index) => [input.getExistingKey(item), index] as const),
   );
 
-  for (const notification of incomingNotifications) {
-    const existingIndex = indexByNotificationId.get(notification.notificationId);
-    const mappedNotification = mapProgramNotification(notification);
+  for (const incomingItem of input.incoming) {
+    const key = input.getIncomingKey(incomingItem);
+    const existingIndex = indexByKey.get(key);
+    const mappedItem = input.mapIncoming(incomingItem);
     if (existingIndex === undefined) {
-      indexByNotificationId.set(
-        mappedNotification.notificationId,
-        nextNotifications.push(mappedNotification) - 1,
-      );
+      indexByKey.set(input.getExistingKey(mappedItem), nextItems.push(mappedItem) - 1);
       continue;
     }
-    nextNotifications[existingIndex] = mappedNotification;
+    nextItems[existingIndex] = mappedItem;
   }
 
-  return nextNotifications;
+  return nextItems;
 }
 
-function mergeProjects(
-  existingProjects: Project[],
-  incomingProjects: ReadonlyArray<OrchestrationReadModel["projects"][number]>,
-): Project[] {
-  const nextProjects = [...existingProjects];
-  const indexByProjectId = new Map(
-    nextProjects.map((project, index) => [project.id, index] as const),
-  );
+function upsertCollectionItemByKey<TItem>(input: {
+  existing: readonly TItem[];
+  nextItem: TItem;
+  getKey: (item: TItem) => string;
+}): TItem[] {
+  return mergeCollectionByKey({
+    existing: input.existing,
+    incoming: [input.nextItem],
+    getExistingKey: input.getKey,
+    getIncomingKey: input.getKey,
+    mapIncoming: (item) => item,
+  });
+}
 
-  for (const project of incomingProjects) {
-    const existingIndex = indexByProjectId.get(project.id);
-    if (project.deletedAt !== null) {
-      if (existingIndex === undefined) {
-        continue;
-      }
-      nextProjects.splice(existingIndex, 1);
-      indexByProjectId.clear();
-      nextProjects.forEach((entry, index) => indexByProjectId.set(entry.id, index));
-      continue;
+function updateCollectionItemByKey<TItem>(input: {
+  existing: readonly TItem[];
+  key: string;
+  getKey: (item: TItem) => string;
+  updater: (item: TItem) => TItem;
+}): TItem[] {
+  let changed = false;
+  const nextItems = input.existing.map((item) => {
+    if (input.getKey(item) !== input.key) {
+      return item;
     }
+    changed = true;
+    return input.updater(item);
+  });
+  return changed ? nextItems : (input.existing as TItem[]);
+}
 
-    const mappedProject = mapProject(project);
-    if (existingIndex === undefined) {
-      indexByProjectId.set(mappedProject.id, nextProjects.push(mappedProject) - 1);
-      continue;
-    }
-    nextProjects[existingIndex] = mappedProject;
+function mapCtoAttentionItem(item: ReadModelCtoAttentionItem): CtoAttentionItem {
+  return { ...item };
+}
+
+function projectCtoAttentionFromProgramNotification(
+  notification: ReadModelProgramNotification,
+): CtoAttentionItem | null {
+  const attentionKind = toCtoAttentionKind(notification.kind);
+  if (!attentionKind || !isCtoActionableProgramNotificationKind(attentionKind)) {
+    return null;
   }
 
-  return nextProjects;
+  const source = extractCtoAttentionSource(
+    notification.evidence,
+    notification.orchestratorThreadId,
+  );
+  const attentionKey = buildCtoAttentionKey({
+    programId: notification.programId,
+    kind: attentionKind,
+    sourceThreadId: source.sourceThreadId,
+    sourceRole: source.sourceRole,
+    evidence: notification.evidence,
+    notificationId: notification.notificationId,
+  });
+  const state = deriveCtoAttentionStateFromProgramNotificationState(notification.state);
+
+  return {
+    attentionId: CtoAttentionId.makeUnsafe(attentionKey),
+    attentionKey,
+    notificationId: ProgramNotificationId.makeUnsafe(String(notification.notificationId)),
+    programId: ProgramId.makeUnsafe(String(notification.programId)),
+    executiveProjectId: ProjectId.makeUnsafe(String(notification.executiveProjectId)),
+    executiveThreadId: ThreadId.makeUnsafe(String(notification.executiveThreadId)),
+    sourceThreadId: source.sourceThreadId,
+    sourceRole: source.sourceRole,
+    kind: attentionKind,
+    severity: notification.severity,
+    summary: notification.summary,
+    evidence: notification.evidence,
+    state,
+    queuedAt: notification.queuedAt,
+    acknowledgedAt: state === "acknowledged" ? notification.consumedAt : null,
+    resolvedAt: null,
+    droppedAt: state === "dropped" ? notification.droppedAt : null,
+    createdAt: notification.createdAt,
+    updatedAt: notification.updatedAt,
+  };
 }
 
 function normalizeModelSelection<T extends { provider: "codex" | "claudeAgent"; model: string }>(
@@ -690,11 +786,23 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     ? mergePrograms(state.programs ?? [], readModel.programs ?? [])
     : (readModel.programs ?? []).filter((program) => program.deletedAt === null).map(mapProgram);
   const programNotifications = isPartialReadModel(readModel)
-    ? mergeProgramNotifications(
-        state.programNotifications ?? [],
-        readModel.programNotifications ?? [],
-      )
+    ? mergeCollectionByKey({
+        existing: state.programNotifications ?? [],
+        incoming: readModel.programNotifications ?? [],
+        getExistingKey: (notification) => String(notification.notificationId),
+        getIncomingKey: (notification) => String(notification.notificationId),
+        mapIncoming: mapProgramNotification,
+      })
     : (readModel.programNotifications ?? []).map(mapProgramNotification);
+  const ctoAttentionItems = isPartialReadModel(readModel)
+    ? mergeCollectionByKey({
+        existing: state.ctoAttentionItems ?? [],
+        incoming: readModel.ctoAttentionItems ?? [],
+        getExistingKey: (attentionItem) => String(attentionItem.attentionId),
+        getIncomingKey: (attentionItem) => String(attentionItem.attentionId),
+        mapIncoming: mapCtoAttentionItem,
+      })
+    : (readModel.ctoAttentionItems ?? []).map(mapCtoAttentionItem);
   const threads = isPartialReadModel(readModel)
     ? mergeThreads(state.threads, readModel.threads, readModel.snapshotProfile)
     : readModel.threads
@@ -705,6 +813,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     projects,
     programs,
     programNotifications,
+    ctoAttentionItems,
     threads,
     orchestratorWakeItems: readModel.orchestratorWakeItems.map(mapOrchestratorWakeItem),
     bootstrapComplete: true,
@@ -838,55 +947,99 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     case "program.notification-upserted": {
       const currentNotifications = state.programNotifications ?? [];
       const nextNotification = mapProgramNotification(event.payload);
-      const existing = currentNotifications.find(
-        (notification) => notification.notificationId === nextNotification.notificationId,
-      );
-      const programNotifications = existing
-        ? currentNotifications.map((notification) =>
-            notification.notificationId === nextNotification.notificationId
-              ? nextNotification
-              : notification,
-          )
-        : [nextNotification, ...currentNotifications];
-      return { ...state, programNotifications };
+      const programNotifications = upsertCollectionItemByKey({
+        existing: currentNotifications,
+        nextItem: nextNotification,
+        getKey: (notification) => String(notification.notificationId),
+      });
+      const currentAttentionItems = state.ctoAttentionItems ?? [];
+      const nextCtoAttentionItem = projectCtoAttentionFromProgramNotification(event.payload);
+      const ctoAttentionItems =
+        nextCtoAttentionItem === null
+          ? currentAttentionItems.filter(
+              (attentionItem) =>
+                String(attentionItem.notificationId) !== String(nextNotification.notificationId),
+            )
+          : upsertCollectionItemByKey({
+              existing: currentAttentionItems.filter(
+                (attentionItem) =>
+                  String(attentionItem.notificationId) !==
+                  String(nextCtoAttentionItem.notificationId),
+              ),
+              nextItem: nextCtoAttentionItem,
+              getKey: (attentionItem) => attentionItem.attentionKey,
+            });
+      return { ...state, programNotifications, ctoAttentionItems };
     }
 
     case "program.notification-consumed": {
       const currentNotifications = state.programNotifications ?? [];
-      let changed = false;
-      const programNotifications = currentNotifications.map((notification) => {
-        if (notification.notificationId !== event.payload.notificationId) {
-          return notification;
-        }
-        changed = true;
-        return {
+      const currentAttentionItems = state.ctoAttentionItems ?? [];
+      const programNotifications = updateCollectionItemByKey({
+        existing: currentNotifications,
+        key: String(event.payload.notificationId),
+        getKey: (notification) => String(notification.notificationId),
+        updater: (notification) => ({
           ...notification,
           state: "consumed" as const,
           consumedAt: event.payload.consumedAt,
           consumeReason: event.payload.consumeReason,
           updatedAt: event.payload.updatedAt,
-        };
+        }),
       });
-      return changed ? { ...state, programNotifications } : state;
+      const ctoAttentionItems = updateCollectionItemByKey({
+        existing: state.ctoAttentionItems ?? [],
+        key: String(event.payload.notificationId),
+        getKey: (attentionItem) => String(attentionItem.notificationId),
+        updater: (attentionItem) => ({
+          ...attentionItem,
+          state: "acknowledged" as const,
+          acknowledgedAt: event.payload.consumedAt,
+          updatedAt: event.payload.updatedAt,
+        }),
+      });
+      if (
+        programNotifications === currentNotifications &&
+        ctoAttentionItems === currentAttentionItems
+      ) {
+        return state;
+      }
+      return { ...state, programNotifications, ctoAttentionItems };
     }
 
     case "program.notification-dropped": {
       const currentNotifications = state.programNotifications ?? [];
-      let changed = false;
-      const programNotifications = currentNotifications.map((notification) => {
-        if (notification.notificationId !== event.payload.notificationId) {
-          return notification;
-        }
-        changed = true;
-        return {
+      const currentAttentionItems = state.ctoAttentionItems ?? [];
+      const programNotifications = updateCollectionItemByKey({
+        existing: currentNotifications,
+        key: String(event.payload.notificationId),
+        getKey: (notification) => String(notification.notificationId),
+        updater: (notification) => ({
           ...notification,
           state: "dropped" as const,
           droppedAt: event.payload.droppedAt,
           dropReason: event.payload.dropReason,
           updatedAt: event.payload.updatedAt,
-        };
+        }),
       });
-      return changed ? { ...state, programNotifications } : state;
+      const ctoAttentionItems = updateCollectionItemByKey({
+        existing: state.ctoAttentionItems ?? [],
+        key: String(event.payload.notificationId),
+        getKey: (attentionItem) => String(attentionItem.notificationId),
+        updater: (attentionItem) => ({
+          ...attentionItem,
+          state: "dropped" as const,
+          droppedAt: event.payload.droppedAt,
+          updatedAt: event.payload.updatedAt,
+        }),
+      });
+      if (
+        programNotifications === currentNotifications &&
+        ctoAttentionItems === currentAttentionItems
+      ) {
+        return state;
+      }
+      return { ...state, programNotifications, ctoAttentionItems };
     }
 
     case "thread.created": {

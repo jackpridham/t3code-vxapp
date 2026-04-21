@@ -4,6 +4,8 @@ import {
   CorrelationId,
   EventId,
   MessageId,
+  ProgramId,
+  ProgramNotificationId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -274,6 +276,141 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           state: "pending",
           summary: "Completed the task",
         },
+      ]);
+
+      const ctoAttentionRows = yield* sql<{
+        readonly attentionId: string;
+      }>`
+        SELECT attention_id AS "attentionId"
+        FROM projection_cto_attention
+      `;
+      assert.deepEqual(ctoAttentionRows, []);
+    }),
+  );
+
+  it.effect("projects actionable CTO attention and ignores passive notification kinds", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = new Date().toISOString();
+      const later = new Date(Date.parse(now) + 1_000).toISOString();
+
+      yield* eventStore.append({
+        type: "program.notification-upserted",
+        eventId: EventId.makeUnsafe("evt-attention-upsert"),
+        aggregateKind: "program",
+        aggregateId: ProgramId.makeUnsafe("program-cto"),
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-attention-upsert"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-attention-upsert"),
+        metadata: {},
+        payload: {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
+          programId: ProgramId.makeUnsafe("program-cto"),
+          executiveProjectId: ProjectId.makeUnsafe("project-cto"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-cto"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-jasper"),
+          kind: "final_review_ready",
+          severity: "info",
+          summary: "The review is ready.",
+          evidence: { workerThreadId: "thread-worker" },
+          state: "pending",
+          queuedAt: now,
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "program.notification-consumed",
+        eventId: EventId.makeUnsafe("evt-attention-consumed"),
+        aggregateKind: "program",
+        aggregateId: ProgramId.makeUnsafe("program-cto"),
+        occurredAt: later,
+        commandId: CommandId.makeUnsafe("cmd-attention-consumed"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-attention-consumed"),
+        metadata: {},
+        payload: {
+          programId: ProgramId.makeUnsafe("program-cto"),
+          notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
+          consumedAt: later,
+          consumeReason: "reviewed",
+          updatedAt: later,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "program.notification-upserted",
+        eventId: EventId.makeUnsafe("evt-passive-upsert"),
+        aggregateKind: "program",
+        aggregateId: ProgramId.makeUnsafe("program-cto"),
+        occurredAt: later,
+        commandId: CommandId.makeUnsafe("cmd-passive-upsert"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-passive-upsert"),
+        metadata: {},
+        payload: {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-passive"),
+          programId: ProgramId.makeUnsafe("program-cto"),
+          executiveProjectId: ProjectId.makeUnsafe("project-cto"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-cto"),
+          orchestratorThreadId: ThreadId.makeUnsafe("thread-jasper"),
+          kind: "status_update",
+          severity: "info",
+          summary: "FYI only.",
+          evidence: {},
+          state: "pending",
+          queuedAt: later,
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: later,
+          updatedAt: later,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const ctoAttentionRows = yield* sql<{
+        readonly attentionId: string;
+        readonly notificationId: string;
+        readonly state: string;
+        readonly acknowledgedAt: string | null;
+      }>`
+        SELECT
+          attention_id AS "attentionId",
+          notification_id AS "notificationId",
+          state,
+          acknowledged_at AS "acknowledgedAt"
+        FROM projection_cto_attention
+        ORDER BY attention_id ASC
+      `;
+      assert.deepEqual(ctoAttentionRows, [
+        {
+          attentionId:
+            "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-attention",
+          notificationId: "notif-attention",
+          state: "acknowledged",
+          acknowledgedAt: later,
+        },
+      ]);
+
+      const notificationRows = yield* sql<{
+        readonly notificationId: string;
+      }>`
+        SELECT notification_id AS "notificationId"
+        FROM projection_program_notifications
+        ORDER BY notification_id ASC
+      `;
+      assert.deepEqual(notificationRows, [
+        { notificationId: "notif-attention" },
+        { notificationId: "notif-passive" },
       ]);
     }),
   );

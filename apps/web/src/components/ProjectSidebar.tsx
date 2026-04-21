@@ -99,6 +99,7 @@ import { Badge } from "./ui/badge";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import {
   buildCopyThreadIdErrorDescription,
+  buildSidebarCtoAttentionGroups,
   buildSidebarProgramNotificationGroups,
   filterThreadsByLabels,
   getUniqueLabelsFromThreads,
@@ -127,6 +128,7 @@ import {
   type SortableProjectHandleProps,
 } from "./sidebar/SidebarShared";
 import { SidebarBrandHeader } from "./sidebar/SidebarBrandHeader";
+import { CtoAttentionPanel } from "./sidebar/CtoAttentionPanel";
 import { ProgramNotificationsPanel } from "./sidebar/ProgramNotificationsPanel";
 import {
   buildPrStatusIndicator,
@@ -244,6 +246,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
   const projects = useStore((store) => store.projects);
   const programs = useStore((store) => store.programs ?? []);
   const programNotifications = useStore((store) => store.programNotifications ?? []);
+  const ctoAttentionItems = useStore((store) => store.ctoAttentionItems ?? []);
   const serverThreads = useStore((store) => store.threads);
   const orchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById, labelFiltersByProject } =
@@ -343,6 +346,10 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
   const programNotificationGroups = useMemo(
     () => buildSidebarProgramNotificationGroups({ programs, notifications: programNotifications }),
     [programs, programNotifications],
+  );
+  const ctoAttentionGroups = useMemo(
+    () => buildSidebarCtoAttentionGroups({ programs, ctoAttentionItems }),
+    [ctoAttentionItems, programs],
   );
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
@@ -1980,6 +1987,8 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
                 </div>
               )}
             </SidebarGroup>
+
+            <CtoAttentionPanel groups={ctoAttentionGroups} />
 
             <ProgramNotificationsPanel groups={programNotificationGroups} />
 

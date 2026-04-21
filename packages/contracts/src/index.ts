@@ -13,3 +13,8 @@ export * from "./orchestration";
 export * from "./projectHooks";
 export * from "./editor";
 export * from "./project";
+export {
+  OrchestrationCtoAttentionItem,
+  OrchestrationCtoAttentionKind,
+  OrchestrationCtoAttentionState,
+} from "./orchestration";
