@@ -585,6 +585,24 @@ function compareActivities(
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
+function capMessagesForThread(
+  thread: Pick<Thread, "snapshotCoverage">,
+  messages: ChatMessage[],
+): ChatMessage[] {
+  return thread.snapshotCoverage?.messageLimit === null
+    ? messages
+    : messages.slice(-MAX_THREAD_MESSAGES);
+}
+
+function capActivitiesForThread(
+  thread: Pick<Thread, "snapshotCoverage">,
+  activities: Thread["activities"],
+): Thread["activities"] {
+  return thread.snapshotCoverage?.activityLimit === null
+    ? activities
+    : activities.slice(-MAX_THREAD_ACTIVITIES);
+}
+
 function buildLatestTurn(params: {
   previous: Thread["latestTurn"];
   turnId: NonNullable<Thread["latestTurn"]>["turnId"];
@@ -1249,7 +1267,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
                   },
             )
           : [...thread.messages, message];
-        const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
+        const cappedMessages = capMessagesForThread(thread, messages);
         const turnDiffSummaries =
           event.payload.role === "assistant" && event.payload.turnId !== null
             ? rebindTurnDiffSummariesForAssistantMessage(
@@ -1519,12 +1537,13 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
 
     case "thread.activity-appended": {
       const threads = updateThread(state.threads, event.payload.threadId, (thread) => {
-        const activities = [
-          ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
-          { ...event.payload.activity },
-        ]
-          .toSorted(compareActivities)
-          .slice(-MAX_THREAD_ACTIVITIES);
+        const activities = capActivitiesForThread(
+          thread,
+          [
+            ...thread.activities.filter((activity) => activity.id !== event.payload.activity.id),
+            { ...event.payload.activity },
+          ].toSorted(compareActivities),
+        );
         return {
           ...thread,
           activities,

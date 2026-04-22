@@ -125,20 +125,20 @@ describe("orchestration current-state hydration", () => {
     expect(api.orchestration.listSessionThreads).not.toHaveBeenCalled();
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 500,
+      limit: 1000,
     });
     expect(api.orchestration.listThreadActivities).toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 250,
+      limit: 1000,
     });
     expect(thread?.messages).toEqual([expect.objectContaining({ text: "loaded history" })]);
     expect(thread?.activities).toEqual([expect.objectContaining({ summary: "history activity" })]);
     expect(thread?.snapshotCoverage).toEqual(
       expect.objectContaining({
         messageCount: 1,
-        messageLimit: 500,
+        messageLimit: null,
         activityCount: 1,
-        activityLimit: 250,
+        activityLimit: null,
         proposedPlanLimit: 0,
         checkpointLimit: 0,
       }),
@@ -176,5 +176,147 @@ describe("orchestration current-state hydration", () => {
         activities: [expect.objectContaining({ summary: "history activity" })],
       }),
     );
+  });
+
+  it("paginates older messages and activities until history is exhausted", async () => {
+    const messagePage = Array.from({ length: 1000 }, (_, index) => ({
+      id: MessageId.makeUnsafe(`message-${index + 2}`),
+      role: "assistant" as const,
+      text: `newer ${index}`,
+      turnId: TurnId.makeUnsafe("turn-1"),
+      streaming: false,
+      createdAt: `2026-04-14T00:${String(index % 60).padStart(2, "0")}:01.000Z`,
+      updatedAt: `2026-04-14T00:${String(index % 60).padStart(2, "0")}:01.000Z`,
+    }));
+    const olderMessage = {
+      id: MessageId.makeUnsafe("message-1"),
+      role: "user" as const,
+      text: "oldest",
+      turnId: TurnId.makeUnsafe("turn-1"),
+      streaming: false,
+      createdAt: "2026-04-13T23:59:00.000Z",
+      updatedAt: "2026-04-13T23:59:00.000Z",
+    };
+    const activityPage = Array.from({ length: 1000 }, (_, index) => ({
+      id: EventId.makeUnsafe(`activity-${index + 2}`),
+      tone: "tool" as const,
+      kind: "tool.completed",
+      summary: `newer ${index}`,
+      payload: {},
+      turnId: TurnId.makeUnsafe("turn-1"),
+      sequence: index + 2,
+      createdAt: `2026-04-14T00:${String(index % 60).padStart(2, "0")}:01.000Z`,
+    }));
+    const olderActivity = {
+      id: EventId.makeUnsafe("activity-1"),
+      tone: "tool" as const,
+      kind: "tool.completed",
+      summary: "oldest",
+      payload: {},
+      turnId: TurnId.makeUnsafe("turn-1"),
+      sequence: 1,
+      createdAt: "2026-04-13T23:59:00.000Z",
+    };
+    const api = makeApi({
+      listThreadMessages: vi
+        .fn()
+        .mockResolvedValueOnce(messagePage)
+        .mockResolvedValueOnce([olderMessage]),
+      listThreadActivities: vi
+        .fn()
+        .mockResolvedValueOnce(activityPage)
+        .mockResolvedValueOnce([olderActivity]),
+    });
+    const readModel = makeReadModel([makeThread(rootThreadId)]);
+
+    const next = await addThreadDetailToReadModel(api, readModel, rootThreadId);
+    const thread = next.threads.find((entry) => entry.id === rootThreadId);
+
+    expect(api.orchestration.listThreadMessages).toHaveBeenNthCalledWith(2, {
+      threadId: rootThreadId,
+      limit: 1000,
+      beforeCreatedAt: messagePage[0]?.createdAt,
+    });
+    expect(api.orchestration.listThreadActivities).toHaveBeenNthCalledWith(2, {
+      threadId: rootThreadId,
+      limit: 1000,
+      beforeSequence: 2,
+    });
+    expect(thread?.messages[0]?.id).toBe("message-1");
+    expect(thread?.messages).toHaveLength(1001);
+    expect(thread?.activities[0]?.id).toBe("activity-1");
+    expect(thread?.activities).toHaveLength(1001);
+    expect(thread?.snapshotCoverage?.messagesTruncated).toBe(false);
+    expect(thread?.snapshotCoverage?.activitiesTruncated).toBe(false);
+  });
+
+  it("dedupes overlapping activity pages and returns stable chronological order", async () => {
+    const duplicateUpdated = {
+      id: EventId.makeUnsafe("activity-duplicate"),
+      tone: "tool" as const,
+      kind: "tool.completed",
+      summary: "duplicate from older page",
+      payload: {},
+      turnId: TurnId.makeUnsafe("turn-1"),
+      sequence: 2,
+      createdAt: "2026-04-14T00:00:02.000Z",
+    };
+    const newestPage = [
+      {
+        id: EventId.makeUnsafe("activity-duplicate"),
+        tone: "tool" as const,
+        kind: "tool.completed",
+        summary: "duplicate from newest page",
+        payload: {},
+        turnId: TurnId.makeUnsafe("turn-1"),
+        sequence: 2,
+        createdAt: "2026-04-14T00:00:02.000Z",
+      },
+      ...Array.from({ length: 999 }, (_, index) => ({
+        id: EventId.makeUnsafe(`activity-new-${index}`),
+        tone: "tool" as const,
+        kind: "tool.completed",
+        summary: `new ${index}`,
+        payload: {},
+        turnId: TurnId.makeUnsafe("turn-1"),
+        sequence: index + 3,
+        createdAt: `2026-04-14T00:${String(index % 60).padStart(2, "0")}:03.000Z`,
+      })),
+    ];
+    const api = makeApi({
+      listThreadMessages: vi.fn().mockResolvedValue([]),
+      listThreadActivities: vi
+        .fn()
+        .mockResolvedValueOnce(newestPage)
+        .mockResolvedValueOnce([
+          {
+            id: EventId.makeUnsafe("activity-oldest"),
+            tone: "tool" as const,
+            kind: "tool.completed",
+            summary: "oldest",
+            payload: {},
+            turnId: TurnId.makeUnsafe("turn-1"),
+            sequence: 1,
+            createdAt: "2026-04-14T00:00:01.000Z",
+          },
+          duplicateUpdated,
+        ]),
+    });
+    const readModel = makeReadModel([makeThread(rootThreadId)]);
+
+    const next = await addThreadDetailToReadModel(api, readModel, rootThreadId);
+    const thread = next.threads.find((entry) => entry.id === rootThreadId);
+
+    expect(thread?.activities.map((activity) => activity.id).slice(0, 3)).toEqual([
+      "activity-oldest",
+      "activity-duplicate",
+      "activity-new-0",
+    ]);
+    expect(
+      thread?.activities.find(
+        (activity) => activity.id === EventId.makeUnsafe("activity-duplicate"),
+      )?.summary,
+    ).toBe("duplicate from newest page");
+    expect(thread?.activities).toHaveLength(1001);
   });
 });

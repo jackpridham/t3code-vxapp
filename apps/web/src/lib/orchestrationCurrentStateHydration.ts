@@ -1,13 +1,14 @@
 import {
   type NativeApi,
   NonNegativeInt,
+  type OrchestrationListThreadActivitiesResult,
+  type OrchestrationListThreadMessagesResult,
   type OrchestrationReadModel,
   type OrchestrationThreadSummary,
   ThreadId,
 } from "@t3tools/contracts";
 
-const CURRENT_THREAD_MESSAGE_LIMIT = NonNegativeInt.makeUnsafe(500);
-const CURRENT_THREAD_ACTIVITY_LIMIT = NonNegativeInt.makeUnsafe(250);
+const CURRENT_THREAD_HISTORY_PAGE_LIMIT = NonNegativeInt.makeUnsafe(1000);
 const CURRENT_THREAD_WAKE_LIMIT = NonNegativeInt.makeUnsafe(100);
 
 function hasThread(readModel: OrchestrationReadModel, threadId: ThreadId): boolean {
@@ -24,6 +25,83 @@ function threadSummaryToReadModelThread(
     activities: [],
     checkpoints: [],
   };
+}
+
+async function listAllThreadMessages(
+  api: NativeApi,
+  threadId: ThreadId,
+): Promise<OrchestrationListThreadMessagesResult> {
+  const pages: OrchestrationListThreadMessagesResult[] = [];
+  let beforeCreatedAt: string | undefined;
+
+  for (;;) {
+    const page = await api.orchestration.listThreadMessages({
+      threadId,
+      limit: CURRENT_THREAD_HISTORY_PAGE_LIMIT,
+      ...(beforeCreatedAt !== undefined ? { beforeCreatedAt } : {}),
+    });
+    if (page.length === 0) {
+      break;
+    }
+    pages.unshift(page);
+    if (page.length < CURRENT_THREAD_HISTORY_PAGE_LIMIT) {
+      break;
+    }
+    const oldestMessage = page[0];
+    if (!oldestMessage) {
+      break;
+    }
+    beforeCreatedAt = oldestMessage.createdAt;
+  }
+
+  return pages.flat();
+}
+
+async function listAllThreadActivities(
+  api: NativeApi,
+  threadId: ThreadId,
+): Promise<OrchestrationListThreadActivitiesResult> {
+  const pages: OrchestrationListThreadActivitiesResult[] = [];
+  let beforeSequence: number | undefined;
+
+  for (;;) {
+    const page = await api.orchestration.listThreadActivities({
+      threadId,
+      limit: CURRENT_THREAD_HISTORY_PAGE_LIMIT,
+      ...(beforeSequence !== undefined
+        ? { beforeSequence: NonNegativeInt.makeUnsafe(beforeSequence) }
+        : {}),
+    });
+    if (page.length === 0) {
+      break;
+    }
+    pages.unshift(page);
+    if (page.length < CURRENT_THREAD_HISTORY_PAGE_LIMIT) {
+      break;
+    }
+    const oldestSequencedActivity = page.find((activity) => activity.sequence !== undefined);
+    if (oldestSequencedActivity?.sequence === undefined) {
+      break;
+    }
+    beforeSequence = oldestSequencedActivity.sequence;
+  }
+
+  const dedupedById = new Map<string, OrchestrationListThreadActivitiesResult[number]>();
+  for (const activity of pages.flat()) {
+    dedupedById.set(activity.id, activity);
+  }
+  return [...dedupedById.values()].toSorted((left, right) => {
+    if (left.sequence !== undefined && right.sequence !== undefined) {
+      if (left.sequence !== right.sequence) {
+        return left.sequence - right.sequence;
+      }
+    } else if (left.sequence !== undefined) {
+      return 1;
+    } else if (right.sequence !== undefined) {
+      return -1;
+    }
+    return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+  });
 }
 
 async function ensureThreadInReadModel(
@@ -65,14 +143,8 @@ export async function addThreadDetailToReadModel(
 ): Promise<OrchestrationReadModel> {
   const detailReadModel = await ensureThreadInReadModel(api, readModel, threadId);
   const [messages, activities, sessions, orchestratorWakeItems] = await Promise.all([
-    api.orchestration.listThreadMessages({
-      threadId,
-      limit: CURRENT_THREAD_MESSAGE_LIMIT,
-    }),
-    api.orchestration.listThreadActivities({
-      threadId,
-      limit: CURRENT_THREAD_ACTIVITY_LIMIT,
-    }),
+    listAllThreadMessages(api, threadId),
+    listAllThreadActivities(api, threadId),
     api.orchestration.listThreadSessions({ threadId }),
     api.orchestration.listOrchestratorWakes({
       orchestratorThreadId: threadId,
@@ -91,14 +163,14 @@ export async function addThreadDetailToReadModel(
       session: sessions[0] ?? thread.session,
       snapshotCoverage: {
         messageCount: messages.length,
-        messageLimit: CURRENT_THREAD_MESSAGE_LIMIT,
-        messagesTruncated: messages.length >= CURRENT_THREAD_MESSAGE_LIMIT,
+        messageLimit: null,
+        messagesTruncated: false,
         proposedPlanCount: thread.proposedPlans.length,
         proposedPlanLimit: 0,
         proposedPlansTruncated: false,
         activityCount: activities.length,
-        activityLimit: CURRENT_THREAD_ACTIVITY_LIMIT,
-        activitiesTruncated: activities.length >= CURRENT_THREAD_ACTIVITY_LIMIT,
+        activityLimit: null,
+        activitiesTruncated: false,
         checkpointCount: thread.checkpoints.length,
         checkpointLimit: 0,
         checkpointsTruncated: false,

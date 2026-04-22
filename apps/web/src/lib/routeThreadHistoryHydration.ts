@@ -17,13 +17,14 @@ export function threadNeedsRouteHistoryHydration(thread: Thread | null | undefin
   if (!hasStarted) {
     return false;
   }
-  return (
-    thread.snapshotCoverage === undefined &&
-    thread.messages.length === 0 &&
-    thread.activities.length === 0 &&
-    thread.proposedPlans.length === 0 &&
-    thread.turnDiffSummaries.length === 0
-  );
+  const coverage = thread.snapshotCoverage;
+  if (coverage === undefined) {
+    return true;
+  }
+
+  const hasMessageDetail = coverage.messageLimit === null || coverage.messageLimit > 0;
+  const hasActivityDetail = coverage.activityLimit === null || coverage.activityLimit > 0;
+  return !hasMessageDetail || !hasActivityDetail;
 }
 
 export async function hydrateRouteThreadHistory(input: {

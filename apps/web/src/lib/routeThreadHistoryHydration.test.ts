@@ -57,6 +57,33 @@ function makeStartedSummaryThread(): Thread {
   });
 }
 
+function makeHydratedCoverage() {
+  return {
+    messageCount: 1,
+    messageLimit: 500,
+    messagesTruncated: false,
+    proposedPlanCount: 0,
+    proposedPlanLimit: 0,
+    proposedPlansTruncated: false,
+    activityCount: 0,
+    activityLimit: 250,
+    activitiesTruncated: false,
+    checkpointCount: 0,
+    checkpointLimit: 0,
+    checkpointsTruncated: false,
+  };
+}
+
+function makeSummaryCoverage() {
+  return {
+    ...makeHydratedCoverage(),
+    messageCount: 0,
+    messageLimit: 0,
+    activityCount: 0,
+    activityLimit: 0,
+  };
+}
+
 function makeReadModel(): OrchestrationReadModel {
   return {
     snapshotSequence: 10,
@@ -148,7 +175,7 @@ describe("route thread history hydration", () => {
     expect(api.orchestration.getCurrentState).toHaveBeenCalledTimes(1);
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId,
-      limit: 500,
+      limit: 1000,
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -158,7 +185,7 @@ describe("route thread history hydration", () => {
             messages: [expect.objectContaining({ text: "loaded after navigation" })],
             snapshotCoverage: expect.objectContaining({
               messageCount: 1,
-              messageLimit: 500,
+              messageLimit: null,
             }),
           }),
         ],
@@ -175,6 +202,8 @@ describe("route thread history hydration", () => {
         api,
         threadId,
         thread: makeThread({
+          latestTurn: makeStartedSummaryThread().latestTurn,
+          snapshotCoverage: makeHydratedCoverage(),
           messages: [
             {
               id: MessageId.makeUnsafe("message-existing"),
@@ -192,5 +221,95 @@ describe("route thread history hydration", () => {
 
     expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
     expect(syncServerReadModel).not.toHaveBeenCalled();
+  });
+
+  it("hydrates started threads with summary-only zero-limit coverage", () => {
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          latestTurn: makeStartedSummaryThread().latestTurn,
+          snapshotCoverage: makeSummaryCoverage(),
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("hydrates partial live threads that have messages but no bounded detail coverage", () => {
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          latestTurn: makeStartedSummaryThread().latestTurn,
+          messages: [
+            {
+              id: MessageId.makeUnsafe("message-live"),
+              role: "assistant",
+              text: "live only",
+              turnId: TurnId.makeUnsafe("turn-1"),
+              streaming: false,
+              createdAt: "2026-04-14T00:00:02.000Z",
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("hydrates started threads when either messages or activities only have summary coverage", () => {
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          latestTurn: makeStartedSummaryThread().latestTurn,
+          snapshotCoverage: {
+            ...makeSummaryCoverage(),
+            messageLimit: null,
+            activityLimit: 0,
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          latestTurn: makeStartedSummaryThread().latestTurn,
+          snapshotCoverage: {
+            ...makeSummaryCoverage(),
+            messageLimit: 0,
+            activityLimit: null,
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("skips started threads after both message and activity coverage are fully hydrated", () => {
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          latestTurn: makeStartedSummaryThread().latestTurn,
+          snapshotCoverage: {
+            ...makeSummaryCoverage(),
+            messageLimit: null,
+            activityLimit: null,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("hydrates session-only started threads without waiting for messages first", () => {
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          session: {
+            provider: "codex",
+            status: "ready",
+            createdAt: "2026-04-14T00:00:00.000Z",
+            updatedAt: "2026-04-14T00:00:01.000Z",
+            orchestrationStatus: "idle",
+          },
+        }),
+      ),
+    ).toBe(true);
   });
 });

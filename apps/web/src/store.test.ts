@@ -1587,6 +1587,210 @@ describe("incremental orchestration updates", () => {
     expect(next.threads[1]).toBe(thread2);
   });
 
+  it("preserves fully hydrated message history when live messages append", () => {
+    const existingMessages = Array.from({ length: 2_000 }, (_, index) => ({
+      id: MessageId.makeUnsafe(`message-${index}`),
+      role: "assistant" as const,
+      text: `message ${index}`,
+      turnId: TurnId.makeUnsafe("turn-1"),
+      createdAt: `2026-02-27T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+      completedAt: `2026-02-27T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+      streaming: false,
+    }));
+    const state = makeState(
+      makeThread({
+        messages: existingMessages,
+        snapshotCoverage: {
+          messageCount: existingMessages.length,
+          messageLimit: null,
+          messagesTruncated: false,
+          proposedPlanCount: 0,
+          proposedPlanLimit: 0,
+          proposedPlansTruncated: false,
+          activityCount: 0,
+          activityLimit: null,
+          activitiesTruncated: false,
+          checkpointCount: 0,
+          checkpointLimit: 0,
+          checkpointsTruncated: false,
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("message-live"),
+        role: "assistant",
+        text: "live update",
+        turnId: TurnId.makeUnsafe("turn-2"),
+        streaming: false,
+        createdAt: "2026-02-27T00:01:00.000Z",
+        updatedAt: "2026-02-27T00:01:00.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.messages).toHaveLength(2_001);
+    expect(next.threads[0]?.messages[0]?.id).toBe(MessageId.makeUnsafe("message-0"));
+    expect(next.threads[0]?.messages.at(-1)?.id).toBe(MessageId.makeUnsafe("message-live"));
+  });
+
+  it("keeps capping partially hydrated message history during live appends", () => {
+    const existingMessages = Array.from({ length: 2_000 }, (_, index) => ({
+      id: MessageId.makeUnsafe(`message-${index}`),
+      role: "assistant" as const,
+      text: `message ${index}`,
+      turnId: TurnId.makeUnsafe("turn-1"),
+      createdAt: `2026-02-27T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+      completedAt: `2026-02-27T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+      streaming: false,
+    }));
+    const state = makeState(
+      makeThread({
+        messages: existingMessages,
+        snapshotCoverage: {
+          messageCount: existingMessages.length,
+          messageLimit: 2_000,
+          messagesTruncated: true,
+          proposedPlanCount: 0,
+          proposedPlanLimit: 0,
+          proposedPlansTruncated: false,
+          activityCount: 0,
+          activityLimit: 0,
+          activitiesTruncated: false,
+          checkpointCount: 0,
+          checkpointLimit: 0,
+          checkpointsTruncated: false,
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("message-live"),
+        role: "assistant",
+        text: "live update",
+        turnId: TurnId.makeUnsafe("turn-2"),
+        streaming: false,
+        createdAt: "2026-02-27T00:01:00.000Z",
+        updatedAt: "2026-02-27T00:01:00.000Z",
+      }),
+    );
+
+    expect(next.threads[0]?.messages).toHaveLength(2_000);
+    expect(next.threads[0]?.messages[0]?.id).toBe(MessageId.makeUnsafe("message-1"));
+    expect(next.threads[0]?.messages.at(-1)?.id).toBe(MessageId.makeUnsafe("message-live"));
+  });
+
+  it("preserves fully hydrated activity history when live activities append", () => {
+    const existingActivities = Array.from({ length: 500 }, (_, index) => ({
+      id: EventId.makeUnsafe(`activity-${index}`),
+      tone: "tool" as const,
+      kind: "tool.completed",
+      summary: `activity ${index}`,
+      payload: {},
+      turnId: TurnId.makeUnsafe("turn-1"),
+      sequence: index,
+      createdAt: `2026-02-27T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+    }));
+    const state = makeState(
+      makeThread({
+        activities: existingActivities,
+        snapshotCoverage: {
+          messageCount: 0,
+          messageLimit: null,
+          messagesTruncated: false,
+          proposedPlanCount: 0,
+          proposedPlanLimit: 0,
+          proposedPlansTruncated: false,
+          activityCount: existingActivities.length,
+          activityLimit: null,
+          activitiesTruncated: false,
+          checkpointCount: 0,
+          checkpointLimit: 0,
+          checkpointsTruncated: false,
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.activity-appended", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        activity: {
+          id: EventId.makeUnsafe("activity-live"),
+          kind: "tool.completed",
+          summary: "live activity",
+          tone: "tool",
+          payload: {},
+          turnId: TurnId.makeUnsafe("turn-2"),
+          sequence: 501,
+          createdAt: "2026-02-27T00:01:00.000Z",
+        },
+      }),
+    );
+
+    expect(next.threads[0]?.activities).toHaveLength(501);
+    expect(next.threads[0]?.activities[0]?.id).toBe(EventId.makeUnsafe("activity-0"));
+    expect(next.threads[0]?.activities.at(-1)?.id).toBe(EventId.makeUnsafe("activity-live"));
+  });
+
+  it("keeps capping partially hydrated activity history during live appends", () => {
+    const existingActivities = Array.from({ length: 500 }, (_, index) => ({
+      id: EventId.makeUnsafe(`activity-${index}`),
+      tone: "tool" as const,
+      kind: "tool.completed",
+      summary: `activity ${index}`,
+      payload: {},
+      turnId: TurnId.makeUnsafe("turn-1"),
+      sequence: index,
+      createdAt: `2026-02-27T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+    }));
+    const state = makeState(
+      makeThread({
+        activities: existingActivities,
+        snapshotCoverage: {
+          messageCount: 0,
+          messageLimit: 0,
+          messagesTruncated: false,
+          proposedPlanCount: 0,
+          proposedPlanLimit: 0,
+          proposedPlansTruncated: false,
+          activityCount: existingActivities.length,
+          activityLimit: 500,
+          activitiesTruncated: true,
+          checkpointCount: 0,
+          checkpointLimit: 0,
+          checkpointsTruncated: false,
+        },
+      }),
+    );
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.activity-appended", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        activity: {
+          id: EventId.makeUnsafe("activity-live"),
+          kind: "tool.completed",
+          summary: "live activity",
+          tone: "tool",
+          payload: {},
+          turnId: TurnId.makeUnsafe("turn-2"),
+          sequence: 501,
+          createdAt: "2026-02-27T00:01:00.000Z",
+        },
+      }),
+    );
+
+    expect(next.threads[0]?.activities).toHaveLength(500);
+    expect(next.threads[0]?.activities[0]?.id).toBe(EventId.makeUnsafe("activity-1"));
+    expect(next.threads[0]?.activities.at(-1)?.id).toBe(EventId.makeUnsafe("activity-live"));
+  });
+
   it("applies replay batches in sequence and updates session state", () => {
     const thread = makeThread({
       latestTurn: {

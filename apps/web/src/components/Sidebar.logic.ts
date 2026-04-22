@@ -524,18 +524,18 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "running") {
+  if (thread.session?.status === "connecting") {
     return {
-      label: "Working",
+      label: "Connecting",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
     };
   }
 
-  if (thread.session?.status === "connecting") {
+  if (isThreadRuntimeActive(thread)) {
     return {
-      label: "Connecting",
+      label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
@@ -595,8 +595,29 @@ export function resolveProjectStatusIndicator(
   return highestPriorityStatus;
 }
 
-export function isThreadActiveForFold(thread: Pick<Thread, "session">): boolean {
-  return thread.session?.status === "running" || thread.session?.status === "connecting";
+export function isThreadRuntimeActive(thread: Pick<Thread, "session" | "latestTurn">): boolean {
+  const sessionStatus = thread.session?.status;
+  const hasOpenActiveTurn =
+    thread.session?.activeTurnId !== undefined &&
+    sessionStatus !== undefined &&
+    sessionStatus !== "closed" &&
+    sessionStatus !== "error" &&
+    sessionStatus !== "disconnected";
+  return (
+    sessionStatus === "running" ||
+    sessionStatus === "connecting" ||
+    hasOpenActiveTurn ||
+    thread.latestTurn?.state === "running"
+  );
+}
+
+export function isThreadActiveForFold(
+  thread: Pick<Thread, "session"> & Partial<Pick<Thread, "latestTurn">>,
+): boolean {
+  return isThreadRuntimeActive({
+    session: thread.session,
+    latestTurn: thread.latestTurn ?? null,
+  });
 }
 
 export function filterThreadsByLabels<T extends Pick<Thread, "labels">>(

@@ -41,6 +41,7 @@ import {
   ProgramNotificationId,
   ProjectId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -844,6 +845,81 @@ describe("resolveThreadStatusPill", () => {
         hasPendingUserInput: false,
       }),
     ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows working when the latest turn is running even if the session is ready", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          latestTurn: {
+            ...makeLatestTurn({ completedAt: null }),
+            state: "running",
+          },
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows working when a session has an active turn id", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            activeTurnId: TurnId.makeUnsafe("turn-active"),
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("keeps the connecting label when a connecting session also has an active turn", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "connecting",
+            orchestrationStatus: "starting",
+            activeTurnId: TurnId.makeUnsafe("turn-active"),
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toMatchObject({ label: "Connecting", pulse: true });
+  });
+
+  it("does not show working for stale active turn ids on closed sessions", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "closed",
+            orchestrationStatus: "stopped",
+            activeTurnId: TurnId.makeUnsafe("turn-stale"),
+          },
+        },
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      }),
+    ).toBeNull();
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {

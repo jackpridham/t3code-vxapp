@@ -609,6 +609,29 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["turn-2"]);
   });
 
+  it("keeps tool calls from older turns when no turn filter is provided", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "turn-1-tool",
+        turnId: "turn-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        summary: "Older tool",
+        kind: "tool.completed",
+      }),
+      makeActivity({
+        id: "turn-2-tool",
+        turnId: "turn-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        summary: "Latest tool",
+        kind: "tool.completed",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries.map((entry) => entry.id)).toEqual(["turn-1-tool", "turn-2-tool"]);
+  });
+
   it("omits checkpoint captured info entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

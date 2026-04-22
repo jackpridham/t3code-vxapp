@@ -176,6 +176,8 @@ export function SidebarThreadRow({
   children,
 }: SidebarThreadRowProps) {
   const isHighlighted = isActive || isSelected;
+  const hasActiveRuntimeStatus =
+    threadStatus?.label === "Working" || threadStatus?.label === "Connecting";
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
     : !isThreadRunning
@@ -203,6 +205,12 @@ export function SidebarThreadRow({
         onKeyDown={onKeyDown}
         onContextMenu={onContextMenu}
       >
+        {hasActiveRuntimeStatus ? (
+          <span
+            aria-hidden="true"
+            className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-sky-500/80 shadow-[0_0_10px_color-mix(in_srgb,var(--color-sky-500)_55%,transparent)] animate-pulse"
+          />
+        ) : null}
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
           {prStatus && (
             <Tooltip>

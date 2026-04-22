@@ -186,14 +186,16 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
 }
 
 export function threadHasHydratedHistory(thread: Thread | null | undefined): boolean {
-  return Boolean(
-    thread &&
-    (thread.snapshotCoverage !== undefined ||
-      thread.messages.length > 0 ||
-      thread.activities.length > 0 ||
-      thread.proposedPlans.length > 0 ||
-      thread.turnDiffSummaries.length > 0),
-  );
+  if (!thread) {
+    return false;
+  }
+  const coverage = thread.snapshotCoverage;
+  if (coverage === undefined) {
+    return false;
+  }
+  const hasMessageDetail = coverage.messageLimit === null || coverage.messageLimit > 0;
+  const hasActivityDetail = coverage.activityLimit === null || coverage.activityLimit > 0;
+  return hasMessageDetail && hasActivityDetail;
 }
 
 export function threadIsHydratingHistory(thread: Thread | null | undefined): boolean {

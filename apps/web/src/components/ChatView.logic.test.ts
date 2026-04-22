@@ -378,6 +378,99 @@ describe("thread history helpers", () => {
     expect(threadIsHydratingHistory(thread)).toBe(false);
   });
 
+  it("does not treat zero-limit summary coverage as hydrated history", () => {
+    const thread = {
+      ...makeThread({
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-summary"),
+          state: "completed",
+          requestedAt: "2026-03-29T00:00:01.000Z",
+          startedAt: "2026-03-29T00:00:01.000Z",
+          completedAt: "2026-03-29T00:00:05.000Z",
+        },
+      }),
+      snapshotCoverage: {
+        messageCount: 0,
+        messageLimit: 0,
+        messagesTruncated: false,
+        proposedPlanCount: 0,
+        proposedPlanLimit: 0,
+        proposedPlansTruncated: false,
+        activityCount: 0,
+        activityLimit: 0,
+        activitiesTruncated: false,
+        checkpointCount: 0,
+        checkpointLimit: 0,
+        checkpointsTruncated: false,
+      },
+    };
+
+    expect(threadHasHydratedHistory(thread)).toBe(false);
+    expect(threadIsHydratingHistory(thread)).toBe(true);
+  });
+
+  it("treats null message and activity limits as fully hydrated history", () => {
+    const thread = {
+      ...makeThread({
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-hydrated"),
+          state: "completed",
+          requestedAt: "2026-03-29T00:00:01.000Z",
+          startedAt: "2026-03-29T00:00:01.000Z",
+          completedAt: "2026-03-29T00:00:05.000Z",
+        },
+      }),
+      snapshotCoverage: {
+        messageCount: 0,
+        messageLimit: null,
+        messagesTruncated: false,
+        proposedPlanCount: 0,
+        proposedPlanLimit: 0,
+        proposedPlansTruncated: false,
+        activityCount: 0,
+        activityLimit: null,
+        activitiesTruncated: false,
+        checkpointCount: 0,
+        checkpointLimit: 0,
+        checkpointsTruncated: false,
+      },
+    };
+
+    expect(threadHasHydratedHistory(thread)).toBe(true);
+    expect(threadIsHydratingHistory(thread)).toBe(false);
+  });
+
+  it("keeps hydrating until both message and activity detail coverage are present", () => {
+    const thread = {
+      ...makeThread({
+        latestTurn: {
+          turnId: TurnId.makeUnsafe("turn-partial-coverage"),
+          state: "completed",
+          requestedAt: "2026-03-29T00:00:01.000Z",
+          startedAt: "2026-03-29T00:00:01.000Z",
+          completedAt: "2026-03-29T00:00:05.000Z",
+        },
+      }),
+      snapshotCoverage: {
+        messageCount: 3,
+        messageLimit: null,
+        messagesTruncated: false,
+        proposedPlanCount: 0,
+        proposedPlanLimit: 0,
+        proposedPlansTruncated: false,
+        activityCount: 0,
+        activityLimit: 0,
+        activitiesTruncated: false,
+        checkpointCount: 0,
+        checkpointLimit: 0,
+        checkpointsTruncated: false,
+      },
+    };
+
+    expect(threadHasHydratedHistory(thread)).toBe(false);
+    expect(threadIsHydratingHistory(thread)).toBe(true);
+  });
+
   it("marks completed turns as visited when there is no prior visit timestamp", () => {
     expect(
       shouldMarkThreadVisitedForCompletedTurn({

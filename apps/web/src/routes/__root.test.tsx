@@ -238,7 +238,7 @@ describe("bootstrapOrchestrationState", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 500,
+      limit: 1000,
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(1, bootstrapSummary);
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
@@ -292,7 +292,7 @@ describe("bootstrapOrchestrationState", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 500,
+      limit: 1000,
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(1, currentState);
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
@@ -348,7 +348,7 @@ describe("bootstrapOrchestrationState", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: ThreadId.makeUnsafe("thread-root"),
-      limit: 500,
+      limit: 1000,
     });
     expect(syncServerReadModel).toHaveBeenCalledTimes(1);
     expect(syncServerReadModel).toHaveBeenCalledWith(bootstrapSummary);
@@ -400,11 +400,11 @@ describe("bootstrapOrchestrationState", () => {
     });
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: routeThreadId,
-      limit: 500,
+      limit: 1000,
     });
     expect(threadDetailApi.listThreadMessages).not.toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 500,
+      limit: 1000,
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
       2,

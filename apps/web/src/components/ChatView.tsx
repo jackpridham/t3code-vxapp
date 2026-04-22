@@ -961,10 +961,10 @@ export default function ChatView({
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
     () =>
-      deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined, {
+      deriveWorkLogEntries(threadActivities, undefined, {
         latestTurnSettled,
       }),
-    [activeLatestTurn?.turnId, latestTurnSettled, threadActivities],
+    [latestTurnSettled, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),

@@ -1824,9 +1824,9 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       const orchestratorWakeBadgeCount =
         (wakeSummary?.pendingCount ?? 0) + (wakeSummary?.deliveringCount ?? 0);
       const workerWakeState = wakeSummary?.workerState ?? null;
-      const isThreadRunning =
-        thread.session?.status === "running" && thread.session.activeTurnId != null;
       const threadStatus = threadStatuses.get(thread.id) ?? null;
+      const isThreadRunning =
+        threadStatus?.label === "Working" || threadStatus?.label === "Connecting";
       const prStatus = buildPrStatusIndicator(prByThreadId.get(thread.id) ?? null);
       const terminalStatus = buildTerminalStatusIndicator(
         selectThreadTerminalState(terminalStateByThreadId, thread.id).runningTerminalIds,

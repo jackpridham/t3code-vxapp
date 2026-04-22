@@ -239,7 +239,7 @@ describe("reactivateOrchestrationSession", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(listThreadMessages).toHaveBeenCalledWith({
       threadId: targetRoot.id,
-      limit: 500,
+      limit: 1000,
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(snapshot);
     expect(invalidateQueries).toHaveBeenCalled();
@@ -344,7 +344,7 @@ describe("createNewOrchestrationSession", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(listThreadMessages).toHaveBeenCalledWith({
       threadId: newThreadId,
-      limit: 500,
+      limit: 1000,
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(snapshot);
     expect(invalidateQueries).toHaveBeenCalled();
