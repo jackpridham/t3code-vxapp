@@ -541,10 +541,14 @@ const make = Effect.gen(function* () {
     readonly commandTag: string;
   }) {
     const readModel = yield* orchestrationEngine.getReadModel();
+    const findActiveThread = (threadId: ThreadId) =>
+      readModel.threads.find(
+        (entry) => entry.id === threadId && entry.archivedAt === null && entry.deletedAt === null,
+      )?.id;
     const aggregateThreadId =
-      readModel.threads.find((entry) => entry.id === input.preferredThreadId)?.id ??
-      readModel.threads.find((entry) => entry.id === input.wakeItem.orchestratorThreadId)?.id ??
-      readModel.threads.find((entry) => entry.id === input.wakeItem.workerThreadId)?.id;
+      findActiveThread(input.preferredThreadId) ??
+      findActiveThread(input.wakeItem.orchestratorThreadId) ??
+      findActiveThread(input.wakeItem.workerThreadId);
     if (!aggregateThreadId) {
       yield* Effect.logWarning("orchestrator wake upsert skipped because no anchor thread exists", {
         wakeId: input.wakeItem.wakeId,

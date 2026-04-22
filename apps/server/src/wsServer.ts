@@ -84,7 +84,7 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
-import { VortexApps } from "./vortexApps/Services/VortexApps.ts";
+import { makeVxappWsRouteHandlers, type VxappWsRouteHandlerServices } from "./extensions/vxapp";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -189,7 +189,7 @@ export type ServerRuntimeServices =
   | WorkspaceFileSystem
   | WorkspacePaths
   | ProjectHooksService
-  | VortexApps
+  | VxappWsRouteHandlerServices
   | Open
   | AnalyticsService;
 
@@ -305,7 +305,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const workspaceFileSystem = yield* WorkspaceFileSystem;
   const workspacePaths = yield* WorkspacePaths;
   const projectHooksService = yield* ProjectHooksService;
-  const vortexApps = yield* VortexApps;
+  const vxappWsRouteHandlers = yield* makeVxappWsRouteHandlers;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -801,6 +801,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
 
   const routeRequest = Effect.fnUntraced(function* (ws: WebSocket, request: WebSocketRequest) {
+    const vxappRouteHandler = vxappWsRouteHandlers.get(request.body._tag);
+    if (vxappRouteHandler) {
+      return yield* vxappRouteHandler.handle(request);
+    }
+
     switch (request.body._tag) {
       case ORCHESTRATION_WS_METHODS.getBootstrapSummary:
         return yield* projectionBootstrapSummaryQuery.getBootstrapSummary();
@@ -842,11 +847,6 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case ORCHESTRATION_WS_METHODS.listThreadSessions: {
         const body = stripRequestTag(request.body);
         return yield* projectionOperationalQuery.listThreadSessions(body);
-      }
-
-      case ORCHESTRATION_WS_METHODS.listOrchestratorWakes: {
-        const body = stripRequestTag(request.body);
-        return yield* projectionOperationalQuery.listOrchestratorWakes(body);
       }
 
       case ORCHESTRATION_WS_METHODS.getSnapshot: {
@@ -1065,19 +1065,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* serverSettingsManager.updateSettings(body.patch);
       }
 
-      case WS_METHODS.serverListVortexApps: {
-        return yield* vortexApps.listApps;
-      }
-
-      case WS_METHODS.serverListVortexAppArtifacts: {
-        const body = stripRequestTag(request.body);
-        return yield* vortexApps.listAppArtifacts(body);
-      }
-
       default: {
-        const _exhaustiveCheck: never = request.body;
         return yield* new RouteRequestError({
-          message: `Unknown method: ${String(_exhaustiveCheck)}`,
+          message: `Unknown method: ${String(request.body._tag)}`,
         });
       }
     }

@@ -6,11 +6,15 @@
  * on Zustand stores and the TanStack Router and is covered by integration tests.
  */
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ComponentType } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { ArtifactContentProps } from "./ArtifactPanel";
+
+let ArtifactContent: ComponentType<ArtifactContentProps>;
 
 // ── Environment stubs ─────────────────────────────────────────────────────────
 
-beforeAll(() => {
+beforeAll(async () => {
   const classList = {
     add: () => {},
     remove: () => {},
@@ -41,21 +45,21 @@ beforeAll(() => {
     cb(0);
     return 0;
   });
-});
+
+  ArtifactContent = (await import("./ArtifactPanel")).ArtifactContent;
+}, 15_000);
 
 // ── ArtifactContent rendering ─────────────────────────────────────────────────
 
 describe("ArtifactContent", () => {
-  it("renders the idle prompt when status is idle", async () => {
-    const { ArtifactContent } = await import("./ArtifactPanel");
+  it("renders the idle prompt when status is idle", () => {
     const markup = renderToStaticMarkup(
       <ArtifactContent state={{ status: "idle" }} cwd={undefined} />,
     );
     expect(markup).toContain("Select an artifact");
   });
 
-  it("renders loading skeletons when status is loading", async () => {
-    const { ArtifactContent } = await import("./ArtifactPanel");
+  it("renders loading skeletons when status is loading", () => {
     const markup = renderToStaticMarkup(
       <ArtifactContent state={{ status: "loading" }} cwd={undefined} />,
     );
@@ -63,8 +67,7 @@ describe("ArtifactContent", () => {
     expect(markup).toMatch(/Loading artifact/i);
   });
 
-  it("renders the error message when status is error", async () => {
-    const { ArtifactContent } = await import("./ArtifactPanel");
+  it("renders the error message when status is error", () => {
     const markup = renderToStaticMarkup(
       <ArtifactContent
         state={{ status: "error", message: "File not found: report.md" }}
@@ -74,8 +77,7 @@ describe("ArtifactContent", () => {
     expect(markup).toContain("File not found: report.md");
   });
 
-  it("renders the markdown content when status is loaded", async () => {
-    const { ArtifactContent } = await import("./ArtifactPanel");
+  it("renders the markdown content when status is loaded", () => {
     const markup = renderToStaticMarkup(
       <ArtifactContent
         state={{
@@ -91,8 +93,7 @@ describe("ArtifactContent", () => {
     expect(markup).toContain("Hello world");
   });
 
-  it("renders empty content gracefully for loaded state with empty string", async () => {
-    const { ArtifactContent } = await import("./ArtifactPanel");
+  it("renders empty content gracefully for loaded state with empty string", () => {
     const markup = renderToStaticMarkup(
       <ArtifactContent
         state={{ status: "loaded", content: "", path: "/repo/@Docs/@Scratch/myrepo/empty.md" }}

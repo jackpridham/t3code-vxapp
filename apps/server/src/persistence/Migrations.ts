@@ -31,19 +31,7 @@ import Migration0015 from "./Migrations/015_ProjectionTurnsSourceProposedPlan.ts
 import Migration0016 from "./Migrations/016_CanonicalizeModelSelections.ts";
 import Migration0017 from "./Migrations/017_ProjectionThreadsArchivedAt.ts";
 import Migration0018 from "./Migrations/018_ProjectionThreadsArchivedAtIndex.ts";
-import Migration0019 from "./Migrations/019_ProjectionProjectHooks.ts";
-import Migration0020 from "./Migrations/020_ProjectionProjectKind.ts";
-import Migration0021 from "./Migrations/021_ProjectionThreadLabels.ts";
-import Migration0022 from "./Migrations/022_ProjectionThreadLineage.ts";
-import Migration0023 from "./Migrations/023_ProjectionOrchestratorWakes.ts";
-import Migration0024 from "./Migrations/024_ProjectionProjectCurrentSessionRoot.ts";
-import Migration0025 from "./Migrations/025_ProjectionProjectSidebarParent.ts";
-import Migration0026 from "./Migrations/026_ReconcileCompletedWakeTurnStatus.ts";
-import Migration0027 from "./Migrations/027_ProjectionPrograms.ts";
-import Migration0028 from "./Migrations/028_ProjectionSnapshotQueryIndexes.ts";
-import Migration0029 from "./Migrations/029_ProjectionProgramNotifications.ts";
-import Migration0030 from "./Migrations/030_RuntimeTtlCache.ts";
-import Migration0031 from "./Migrations/031_ProjectionCtoAttention.ts";
+import { vxappMigrationEntries } from "../extensions/vxapp/migrations.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -74,19 +62,7 @@ export const migrationEntries = [
   [16, "CanonicalizeModelSelections", Migration0016],
   [17, "ProjectionThreadsArchivedAt", Migration0017],
   [18, "ProjectionThreadsArchivedAtIndex", Migration0018],
-  [19, "ProjectionProjectHooks", Migration0019],
-  [20, "ProjectionProjectKind", Migration0020],
-  [21, "ProjectionThreadLabels", Migration0021],
-  [22, "ProjectionThreadLineage", Migration0022],
-  [23, "ProjectionOrchestratorWakes", Migration0023],
-  [24, "ProjectionProjectCurrentSessionRoot", Migration0024],
-  [25, "ProjectionProjectSidebarParent", Migration0025],
-  [26, "ReconcileCompletedWakeTurnStatus", Migration0026],
-  [27, "ProjectionPrograms", Migration0027],
-  [28, "ProjectionSnapshotQueryIndexes", Migration0028],
-  [29, "ProjectionProgramNotifications", Migration0029],
-  [30, "RuntimeTtlCache", Migration0030],
-  [31, "ProjectionCtoAttention", Migration0031],
+  ...vxappMigrationEntries,
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

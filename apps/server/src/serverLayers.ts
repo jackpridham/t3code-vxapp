@@ -12,7 +12,6 @@ import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./orchestratio
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
-import { OrchestratorWakeReactorLive } from "./orchestration/Layers/OrchestratorWakeReactor";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline";
 import { OrchestrationProjectionOperationalQueryLive } from "./orchestration/Layers/ProjectionOperationalQuery";
@@ -41,8 +40,10 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
-import { ProjectHooksLive } from "./projectHooks/Layers/ProjectHooks.ts";
-import { VortexAppsLive } from "./vortexApps/Layers/VortexApps.ts";
+import {
+  makeVxappOrchestratorWakeReactorLayer,
+  makeVxappRuntimeServicesLayer,
+} from "./extensions/vxapp";
 
 type RuntimePtyAdapterLoader = {
   layer: Layer.Layer<PtyAdapter, never, FileSystem.FileSystem | Path.Path>;
@@ -123,10 +124,8 @@ export function makeServerRuntimeServicesLayer() {
     checkpointDiffQueryLayer,
     RuntimeReceiptBusLive,
   );
-  const runtimeServicesLayer = Layer.mergeAll(
-    runtimeServicesBaseLayer,
-    ProjectHooksLive.pipe(Layer.provideMerge(runtimeServicesBaseLayer)),
-  );
+  const vxappRuntimeServicesLayer = makeVxappRuntimeServicesLayer(runtimeServicesBaseLayer);
+  const runtimeServicesLayer = Layer.mergeAll(runtimeServicesBaseLayer, vxappRuntimeServicesLayer);
   const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
   );
@@ -138,9 +137,7 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(WorkspaceEntriesLive),
   );
-  const orchestratorWakeReactorLayer = OrchestratorWakeReactorLive.pipe(
-    Layer.provideMerge(runtimeServicesLayer),
-  );
+  const orchestratorWakeReactorLayer = makeVxappOrchestratorWakeReactorLayer(runtimeServicesLayer);
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
@@ -169,7 +166,7 @@ export function makeServerRuntimeServicesLayer() {
     workspaceEntriesLayer,
     workspaceFileSystemLayer,
     projectFaviconResolverLayer,
-    VortexAppsLive,
+    vxappRuntimeServicesLayer,
     gitManagerLayer,
     terminalLayer,
     KeybindingsLive,

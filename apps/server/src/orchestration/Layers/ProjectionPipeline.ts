@@ -62,6 +62,7 @@ import {
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
 } from "../../attachmentStore.ts";
+import { getVxappProjectionProjectors } from "../../extensions/vxapp";
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: "projection.projects",
@@ -82,7 +83,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES];
 
-interface ProjectorDefinition {
+export interface ProjectorDefinition {
   readonly name: ProjectorName;
   readonly apply: (
     event: OrchestrationEvent,
@@ -90,7 +91,7 @@ interface ProjectorDefinition {
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
-interface AttachmentSideEffects extends ProjectionAttachmentSideEffects {
+export interface AttachmentSideEffects extends ProjectionAttachmentSideEffects {
   readonly deletedThreadIds: Set<string>;
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
 }
@@ -1663,6 +1664,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
         apply: applyThreadsProjection,
       },
+      ...getVxappProjectionProjectors(),
     ];
 
     const applyProjectorForEvent = Effect.fn("applyProjectorForEvent")(function* (

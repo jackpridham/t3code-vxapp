@@ -32,6 +32,7 @@
         "@effect/language-service": "catalog:",
         "@effect/vitest": "catalog:",
         "@t3tools/contracts": "workspace:*",
+        "@t3tools/orchestration-core": "workspace:*",
         "@t3tools/shared": "workspace:*",
         "@t3tools/web": "workspace:*",
         "@types/bun": "catalog:",
@@ -103,6 +104,22 @@
         "@effect/language-service": "catalog:",
         "@effect/vitest": "catalog:",
         "tsdown": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/orchestration-core": {
+      "name": "@t3tools/orchestration-core",
+      "version": "0.0.0-alpha.1",
+      "dependencies": {
+        "@t3tools/contracts": "workspace:*",
+        "@t3tools/shared": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/language-service": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@types/node": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },
@@ -560,6 +577,8 @@
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
     "@t3tools/contracts": ["@t3tools/contracts@workspace:packages/contracts"],
+
+    "@t3tools/orchestration-core": ["@t3tools/orchestration-core@workspace:packages/orchestration-core"],
 
     "@t3tools/scripts": ["@t3tools/scripts@workspace:scripts"],
 
