@@ -32,6 +32,7 @@ import {
   type CodexAccountSnapshot,
 } from "./provider/codexAccount";
 import { buildCodexInitializeParams, killCodexChildProcess } from "./provider/codexAppServer";
+import { expandHomePath } from "./pathExpansion";
 
 export { buildCodexInitializeParams } from "./provider/codexAppServer";
 export { readCodexAccountSnapshot, resolveCodexModelForAccount } from "./provider/codexAccount";
@@ -297,13 +298,13 @@ In Default mode, strongly prefer making reasonable assumptions and executing the
 </collaboration_mode>`;
 
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
-  readonly approvalPolicy: "on-request" | "never";
-  readonly sandbox: "workspace-write" | "danger-full-access";
+  readonly approvalPolicy: "untrusted" | "never";
+  readonly sandbox: "read-only" | "danger-full-access";
 } {
   if (runtimeMode === "approval-required") {
     return {
-      approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      approvalPolicy: "untrusted",
+      sandbox: "read-only",
     };
   }
 
@@ -475,7 +476,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         cwd: resolvedCwd,
         env: {
           ...process.env,
-          ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
+          ...(codexHomePath ? { CODEX_HOME: expandHomePath(codexHomePath) } : {}),
           VX_T3_CURRENT_THREAD_ID: threadId,
           ...(input.projectId !== undefined ? { VX_T3_CURRENT_PROJECT_ID: input.projectId } : {}),
         },
@@ -1569,7 +1570,7 @@ function assertSupportedCodexCliVersion(input: {
     cwd: input.cwd,
     env: {
       ...process.env,
-      ...(input.homePath ? { CODEX_HOME: input.homePath } : {}),
+      ...(input.homePath ? { CODEX_HOME: expandHomePath(input.homePath) } : {}),
     },
     encoding: "utf8",
     shell: process.platform === "win32",

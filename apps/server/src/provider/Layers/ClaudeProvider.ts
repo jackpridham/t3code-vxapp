@@ -9,7 +9,7 @@ import type {
 import { Cache, Duration, Effect, Equal, Layer, Option, Result, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
-import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
+import { query as claudeQuery, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import {
   buildServerProvider,
@@ -393,13 +393,22 @@ const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
+function waitForAbortSignal(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 /**
  * Probe account information by spawning a lightweight Claude Agent SDK
  * session and reading the initialization result.
  *
- * The prompt is never sent to the Anthropic API — we abort immediately
- * after the local initialization phase completes. This gives us the
- * user's subscription type without incurring any token cost.
+ * Use a never-yielding prompt stream so the Claude subprocess completes
+ * local initialization without receiving a user prompt or starting an API
+ * request. Once initialization data is available, the subprocess is aborted.
  *
  * This is used as a fallback when `claude auth status` does not include
  * subscription type information.
@@ -408,12 +417,14 @@ const probeClaudeCapabilities = (binaryPath: string) => {
   const abort = new AbortController();
   return Effect.tryPromise(async () => {
     const q = claudeQuery({
-      prompt: ".",
+      // oxlint-disable-next-line require-yield
+      prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+        await waitForAbortSignal(abort.signal);
+      })(),
       options: {
         persistSession: false,
         pathToClaudeCodeExecutable: binaryPath,
         abortController: abort,
-        maxTurns: 0,
         settingSources: [],
         allowedTools: [],
         stderr: () => {},

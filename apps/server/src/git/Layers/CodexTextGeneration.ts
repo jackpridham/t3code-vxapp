@@ -8,6 +8,7 @@ import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shar
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { TextGenerationError } from "../Errors.ts";
 import {
   type BranchNameGenerationInput,
@@ -185,7 +186,9 @@ const makeCodexTextGeneration = Effect.gen(function* () {
           {
             env: {
               ...process.env,
-              ...(codexSettings?.homePath ? { CODEX_HOME: codexSettings.homePath } : {}),
+              ...(codexSettings?.homePath
+                ? { CODEX_HOME: expandHomePath(codexSettings.homePath) }
+                : {}),
             },
             cwd,
             shell: process.platform === "win32",

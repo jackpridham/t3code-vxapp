@@ -40,6 +40,12 @@ const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
+const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.untrackedCache=false",
+] as const;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(2);
 const STATUS_UPSTREAM_REFRESH_FAILURE_INTERVAL = Duration.minutes(10);
@@ -306,6 +312,16 @@ function createGitCommandError(
 
 function quoteGitCommand(args: ReadonlyArray<string>): string {
   return `git ${args.join(" ")}`;
+}
+
+function isMissingGitCwdError(error: GitCommandError): boolean {
+  const normalized = `${error.detail}\n${error.message}`.toLowerCase();
+  return (
+    normalized.includes("no such file or directory") ||
+    normalized.includes("notfound: filesystem.access") ||
+    normalized.includes("enoent") ||
+    normalized.includes("not a directory")
+  );
 }
 
 function normalizeComparablePath(path: string): string {
@@ -1120,18 +1136,44 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     // Opportunistically refresh upstream refs, but cap the work tightly so
     // slow remotes cannot hold WebSocket-facing status requests hostage.
     yield* refreshStatusUpstreamIfStale(cwd).pipe(
+      Effect.catchIf(isMissingGitCwdError, () => Effect.void),
       Effect.timeoutOption(500),
       Effect.ignoreCause({ log: true }),
     );
 
-    const [statusStdout, unstagedNumstatStdout, stagedNumstatStdout] = yield* Effect.all(
-      [
-        runGitStdout("GitCore.statusDetails.status", cwd, ["status", "--porcelain=2", "--branch"]),
-        runGitStdout("GitCore.statusDetails.unstagedNumstat", cwd, ["diff", "--numstat"]),
-        runGitStdout("GitCore.statusDetails.stagedNumstat", cwd, ["diff", "--cached", "--numstat"]),
-      ],
+    const statusResult = yield* Effect.all(
+      {
+        statusStdout: runGitStdout("GitCore.statusDetails.status", cwd, [
+          "status",
+          "--porcelain=2",
+          "--branch",
+        ]),
+        unstagedNumstatStdout: runGitStdout("GitCore.statusDetails.unstagedNumstat", cwd, [
+          "diff",
+          "--numstat",
+        ]),
+        stagedNumstatStdout: runGitStdout("GitCore.statusDetails.stagedNumstat", cwd, [
+          "diff",
+          "--cached",
+          "--numstat",
+        ]),
+      },
       { concurrency: "unbounded" },
-    );
+    ).pipe(Effect.catchIf(isMissingGitCwdError, () => Effect.succeed(null)));
+
+    if (statusResult === null) {
+      return {
+        branch: null,
+        upstreamRef: null,
+        hasWorkingTreeChanges: false,
+        workingTree: { files: [], insertions: 0, deletions: 0 },
+        hasUpstream: false,
+        aheadCount: 0,
+        behindCount: 0,
+      };
+    }
+
+    const { statusStdout, unstagedNumstatStdout, stagedNumstatStdout } = statusResult;
 
     let branch: string | null = null;
     let upstreamRef: string | null = null;
@@ -1506,8 +1548,22 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
 
   const listWorkspaceFiles: GitCoreShape["listWorkspaceFiles"] = (cwd, options) => {
     const includeIgnored = options?.includeIgnored ?? false;
-    const baseArgs = ["ls-files", "--cached", "--others", "--exclude-standard", "-z"] as const;
-    const ignoredArgs = ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"] as const;
+    const baseArgs = [
+      ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      "-z",
+    ] as const;
+    const ignoredArgs = [
+      ...WORKSPACE_GIT_HARDENED_CONFIG_ARGS,
+      "ls-files",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+      "-z",
+    ] as const;
 
     const runListWorkspaceFiles = (args: ReadonlyArray<string>) =>
       executeGit("GitCore.listWorkspaceFiles", cwd, args, {
@@ -1558,7 +1614,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         const result = yield* executeGit(
           "GitCore.filterIgnoredPaths",
           cwd,
-          ["check-ignore", "--no-index", "-z", "--stdin"],
+          [...WORKSPACE_GIT_HARDENED_CONFIG_ARGS, "check-ignore", "--no-index", "-z", "--stdin"],
           {
             stdin: `${chunk.join("\0")}\0`,
             allowNonZeroExit: true,
@@ -1572,7 +1628,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
           return yield* createGitCommandError(
             "GitCore.filterIgnoredPaths",
             cwd,
-            ["check-ignore", "--no-index", "-z", "--stdin"],
+            [...WORKSPACE_GIT_HARDENED_CONFIG_ARGS, "check-ignore", "--no-index", "-z", "--stdin"],
             result.stderr.trim().length > 0 ? result.stderr.trim() : "git check-ignore failed",
           );
         }
@@ -1596,11 +1652,21 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     const localBranchResult = yield* executeGit(
       "GitCore.listBranches.branchNoColor",
       input.cwd,
-      ["branch", "--no-color"],
+      ["branch", "--no-color", "--no-column"],
       {
         timeoutMs: 10_000,
         allowNonZeroExit: true,
       },
+    ).pipe(
+      Effect.catchIf(isMissingGitCwdError, () =>
+        Effect.succeed({
+          code: 128,
+          stdout: "",
+          stderr: "fatal: not a git repository",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        }),
+      ),
     );
 
     if (localBranchResult.code !== 0) {
@@ -1611,7 +1677,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       return yield* createGitCommandError(
         "GitCore.listBranches",
         input.cwd,
-        ["branch", "--no-color"],
+        ["branch", "--no-color", "--no-column"],
         stderr || "git branch failed",
       );
     }
@@ -1619,7 +1685,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     const remoteBranchResultEffect = executeGit(
       "GitCore.listBranches.remoteBranches",
       input.cwd,
-      ["branch", "--no-color", "--remotes"],
+      ["branch", "--no-color", "--no-column", "--remotes"],
       {
         timeoutMs: 10_000,
         allowNonZeroExit: true,
@@ -2056,6 +2122,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     runGitStdout("GitCore.listLocalBranchNames", cwd, [
       "branch",
       "--list",
+      "--no-column",
       "--format=%(refname:short)",
     ]).pipe(
       Effect.map((stdout) =>

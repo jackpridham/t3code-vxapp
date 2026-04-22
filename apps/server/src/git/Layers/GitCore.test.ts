@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -202,7 +202,10 @@ it.layer(TestLayer)("git integration", (it) => {
 
         const seenChunks: string[][] = [];
         const core = yield* makeIsolatedGitCore((input) => {
-          if (input.args.join(" ") !== "check-ignore --no-index -z --stdin") {
+          if (
+            input.args.join(" ") !==
+            "-c core.fsmonitor=false -c core.untrackedCache=false check-ignore --no-index -z --stdin"
+          ) {
             return Effect.fail(
               new GitCommandError({
                 operation: input.operation,
@@ -235,6 +238,35 @@ it.layer(TestLayer)("git integration", (it) => {
         expect(result).toEqual(expectedPaths);
       }),
     );
+
+    it.effect("listWorkspaceFiles disables fsmonitor and untracked cache helpers", () =>
+      Effect.gen(function* () {
+        const core = yield* makeIsolatedGitCore((input) => {
+          expect(input.args).toEqual([
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+          ]);
+          return Effect.succeed({
+            code: 0,
+            stdout: "src/index.ts\0README.md\0",
+            stderr: "",
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          });
+        });
+
+        const result = yield* core.listWorkspaceFiles("/virtual/repo");
+        expect(result.paths).toEqual(["src/index.ts", "README.md"]);
+        expect(result.truncated).toBe(false);
+      }),
+    );
   });
 
   // ── listGitBranches ──
@@ -243,6 +275,22 @@ it.layer(TestLayer)("git integration", (it) => {
     it.effect("returns isRepo: false for non-git directory", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
+        const result = yield* (yield* GitCore).listBranches({ cwd: tmp });
+        expect(result.isRepo).toBe(false);
+        expect(result.hasOriginRemote).toBe(false);
+        expect(result.branches).toEqual([]);
+      }),
+    );
+
+    it.effect("returns isRepo: false when the cwd has been deleted", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTmpDir();
+        const tmp = path.join(root, "deleted-repo");
+        const fileSystem = yield* FileSystem.FileSystem;
+        yield* fileSystem.makeDirectory(tmp);
+        yield* initRepoWithCommit(tmp);
+        rmSync(tmp, { recursive: true, force: true });
+
         const result = yield* (yield* GitCore).listBranches({ cwd: tmp });
         expect(result.isRepo).toBe(false);
         expect(result.hasOriginRemote).toBe(false);
@@ -366,6 +414,64 @@ it.layer(TestLayer)("git integration", (it) => {
         const names = result.branches.map((b) => b.name);
         expect(names).toContain("feature-a");
         expect(names).toContain("feature-b");
+      }),
+    );
+
+    it.effect("parses separate branch names when column.ui is always enabled", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(tmp);
+        const createdBranchNames = [
+          "go-bin",
+          "copilot/rewrite-cli-in-go",
+          "copilot/rewrite-cli-in-rust",
+        ] as const;
+        for (const branchName of createdBranchNames) {
+          yield* (yield* GitCore).createBranch({ cwd: tmp, branch: branchName });
+        }
+        yield* git(tmp, ["config", "column.ui", "always"]);
+
+        const rawBranchOutput = yield* git(tmp, ["branch", "--no-color"], {
+          ...process.env,
+          COLUMNS: "120",
+        });
+        expect(
+          rawBranchOutput
+            .split("\n")
+            .some(
+              (line) =>
+                createdBranchNames.filter((branchName) => line.includes(branchName)).length >= 2,
+            ),
+        ).toBe(true);
+
+        const realGitCore = yield* GitCore;
+        const core = yield* makeIsolatedGitCore((input) =>
+          realGitCore.execute(
+            input.args[0] === "branch"
+              ? {
+                  ...input,
+                  env: { ...input.env, COLUMNS: "120" },
+                }
+              : input,
+          ),
+        );
+
+        const result = yield* core.listBranches({ cwd: tmp });
+        const localBranchNames = result.branches
+          .filter((branch) => !branch.isRemote)
+          .map((branch) => branch.name);
+
+        expect(localBranchNames).toHaveLength(4);
+        expect(localBranchNames).toEqual(
+          expect.arrayContaining([initialBranch, ...createdBranchNames]),
+        );
+        expect(
+          localBranchNames.some(
+            (branchName) =>
+              createdBranchNames.filter((createdBranch) => branchName.includes(createdBranch))
+                .length >= 2,
+          ),
+        ).toBe(false);
       }),
     );
 
@@ -1357,6 +1463,28 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
+    it.effect("treats deleted cwd status as a clean non-repository snapshot", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTmpDir();
+        const tmp = path.join(root, "deleted-repo");
+        const fileSystem = yield* FileSystem.FileSystem;
+        yield* fileSystem.makeDirectory(tmp);
+        yield* initRepoWithCommit(tmp);
+        rmSync(tmp, { recursive: true, force: true });
+
+        const details = yield* (yield* GitCore).statusDetails(tmp);
+        expect(details).toEqual({
+          branch: null,
+          upstreamRef: null,
+          hasWorkingTreeChanges: false,
+          workingTree: { files: [], insertions: 0, deletions: 0 },
+          hasUpstream: false,
+          aheadCount: 0,
+          behindCount: 0,
+        });
+      }),
+    );
+
     it.effect("computes ahead count against base branch when no upstream is configured", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
@@ -1898,7 +2026,7 @@ it.layer(TestLayer)("git integration", (it) => {
         let didFailRemoteBranches = false;
         let didFailRemoteNames = false;
         const core = yield* makeIsolatedGitCore((input) => {
-          if (input.args.join(" ") === "branch --no-color --remotes") {
+          if (input.args.join(" ") === "branch --no-color --no-column --remotes") {
             didFailRemoteBranches = true;
             return Effect.fail(
               new GitCommandError({

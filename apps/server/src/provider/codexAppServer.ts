@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 import { readCodexAccountSnapshot, type CodexAccountSnapshot } from "./codexAccount";
+import { expandHomePath } from "../pathExpansion";
 
 interface JsonRpcProbeResponse {
   readonly id?: unknown;
@@ -49,7 +50,7 @@ export async function probeCodexAccount(input: {
     const child = spawn(input.binaryPath, ["app-server"], {
       env: {
         ...process.env,
-        ...(input.homePath ? { CODEX_HOME: input.homePath } : {}),
+        ...(input.homePath ? { CODEX_HOME: expandHomePath(input.homePath) } : {}),
       },
       stdio: ["pipe", "pipe", "pipe"],
       shell: process.platform === "win32",

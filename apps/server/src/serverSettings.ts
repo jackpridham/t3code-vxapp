@@ -91,7 +91,7 @@ export class ServerSettingsService extends ServiceMap.Service<
           getSettings: Ref.get(currentSettingsRef),
           updateSettings: (patch) =>
             Ref.get(currentSettingsRef).pipe(
-              Effect.map((currentSettings) => deepMerge(currentSettings, patch)),
+              Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
               Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
             ),
           streamChanges: Stream.empty,
@@ -129,6 +129,27 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback],
     } as ModelSelection,
   };
+}
+
+function applyServerSettingsPatch(
+  currentSettings: ServerSettings,
+  patch: ServerSettingsPatch,
+): ServerSettings {
+  const nextSettings = deepMerge(currentSettings, patch);
+  const selectionPatch = patch.textGenerationModelSelection;
+  if (
+    selectionPatch !== undefined &&
+    selectionPatch.options === undefined &&
+    (selectionPatch.provider !== undefined || selectionPatch.model !== undefined)
+  ) {
+    const { options: _staleOptions, ...selectionWithoutStaleOptions } =
+      nextSettings.textGenerationModelSelection;
+    return {
+      ...nextSettings,
+      textGenerationModelSelection: selectionWithoutStaleOptions,
+    };
+  }
+  return nextSettings;
 }
 
 // Values under these keys are compared as a whole — never stripped field-by-field.
@@ -324,7 +345,9 @@ const makeServerSettings = Effect.gen(function* () {
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const next = yield* Schema.decodeEffect(ServerSettings)(deepMerge(current, patch)).pipe(
+          const next = yield* Schema.decodeEffect(ServerSettings)(
+            applyServerSettingsPatch(current, patch),
+          ).pipe(
             Effect.mapError(
               (cause) =>
                 new ServerSettingsError({

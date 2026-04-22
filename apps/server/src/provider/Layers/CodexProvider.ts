@@ -46,6 +46,7 @@ import {
 } from "../codexAccount";
 import { probeCodexAccount } from "../codexAppServer";
 import { CodexProvider } from "../Services/CodexProvider";
+import { expandHomePath } from "../../pathExpansion";
 import { ServerSettingsError, ServerSettingsService } from "../../serverSettings";
 
 const PROVIDER = "codex" as const;
@@ -260,7 +261,7 @@ export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvi
         path.join(OS.homedir(), ".codex"),
     ),
   );
-  const configPath = path.join(codexHome, "config.toml");
+  const configPath = path.join(expandHomePath(codexHome), "config.toml");
 
   const content = yield* fileSystem
     .readFileString(configPath)
@@ -315,7 +316,7 @@ const runCodexCommand = (args: ReadonlyArray<string>) =>
       shell: process.platform === "win32",
       env: {
         ...process.env,
-        ...(codexSettings.homePath ? { CODEX_HOME: codexSettings.homePath } : {}),
+        ...(codexSettings.homePath ? { CODEX_HOME: expandHomePath(codexSettings.homePath) } : {}),
       },
     });
     return yield* spawnAndCollect(codexSettings.binaryPath, command);
