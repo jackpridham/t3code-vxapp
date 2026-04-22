@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatOrchestratorChatNotification,
+  isOrchestratorChatNotifyEnabled,
   shouldNotifyOrchestratorChatMessage,
+  shouldSendOrchestratorChatNotification,
 } from "./orchestratorNotify.ts";
 
 const baseThread = {
@@ -40,6 +42,30 @@ const baseMessage = {
 } as unknown as OrchestrationMessage;
 
 describe("orchestratorNotify", () => {
+  it("keeps vx notify disabled for routine orchestrator chat unless explicitly enabled", () => {
+    expect(isOrchestratorChatNotifyEnabled({})).toBe(false);
+    expect(
+      shouldSendOrchestratorChatNotification({ thread: baseThread, message: baseMessage }, {}),
+    ).toBe(false);
+
+    expect(
+      shouldSendOrchestratorChatNotification(
+        { thread: baseThread, message: baseMessage },
+        { T3CODE_ORCHESTRATOR_NOTIFY_ENABLED: "1" },
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldSendOrchestratorChatNotification(
+        { thread: baseThread, message: baseMessage },
+        {
+          T3CODE_ORCHESTRATOR_NOTIFY_DISABLED: "1",
+          T3CODE_ORCHESTRATOR_NOTIFY_ENABLED: "1",
+        },
+      ),
+    ).toBe(false);
+  });
+
   it("notifies only finalized visible assistant messages from orchestrator threads", () => {
     expect(shouldNotifyOrchestratorChatMessage({ thread: baseThread, message: baseMessage })).toBe(
       true,

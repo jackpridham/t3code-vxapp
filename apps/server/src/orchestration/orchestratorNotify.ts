@@ -15,12 +15,28 @@ class OrchestratorNotifyError extends Data.TaggedError("OrchestratorNotifyError"
 
 export { formatOrchestratorChatNotification, shouldNotifyOrchestratorChatMessage };
 
-function isOrchestratorNotifyDisabled(): boolean {
-  return (
-    process.env.T3CODE_ORCHESTRATOR_NOTIFY_DISABLED === "1" ||
-    process.env.VITEST === "true" ||
-    process.env.NODE_ENV === "test"
-  );
+type Env = Readonly<Record<string, string | undefined>>;
+
+export function isOrchestratorChatNotifyEnabled(env: Env = process.env): boolean {
+  if (
+    env.T3CODE_ORCHESTRATOR_NOTIFY_DISABLED === "1" ||
+    env.VITEST === "true" ||
+    env.NODE_ENV === "test"
+  ) {
+    return false;
+  }
+
+  return env.T3CODE_ORCHESTRATOR_NOTIFY_ENABLED === "1";
+}
+
+export function shouldSendOrchestratorChatNotification(
+  input: {
+    thread: OrchestrationThread;
+    message: OrchestrationMessage;
+  },
+  env: Env = process.env,
+): boolean {
+  return isOrchestratorChatNotifyEnabled(env) && shouldNotifyOrchestratorChatMessage(input);
 }
 
 export function notifyOrchestratorChatMessage(input: {
@@ -28,7 +44,7 @@ export function notifyOrchestratorChatMessage(input: {
   message: OrchestrationMessage;
 }): Effect.Effect<void> {
   return Effect.gen(function* () {
-    if (!shouldNotifyOrchestratorChatMessage(input) || isOrchestratorNotifyDisabled()) {
+    if (!shouldSendOrchestratorChatNotification(input)) {
       return;
     }
 
