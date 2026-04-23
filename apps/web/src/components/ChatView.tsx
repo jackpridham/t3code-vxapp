@@ -31,8 +31,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
-import { projectSkillEntriesQueryOptions } from "~/lib/skillReactQuery";
-import type { ProjectSkillEntry } from "~/lib/skillReferences";
+import { useSkillSuggestions } from "~/lib/skillReactQuery";
 import { isElectron } from "../env";
 import { stripDiffSearchParams } from "../diffRouteSearch";
 import { buildChangesWindowHref } from "../lib/changesWindow";
@@ -97,7 +96,6 @@ import {
 } from "../types";
 import { LRUCache } from "../lib/lruCache";
 
-import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -170,6 +168,13 @@ import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
+import {
+  buildModelComposerItems,
+  buildPathComposerItems,
+  buildSkillComposerItems,
+  buildSkillPromptReference,
+  buildSlashCommandComposerItems,
+} from "./chat/composerSuggestionItems";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
@@ -215,7 +220,6 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
-const EMPTY_SKILL_ENTRIES: ProjectSkillEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
@@ -1380,89 +1384,32 @@ export default function ChatView({
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
-  const skillEntriesQuery = useQuery(
-    projectSkillEntriesQueryOptions({
-      projectCwd: gitCwd,
-      query: effectiveReferenceQuery,
-      enabled: isSkillTrigger,
-      limit: 40,
-    }),
-  );
-  const skillEntries = skillEntriesQuery.data?.entries ?? EMPTY_SKILL_ENTRIES;
+  const skillSuggestions = useSkillSuggestions({
+    context: {
+      projectCwd: activeProject?.cwd ?? null,
+      worktreePath: activeThread?.worktreePath ?? null,
+      provider: selectedProvider,
+    },
+    query: effectiveReferenceQuery,
+    enabled: isSkillTrigger,
+    limit: 40,
+  });
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
-      return workspaceEntries.map((entry) => ({
-        id: `path:${entry.kind}:${entry.path}`,
-        type: "path",
-        path: entry.path,
-        pathKind: entry.kind,
-        label: basenameOfPath(entry.path),
-        description: entry.parentPath ?? "",
-      }));
+      return buildPathComposerItems(workspaceEntries);
     }
 
     if (composerTrigger.kind === "skill") {
-      return skillEntries.map((entry) => ({
-        id: `skill:${entry.name}`,
-        type: "skill",
-        skillName: entry.name,
-        skillMarkdownPath: entry.skillMarkdownPath,
-        label: entry.name,
-        description: entry.skillMarkdownPath,
-      }));
+      return buildSkillComposerItems(skillSuggestions.entries);
     }
 
     if (composerTrigger.kind === "slash-command") {
-      const slashCommandItems = [
-        {
-          id: "slash:model",
-          type: "slash-command",
-          command: "model",
-          label: "/model",
-          description: "Switch response model for this thread",
-        },
-        {
-          id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
-          label: "/plan",
-          description: "Switch this thread into plan mode",
-        },
-        {
-          id: "slash:default",
-          type: "slash-command",
-          command: "default",
-          label: "/default",
-          description: "Switch this thread back to normal chat mode",
-        },
-      ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-      const query = composerTrigger.query.trim().toLowerCase();
-      if (!query) {
-        return [...slashCommandItems];
-      }
-      return slashCommandItems.filter(
-        (item) => item.command.includes(query) || item.label.slice(1).includes(query),
-      );
+      return buildSlashCommandComposerItems(composerTrigger.query);
     }
 
-    return searchableModelOptions
-      .filter(({ searchSlug, searchName, searchProvider }) => {
-        const query = composerTrigger.query.trim().toLowerCase();
-        if (!query) return true;
-        return (
-          searchSlug.includes(query) || searchName.includes(query) || searchProvider.includes(query)
-        );
-      })
-      .map(({ provider, providerLabel, slug, name }) => ({
-        id: `model:${provider}:${slug}`,
-        type: "model",
-        provider,
-        model: slug,
-        label: name,
-        description: `${providerLabel} · ${slug}`,
-      }));
-  }, [composerTrigger, searchableModelOptions, skillEntries, workspaceEntries]);
+    return buildModelComposerItems(searchableModelOptions, composerTrigger.query);
+  }, [composerTrigger, searchableModelOptions, skillSuggestions.entries, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -3641,7 +3588,7 @@ export default function ChatView({
         return;
       }
       if (item.type === "skill") {
-        const replacement = `@${item.skillMarkdownPath} `;
+        const replacement = buildSkillPromptReference(item);
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
           trigger.rangeEnd,
@@ -3728,7 +3675,7 @@ export default function ChatView({
       (composerTriggerKind === "path" &&
         (workspaceEntriesQuery.isLoading || workspaceEntriesQuery.isFetching)) ||
       (composerTriggerKind === "skill" &&
-        (skillEntriesQuery.isLoading || skillEntriesQuery.isFetching)));
+        (skillSuggestions.isLoading || skillSuggestions.isFetching)));
 
   const onPromptChange = useCallback(
     (

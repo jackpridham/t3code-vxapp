@@ -20,11 +20,6 @@ import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import { Undo2Icon } from "lucide-react";
-import {
-  COMPOSER_INLINE_CHIP_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
-} from "../composerInlineChip";
 import { Button } from "../ui/button";
 import { clamp } from "effect/Number";
 import { estimateTimelineMessageHeight } from "../timelineHeight";
@@ -35,14 +30,13 @@ import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageMeta } from "./MessageMeta";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { computeMessageDurationStart } from "./MessagesTimeline.logic";
-import { SkillIcon } from "./SkillIcon";
+import { SkillReferenceChip } from "./SkillReferenceChip";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { WorkLogGroup } from "./WorkLogGroup";
 import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
-import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatShortTimestamp } from "../../timestampFormat";
 import { splitTextIntoSkillReferenceSegments } from "~/lib/skillReferences";
@@ -754,15 +748,6 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   );
 });
 
-function UserMessageSkillInlineLabel(props: { skillName: string }) {
-  return (
-    <span className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, "mx-px align-baseline")}>
-      <SkillIcon className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME} />
-      <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{props.skillName}</span>
-    </span>
-  );
-}
-
 function renderUserMessageTextWithSkillReferences(text: string, keyPrefix: string): ReactNode[] {
   let offset = 0;
 
@@ -771,9 +756,10 @@ function renderUserMessageTextWithSkillReferences(text: string, keyPrefix: strin
     if (segment.type === "skill") {
       offset += segment.skillMarkdownPath.length + 1;
       return (
-        <UserMessageSkillInlineLabel
+        <SkillReferenceChip
           key={`${keyPrefix}:skill:${segmentOffset}:${segment.skillMarkdownPath}`}
           skillName={segment.skillName}
+          className="mx-px align-baseline"
         />
       );
     }

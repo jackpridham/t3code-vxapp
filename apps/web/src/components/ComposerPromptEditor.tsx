@@ -60,19 +60,19 @@ import {
   isCollapsedCursorAdjacentToInlineToken,
 } from "~/composer-logic";
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
-import { getSkillReferenceName } from "~/lib/skillReferences";
+import { labelForMentionPath } from "~/lib/skillReferenceDisplay";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
-import { basenameOfPath, getVscodeIconUrlForEntry, inferEntryKindFromPath } from "~/vscode-icons";
+import { getVscodeIconUrlForEntry, inferEntryKindFromPath } from "~/vscode-icons";
 import {
   COMPOSER_INLINE_CHIP_CLASS_NAME,
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
   COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
 } from "./composerInlineChip";
-import { createSkillIconDomElement } from "./chat/SkillIcon";
+import { createSkillReferenceChipDomElement } from "./chat/SkillReferenceChip";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
 
 const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
@@ -254,12 +254,15 @@ function renderMentionChipDom(container: HTMLElement, pathValue: string): void {
   container.style.setProperty("user-select", "none");
   container.style.setProperty("-webkit-user-select", "none");
 
-  const skillName = getSkillReferenceName(pathValue);
-  if (skillName) {
-    const label = document.createElement("span");
-    label.className = COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME;
-    label.textContent = skillName;
-    container.append(createSkillIconDomElement(COMPOSER_INLINE_CHIP_ICON_CLASS_NAME), label);
+  const skillChip = createSkillReferenceChipDomElement(
+    pathValue,
+    COMPOSER_INLINE_CHIP_CLASS_NAME,
+    COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
+    COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
+  );
+  if (skillChip) {
+    container.className = skillChip.className;
+    container.append(...Array.from(skillChip.childNodes));
     return;
   }
 
@@ -273,7 +276,7 @@ function renderMentionChipDom(container: HTMLElement, pathValue: string): void {
 
   const label = document.createElement("span");
   label.className = COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME;
-  label.textContent = basenameOfPath(pathValue);
+  label.textContent = labelForMentionPath(pathValue);
 
   container.append(icon, label);
 }
