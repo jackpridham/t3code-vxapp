@@ -26,7 +26,10 @@ import {
   type ProjectionThreadProposedPlan,
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
-import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
+import {
+  type ProjectionThreadSession,
+  ProjectionThreadSessionRepository,
+} from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
   ProjectionTurnRepository,
@@ -124,7 +127,14 @@ function checkpointStatusToProjectionTurnState(
 function nextProjectionTurnState(
   existingTurn: Option.Option<ProjectionTurn>,
   status: "ready" | "missing" | "error",
+  keepRunning: boolean,
 ): ProjectionTurn["state"] {
+  if (keepRunning && Option.isSome(existingTurn)) {
+    if (existingTurn.value.state === "interrupted") {
+      return "interrupted";
+    }
+    return existingTurn.value.state === "pending" ? "pending" : "running";
+  }
   if (
     status === "missing" &&
     Option.isSome(existingTurn) &&
@@ -147,6 +157,18 @@ function nextProjectionTurnCompletedAt(
     return existingTurn.value.completedAt;
   }
   return completedAt;
+}
+
+function isRunningSessionCheckpointEventForTurn(
+  session: Option.Option<ProjectionThreadSession>,
+  turnId: string,
+): boolean {
+  return (
+    Option.isSome(session) &&
+    session.value.status === "running" &&
+    session.value.activeTurnId !== null &&
+    session.value.activeTurnId === turnId
+  );
 }
 
 function retainProjectionMessagesAfterRevert(
@@ -712,6 +734,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.turn-checkpoint-recorded":
         case "thread.turn-diff-completed": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -1192,38 +1215,52 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             const existingThread = yield* projectionThreadRepository.getById({
               threadId: event.payload.threadId,
             });
-            if (
-              Option.isNone(existingThread) ||
-              existingThread.value.latestTurnId === null ||
-              event.payload.session.status === "starting"
-            ) {
+            if (Option.isNone(existingThread) || event.payload.session.status === "starting") {
               return;
             }
 
-            const existingTurn = yield* projectionTurnRepository.getByTurnId({
-              threadId: event.payload.threadId,
-              turnId: existingThread.value.latestTurnId,
-            });
+            const existingTurn =
+              existingThread.value.latestTurnId !== null
+                ? yield* projectionTurnRepository.getByTurnId({
+                    threadId: event.payload.threadId,
+                    turnId: existingThread.value.latestTurnId,
+                  })
+                : Option.none();
+            let fallbackRunningTurn = Option.none<ProjectionTurn>();
+            if (Option.isNone(existingTurn) && existingThread.value.latestTurnId === null) {
+              const runningTurn = (yield* projectionTurnRepository.listByThreadId({
+                threadId: event.payload.threadId,
+              }))
+                .filter((turn) => turn.turnId !== null)
+                .find((turn) => turn.state === "running" || turn.state === "pending");
+              fallbackRunningTurn = runningTurn
+                ? Option.some(runningTurn)
+                : Option.none<ProjectionTurn>();
+            }
+            const targetTurn = Option.isSome(existingTurn) ? existingTurn : fallbackRunningTurn;
             if (
-              Option.isNone(existingTurn) ||
-              (existingTurn.value.state !== "running" && existingTurn.value.state !== "pending")
+              Option.isNone(targetTurn) ||
+              targetTurn.value.turnId === null ||
+              (targetTurn.value.state !== "running" && targetTurn.value.state !== "pending")
             ) {
               return;
             }
 
             const terminalState = event.payload.session.status === "error" ? "error" : "completed";
+            const { turnId, ...targetTurnRest } = targetTurn.value;
             yield* projectionTurnRepository.upsertByTurnId({
-              ...existingTurn.value,
+              ...targetTurnRest,
+              turnId,
               state: terminalState,
               startedAt:
-                existingTurn.value.startedAt ??
-                existingTurn.value.requestedAt ??
+                targetTurn.value.startedAt ??
+                targetTurn.value.requestedAt ??
                 event.payload.session.updatedAt,
               requestedAt:
-                existingTurn.value.requestedAt ??
-                existingTurn.value.startedAt ??
+                targetTurn.value.requestedAt ??
+                targetTurn.value.startedAt ??
                 event.payload.session.updatedAt,
-              completedAt: existingTurn.value.completedAt ?? event.payload.session.updatedAt,
+              completedAt: targetTurn.value.completedAt ?? event.payload.session.updatedAt,
             });
             return;
           }
@@ -1430,10 +1467,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.turn-checkpoint-recorded":
         case "thread.turn-diff-completed": {
           const existingTurn = yield* projectionTurnRepository.getByTurnId({
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
+          });
+          const session = yield* projectionThreadSessionRepository.getByThreadId({
+            threadId: event.payload.threadId,
           });
           if (
             event.payload.status === "missing" &&
@@ -1443,7 +1484,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           ) {
             return;
           }
-          const nextState = nextProjectionTurnState(existingTurn, event.payload.status);
+          const nextState = nextProjectionTurnState(
+            existingTurn,
+            event.payload.status,
+            isRunningSessionCheckpointEventForTurn(session, event.payload.turnId),
+          );
           const nextCompletedAt = nextProjectionTurnCompletedAt(
             existingTurn,
             nextState,

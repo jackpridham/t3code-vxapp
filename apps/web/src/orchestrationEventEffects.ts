@@ -24,6 +24,7 @@ export function deriveOrchestrationBatchEffects(
 
   for (const event of events) {
     switch (event.type) {
+      case "thread.turn-checkpoint-recorded":
       case "thread.turn-diff-completed":
       case "thread.reverted": {
         needsProviderInvalidation = true;
@@ -99,24 +100,49 @@ export function processEventNotifications(events: ReadonlyArray<OrchestrationEve
     };
 
     switch (event.type) {
-      case "thread.turn-diff-completed": {
+      case "thread.session-set": {
         const threadId = event.payload.threadId;
         const context = resolveThreadContext(threadId);
+        const latestTurn = context.thread?.latestTurn ?? null;
+        const isTerminalSession =
+          event.payload.session.status !== "running" && event.payload.session.status !== "starting";
 
-        if (event.payload.status === "error") {
-          dispatchNotification("turn-failed", "error", "Turn Failed", undefined, {
-            threadId,
-            projectName: context.projectName,
-            labels: context.labels,
-            occurredAt: event.payload.completedAt,
-          });
-        } else {
-          dispatchNotification("turn-completed", "info", "Turn Completed", undefined, {
-            threadId,
-            projectName: context.projectName,
-            labels: context.labels,
-            occurredAt: event.payload.completedAt,
-          });
+        if (isTerminalSession && latestTurn !== null && latestTurn.completedAt !== null) {
+          if (latestTurn.state === "error") {
+            dispatchNotification("turn-failed", "error", "Turn Failed", undefined, {
+              threadId,
+              projectName: context.projectName,
+              labels: context.labels,
+              occurredAt: latestTurn.completedAt,
+            });
+          } else if (latestTurn.state === "completed") {
+            dispatchNotification("turn-completed", "info", "Turn Completed", undefined, {
+              threadId,
+              projectName: context.projectName,
+              labels: context.labels,
+              occurredAt: latestTurn.completedAt,
+            });
+          }
+        }
+
+        if (event.payload.session.lastError) {
+          const errorMsg =
+            typeof event.payload.session.lastError === "string"
+              ? event.payload.session.lastError
+              : "";
+          if (
+            errorMsg.toLowerCase().includes("rate") ||
+            errorMsg.toLowerCase().includes("limit") ||
+            errorMsg.toLowerCase().includes("429")
+          ) {
+            dispatchNotification("thread-rate-limited", "warning", "Rate Limited", undefined, {
+              threadId,
+              projectName: context.projectName,
+              labels: context.labels,
+              occurredAt: event.payload.session.updatedAt,
+              detail: errorMsg,
+            });
+          }
         }
         break;
       }
@@ -160,31 +186,6 @@ export function processEventNotifications(events: ReadonlyArray<OrchestrationEve
             labels: event.payload.labels,
             occurredAt: event.payload.updatedAt,
           });
-        }
-        break;
-      }
-
-      case "thread.session-set": {
-        if (event.payload.session.lastError) {
-          const errorMsg =
-            typeof event.payload.session.lastError === "string"
-              ? event.payload.session.lastError
-              : "";
-          if (
-            errorMsg.toLowerCase().includes("rate") ||
-            errorMsg.toLowerCase().includes("limit") ||
-            errorMsg.toLowerCase().includes("429")
-          ) {
-            const threadId = event.payload.threadId;
-            const context = resolveThreadContext(threadId);
-            dispatchNotification("thread-rate-limited", "warning", "Rate Limited", undefined, {
-              threadId,
-              projectName: context.projectName,
-              labels: context.labels,
-              occurredAt: event.payload.session.updatedAt,
-              detail: errorMsg,
-            });
-          }
         }
         break;
       }

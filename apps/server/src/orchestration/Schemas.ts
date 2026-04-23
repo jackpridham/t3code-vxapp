@@ -23,6 +23,7 @@ export {
   ThreadRuntimeModeSetPayload,
   ThreadSessionSetPayload,
   ThreadSessionStopRequestedPayload,
+  ThreadTurnCheckpointRecordedPayload,
   ThreadTurnDiffCompletedPayload,
   ThreadTurnInterruptRequestedPayload,
   ThreadTurnStartRequestedPayload,

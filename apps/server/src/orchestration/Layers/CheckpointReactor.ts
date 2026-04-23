@@ -191,6 +191,7 @@ const make = Effect.gen(function* () {
   const captureAndDispatchCheckpoint = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly turnId: TurnId;
+    readonly commandType: "thread.turn.checkpoint.record" | "thread.turn.diff.complete";
     readonly thread: {
       readonly messages: ReadonlyArray<{
         readonly id: MessageId;
@@ -271,8 +272,12 @@ const make = Effect.gen(function* () {
       MessageId.makeUnsafe(`assistant:${input.turnId}`);
 
     yield* orchestrationEngine.dispatch({
-      type: "thread.turn.diff.complete",
-      commandId: serverCommandId("checkpoint-turn-diff-complete"),
+      type: input.commandType,
+      commandId: serverCommandId(
+        input.commandType === "thread.turn.diff.complete"
+          ? "checkpoint-turn-diff-complete"
+          : "checkpoint-turn-checkpoint-record",
+      ),
       threadId: input.threadId,
       turnId: input.turnId,
       completedAt: input.createdAt,
@@ -292,13 +297,15 @@ const make = Effect.gen(function* () {
       status: input.status,
       createdAt: input.createdAt,
     });
-    yield* receiptBus.publish({
-      type: "turn.processing.quiesced",
-      threadId: input.threadId,
-      turnId: input.turnId,
-      checkpointTurnCount: input.turnCount,
-      createdAt: input.createdAt,
-    });
+    if (input.commandType === "thread.turn.diff.complete") {
+      yield* receiptBus.publish({
+        type: "turn.processing.quiesced",
+        threadId: input.threadId,
+        turnId: input.turnId,
+        checkpointTurnCount: input.turnCount,
+        createdAt: input.createdAt,
+      });
+    }
 
     yield* orchestrationEngine.dispatch({
       type: "thread.activity.append",
@@ -377,6 +384,7 @@ const make = Effect.gen(function* () {
     yield* captureAndDispatchCheckpoint({
       threadId: thread.id,
       turnId,
+      commandType: "thread.turn.diff.complete",
       thread,
       cwd: checkpointCwd,
       turnCount: nextTurnCount,
@@ -395,7 +403,7 @@ const make = Effect.gen(function* () {
   // domain event arrives, allowing the reactor to capture the actual filesystem
   // state into a git ref and dispatch a replacement checkpoint.
   const captureCheckpointFromPlaceholder = Effect.fnUntraced(function* (
-    event: Extract<OrchestrationEvent, { type: "thread.turn-diff-completed" }>,
+    event: Extract<OrchestrationEvent, { type: "thread.turn-checkpoint-recorded" }>,
   ) {
     const { threadId, turnId, checkpointTurnCount, status } = event.payload;
 
@@ -439,6 +447,7 @@ const make = Effect.gen(function* () {
     yield* captureAndDispatchCheckpoint({
       threadId,
       turnId,
+      commandType: "thread.turn.checkpoint.record",
       thread,
       cwd: checkpointCwd,
       turnCount: checkpointTurnCount,
@@ -710,7 +719,7 @@ const make = Effect.gen(function* () {
     // replace it. The providerService.streamEvents PubSub does not reliably deliver
     // turn.completed runtime events to this reactor (shared subscription), so
     // reacting to the domain event is the reliable path.
-    if (event.type === "thread.turn-diff-completed") {
+    if (event.type === "thread.turn-checkpoint-recorded") {
       yield* captureCheckpointFromPlaceholder(event).pipe(
         Effect.catch((error) =>
           appendCaptureFailureActivity({
@@ -774,7 +783,7 @@ const make = Effect.gen(function* () {
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&
           event.type !== "thread.checkpoint-revert-requested" &&
-          event.type !== "thread.turn-diff-completed"
+          event.type !== "thread.turn-checkpoint-recorded"
         ) {
           return Effect.void;
         }

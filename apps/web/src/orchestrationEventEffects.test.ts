@@ -147,17 +147,65 @@ describe("deriveOrchestrationBatchEffects", () => {
 });
 
 describe("processEventNotifications", () => {
-  it("fires a completion toast for ready turn diffs", () => {
+  beforeEach(() => {
+    dispatchNotification.mockReset();
+    getState.mockReset();
+    getState.mockReturnValue({
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project 1",
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread 1",
+          labels: ["urgent"],
+        },
+      ],
+    });
+  });
+
+  it("fires a completion toast from terminal session lifecycle", () => {
+    getState.mockReturnValue({
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project 1",
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread 1",
+          labels: ["urgent"],
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-1"),
+            state: "completed",
+            requestedAt: "2026-02-27T00:00:00.000Z",
+            startedAt: "2026-02-27T00:00:01.000Z",
+            completedAt: "2026-02-27T00:00:03.000Z",
+            assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+          },
+        },
+      ],
+    });
+
     processEventNotifications([
-      makeEvent("thread.turn-diff-completed", {
+      makeEvent("thread.session-set", {
         threadId: ThreadId.makeUnsafe("thread-1"),
-        turnId: TurnId.makeUnsafe("turn-1"),
-        checkpointTurnCount: 1,
-        checkpointRef: CheckpointRef.makeUnsafe("checkpoint-1"),
-        status: "ready",
-        files: [],
-        assistantMessageId: MessageId.makeUnsafe("assistant-1"),
-        completedAt: "2026-02-27T00:00:03.000Z",
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:03.000Z",
+        },
       }),
     ]);
 
@@ -173,6 +221,23 @@ describe("processEventNotifications", () => {
         occurredAt: "2026-02-27T00:00:03.000Z",
       },
     );
+  });
+
+  it("does not fire completion notifications for checkpoint-only events", () => {
+    processEventNotifications([
+      makeEvent("thread.turn-checkpoint-recorded", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId: TurnId.makeUnsafe("turn-1"),
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.makeUnsafe("checkpoint-1"),
+        status: "ready",
+        files: [],
+        assistantMessageId: MessageId.makeUnsafe("assistant-1"),
+        completedAt: "2026-02-27T00:00:03.000Z",
+      }),
+    ]);
+
+    expect(dispatchNotification).not.toHaveBeenCalled();
   });
 
   it("fires a hook failure toast for error hook activities", () => {

@@ -568,6 +568,17 @@ function checkpointStatusToLatestTurnState(
   return "completed" as const;
 }
 
+function isCheckpointEventForRunningActiveTurn(
+  thread: Pick<Thread, "session">,
+  turnId: NonNullable<Thread["latestTurn"]>["turnId"],
+): boolean {
+  return (
+    thread.session?.orchestrationStatus === "running" &&
+    thread.session.activeTurnId !== undefined &&
+    thread.session.activeTurnId === turnId
+  );
+}
+
 function compareActivities(
   left: Thread["activities"][number],
   right: Thread["activities"][number],
@@ -1319,11 +1330,8 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     }
 
     case "thread.session-set": {
-      const threads = updateThread(state.threads, event.payload.threadId, (thread) => ({
-        ...thread,
-        session: mapSession(event.payload.session),
-        error: event.payload.session.lastError ?? null,
-        latestTurn:
+      const threads = updateThread(state.threads, event.payload.threadId, (thread) => {
+        const latestTurn =
           event.payload.session.status === "running" && event.payload.session.activeTurnId !== null
             ? buildLatestTurn({
                 previous: thread.latestTurn,
@@ -1344,9 +1352,26 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
                     : null,
                 sourceProposedPlan: thread.pendingSourceProposedPlan,
               })
-            : thread.latestTurn,
-        updatedAt: event.occurredAt,
-      }));
+            : thread.latestTurn && thread.latestTurn.state === "running"
+              ? buildLatestTurn({
+                  previous: thread.latestTurn,
+                  turnId: thread.latestTurn.turnId,
+                  state: event.payload.session.status === "error" ? "error" : "completed",
+                  requestedAt: thread.latestTurn.requestedAt,
+                  startedAt: thread.latestTurn.startedAt,
+                  completedAt: thread.latestTurn.completedAt ?? event.payload.session.updatedAt,
+                  assistantMessageId: thread.latestTurn.assistantMessageId,
+                })
+              : thread.latestTurn;
+
+        return {
+          ...thread,
+          session: mapSession(event.payload.session),
+          error: event.payload.session.lastError ?? null,
+          latestTurn,
+          updatedAt: event.occurredAt,
+        };
+      });
       if (
         threads !== state.threads &&
         event.payload.session.status === "error" &&
@@ -1403,6 +1428,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       return threads === state.threads ? state : { ...state, threads };
     }
 
+    case "thread.turn-checkpoint-recorded":
     case "thread.turn-diff-completed": {
       const threads = updateThread(state.threads, event.payload.threadId, (thread) => {
         const checkpoint = mapTurnDiffSummary({
@@ -1433,10 +1459,14 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         const latestTurn =
           thread.latestTurn === null || thread.latestTurn.turnId === event.payload.turnId
             ? (() => {
-                const nextState = checkpointStatusToLatestTurnState(
-                  event.payload.status,
-                  thread.latestTurn,
-                );
+                const nextState = isCheckpointEventForRunningActiveTurn(
+                  thread,
+                  event.payload.turnId,
+                )
+                  ? thread.latestTurn?.state === "interrupted"
+                    ? "interrupted"
+                    : "running"
+                  : checkpointStatusToLatestTurnState(event.payload.status, thread.latestTurn);
                 return buildLatestTurn({
                   previous: thread.latestTurn,
                   turnId: event.payload.turnId,
@@ -1460,24 +1490,6 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           updatedAt: event.occurredAt,
         };
       });
-      if (threads !== state.threads) {
-        const turnThread = threads.find((t) => t.id === event.payload.threadId);
-        if (event.payload.status === "ready") {
-          dispatchNotification(
-            "turn-completed",
-            "info",
-            "Turn completed",
-            turnThread?.title ?? event.payload.threadId,
-          );
-        } else if (event.payload.status === "error") {
-          dispatchNotification(
-            "turn-failed",
-            "error",
-            "Turn failed",
-            turnThread?.title ?? event.payload.threadId,
-          );
-        }
-      }
       return threads === state.threads ? state : { ...state, threads };
     }
 

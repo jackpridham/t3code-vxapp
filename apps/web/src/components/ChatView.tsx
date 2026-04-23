@@ -62,6 +62,7 @@ import {
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
+  shouldShowActiveTurnIndicator,
 } from "../session-logic";
 import { isScrollContainerNearBottom } from "../chat-scroll";
 import {
@@ -217,6 +218,7 @@ const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
@@ -1322,6 +1324,14 @@ export default function ChatView({
     if (!completionDuration) return null;
     return deriveCompletionDividerBeforeEntryId(timelineEntries, activeLatestTurn);
   }, [activeLatestTurn, completionDuration, latestTurnSettled, timelineEntries]);
+  const showActiveTurnIndicator = useMemo(
+    () =>
+      shouldShowActiveTurnIndicator({
+        session: activeThread?.session ?? null,
+        messages: activeThread?.messages ?? EMPTY_MESSAGES,
+      }),
+    [activeThread?.messages, activeThread?.session],
+  );
   const gitCwd = activeProject
     ? projectScriptCwd({
         project: { cwd: activeProject.cwd },
@@ -4024,6 +4034,16 @@ export default function ChatView({
 
           {!isComposerHidden ? (
             <div data-testid="chat-composer-region">
+              {showActiveTurnIndicator ? (
+                <div className="px-3 pt-2 sm:px-5">
+                  <div
+                    data-testid="active-turn-indicator"
+                    className="mx-auto w-full max-w-3xl rounded-2xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 shadow-sm dark:text-amber-100"
+                  >
+                    Active turn in progress. Waiting for fresh assistant output for this turn.
+                  </div>
+                </div>
+              ) : null}
               {/* Input bar */}
               <div
                 className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}

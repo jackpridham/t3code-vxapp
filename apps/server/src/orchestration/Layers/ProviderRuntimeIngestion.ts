@@ -1334,8 +1334,8 @@ const make = Effect.fn("make")(function* () {
             0,
           );
           yield* orchestrationEngine.dispatch({
-            type: "thread.turn.diff.complete",
-            commandId: providerCommandId(event, "thread-turn-diff-complete"),
+            type: "thread.turn.checkpoint.record",
+            commandId: providerCommandId(event, "thread-turn-checkpoint-record"),
             threadId: thread.id,
             turnId,
             completedAt: now,

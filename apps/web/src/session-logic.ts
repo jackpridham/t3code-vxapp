@@ -1078,3 +1078,23 @@ export function derivePhase(session: ThreadSession | null): SessionPhase {
   if (session.status === "running") return "running";
   return "ready";
 }
+
+export function shouldShowActiveTurnIndicator(input: {
+  session: ThreadSession | null;
+  messages: ReadonlyArray<Pick<ChatMessage, "role" | "turnId">>;
+}): boolean {
+  const activeTurnId = input.session?.activeTurnId;
+  if (input.session?.orchestrationStatus !== "running" || !activeTurnId) {
+    return false;
+  }
+
+  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
+    const message = input.messages[index];
+    if (!message || message.role !== "assistant") {
+      continue;
+    }
+    return message.turnId !== activeTurnId;
+  }
+
+  return true;
+}

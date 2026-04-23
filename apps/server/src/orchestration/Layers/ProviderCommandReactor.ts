@@ -735,6 +735,10 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (thread.session.status === "running") {
+      return;
+    }
+
     const sessionStatus = event.payload.status === "error" ? "error" : "ready";
     const lastError =
       sessionStatus === "error"

@@ -1007,6 +1007,20 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadTurnCheckpointRecordCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.checkpoint.record"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  completedAt: IsoDateTime,
+  checkpointRef: CheckpointRef,
+  status: OrchestrationCheckpointStatus,
+  files: Schema.Array(OrchestrationCheckpointFile),
+  assistantMessageId: Schema.optional(MessageId),
+  checkpointTurnCount: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
 const ThreadActivityAppendCommand = Schema.Struct({
   type: Schema.Literal("thread.activity.append"),
   commandId: CommandId,
@@ -1037,6 +1051,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
+  ThreadTurnCheckpointRecordCommand,
   ThreadActivityAppendCommand,
   ThreadOrchestratorWakeUpsertCommand,
   ThreadRevertCompleteCommand,
@@ -1076,6 +1091,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.session-stop-requested",
   "thread.session-set",
   "thread.proposed-plan-upserted",
+  "thread.turn-checkpoint-recorded",
   "thread.turn-diff-completed",
   "thread.activity-appended",
   "thread.orchestrator-wake-upserted",
@@ -1319,7 +1335,7 @@ export const ThreadProposedPlanUpsertedPayload = Schema.Struct({
   proposedPlan: OrchestrationProposedPlan,
 });
 
-export const ThreadTurnDiffCompletedPayload = Schema.Struct({
+const ThreadTurnCheckpointPayloadFields = {
   threadId: ThreadId,
   turnId: TurnId,
   checkpointTurnCount: NonNegativeInt,
@@ -1328,7 +1344,11 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
-});
+} as const;
+
+export const ThreadTurnCheckpointRecordedPayload = Schema.Struct(ThreadTurnCheckpointPayloadFields);
+
+export const ThreadTurnDiffCompletedPayload = Schema.Struct(ThreadTurnCheckpointPayloadFields);
 
 export const ThreadActivityAppendedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -1491,6 +1511,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.proposed-plan-upserted"),
     payload: ThreadProposedPlanUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-checkpoint-recorded"),
+    payload: ThreadTurnCheckpointRecordedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

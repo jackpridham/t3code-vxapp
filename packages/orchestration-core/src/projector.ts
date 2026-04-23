@@ -4,6 +4,7 @@ import type {
   ProgramId,
   ProgramNotificationId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
@@ -39,6 +40,7 @@ import {
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
+  ThreadTurnCheckpointRecordedPayload,
   ThreadTurnDiffCompletedPayload,
   ThreadOrchestratorWakeUpsertedPayload,
 } from "./schemas.ts";
@@ -68,6 +70,17 @@ function checkpointStatusToLatestTurnState(
     return "interrupted" as const;
   }
   return "completed" as const;
+}
+
+function isCheckpointEventForRunningActiveTurn(
+  thread: OrchestrationThread,
+  turnId: TurnId,
+): boolean {
+  return (
+    thread.session?.status === "running" &&
+    thread.session.activeTurnId !== null &&
+    thread.session.activeTurnId === turnId
+  );
 }
 
 function updateThread(
@@ -763,10 +776,13 @@ export function projectEvent(
         };
       });
 
+    case "thread.turn-checkpoint-recorded":
     case "thread.turn-diff-completed":
       return Effect.gen(function* () {
         const payload = yield* decodeForEvent(
-          ThreadTurnDiffCompletedPayload,
+          event.type === "thread.turn-checkpoint-recorded"
+            ? ThreadTurnCheckpointRecordedPayload
+            : ThreadTurnDiffCompletedPayload,
           event.payload,
           event.type,
           "payload",
@@ -809,10 +825,11 @@ export function projectEvent(
           .slice(-MAX_THREAD_CHECKPOINTS);
         const existingLatestTurn =
           thread.latestTurn?.turnId === payload.turnId ? thread.latestTurn : null;
-        const nextLatestTurnState = checkpointStatusToLatestTurnState(
-          payload.status,
-          existingLatestTurn,
-        );
+        const nextLatestTurnState = isCheckpointEventForRunningActiveTurn(thread, payload.turnId)
+          ? existingLatestTurn?.state === "interrupted"
+            ? "interrupted"
+            : "running"
+          : checkpointStatusToLatestTurnState(payload.status, existingLatestTurn);
         const latestTurnCompletedAt =
           nextLatestTurnState === "running"
             ? (existingLatestTurn?.completedAt ?? null)

@@ -1732,7 +1732,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         });
 
         yield* eventStore.append({
-          type: "thread.turn-diff-completed",
+          type: "thread.turn-checkpoint-recorded",
           eventId: EventId.makeUnsafe("evt-assistant-turn-open-5"),
           aggregateKind: "thread",
           aggregateId: threadId,
@@ -1773,9 +1773,9 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
 
         assert.equal(turnRows.length, 1);
         assert.deepEqual(turnRows[0], {
-          state: "completed",
+          state: "running",
           assistantMessageId: "assistant-turn-open-2",
-          completedAt: "2026-02-26T16:00:04.000Z",
+          completedAt: null,
         });
       }),
   );
@@ -2071,7 +2071,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       ]);
 
       yield* appendAndProject({
-        type: "thread.turn-diff-completed",
+        type: "thread.turn-checkpoint-recorded",
         eventId: EventId.makeUnsafe("evt-interrupt-latest-6"),
         aggregateKind: "thread",
         aggregateId: threadId,
@@ -2265,7 +2265,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       ]);
 
       yield* appendAndProject({
-        type: "thread.turn-diff-completed",
+        type: "thread.turn-checkpoint-recorded",
         eventId: EventId.makeUnsafe("evt-running-missing-diff-6"),
         aggregateKind: "thread",
         aggregateId: threadId,
@@ -2303,8 +2303,53 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       `;
       assert.deepEqual(turnRows, [
         {
+          state: "running",
+          completedAt: null,
+          checkpointStatus: "ready",
+        },
+      ]);
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-running-missing-diff-7"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T17:00:06.000Z",
+        commandId: CommandId.makeUnsafe("cmd-running-missing-diff-7"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-running-missing-diff-7"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-26T17:00:06.000Z",
+          },
+        },
+      });
+
+      turnRows = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly checkpointStatus: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          checkpoint_status AS "checkpointStatus"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(turnRows, [
+        {
           state: "completed",
-          completedAt: "2026-02-26T17:00:05.000Z",
+          completedAt: "2026-02-26T17:00:06.000Z",
           checkpointStatus: "ready",
         },
       ]);
