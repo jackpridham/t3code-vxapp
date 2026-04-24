@@ -45,6 +45,7 @@ import {
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
+import { cn } from "~/lib/utils";
 
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
@@ -52,6 +53,7 @@ interface MessagesTimelineProps {
   hasMessages: boolean;
   isHydratingHistory: boolean;
   isWorking: boolean;
+  layoutMode?: "default" | "drawer" | undefined;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
@@ -77,6 +79,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isHydratingHistory,
   isWorking,
+  layoutMode = "default",
   activeTurnInProgress,
   activeTurnStartedAt,
   scrollContainer,
@@ -301,7 +304,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const renderRowContent = (row: TimelineRow) => (
     <div
-      className="pb-4"
+      className="min-w-0 pb-4"
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
@@ -326,8 +329,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
-            <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+            <div className="flex min-w-0 justify-end">
+              <div
+                className={cn(
+                  "group relative min-w-0 rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3",
+                  layoutMode === "drawer" ? "max-w-[92%]" : "max-w-[80%]",
+                )}
+              >
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
@@ -424,7 +432,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   <span className="h-px flex-1 bg-border" />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
+              <div className="w-full min-w-0 px-1 py-0.5">
                 <ChatMarkdown
                   text={messageText}
                   cwd={markdownCwd}
@@ -549,7 +557,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     <div
       ref={timelineRootRef}
       data-timeline-root="true"
-      className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden"
+      className={cn(
+        "w-full min-w-0 overflow-hidden",
+        layoutMode === "drawer" ? "max-w-none" : "mx-auto max-w-3xl",
+      )}
     >
       {virtualizedRowCount > 0 && (
         <div className="relative" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>

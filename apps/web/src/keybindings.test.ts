@@ -53,6 +53,21 @@ function modShortcut(
   };
 }
 
+function ctrlShortcut(
+  key: string,
+  overrides: Partial<Omit<KeybindingShortcut, "key">> = {},
+): KeybindingShortcut {
+  return {
+    key,
+    metaKey: false,
+    ctrlKey: true,
+    shiftKey: false,
+    altKey: false,
+    modKey: false,
+    ...overrides,
+  };
+}
+
 function whenIdentifier(name: string): KeybindingWhenNode {
   return { type: "identifier", name };
 }
@@ -100,6 +115,16 @@ const DEFAULT_BINDINGS = compile([
     shortcut: modShortcut("d"),
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: ctrlShortcut("e", { shiftKey: true }),
+    command: "ide.explorer.toggle",
+    whenAst: whenIdentifier("ideMode"),
+  },
+  {
+    shortcut: ctrlShortcut("d", { shiftKey: true }),
+    command: "ide.diff.toggle",
+    whenAst: whenIdentifier("ideMode"),
   },
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
@@ -249,6 +274,13 @@ describe("shortcutLabelForCommand", () => {
   it("returns effective labels for non-terminal commands", () => {
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.new", "MacIntel"), "⇧⌘O");
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "diff.toggle", "Linux"), "Ctrl+D");
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "ide.explorer.toggle", {
+        platform: "Linux",
+        context: { ideMode: true },
+      }),
+      "Ctrl+Shift+E",
+    );
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "editor.openFavorite", "Linux"),
       "Ctrl+O",
@@ -492,6 +524,22 @@ describe("resolveShortcutCommand", () => {
         },
       ),
       "thread.next",
+    );
+  });
+
+  it("only resolves IDE shortcuts when IDE mode is enabled", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "e", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
+        context: { ideMode: true },
+      }),
+      "ide.explorer.toggle",
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "e", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
+        context: { ideMode: false },
+      }),
     );
   });
 });

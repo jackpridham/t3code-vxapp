@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildChangesWindowHref } from "../lib/changesWindow";
 import { useSettings } from "../hooks/useSettings";
 import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
+import { resolveChangesAbsolutePath, resolveChangesThreadRelativePath } from "../lib/changesPath";
 import { inferCheckpointTurnCountByTurnId } from "../session-logic";
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
@@ -21,6 +22,7 @@ import {
 } from "../changesDiscovery";
 import type { ChangesPanelGroup } from "../changesDiscovery";
 import type { PersistedFileChange, Project, Thread, TurnDiffSummary } from "../types";
+import type { IdeSelectedFile } from "../lib/ide";
 
 const EMPTY_MESSAGES: readonly [] = [];
 const EMPTY_PERSISTED: readonly [] = [];
@@ -220,7 +222,15 @@ export function buildOrchestratorWorkerChangesInput(input: {
   };
 }
 
-export const ChangesPanel = memo(function ChangesPanel() {
+export interface ChangesPanelProps {
+  onReferenceSelect?: ((selectedFile: IdeSelectedFile) => void) | undefined;
+  showHeader?: boolean | undefined;
+}
+
+export const ChangesPanel = memo(function ChangesPanel({
+  onReferenceSelect,
+  showHeader = true,
+}: ChangesPanelProps) {
   const settings = useSettings();
   const filesChangedViewType = settings.changesPanelFilesChangedViewType;
   const activePath = useUiStateStore((state) => state.changesPanelActivePath);
@@ -273,8 +283,42 @@ export const ChangesPanel = memo(function ChangesPanel() {
       setActivePath(item.resolvedPath);
       setActiveSection(item.section);
       setContentMode("preview");
+      if (!onReferenceSelect) {
+        return;
+      }
+      const targetThreadId = item.sourceThreadId
+        ? ThreadId.makeUnsafe(item.sourceThreadId)
+        : (activeThread?.id ?? routeThreadId);
+      const targetWorktreePath = item.sourceWorktreePath ?? effectiveWorktreePath;
+      const targetSourcePath = item.sourcePath ?? item.resolvedPath;
+      const absolutePath = resolveChangesAbsolutePath(targetWorktreePath, targetSourcePath);
+      const relativePath =
+        resolveChangesThreadRelativePath(targetWorktreePath, targetSourcePath) ??
+        targetSourcePath.replaceAll("\\", "/");
+      onReferenceSelect({
+        absolutePath,
+        relativePath,
+        displayPath: item.resolvedPath,
+        fileName: item.filename,
+        source: "changes",
+        section: item.section,
+        threadId: targetThreadId ?? null,
+        worktreePath: targetWorktreePath,
+        sourcePath: targetSourcePath,
+        latestCheckpointTurnCount:
+          item.sourceLatestCheckpointTurnCount ?? effectiveLatestCheckpointTurnCount,
+      });
     },
-    [setActivePath, setActiveSection, setContentMode],
+    [
+      activeThread?.id,
+      effectiveLatestCheckpointTurnCount,
+      effectiveWorktreePath,
+      onReferenceSelect,
+      routeThreadId,
+      setActivePath,
+      setActiveSection,
+      setContentMode,
+    ],
   );
 
   const handleOpenItemInWindow = useCallback(
@@ -324,6 +368,7 @@ export const ChangesPanel = memo(function ChangesPanel() {
       onContentModeChange={setContentMode}
       onClose={closePanel}
       showPreviewPane={false}
+      showHeader={showHeader}
     />
   );
 });

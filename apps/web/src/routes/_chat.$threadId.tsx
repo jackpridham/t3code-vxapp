@@ -4,6 +4,7 @@ import {
   Suspense,
   lazy,
   type CSSProperties,
+  type RefObject,
   type ReactNode,
   useCallback,
   useEffect,
@@ -14,6 +15,7 @@ import {
 import { ChangesPanel } from "../components/ChangesPanel";
 import ChatView from "../components/ChatView";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
+import { IdeWorkspace } from "../components/ide/IdeWorkspace";
 import {
   DiffPanelHeaderSkeleton,
   DiffPanelLoadingState,
@@ -117,9 +119,64 @@ const ChangesWindowNavigationPublisher = (props: { threadId: ThreadId }) => {
   return null;
 };
 
+function LegacyChatThreadView(props: {
+  changesLayoutRef: RefObject<HTMLDivElement | null>;
+  effectiveChangesPanelOpen: boolean;
+  rememberDrawerWidth: boolean;
+  setChangesPanelOpen: (open: boolean) => void;
+  showChangesPanelByDefault: boolean;
+  threadId: ThreadId;
+}) {
+  const appSidebar = useSidebar();
+
+  return (
+    <div ref={props.changesLayoutRef} className="flex h-dvh min-h-0 min-w-0 flex-1 bg-transparent">
+      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
+        <ChatView
+          key={props.threadId}
+          threadId={props.threadId}
+          mobileSidebarOpen={appSidebar.openMobile}
+          onToggleMobileSidebar={appSidebar.toggleSidebar}
+        />
+      </SidebarInset>
+      <SidebarProvider
+        defaultOpen={props.showChangesPanelByDefault}
+        open={props.effectiveChangesPanelOpen}
+        onOpenChange={props.setChangesPanelOpen}
+        openMobile={props.effectiveChangesPanelOpen}
+        onOpenMobileChange={props.setChangesPanelOpen}
+        className="contents"
+        style={
+          {
+            width: "auto",
+            "--sidebar-width": CHANGES_PANEL_DEFAULT_WIDTH,
+          } as CSSProperties
+        }
+      >
+        <Sidebar
+          side="right"
+          collapsible="offcanvas"
+          className="border-l border-border bg-card text-foreground"
+          resizable={{
+            minWidth: CHANGES_PANEL_MIN_WIDTH,
+            shouldAcceptWidth: ({ nextWidth, wrapper }) => {
+              const layoutWidth =
+                props.changesLayoutRef.current?.clientWidth ?? wrapper.clientWidth;
+              return layoutWidth - nextWidth >= CHANGES_PANEL_MIN_MAIN_CONTENT_WIDTH;
+            },
+            ...(props.rememberDrawerWidth ? { storageKey: CHANGES_PANEL_WIDTH_STORAGE_KEY } : {}),
+          }}
+        >
+          <ChangesPanel />
+          <SidebarRail className="top-0 bottom-auto h-12" />
+        </Sidebar>
+      </SidebarProvider>
+    </div>
+  );
+}
+
 function ChatThreadRouteView() {
   const bootstrapComplete = useStore((store) => store.bootstrapComplete);
-  const appSidebar = useSidebar();
   const changesLayoutRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   const threadId = Route.useParams({
@@ -135,6 +192,7 @@ function ChatThreadRouteView() {
   const routeHistoryHydrationInFlightRef = useRef(new Set<ThreadId>());
 
   const settings = useSettings();
+  const ideModeEnabled = settings.ideModeEnabled;
   const showChangesPanelByDefault = settings.changesDrawerVisibility === "always_show";
   const rememberDrawerWidth = settings.rememberChangesDrawerWidth;
   const changesPanelOpen = useUiStateStore((s) => s.changesPanelOpen);
@@ -235,47 +293,20 @@ function ChatThreadRouteView() {
   return (
     <>
       <ChangesWindowNavigationPublisher threadId={threadId} />
-      <div ref={changesLayoutRef} className="flex h-dvh min-h-0 min-w-0 flex-1 bg-transparent">
-        <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
-          <ChatView
-            key={threadId}
-            threadId={threadId}
-            mobileSidebarOpen={appSidebar.openMobile}
-            onToggleMobileSidebar={appSidebar.toggleSidebar}
-          />
-        </SidebarInset>
-        <SidebarProvider
-          defaultOpen={showChangesPanelByDefault}
-          open={effectiveChangesPanelOpen}
-          onOpenChange={setChangesPanelOpen}
-          openMobile={effectiveChangesPanelOpen}
-          onOpenMobileChange={setChangesPanelOpen}
-          className="contents"
-          style={
-            {
-              width: "auto",
-              "--sidebar-width": CHANGES_PANEL_DEFAULT_WIDTH,
-            } as CSSProperties
-          }
-        >
-          <Sidebar
-            side="right"
-            collapsible="offcanvas"
-            className="border-l border-border bg-card text-foreground"
-            resizable={{
-              minWidth: CHANGES_PANEL_MIN_WIDTH,
-              shouldAcceptWidth: ({ nextWidth, wrapper }) => {
-                const layoutWidth = changesLayoutRef.current?.clientWidth ?? wrapper.clientWidth;
-                return layoutWidth - nextWidth >= CHANGES_PANEL_MIN_MAIN_CONTENT_WIDTH;
-              },
-              ...(rememberDrawerWidth ? { storageKey: CHANGES_PANEL_WIDTH_STORAGE_KEY } : {}),
-            }}
-          >
-            <ChangesPanel />
-            <SidebarRail className="top-0 bottom-auto h-12" />
-          </Sidebar>
-        </SidebarProvider>
-      </div>
+      {ideModeEnabled ? (
+        <div className="flex h-dvh min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground">
+          <IdeWorkspace threadId={threadId} />
+        </div>
+      ) : (
+        <LegacyChatThreadView
+          changesLayoutRef={changesLayoutRef}
+          effectiveChangesPanelOpen={effectiveChangesPanelOpen}
+          rememberDrawerWidth={rememberDrawerWidth}
+          setChangesPanelOpen={setChangesPanelOpen}
+          showChangesPanelByDefault={showChangesPanelByDefault}
+          threadId={threadId}
+        />
+      )}
       {/* Diff panel overlay for when a specific file diff is requested */}
       {diffOpen && (
         <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>

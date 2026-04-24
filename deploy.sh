@@ -7,6 +7,7 @@ IFS=$'\n\t'
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUN_BIN="${BUN_BIN:-/home/gizmo/.bun/bin/bun}"
 NODE_BIN="${NODE_BIN:-/usr/bin/node}"
+VX_BIN="${VX_BIN:-/home/gizmo/vortex-scripts/bin/vx}"
 SERVICE_NAME="${SERVICE_NAME:-t3code}"
 HOST="${T3CODE_HOST:-0.0.0.0}"
 PORT="${T3CODE_PORT:-7421}"
@@ -14,6 +15,7 @@ NO_BROWSER_FLAG="--no-browser"
 LOG_FILE="${DEPLOY_LOG_FILE:-/tmp/t3code-vxapp-deploy.log}"
 PID_FILE="${DEPLOY_PID_FILE:-/tmp/t3code-vxapp-deploy.pid}"
 READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-120}"
+WS_READY_TIMEOUT_SECONDS="${WS_READY_TIMEOUT_SECONDS:-60}"
 NO_WAKE_MARKER="${T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER:-/tmp/t3code-vxapp-no-wake}"
 NO_WAKE=0
 
@@ -30,7 +32,7 @@ Default mode is --full:
   4. verify http://127.0.0.1:7421/
 
 Options:
-  --no-wake       Suppress the server's one-shot startup orchestrator wake drain.
+  --no-wake       Skip the post-deploy CTO wake after restart.
 
 Fallback behavior:
   - Uses systemd restart when available.
@@ -106,31 +108,104 @@ run_build() {
     "$BUN_BIN" run build
 }
 
-prepare_no_wake() {
-    if [[ "$NO_WAKE" != "1" ]]; then
-        return 0
-    fi
-
-    step "Suppressing startup orchestrator wake"
+prepare_startup_wake_suppression() {
+    step "Suppressing startup orchestrator wake drain"
     mkdir -p "$(dirname "$NO_WAKE_MARKER")"
     printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$NO_WAKE_MARKER"
     log "No-wake marker: $NO_WAKE_MARKER"
 }
 
+wait_for_t3_ws() {
+    local attempt
+    local doctor_json=""
+
+    for attempt in $(seq 1 "$WS_READY_TIMEOUT_SECONDS"); do
+        if doctor_json=$("$VX_BIN" t3 doctor --json 2>/dev/null); then
+            if printf '%s\n' "$doctor_json" | jq -e '.ws_roundtrip.ok == true' >/dev/null 2>&1; then
+                return 0
+            fi
+        fi
+        sleep 1
+    done
+
+    printf 'T3 WebSocket did not become ready after %s seconds.\n' "$WS_READY_TIMEOUT_SECONDS" >&2
+    if [[ -n "$doctor_json" ]]; then
+        printf '%s\n' "$doctor_json" >&2
+    fi
+    return 1
+}
+
+wake_cto_after_deploy() {
+    if [[ "$NO_WAKE" == "1" ]]; then
+        step "Skipping CTO wake"
+        log "Post-deploy CTO wake disabled via --no-wake"
+        return 0
+    fi
+
+    step "Waking CTO post-deploy"
+    require_cmd "$VX_BIN"
+    require_cmd jq
+    wait_for_t3_ws || return 1
+
+    local status_json=""
+    local ensure_json=""
+    local cto_thread_id=""
+    local jasper_thread_id=""
+    local wake_message=""
+
+    status_json=$("$VX_BIN" t3 cto status --json)
+    cto_thread_id=$(printf '%s\n' "$status_json" | jq -r '.cto.currentThread.id // empty' 2>/dev/null || true)
+
+    if [[ -z "$cto_thread_id" ]]; then
+        ensure_json=$("$VX_BIN" t3 cto ensure --json)
+        cto_thread_id=$(printf '%s\n' "$ensure_json" | jq -r '.threadId // empty' 2>/dev/null || true)
+        status_json=$("$VX_BIN" t3 cto status --json)
+    fi
+
+    if [[ -z "$cto_thread_id" ]]; then
+        printf 'CTO wake failed: unable to resolve current CTO thread.\n' >&2
+        return 1
+    fi
+
+    jasper_thread_id=$(printf '%s\n' "$status_json" | jq -r '.jasper.currentThread.id // empty' 2>/dev/null || true)
+
+    wake_message=$(cat <<EOF
+deploy-complete
+
+t3code-vxapp was restarted successfully and passed http://127.0.0.1:${PORT}/health/ready.
+
+Review executive attention and decide whether Jasper needs a continuation nudge.
+This deploy now suppresses the old startup orchestrator wake drain and routes the post-deploy review to CTO instead.
+
+CTO thread id: ${cto_thread_id}
+Jasper thread id: ${jasper_thread_id:-none}
+
+Inspect:
+- vx t3 cto attention --json
+- vx t3 cto operate --once --json
+EOF
+)
+
+    "$VX_BIN" t3 threads start --thread "$cto_thread_id" --message "$wake_message" --json >/dev/null
+    log "CTO wake sent to thread $cto_thread_id"
+}
+
 restart_via_systemd() {
     step "Restarting systemd service"
-    prepare_no_wake
+    prepare_startup_wake_suppression
 
     if can_use_sudo_systemctl; then
         sudo -n systemctl restart "$SERVICE_NAME"
         wait_for_http || return 1
         verify_systemd_service || return 1
+        wake_cto_after_deploy || return 1
         return 0
     fi
 
     if systemctl restart "$SERVICE_NAME" >/dev/null 2>&1; then
         wait_for_http || return 1
         verify_systemd_service || return 1
+        wake_cto_after_deploy || return 1
         return 0
     fi
 
@@ -139,6 +214,7 @@ restart_via_systemd() {
 
 start_direct_process() {
     step "Starting direct Node process"
+    prepare_startup_wake_suppression
 
     mkdir -p /tmp
     pkill -f "/home/gizmo/t3code-vxapp/apps/server/dist/index.mjs --host ${HOST} --port ${PORT} --no-browser" >/dev/null 2>&1 || true
@@ -160,6 +236,7 @@ start_direct_process() {
 
     log "Direct process started with pid $(cat "$PID_FILE")"
     log "Log file: $LOG_FILE"
+    wake_cto_after_deploy
 }
 
 show_status() {

@@ -939,31 +939,36 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     case "program.meta-updated": {
       let changed = false;
       const currentPrograms = state.programs ?? [];
-      const programs = currentPrograms.map((program) => {
-        if (program.id !== event.payload.programId) {
-          return program;
+      const programs = [...currentPrograms];
+      for (let index = 0; index < programs.length; index += 1) {
+        const program = programs[index];
+        if (!program || program.id !== event.payload.programId) {
+          continue;
         }
         changed = true;
-        return {
-          ...program,
-          ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
-          ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
-          ...(event.payload.status !== undefined ? { status: event.payload.status } : {}),
-          ...(event.payload.executiveProjectId !== undefined
+        const nextProgram = Object.assign(
+          {},
+          program,
+          event.payload.title !== undefined ? { title: event.payload.title } : null,
+          event.payload.objective !== undefined ? { objective: event.payload.objective } : null,
+          event.payload.status !== undefined ? { status: event.payload.status } : null,
+          event.payload.executiveProjectId !== undefined
             ? { executiveProjectId: event.payload.executiveProjectId }
-            : {}),
-          ...(event.payload.executiveThreadId !== undefined
+            : null,
+          event.payload.executiveThreadId !== undefined
             ? { executiveThreadId: event.payload.executiveThreadId }
-            : {}),
-          ...(event.payload.currentOrchestratorThreadId !== undefined
+            : null,
+          event.payload.currentOrchestratorThreadId !== undefined
             ? { currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId }
-            : {}),
-          ...(event.payload.completedAt !== undefined
+            : null,
+          event.payload.completedAt !== undefined
             ? { completedAt: event.payload.completedAt }
-            : {}),
-          updatedAt: event.payload.updatedAt,
-        };
-      });
+            : null,
+          { updatedAt: event.payload.updatedAt },
+        );
+        programs[index] = nextProgram;
+        break;
+      }
       return changed ? { ...state, programs } : state;
     }
 

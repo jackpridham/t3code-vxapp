@@ -19,6 +19,10 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     expect(DEFAULT_CLIENT_SETTINGS.sidebarGroupWorktreesWithParentProject).toBe(true);
   });
 
+  it("defaults IDE mode to disabled", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.ideModeEnabled).toBe(false);
+  });
+
   it("defaults chat view input when scrolling to compact", () => {
     expect(DEFAULT_CLIENT_SETTINGS.chatViewInputWhenScrolling).toBe(
       DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING,
@@ -57,6 +61,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
         changesPanelWindowNavigationMode: "static",
         confirmThreadArchive: true,
         confirmThreadDelete: false,
+        ideModeEnabled: true,
         maxProjectThreadsBeforeFolding: 3,
         sidebarGroupWorktreesWithParentProject: false,
         sidebarOrchestrationModeEnabled: true,
@@ -76,6 +81,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       changesPanelWindowNavigationMode: "static",
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      ideModeEnabled: true,
       maxProjectThreadsBeforeFolding: 3,
       rememberChangesDrawerWidth: true,
       sidebarGroupWorktreesWithParentProject: false,
@@ -95,6 +101,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       chatViewInputWhenScrolling: "compact",
       changesDrawerVisibility: "always_show",
       changesPanelWindowNavigationMode: "dynamic",
+      ideModeEnabled: false,
       rememberChangesDrawerWidth: true,
       sidebarWorkerActivityFilter: "all",
       sidebarWorkerLineageFilter: "hide_invalid",

@@ -36,6 +36,7 @@ import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerProvidersUpdated, onServerWelcome } from "../wsNativeApi";
 import { migrateLocalSettingsToServer } from "../hooks/useSettings";
+import { useSettings } from "../hooks/useSettings";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { skillQueryKeys } from "../lib/skillReactQuery";
@@ -74,6 +75,16 @@ export const Route = createRootRouteWithContext<{
 export function isStandaloneRootRoutePath(pathname: string): boolean {
   return (
     isArtifactWindowPath(pathname) || isArtifactsPath(pathname) || isChangesWindowPath(pathname)
+  );
+}
+
+export function shouldUseStandaloneRootLayout(input: {
+  pathname: string;
+  ideModeEnabled: boolean;
+  isChatThreadRoute: boolean;
+}): boolean {
+  return (
+    isStandaloneRootRoutePath(input.pathname) || (input.ideModeEnabled && input.isChatThreadRoute)
   );
 }
 
@@ -165,9 +176,19 @@ export function collectOrchestrationInvalidationTargets(input: {
 }
 
 function RootRouteView() {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const { isChatThreadRoute, pathname } = useRouterState({
+    select: (state) => ({
+      pathname: state.location.pathname,
+      isChatThreadRoute: state.matches.some((match) => match.routeId === "/_chat/$threadId"),
+    }),
+  });
+  const settings = useSettings();
   const isSidebarWindowRoute = isSidebarWindowPath(pathname);
-  const isStandaloneWindowRoute = isStandaloneRootRoutePath(pathname);
+  const isStandaloneWindowRoute = shouldUseStandaloneRootLayout({
+    pathname,
+    ideModeEnabled: settings.ideModeEnabled,
+    isChatThreadRoute,
+  });
 
   if (!readNativeApi()) {
     return (

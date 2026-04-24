@@ -1,9 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   CheckpointRef,
-  CtoAttentionId,
   NonNegativeInt,
-  ProgramId,
   ProgramNotificationId,
   ProjectId,
   ThreadId,
@@ -20,9 +18,6 @@ import { ProjectionOperationalQuery } from "../Services/ProjectionOperationalQue
 const projectionOperationalQueryLayer = it.layer(
   OrchestrationProjectionOperationalQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
 );
-
-const asCtoAttentionId = (value: string): CtoAttentionId => CtoAttentionId.makeUnsafe(value);
-
 projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
   it.effect("lists project summaries and resolves readiness counts", () =>
     Effect.gen(function* () {

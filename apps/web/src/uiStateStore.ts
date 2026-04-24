@@ -5,6 +5,11 @@ import { create } from "zustand";
 import type { DiscoveredArtifact } from "./artifactDiscovery";
 import type { ChangesSectionKind } from "./changesDiscovery";
 import {
+  type IdeExplorerSection,
+  type IdeSelectedFile,
+  IDE_DEFAULT_EXPLORER_SECTIONS,
+} from "./lib/ide";
+import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   mergeNotificationPreferences,
   type NotificationEventType,
@@ -69,8 +74,19 @@ export interface UiChangesPanelState {
 
 export type ChangesPanelContentMode = "preview" | "diff";
 
+export interface UiIdeState {
+  ideExplorerOpen: boolean;
+  ideExplorerExpandedSections: IdeExplorerSection[];
+  ideChatDrawerOpen: boolean;
+  ideOrchestrationManagerOpen: boolean;
+  ideSelectedFile: IdeSelectedFile | null;
+  ideSelectedDrawerThreadId: ThreadId | null;
+  ideMarkdownPreviewEnabled: boolean;
+  ideDiffEnabled: boolean;
+}
+
 export interface UiState
-  extends UiProjectState, UiThreadState, UiArtifactPanelState, UiChangesPanelState {
+  extends UiProjectState, UiThreadState, UiArtifactPanelState, UiChangesPanelState, UiIdeState {
   notificationPreferences: NotificationPreferences;
 }
 
@@ -99,6 +115,14 @@ const initialState: UiState = {
   changesPanelActivePath: null,
   changesPanelActiveSection: null,
   changesPanelContentMode: "preview",
+  ideExplorerOpen: true,
+  ideExplorerExpandedSections: [...IDE_DEFAULT_EXPLORER_SECTIONS],
+  ideChatDrawerOpen: true,
+  ideOrchestrationManagerOpen: false,
+  ideSelectedFile: null,
+  ideSelectedDrawerThreadId: null,
+  ideMarkdownPreviewEnabled: false,
+  ideDiffEnabled: false,
   notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
 };
 
@@ -637,6 +661,157 @@ export function setChangesPanelContentMode(state: UiState, mode: ChangesPanelCon
   return { ...state, changesPanelContentMode: mode };
 }
 
+// ── IDE mode ────────────────────────────────────────────────────────────────
+
+export function setIdeExplorerOpen(state: UiState, open: boolean): UiState {
+  if (state.ideExplorerOpen === open) {
+    return state;
+  }
+  return {
+    ...state,
+    ideExplorerOpen: open,
+  };
+}
+
+export function toggleIdeExplorer(state: UiState): UiState {
+  return setIdeExplorerOpen(state, !state.ideExplorerOpen);
+}
+
+export function setIdeExplorerExpandedSections(
+  state: UiState,
+  sections: readonly IdeExplorerSection[],
+): UiState {
+  const nextSections = [...new Set(sections)];
+  if (
+    nextSections.length === state.ideExplorerExpandedSections.length &&
+    nextSections.every((section, index) => section === state.ideExplorerExpandedSections[index])
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    ideExplorerExpandedSections: nextSections,
+  };
+}
+
+export function toggleIdeExplorerSection(state: UiState, section: IdeExplorerSection): UiState {
+  const isExpanded = state.ideExplorerExpandedSections.includes(section);
+  const nextSections = isExpanded
+    ? state.ideExplorerExpandedSections.filter((value) => value !== section)
+    : [...state.ideExplorerExpandedSections, section];
+  return setIdeExplorerExpandedSections(state, nextSections);
+}
+
+export function focusIdeExplorerSection(state: UiState, section: IdeExplorerSection): UiState {
+  if (
+    state.ideExplorerOpen &&
+    state.ideExplorerExpandedSections.length === 1 &&
+    state.ideExplorerExpandedSections[0] === section
+  ) {
+    return {
+      ...state,
+      ideExplorerOpen: false,
+    };
+  }
+  return {
+    ...state,
+    ideExplorerOpen: true,
+    ideExplorerExpandedSections: [section],
+  };
+}
+
+export function setIdeChatDrawerOpen(state: UiState, open: boolean): UiState {
+  if (state.ideChatDrawerOpen === open) {
+    return state;
+  }
+  return {
+    ...state,
+    ideChatDrawerOpen: open,
+  };
+}
+
+export function toggleIdeChatDrawer(state: UiState): UiState {
+  return setIdeChatDrawerOpen(state, !state.ideChatDrawerOpen);
+}
+
+export function setIdeOrchestrationManagerOpen(state: UiState, open: boolean): UiState {
+  if (state.ideOrchestrationManagerOpen === open) {
+    return state;
+  }
+  return {
+    ...state,
+    ideOrchestrationManagerOpen: open,
+  };
+}
+
+export function toggleIdeOrchestrationManager(state: UiState): UiState {
+  return setIdeOrchestrationManagerOpen(state, !state.ideOrchestrationManagerOpen);
+}
+
+export function setIdeSelectedFile(state: UiState, selectedFile: IdeSelectedFile | null): UiState {
+  const previousSelection = state.ideSelectedFile;
+  const selectionUnchanged =
+    previousSelection?.absolutePath === selectedFile?.absolutePath &&
+    previousSelection?.source === selectedFile?.source &&
+    previousSelection?.threadId === selectedFile?.threadId &&
+    previousSelection?.sourcePath === selectedFile?.sourcePath &&
+    previousSelection?.worktreePath === selectedFile?.worktreePath &&
+    previousSelection?.latestCheckpointTurnCount === selectedFile?.latestCheckpointTurnCount;
+
+  if (
+    selectionUnchanged &&
+    state.ideMarkdownPreviewEnabled === false &&
+    state.ideDiffEnabled === false
+  ) {
+    return state;
+  }
+
+  return {
+    ...state,
+    ideSelectedFile: selectedFile,
+    ideMarkdownPreviewEnabled: false,
+    ideDiffEnabled: false,
+  };
+}
+
+export function setIdeSelectedDrawerThreadId(state: UiState, threadId: ThreadId | null): UiState {
+  if (state.ideSelectedDrawerThreadId === threadId) {
+    return state;
+  }
+  return {
+    ...state,
+    ideSelectedDrawerThreadId: threadId,
+  };
+}
+
+export function setIdeMarkdownPreviewEnabled(state: UiState, enabled: boolean): UiState {
+  if (state.ideMarkdownPreviewEnabled === enabled) {
+    return state;
+  }
+  return {
+    ...state,
+    ideMarkdownPreviewEnabled: enabled,
+  };
+}
+
+export function toggleIdeMarkdownPreview(state: UiState): UiState {
+  return setIdeMarkdownPreviewEnabled(state, !state.ideMarkdownPreviewEnabled);
+}
+
+export function setIdeDiffEnabled(state: UiState, enabled: boolean): UiState {
+  if (state.ideDiffEnabled === enabled) {
+    return state;
+  }
+  return {
+    ...state,
+    ideDiffEnabled: enabled,
+  };
+}
+
+export function toggleIdeDiff(state: UiState): UiState {
+  return setIdeDiffEnabled(state, !state.ideDiffEnabled);
+}
+
 export function reorderProjects(
   state: UiState,
   draggedProjectId: ProjectId,
@@ -711,6 +886,21 @@ interface UiStateStore extends UiState {
   setChangesPanelActivePath: (path: string | null) => void;
   setChangesPanelActiveSection: (section: ChangesSectionKind | null) => void;
   setChangesPanelContentMode: (mode: ChangesPanelContentMode) => void;
+  setIdeExplorerOpen: (open: boolean) => void;
+  toggleIdeExplorer: () => void;
+  setIdeExplorerExpandedSections: (sections: readonly IdeExplorerSection[]) => void;
+  toggleIdeExplorerSection: (section: IdeExplorerSection) => void;
+  focusIdeExplorerSection: (section: IdeExplorerSection) => void;
+  setIdeChatDrawerOpen: (open: boolean) => void;
+  toggleIdeChatDrawer: () => void;
+  setIdeOrchestrationManagerOpen: (open: boolean) => void;
+  toggleIdeOrchestrationManager: () => void;
+  setIdeSelectedFile: (selectedFile: IdeSelectedFile | null) => void;
+  setIdeSelectedDrawerThreadId: (threadId: ThreadId | null) => void;
+  setIdeMarkdownPreviewEnabled: (enabled: boolean) => void;
+  toggleIdeMarkdownPreview: () => void;
+  setIdeDiffEnabled: (enabled: boolean) => void;
+  toggleIdeDiff: () => void;
   setNotificationPreferences: (prefs: Partial<NotificationPreferences>) => void;
   toggleNotificationEvent: (eventType: NotificationEventType, enabled: boolean) => void;
 }
@@ -752,6 +942,25 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setChangesPanelActiveSection: (section) =>
     set((state) => setChangesPanelActiveSection(state, section)),
   setChangesPanelContentMode: (mode) => set((state) => setChangesPanelContentMode(state, mode)),
+  setIdeExplorerOpen: (open) => set((state) => setIdeExplorerOpen(state, open)),
+  toggleIdeExplorer: () => set((state) => toggleIdeExplorer(state)),
+  setIdeExplorerExpandedSections: (sections) =>
+    set((state) => setIdeExplorerExpandedSections(state, sections)),
+  toggleIdeExplorerSection: (section) => set((state) => toggleIdeExplorerSection(state, section)),
+  focusIdeExplorerSection: (section) => set((state) => focusIdeExplorerSection(state, section)),
+  setIdeChatDrawerOpen: (open) => set((state) => setIdeChatDrawerOpen(state, open)),
+  toggleIdeChatDrawer: () => set((state) => toggleIdeChatDrawer(state)),
+  setIdeOrchestrationManagerOpen: (open) =>
+    set((state) => setIdeOrchestrationManagerOpen(state, open)),
+  toggleIdeOrchestrationManager: () => set((state) => toggleIdeOrchestrationManager(state)),
+  setIdeSelectedFile: (selectedFile) => set((state) => setIdeSelectedFile(state, selectedFile)),
+  setIdeSelectedDrawerThreadId: (threadId) =>
+    set((state) => setIdeSelectedDrawerThreadId(state, threadId)),
+  setIdeMarkdownPreviewEnabled: (enabled) =>
+    set((state) => setIdeMarkdownPreviewEnabled(state, enabled)),
+  toggleIdeMarkdownPreview: () => set((state) => toggleIdeMarkdownPreview(state)),
+  setIdeDiffEnabled: (enabled) => set((state) => setIdeDiffEnabled(state, enabled)),
+  toggleIdeDiff: () => set((state) => toggleIdeDiff(state)),
   setNotificationPreferences: (prefs) => set((state) => setNotificationPreferences(state, prefs)),
   toggleNotificationEvent: (eventType, enabled) =>
     set((state) => toggleNotificationEvent(state, eventType, enabled)),

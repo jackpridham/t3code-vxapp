@@ -114,6 +114,7 @@ import {
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
+  MenuIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -131,7 +132,6 @@ import {
   setupProjectScript,
 } from "~/projectScripts";
 import { nextProjectHookId } from "~/projectHooks";
-import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
@@ -365,6 +365,8 @@ const terminalContextIdListsEqual = (
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
 
 interface ChatViewProps {
+  hideHeader?: boolean | undefined;
+  layoutMode?: "default" | "drawer" | undefined;
   mobileSidebarOpen?: boolean | undefined;
   onToggleMobileSidebar?: (() => void) | undefined;
   threadId: ThreadId;
@@ -444,12 +446,16 @@ function useLocalDispatchState(input: {
 }
 
 export default function ChatView({
+  hideHeader = false,
+  layoutMode = "default",
   mobileSidebarOpen,
   onToggleMobileSidebar,
   threadId,
 }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
   const isMobile = useIsMobile();
+  const isDrawerLayout = layoutMode === "drawer";
+  const allowAuxiliaryPanels = !isDrawerLayout;
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const setStoreThreadError = useStore((store) => store.setError);
@@ -464,6 +470,7 @@ export default function ChatView({
     (store) => store.setStickyModelSelection,
   );
   const chatViewInputWhenScrolling = settings.chatViewInputWhenScrolling;
+  const ideModeEnabled = settings.ideModeEnabled;
   const sidebarOrchestrationModeEnabled = settings.sidebarOrchestrationModeEnabled;
   const timestampFormat = settings.timestampFormat;
   const workerChatViewVisibility = settings.workerChatViewVisibility;
@@ -1904,6 +1911,9 @@ export default function ChatView({
     );
   }, [handleRuntimeModeChange, runtimeMode]);
   const togglePlanSidebar = useCallback(() => {
+    if (!allowAuxiliaryPanels) {
+      return;
+    }
     setPlanSidebarOpen((open) => {
       if (open) {
         const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
@@ -1915,7 +1925,7 @@ export default function ChatView({
       }
       return !open;
     });
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  }, [activePlan?.turnId, allowAuxiliaryPanels, sidebarProposedPlan?.turnId]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -2449,6 +2459,7 @@ export default function ChatView({
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || event.defaultPrevented) return;
       const shortcutContext = {
+        ideMode: ideModeEnabled,
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
       };
@@ -2523,6 +2534,7 @@ export default function ChatView({
     setTerminalOpen,
     runProjectScript,
     splitTerminal,
+    ideModeEnabled,
     keybindings,
     showChangesDrawerToggle,
     toggleChangesPanel,
@@ -3811,7 +3823,19 @@ export default function ChatView({
         {!isElectron && (
           <header className="border-b border-border px-3 py-2 md:hidden">
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="size-7 shrink-0" />
+              {onToggleMobileSidebar ? (
+                <Button
+                  className="size-7 shrink-0"
+                  data-sidebar="trigger"
+                  data-slot="sidebar-trigger"
+                  onClick={onToggleMobileSidebar}
+                  size="icon"
+                  variant="ghost"
+                >
+                  {mobileSidebarOpen ? <ChevronLeftIcon /> : <MenuIcon />}
+                  <span className="sr-only">Toggle Sidebar</span>
+                </Button>
+              ) : null}
               <span className="text-sm font-medium text-foreground">Threads</span>
             </div>
           </header>
@@ -3831,12 +3855,13 @@ export default function ChatView({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       {/* Top bar */}
       <header
         className={cn(
           "border-b border-border px-3 sm:px-5",
           isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          hideHeader && "hidden",
         )}
       >
         <ChatHeader
@@ -3953,7 +3978,10 @@ export default function ChatView({
             {/* Messages */}
             <div
               ref={setMessagesScrollContainerRef}
-              className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
+              className={cn(
+                "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain",
+                isDrawerLayout ? "px-3 py-3" : "px-3 py-3 sm:px-5 sm:py-4",
+              )}
               onScroll={onMessagesScroll}
               onClickCapture={onMessagesClickCapture}
               onWheel={onMessagesWheel}
@@ -3989,10 +4017,16 @@ export default function ChatView({
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
+                layoutMode={layoutMode}
               />
             </div>
 
-            <div className="pointer-events-none absolute bottom-1 right-3 z-30 py-1.5 sm:right-5">
+            <div
+              className={cn(
+                "pointer-events-none absolute bottom-1 z-30 py-1.5",
+                isDrawerLayout ? "right-3" : "right-3 sm:right-5",
+              )}
+            >
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -4033,12 +4067,15 @@ export default function ChatView({
           </div>
 
           {!isComposerHidden ? (
-            <div data-testid="chat-composer-region">
+            <div data-testid="chat-composer-region" className="shrink-0">
               {showActiveTurnIndicator ? (
-                <div className="px-3 pt-2 sm:px-5">
+                <div className={cn("px-3 pt-2", !isDrawerLayout && "sm:px-5")}>
                   <div
                     data-testid="active-turn-indicator"
-                    className="mx-auto w-full max-w-3xl rounded-2xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 shadow-sm dark:text-amber-100"
+                    className={cn(
+                      "w-full rounded-2xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 shadow-sm dark:text-amber-100",
+                      isDrawerLayout ? "max-w-none" : "mx-auto max-w-3xl",
+                    )}
                   >
                     Active turn in progress. Waiting for fresh assistant output for this turn.
                   </div>
@@ -4046,7 +4083,11 @@ export default function ChatView({
               ) : null}
               {/* Input bar */}
               <div
-                className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}
+                className={cn(
+                  "px-3 pt-1.5",
+                  isDrawerLayout ? "pb-3" : "sm:px-5 sm:pt-2",
+                  isGitRepo ? "pb-1" : isDrawerLayout ? "pb-3" : "pb-3 sm:pb-4",
+                )}
               >
                 <form
                   ref={composerFormRef}
@@ -4057,7 +4098,10 @@ export default function ChatView({
                       setIsComposerInputFocused(false);
                     }
                   }}
-                  className="mx-auto w-full min-w-0 max-w-3xl"
+                  className={cn(
+                    "w-full min-w-0",
+                    isDrawerLayout ? "max-w-none" : "mx-auto max-w-3xl",
+                  )}
                   data-chat-composer-form="true"
                   data-composer-collapsed={isComposerCollapsed ? "true" : "false"}
                 >
@@ -4288,9 +4332,10 @@ export default function ChatView({
 
                             {isComposerFooterCompact ? (
                               <CompactComposerControlsMenu
-                                activePlan={Boolean(
-                                  activePlan || sidebarProposedPlan || planSidebarOpen,
-                                )}
+                                activePlan={
+                                  allowAuxiliaryPanels &&
+                                  Boolean(activePlan || sidebarProposedPlan || planSidebarOpen)
+                                }
                                 interactionMode={interactionMode}
                                 planSidebarOpen={planSidebarOpen}
                                 runtimeMode={runtimeMode}
@@ -4363,7 +4408,8 @@ export default function ChatView({
                                   </span>
                                 </Button>
 
-                                {activePlan || sidebarProposedPlan || planSidebarOpen ? (
+                                {allowAuxiliaryPanels &&
+                                (activePlan || sidebarProposedPlan || planSidebarOpen) ? (
                                   <>
                                     <Separator
                                       orientation="vertical"
@@ -4570,15 +4616,17 @@ export default function ChatView({
               </div>
 
               {isGitRepo && (
-                <BranchToolbar
-                  threadId={activeThread.id}
-                  onEnvModeChange={onEnvModeChange}
-                  envLocked={envLocked}
-                  onComposerFocusRequest={scheduleComposerFocus}
-                  {...(canCheckoutPullRequestIntoThread
-                    ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                    : {})}
-                />
+                <div className="shrink-0">
+                  <BranchToolbar
+                    threadId={activeThread.id}
+                    onEnvModeChange={onEnvModeChange}
+                    envLocked={envLocked}
+                    onComposerFocusRequest={scheduleComposerFocus}
+                    {...(canCheckoutPullRequestIntoThread
+                      ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+                      : {})}
+                  />
+                </div>
               )}
             </div>
           ) : null}
@@ -4600,7 +4648,7 @@ export default function ChatView({
         {/* end chat column */}
 
         {/* Plan sidebar */}
-        {planSidebarOpen ? (
+        {allowAuxiliaryPanels && planSidebarOpen ? (
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
@@ -4621,7 +4669,7 @@ export default function ChatView({
       {/* end horizontal flex container */}
 
       {(() => {
-        if (!terminalState.terminalOpen || !activeProject) {
+        if (!allowAuxiliaryPanels || !terminalState.terminalOpen || !activeProject) {
           return null;
         }
         return (

@@ -21,6 +21,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     Effect.sync(() => {
       const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
+      assert.equal(DEFAULT_SERVER_SETTINGS.startupThreadTarget, "executive");
+      assert.deepEqual(decodePatch({ startupThreadTarget: "orchestrator" }), {
+        startupThreadTarget: "orchestrator",
+      });
+
       assert.deepEqual(decodePatch({ providers: { codex: { binaryPath: "/tmp/codex" } } }), {
         providers: { codex: { binaryPath: "/tmp/codex" } },
       });

@@ -25,6 +25,7 @@ import {
   type SidebarWorkerActivityFilter,
   type SidebarWorkerLineageFilter,
   type SidebarWorkerVisibilityScope,
+  type StartupThreadTarget,
   type ChangesDrawerVisibility,
   type ChangesPanelFilesChangedViewType,
   type ChangesPanelWindowNavigationMode,
@@ -493,6 +494,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled
         ? ["Orchestration mode"]
         : []),
+      ...(settings.ideModeEnabled !== DEFAULT_UNIFIED_SETTINGS.ideModeEnabled ? ["IDE mode"] : []),
+      ...(settings.startupThreadTarget !== DEFAULT_UNIFIED_SETTINGS.startupThreadTarget
+        ? ["Startup thread"]
+        : []),
       ...(settings.sidebarGroupWorktreesWithParentProject !==
       DEFAULT_UNIFIED_SETTINGS.sidebarGroupWorktreesWithParentProject
         ? ["Worktree project grouping"]
@@ -573,8 +578,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.ideModeEnabled,
       settings.maxProjectThreadsBeforeFolding,
       settings.notifyActiveOrchestratorOnRejectedWorkerWake,
+      settings.startupThreadTarget,
       settings.sidebarGroupWorktreesWithParentProject,
       settings.sidebarOrchestrationModeEnabled,
       settings.sidebarProjectSortOrder,
@@ -616,6 +623,11 @@ const CHANGES_PANEL_FILES_CHANGED_VIEW_TYPE_LABELS: Record<
 > = {
   list: "File List",
   tree: "File Tree",
+};
+
+const STARTUP_THREAD_TARGET_LABELS: Record<StartupThreadTarget, string> = {
+  executive: "CTO",
+  orchestrator: "Orchestrator",
 };
 
 const CHANGES_PANEL_WINDOW_NAVIGATION_MODE_LABELS: Record<
@@ -1756,6 +1768,69 @@ export function OrchestrationSettingsPanel() {
               }
               aria-label="Enable orchestration mode"
             />
+          }
+        />
+        <SettingsRow
+          title="Toggle IDE Mode"
+          description="Replace the central chat route with the IDE workspace, explorer sidebar, orchestration manager, and chat drawer."
+          resetAction={
+            settings.ideModeEnabled !== DEFAULT_UNIFIED_SETTINGS.ideModeEnabled ? (
+              <SettingResetButton
+                label="IDE mode"
+                onClick={() =>
+                  updateSettings({
+                    ideModeEnabled: DEFAULT_UNIFIED_SETTINGS.ideModeEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.ideModeEnabled}
+              onCheckedChange={(checked) => updateSettings({ ideModeEnabled: Boolean(checked) })}
+              aria-label="Toggle IDE mode"
+            />
+          }
+        />
+        <SettingsRow
+          title="Startup Thread"
+          description="When loading `/`, open the active CTO or orchestrator session for the current workspace."
+          resetAction={
+            settings.startupThreadTarget !== DEFAULT_UNIFIED_SETTINGS.startupThreadTarget ? (
+              <SettingResetButton
+                label="startup thread"
+                onClick={() =>
+                  updateSettings({
+                    startupThreadTarget: DEFAULT_UNIFIED_SETTINGS.startupThreadTarget,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.startupThreadTarget}
+              onValueChange={(value) => {
+                if (value === "executive" || value === "orchestrator") {
+                  updateSettings({ startupThreadTarget: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-44" aria-label="Startup thread target">
+                <SelectValue>
+                  {STARTUP_THREAD_TARGET_LABELS[settings.startupThreadTarget]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="executive">
+                  {STARTUP_THREAD_TARGET_LABELS.executive}
+                </SelectItem>
+                <SelectItem hideIndicator value="orchestrator">
+                  {STARTUP_THREAD_TARGET_LABELS.orchestrator}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
       </SettingsSection>

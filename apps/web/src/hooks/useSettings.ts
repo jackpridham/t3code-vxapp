@@ -230,6 +230,12 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.sidebarOrchestrationModeEnabled = legacySettings.sidebarOrchestrationModeEnabled;
   }
 
+  if (Predicate.isBoolean(legacySettings.ideModeEnabled)) {
+    patch.ideModeEnabled = legacySettings.ideModeEnabled;
+  } else if (legacySettings.ideModeEnabled === undefined) {
+    patch.ideModeEnabled = DEFAULT_CLIENT_SETTINGS.ideModeEnabled;
+  }
+
   if (Predicate.isBoolean(legacySettings.sidebarGroupWorktreesWithParentProject)) {
     patch.sidebarGroupWorktreesWithParentProject =
       legacySettings.sidebarGroupWorktreesWithParentProject;

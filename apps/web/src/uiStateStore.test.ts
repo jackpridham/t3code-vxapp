@@ -8,6 +8,7 @@ import {
   clearThreadUi,
   closeArtifactPanel,
   closeChangesPanel,
+  focusIdeExplorerSection,
   initializeChangesPanelFromSettings,
   markThreadUnread,
   openArtifactPanel,
@@ -17,6 +18,7 @@ import {
   setChangesPanelActiveSection,
   setChangesPanelContentMode,
   setDiscoveredArtifacts,
+  setIdeSelectedFile,
   setProjectExpanded,
   setProjectLabelFilter,
   setSelectedOrchestrationSessionRoot,
@@ -43,6 +45,14 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     changesPanelActivePath: null,
     changesPanelActiveSection: null,
     changesPanelContentMode: "preview",
+    ideExplorerOpen: true,
+    ideExplorerExpandedSections: ["changes"],
+    ideChatDrawerOpen: true,
+    ideOrchestrationManagerOpen: false,
+    ideSelectedFile: null,
+    ideSelectedDrawerThreadId: null,
+    ideMarkdownPreviewEnabled: false,
+    ideDiffEnabled: false,
     notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
     ...overrides,
   };
@@ -574,5 +584,58 @@ describe("changes panel pure functions", () => {
   it("setChangesPanelContentMode returns same reference when mode unchanged", () => {
     const state = makeUiState({ changesPanelContentMode: "preview" });
     expect(setChangesPanelContentMode(state, "preview")).toBe(state);
+  });
+});
+
+describe("IDE mode pure functions", () => {
+  it("focusIdeExplorerSection opens the explorer and retracts other sections", () => {
+    const next = focusIdeExplorerSection(
+      makeUiState({
+        ideExplorerOpen: false,
+        ideExplorerExpandedSections: ["changes", "threads"],
+      }),
+      "explorer",
+    );
+
+    expect(next.ideExplorerOpen).toBe(true);
+    expect(next.ideExplorerExpandedSections).toEqual(["explorer"]);
+  });
+
+  it("focusIdeExplorerSection toggles the explorer closed when the same section is already focused", () => {
+    const next = focusIdeExplorerSection(
+      makeUiState({
+        ideExplorerOpen: true,
+        ideExplorerExpandedSections: ["explorer"],
+      }),
+      "explorer",
+    );
+
+    expect(next.ideExplorerOpen).toBe(false);
+    expect(next.ideExplorerExpandedSections).toEqual(["explorer"]);
+  });
+
+  it("setIdeSelectedFile resets markdown preview and diff mode", () => {
+    const next = setIdeSelectedFile(
+      makeUiState({
+        ideMarkdownPreviewEnabled: true,
+        ideDiffEnabled: true,
+      }),
+      {
+        absolutePath: "/repo/README.md",
+        relativePath: "README.md",
+        displayPath: "README.md",
+        fileName: "README.md",
+        source: "explorer",
+        section: "explorer",
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        worktreePath: "/repo",
+        sourcePath: "README.md",
+        latestCheckpointTurnCount: 4,
+      },
+    );
+
+    expect(next.ideSelectedFile?.absolutePath).toBe("/repo/README.md");
+    expect(next.ideMarkdownPreviewEnabled).toBe(false);
+    expect(next.ideDiffEnabled).toBe(false);
   });
 });

@@ -69,6 +69,7 @@ vi.mock("../wsNativeApi", () => ({
 
 vi.mock("../hooks/useSettings", () => ({
   migrateLocalSettingsToServer: vi.fn(),
+  useSettings: vi.fn(() => ({ ideModeEnabled: false })),
 }));
 
 vi.mock("../lib/providerReactQuery", () => ({
@@ -118,6 +119,7 @@ import {
   collectOrchestrationInvalidationTargets,
   isStandaloneRootRoutePath,
   resolveRouteThreadId,
+  shouldUseStandaloneRootLayout,
 } from "./__root";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { isArtifactWindowPath } from "../lib/artifactWindow";
@@ -456,6 +458,38 @@ describe("isStandaloneRootRoutePath", () => {
 
   it("returns false for normal app routes", () => {
     expect(isStandaloneRootRoutePath("/")).toBe(false);
+  });
+});
+
+describe("shouldUseStandaloneRootLayout", () => {
+  it("treats IDE chat routes as standalone when IDE mode is enabled", () => {
+    expect(
+      shouldUseStandaloneRootLayout({
+        pathname: "/thread-1",
+        ideModeEnabled: true,
+        isChatThreadRoute: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps normal chat routes inside the app shell when IDE mode is disabled", () => {
+    expect(
+      shouldUseStandaloneRootLayout({
+        pathname: "/thread-1",
+        ideModeEnabled: false,
+        isChatThreadRoute: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not infer IDE standalone mode from the pathname alone", () => {
+    expect(
+      shouldUseStandaloneRootLayout({
+        pathname: "/thread-1",
+        ideModeEnabled: true,
+        isChatThreadRoute: false,
+      }),
+    ).toBe(false);
   });
 });
 

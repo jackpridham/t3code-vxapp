@@ -43,6 +43,7 @@ function ChatRouteGlobalShortcuts() {
 
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
+          ideMode: appSettings.ideModeEnabled,
           terminalFocus: isTerminalFocused(),
           terminalOpen,
         },
@@ -81,6 +82,7 @@ function ChatRouteGlobalShortcuts() {
     activeThread,
     clearSelection,
     handleNewThread,
+    appSettings.ideModeEnabled,
     keybindings,
     defaultProjectId,
     selectedThreadIdsSize,

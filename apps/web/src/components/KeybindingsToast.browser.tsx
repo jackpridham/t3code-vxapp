@@ -59,6 +59,7 @@ function createBaseServerConfig(): ServerConfig {
     settings: {
       enableAssistantStreaming: false,
       notifyActiveOrchestratorOnRejectedWorkerWake: false,
+      startupThreadTarget: "executive" as const,
       defaultThreadEnvMode: "local" as const,
       textGenerationModelSelection: { provider: "codex" as const, model: "gpt-5.4-mini" },
       providers: {

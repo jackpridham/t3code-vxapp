@@ -85,6 +85,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
 import { makeVxappWsRouteHandlers, type VxappWsRouteHandlerServices } from "./extensions/vxapp";
+import { resolveStartupBootstrapSelection } from "./bootstrapThreadSelection";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -721,6 +722,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
+      const serverSettings = yield* serverSettingsManager.getSettings;
       const bootstrapSummary = yield* projectionBootstrapSummaryQuery.getBootstrapSummary();
       const existingProject = bootstrapSummary.projects.find(
         (project) => project.workspaceRoot === cwd && project.deletedAt === null,
@@ -751,6 +753,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           provider: "codex" as const,
           model: "gpt-5-codex",
         };
+      }
+
+      const preferredStartupSelection = resolveStartupBootstrapSelection({
+        bootstrapProjectId,
+        projects: bootstrapSummary.projects,
+        threads: bootstrapSummary.threads,
+        startupThreadTarget: serverSettings.startupThreadTarget,
+      });
+      if (preferredStartupSelection) {
+        welcomeBootstrapProjectId = preferredStartupSelection.projectId;
+        welcomeBootstrapThreadId = preferredStartupSelection.threadId;
+        return;
       }
 
       const existingThread = bootstrapSummary.threads.find(

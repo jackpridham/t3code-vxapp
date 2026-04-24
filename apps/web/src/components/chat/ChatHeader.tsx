@@ -11,7 +11,6 @@ import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectHooksControl, { type NewProjectHookInput } from "../ProjectHooksControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
 import { Button } from "../ui/button";
 import { getDisplayThreadLabelEntries } from "../../lib/threadLabels";
 import type { WorkerLineageIndicator } from "../../lib/workerLineage";
@@ -221,9 +220,7 @@ export const ChatHeader = memo(function ChatHeader({
       {mobileSidebarOpen ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
-  ) : (
-    <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-  );
+  ) : null;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">

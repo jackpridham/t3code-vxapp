@@ -615,6 +615,95 @@ describe("WebSocket Server", () => {
     }
   }
 
+  async function seedBootstrapSpecialProject(input: {
+    ws: WebSocket;
+    parentProjectId: string;
+    kind: "executive" | "orchestrator";
+    projectId: string;
+    olderThreadId: string;
+    activeThreadId: string;
+    title: string;
+    workspaceRoot: string;
+  }) {
+    const createdAt = new Date().toISOString();
+
+    const createProjectResponse = await sendRequest(
+      input.ws,
+      ORCHESTRATION_WS_METHODS.dispatchCommand,
+      {
+        type: "project.create",
+        commandId: `cmd-${input.projectId}-create`,
+        projectId: input.projectId,
+        title: input.title,
+        workspaceRoot: input.workspaceRoot,
+        kind: input.kind,
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      },
+    );
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createOlderThreadResponse = await sendRequest(
+      input.ws,
+      ORCHESTRATION_WS_METHODS.dispatchCommand,
+      {
+        type: "thread.create",
+        commandId: `cmd-${input.olderThreadId}-create`,
+        threadId: input.olderThreadId,
+        projectId: input.projectId,
+        title: `${input.title} Older`,
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      },
+    );
+    expect(createOlderThreadResponse.error).toBeUndefined();
+
+    const createActiveThreadResponse = await sendRequest(
+      input.ws,
+      ORCHESTRATION_WS_METHODS.dispatchCommand,
+      {
+        type: "thread.create",
+        commandId: `cmd-${input.activeThreadId}-create`,
+        threadId: input.activeThreadId,
+        projectId: input.projectId,
+        title: `${input.title} Active`,
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      },
+    );
+    expect(createActiveThreadResponse.error).toBeUndefined();
+
+    const updateProjectResponse = await sendRequest(
+      input.ws,
+      ORCHESTRATION_WS_METHODS.dispatchCommand,
+      {
+        type: "project.meta.update",
+        commandId: `cmd-${input.projectId}-meta-update`,
+        projectId: input.projectId,
+        sidebarParentProjectId: input.parentProjectId,
+        currentSessionRootThreadId: input.activeThreadId,
+      },
+    );
+    expect(updateProjectResponse.error).toBeUndefined();
+  }
+
   afterEach(async () => {
     for (const ws of connections) {
       ws.close();
@@ -1004,6 +1093,139 @@ describe("WebSocket Server", () => {
         projectName: "bootstrap-existing",
         bootstrapProjectId: firstBootstrapProjectId,
         bootstrapThreadId: firstBootstrapThreadId,
+      }),
+    );
+  });
+
+  it("defaults startup bootstrap to the active CTO session for the cwd project", async () => {
+    const baseDir = makeTempDir("t3code-state-bootstrap-cto-");
+    const { dbPath } = deriveServerPathsSync(baseDir, undefined);
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath).pipe(
+      Layer.provide(NodeServices.layer),
+    );
+    const cwd = makeTempDir("t3code-ws-bootstrap-cto-workspace-");
+
+    server = await createTestServer({
+      cwd,
+      baseDir,
+      persistenceLayer,
+      autoBootstrapProjectFromCwd: true,
+    });
+    let addr = server.address();
+    let port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [firstWs, firstWelcome] = await connectAndAwaitWelcome(port);
+    connections.push(firstWs);
+    const bootstrapProjectId = (firstWelcome.data as { bootstrapProjectId?: string })
+      .bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    await seedBootstrapSpecialProject({
+      ws: firstWs,
+      parentProjectId: bootstrapProjectId!,
+      kind: "executive",
+      projectId: "project-cto",
+      olderThreadId: "thread-cto-older",
+      activeThreadId: "thread-cto-active",
+      title: "CTO",
+      workspaceRoot: makeTempDir("t3code-ws-bootstrap-cto-special-"),
+    });
+
+    firstWs.close();
+    await closeTestServer();
+    server = null;
+
+    server = await createTestServer({
+      cwd,
+      baseDir,
+      persistenceLayer,
+      autoBootstrapProjectFromCwd: true,
+    });
+    addr = server.address();
+    port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [secondWs, secondWelcome] = await connectAndAwaitWelcome(port);
+    connections.push(secondWs);
+    expect(secondWelcome.data).toEqual(
+      expect.objectContaining({
+        cwd,
+        bootstrapProjectId: "project-cto",
+        bootstrapThreadId: "thread-cto-active",
+      }),
+    );
+  });
+
+  it("can switch startup bootstrap to the active orchestrator session", async () => {
+    const baseDir = makeTempDir("t3code-state-bootstrap-orchestrator-");
+    const { dbPath } = deriveServerPathsSync(baseDir, undefined);
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath).pipe(
+      Layer.provide(NodeServices.layer),
+    );
+    const cwd = makeTempDir("t3code-ws-bootstrap-orchestrator-workspace-");
+
+    server = await createTestServer({
+      cwd,
+      baseDir,
+      persistenceLayer,
+      autoBootstrapProjectFromCwd: true,
+    });
+    let addr = server.address();
+    let port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [firstWs, firstWelcome] = await connectAndAwaitWelcome(port);
+    connections.push(firstWs);
+    const bootstrapProjectId = (firstWelcome.data as { bootstrapProjectId?: string })
+      .bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    await seedBootstrapSpecialProject({
+      ws: firstWs,
+      parentProjectId: bootstrapProjectId!,
+      kind: "executive",
+      projectId: "project-cto-toggle",
+      olderThreadId: "thread-cto-toggle-older",
+      activeThreadId: "thread-cto-toggle-active",
+      title: "CTO",
+      workspaceRoot: makeTempDir("t3code-ws-bootstrap-toggle-cto-"),
+    });
+    await seedBootstrapSpecialProject({
+      ws: firstWs,
+      parentProjectId: bootstrapProjectId!,
+      kind: "orchestrator",
+      projectId: "project-orchestrator-toggle",
+      olderThreadId: "thread-orchestrator-toggle-older",
+      activeThreadId: "thread-orchestrator-toggle-active",
+      title: "Orchestrator",
+      workspaceRoot: makeTempDir("t3code-ws-bootstrap-toggle-orchestrator-"),
+    });
+
+    firstWs.close();
+    await closeTestServer();
+    server = null;
+
+    server = await createTestServer({
+      cwd,
+      baseDir,
+      persistenceLayer,
+      autoBootstrapProjectFromCwd: true,
+      serverSettings: {
+        startupThreadTarget: "orchestrator",
+      },
+    });
+    addr = server.address();
+    port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [secondWs, secondWelcome] = await connectAndAwaitWelcome(port);
+    connections.push(secondWs);
+    expect(secondWelcome.data).toEqual(
+      expect.objectContaining({
+        cwd,
+        bootstrapProjectId: "project-orchestrator-toggle",
+        bootstrapThreadId: "thread-orchestrator-toggle-active",
       }),
     );
   });

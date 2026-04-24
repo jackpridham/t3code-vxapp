@@ -12,9 +12,8 @@ import {
   PanelLeftOpenIcon,
   XIcon,
 } from "lucide-react";
-import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
+import { type FileDiffMetadata } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
-import { useQuery } from "@tanstack/react-query";
 import { ThreadId } from "@t3tools/contracts";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
@@ -25,30 +24,18 @@ import {
   type DiscoveredFileReference,
 } from "../changesDiscovery";
 import { useChangesDiscovery } from "../hooks/useChangesDiscovery";
-import type { CodeLineMarkerKind } from "../lib/codeDiffMarkers";
-import { parseCodeDiffMarkers } from "../lib/codeDiffMarkers";
 import {
   basenameOfChangesPath,
   canonicalizeChangesPathForLookup,
   isAbsoluteChangesPath,
-  normalizeChangesPath,
   resolveChangesAbsolutePath,
   resolveChangesThreadRelativePath,
   stripChangesBasePath,
 } from "../lib/changesPath";
-import {
-  buildChangesPreviewCacheKey,
-  changesPreviewContentCache,
-  estimateChangesPreviewContentSize,
-} from "../lib/changesPreviewCache";
 import { getChangeKindTextClass } from "../lib/changeKindColor";
 import type { ChangesExplorerStat } from "../lib/changesExplorerTree";
-import { buildPatchCacheKey, resolveDiffThemeName } from "../lib/diffRendering";
-import {
-  checkpointDiffQueryOptions,
-  checkpointFileDiffQueryOptions,
-} from "../lib/providerReactQuery";
-import { readWorkspaceFileContent } from "../lib/workspaceFileContent";
+import { resolveDiffThemeName } from "../lib/diffRendering";
+import { useResolvedFileDiffState, useWorkspaceFileContentState } from "../lib/filePreviewState";
 import type { ChangesPanelContentMode } from "../uiStateStore";
 import { cn } from "../lib/utils";
 import { ArtifactContent, type ContentState } from "./ArtifactPanel";
@@ -162,143 +149,6 @@ function findFileChangeSnapshot(
     return null;
   }
   return snapshots.get(canonicalizeChangesPathForLookup(pathValue)) ?? null;
-}
-
-function useWorkspaceFileContentState(input: {
-  threadId: string | null;
-  worktreePath: string | null;
-  absolutePath: string | null;
-  enabled: boolean;
-  mode: ChangesPanelContentMode;
-}): ContentState {
-  const [state, setState] = useState<ContentState>({ status: "idle" });
-
-  useEffect(() => {
-    if (!input.enabled || !input.absolutePath) {
-      setState({ status: "idle" });
-      return;
-    }
-
-    const cacheKey = buildChangesPreviewCacheKey({
-      threadId: input.threadId,
-      path: input.absolutePath,
-      mode: input.mode,
-    });
-    const cachedContent = cacheKey ? changesPreviewContentCache.get(cacheKey) : null;
-    if (cachedContent != null) {
-      setState({ status: "loaded", content: cachedContent, path: input.absolutePath });
-      return;
-    }
-
-    let cancelled = false;
-    setState({ status: "loading" });
-
-    void readWorkspaceFileContent({
-      worktreePath: input.worktreePath,
-      absolutePath: input.absolutePath,
-    })
-      .then((content) => {
-        if (cancelled) {
-          return;
-        }
-        if (cacheKey) {
-          changesPreviewContentCache.set(
-            cacheKey,
-            content,
-            estimateChangesPreviewContentSize(content),
-          );
-        }
-        setState({ status: "loaded", content, path: input.absolutePath ?? "" });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setState({
-            status: "error",
-            message: error instanceof Error ? error.message : "Unable to load file.",
-          });
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [input.absolutePath, input.enabled, input.mode, input.threadId, input.worktreePath]);
-
-  return state;
-}
-
-function findSelectedFileDiffMetadata(
-  patch: string | undefined,
-  selectedFilePath: string | null,
-): FileDiffMetadata | null {
-  if (!patch || !selectedFilePath) {
-    return null;
-  }
-
-  const normalizedSelectedPath = normalizeChangesPath(selectedFilePath);
-  try {
-    const parsedPatches = parsePatchFiles(
-      patch.trim().replace(/\r\n/g, "\n"),
-      buildPatchCacheKey(patch, `changes-panel:${normalizedSelectedPath}`),
-    );
-    const files = parsedPatches.flatMap((parsedPatch) => parsedPatch.files);
-    return (
-      files.find((file) => {
-        const name = normalizeChangesPath(file.name).replace(/^a\//, "").replace(/^b\//, "");
-        const prevName = file.prevName
-          ? normalizeChangesPath(file.prevName).replace(/^a\//, "").replace(/^b\//, "")
-          : "";
-        return name === normalizedSelectedPath || prevName === normalizedSelectedPath;
-      }) ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function useChangesBrowserFileDiffState(input: {
-  threadId: ThreadId | null;
-  selectedFilePath: string | null;
-  selectedFileQueryPath: string | null;
-  enabled: boolean;
-  latestCheckpointTurnCount: number | null;
-}) {
-  const query = useQuery(
-    checkpointFileDiffQueryOptions({
-      threadId: input.threadId,
-      path: input.selectedFileQueryPath,
-      fromTurnCount: 0,
-      toTurnCount: input.latestCheckpointTurnCount,
-      cacheScope: input.selectedFilePath ? `changes-panel:${input.selectedFilePath}` : null,
-      enabled:
-        input.enabled &&
-        input.threadId !== null &&
-        input.selectedFileQueryPath !== null &&
-        input.latestCheckpointTurnCount !== null,
-    }),
-  );
-
-  const diffMetadata = useMemo(
-    () => findSelectedFileDiffMetadata(query.data?.diff, input.selectedFileQueryPath),
-    [input.selectedFileQueryPath, query.data?.diff],
-  );
-  const markers = useMemo(() => {
-    if (!query.data?.diff || !input.selectedFileQueryPath) {
-      return new Map<number, CodeLineMarkerKind>();
-    }
-    const result = parseCodeDiffMarkers({
-      patch: query.data.diff,
-      path: input.selectedFileQueryPath,
-      cacheScope: `changes-panel:${input.selectedFilePath ?? input.selectedFileQueryPath}`,
-    });
-    return result.status === "ready" ? result.markers : new Map<number, CodeLineMarkerKind>();
-  }, [input.selectedFilePath, input.selectedFileQueryPath, query.data?.diff]);
-
-  return { query, diffMetadata, markers };
-}
-
-function hasMarkers(markers: ReadonlyMap<number, CodeLineMarkerKind>): boolean {
-  return markers.size > 0;
 }
 
 function groupItemsBySourceLabel(
@@ -649,7 +499,7 @@ function ChangesPreviewBody(props: {
   diffMetadata: FileDiffMetadata | null;
   diffError: string | null;
   isDeletedFile: boolean;
-  markers: ReadonlyMap<number, CodeLineMarkerKind>;
+  markers: ReadonlyMap<number, import("../lib/codeDiffMarkers").CodeLineMarkerKind>;
   onShowDiff: () => void;
 }) {
   if (!props.activePath || !props.activeItem) {
@@ -706,6 +556,7 @@ export interface ChangesBrowserProps {
   onClose?: (() => void) | undefined;
   showPreviewPane?: boolean | undefined;
   headerShowIcon?: boolean | undefined;
+  showHeader?: boolean | undefined;
   enableBrowserPaneControls?: boolean | undefined;
 }
 
@@ -726,6 +577,7 @@ export const ChangesBrowser = memo(function ChangesBrowser({
   onClose,
   showPreviewPane = true,
   headerShowIcon = true,
+  showHeader = true,
   enableBrowserPaneControls = false,
 }: ChangesBrowserProps) {
   const { resolvedTheme } = useTheme();
@@ -882,32 +734,14 @@ export const ChangesBrowser = memo(function ChangesBrowser({
     [activeSourcePath, activeSourceWorktreePath],
   );
 
-  const fileDiffState = useChangesBrowserFileDiffState({
+  const fileDiffState = useResolvedFileDiffState({
     threadId: activeSourceThreadId,
     selectedFilePath: activePath,
     selectedFileQueryPath,
     enabled: isCodeSelection,
     latestCheckpointTurnCount: activeLatestCheckpointTurnCount,
+    cacheScope: `changes-panel:${activePath ?? selectedFileQueryPath ?? "selection"}`,
   });
-  const fullThreadDiffFallbackQuery = useQuery(
-    checkpointDiffQueryOptions({
-      threadId: activeSourceThreadId,
-      fromTurnCount: 0,
-      toTurnCount: activeLatestCheckpointTurnCount,
-      cacheScope:
-        isCodeSelection && selectedFileQueryPath
-          ? `changes-panel:fallback:${selectedFileQueryPath}`
-          : null,
-      enabled:
-        isCodeSelection &&
-        activeSourceThreadId !== null &&
-        activeLatestCheckpointTurnCount !== null &&
-        selectedFileQueryPath !== null &&
-        (fileDiffState.query.isError ||
-          fileDiffState.query.data == null ||
-          fileDiffState.diffMetadata == null),
-    }),
-  );
 
   const contentState = useWorkspaceFileContentState({
     threadId: activeSourceThreadId ?? null,
@@ -916,28 +750,6 @@ export const ChangesBrowser = memo(function ChangesBrowser({
     enabled: !!activeAbsolutePath && !isDeletedFile && contentMode === "preview",
     mode: contentMode,
   });
-  const fallbackDiffMetadata = useMemo(
-    () =>
-      findSelectedFileDiffMetadata(fullThreadDiffFallbackQuery.data?.diff, selectedFileQueryPath),
-    [fullThreadDiffFallbackQuery.data?.diff, selectedFileQueryPath],
-  );
-  const fallbackMarkers = useMemo(() => {
-    if (!fullThreadDiffFallbackQuery.data?.diff || !selectedFileQueryPath) {
-      return new Map<number, CodeLineMarkerKind>();
-    }
-    const result = parseCodeDiffMarkers({
-      patch: fullThreadDiffFallbackQuery.data.diff,
-      path: selectedFileQueryPath,
-      cacheScope: `changes-panel:fallback:${activePath ?? selectedFileQueryPath}`,
-    });
-    return result.status === "ready" ? result.markers : new Map<number, CodeLineMarkerKind>();
-  }, [activePath, fullThreadDiffFallbackQuery.data?.diff, selectedFileQueryPath]);
-  const resolvedDiffMetadata = fileDiffState.diffMetadata ?? fallbackDiffMetadata;
-  const resolvedMarkers =
-    hasMarkers(fileDiffState.markers) || fallbackMarkers.size === 0
-      ? fileDiffState.markers
-      : fallbackMarkers;
-
   const actions = buildSelectionActions({
     canShowDiff,
     canShowFile,
@@ -945,25 +757,20 @@ export const ChangesBrowser = memo(function ChangesBrowser({
     onShowFile: () => onContentModeChange("preview"),
   });
 
-  const diffError =
-    fileDiffState.query.error instanceof Error
-      ? fileDiffState.query.error.message
-      : fullThreadDiffFallbackQuery.error instanceof Error
-        ? fullThreadDiffFallbackQuery.error.message
-        : null;
-
   return (
     <div className="flex h-full min-w-0 flex-col bg-background text-foreground">
-      <ChangesBrowserHeader
-        title={title}
-        count={totalCount}
-        onClose={onClose}
-        showIcon={headerShowIcon}
-        onToggleBrowserPane={
-          enableBrowserPaneControls ? () => setBrowserPaneCollapsed((value) => !value) : undefined
-        }
-        browserPaneCollapsed={browserPaneCollapsed}
-      />
+      {showHeader ? (
+        <ChangesBrowserHeader
+          title={title}
+          count={totalCount}
+          onClose={onClose}
+          showIcon={headerShowIcon}
+          onToggleBrowserPane={
+            enableBrowserPaneControls ? () => setBrowserPaneCollapsed((value) => !value) : undefined
+          }
+          browserPaneCollapsed={browserPaneCollapsed}
+        />
+      ) : null}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
@@ -1059,10 +866,10 @@ export const ChangesBrowser = memo(function ChangesBrowser({
                       basePath={worktreePath}
                       contentMode={contentMode}
                       contentState={contentState}
-                      diffMetadata={resolvedDiffMetadata}
-                      diffError={diffError}
+                      diffMetadata={fileDiffState.diffMetadata}
+                      diffError={fileDiffState.error}
                       isDeletedFile={!!isDeletedFile}
-                      markers={resolvedMarkers}
+                      markers={fileDiffState.markers}
                       onShowDiff={() => onContentModeChange("diff")}
                     />
                   </div>

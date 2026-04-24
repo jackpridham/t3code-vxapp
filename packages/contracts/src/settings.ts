@@ -67,6 +67,7 @@ export const DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER: SidebarWorkerActivityFilter
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  ideModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   sidebarGroupWorktreesWithParentProject: Schema.Boolean.pipe(
     Schema.withDecodingDefault(() => true),
   ),
@@ -123,6 +124,9 @@ export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientS
 
 export const ThreadEnvMode = Schema.Literals(["local", "worktree"]);
 export type ThreadEnvMode = typeof ThreadEnvMode.Type;
+export const StartupThreadTarget = Schema.Literals(["executive", "orchestrator"]);
+export type StartupThreadTarget = typeof StartupThreadTarget.Type;
+export const DEFAULT_STARTUP_THREAD_TARGET: StartupThreadTarget = "executive";
 
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
@@ -155,6 +159,9 @@ export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   notifyActiveOrchestratorOnRejectedWorkerWake: Schema.Boolean.pipe(
     Schema.withDecodingDefault(() => false),
+  ),
+  startupThreadTarget: StartupThreadTarget.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_STARTUP_THREAD_TARGET),
   ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
@@ -227,6 +234,7 @@ const ClaudeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   notifyActiveOrchestratorOnRejectedWorkerWake: Schema.optionalKey(Schema.Boolean),
+  startupThreadTarget: Schema.optionalKey(StartupThreadTarget),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   providers: Schema.optionalKey(
