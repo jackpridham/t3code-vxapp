@@ -37,6 +37,7 @@ export interface WorkLogEntry {
   createdAt: string;
   label: string;
   detail?: string;
+  thoughts?: ReadonlyArray<string>;
   command?: string;
   changedFiles?: ReadonlyArray<string>;
   rawPayload?: string;
@@ -49,6 +50,8 @@ export interface WorkLogEntry {
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
+  thoughtMergeMode?: "append" | "push";
+  turnId?: TurnId | null;
 }
 
 export interface PendingApproval {
@@ -521,10 +524,23 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     label: activity.summary,
     tone: activity.tone === "approval" ? "info" : activity.tone,
     activityKind: activity.kind,
+    turnId: activity.turnId,
   };
+  const thinkingData = extractThinkingWorkLogData(activity, payload);
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
+  if (thinkingData) {
+    if (thinkingData.thoughts.length > 0) {
+      entry.thoughts = thinkingData.thoughts;
+    }
+    if (thinkingData.preview) {
+      entry.detail = thinkingData.preview;
+    }
+    if (thinkingData.collapseKey) {
+      entry.collapseKey = thinkingData.collapseKey;
+    }
+    entry.thoughtMergeMode = thinkingData.mergeMode;
+  } else if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
     const detail = stripTrailingExitCode(payload.detail).output;
     if (detail) {
       entry.detail = detail;
@@ -541,9 +557,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
   }
-  const rawPayload = formatWorkLogPayload(payload);
-  if (rawPayload) {
-    entry.rawPayload = rawPayload;
+  if (!thinkingData) {
+    const rawPayload = formatWorkLogPayload(payload);
+    if (rawPayload) {
+      entry.rawPayload = rawPayload;
+    }
   }
   if (title) {
     entry.toolTitle = title;
@@ -554,11 +572,53 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (requestKind) {
     entry.requestKind = requestKind;
   }
-  const collapseKey = deriveToolLifecycleCollapseKey(entry);
-  if (collapseKey) {
-    entry.collapseKey = collapseKey;
+  if (!entry.collapseKey) {
+    const collapseKey = deriveToolLifecycleCollapseKey(entry);
+    if (collapseKey) {
+      entry.collapseKey = collapseKey;
+    }
   }
   return entry;
+}
+
+function extractThinkingWorkLogData(
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown> | null,
+): {
+  thoughts: string[];
+  preview?: string;
+  collapseKey?: string;
+  mergeMode: "append" | "push";
+} | null {
+  if (activity.tone !== "thinking") {
+    return null;
+  }
+
+  const thoughtText =
+    typeof payload?.text === "string"
+      ? payload.text
+      : typeof payload?.detail === "string"
+        ? payload.detail
+        : null;
+  const thoughts = thoughtText === null ? [] : [thoughtText];
+  const preview = latestThoughtPreview(thoughts);
+  const turnId = activity.turnId ? String(activity.turnId) : null;
+  const taskId = asTrimmedString(payload?.taskId);
+  const itemId = asTrimmedString(payload?.itemId);
+  const collapseKey = turnId
+    ? `thinking:${turnId}`
+    : taskId
+      ? `thinking:task:${taskId}`
+      : itemId
+        ? `thinking:item:${itemId}`
+        : undefined;
+
+  return {
+    thoughts,
+    ...(preview ? { preview } : {}),
+    ...(collapseKey ? { collapseKey } : {}),
+    mergeMode: activity.kind === "thinking.delta" ? "append" : "push",
+  };
 }
 
 function formatRuntimeDiagnosticDetail(value: unknown): string | undefined {
@@ -681,13 +741,35 @@ function collapseDerivedWorkLogEntries(
   const collapsed: DerivedWorkLogEntry[] = [];
   for (const entry of entries) {
     const previous = collapsed.at(-1);
-    if (previous && shouldCollapseToolLifecycleEntries(previous, entry)) {
+    if (previous && shouldCollapseDerivedWorkLogEntries(previous, entry)) {
       collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry);
       continue;
     }
     collapsed.push(entry);
   }
   return collapsed;
+}
+
+function shouldCollapseDerivedWorkLogEntries(
+  previous: DerivedWorkLogEntry,
+  next: DerivedWorkLogEntry,
+): boolean {
+  return (
+    shouldCollapseThinkingEntries(previous, next) ||
+    shouldCollapseToolLifecycleEntries(previous, next)
+  );
+}
+
+function shouldCollapseThinkingEntries(
+  previous: DerivedWorkLogEntry,
+  next: DerivedWorkLogEntry,
+): boolean {
+  return (
+    previous.tone === "thinking" &&
+    next.tone === "thinking" &&
+    previous.collapseKey !== undefined &&
+    previous.collapseKey === next.collapseKey
+  );
 }
 
 function shouldCollapseToolLifecycleEntries(
@@ -710,6 +792,10 @@ function mergeDerivedWorkLogEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): DerivedWorkLogEntry {
+  if (previous.tone === "thinking" && next.tone === "thinking") {
+    return mergeThinkingEntries(previous, next);
+  }
+
   const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles);
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
@@ -730,6 +816,92 @@ function mergeDerivedWorkLogEntries(
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { collapseKey } : {}),
   };
+}
+
+function mergeThinkingEntries(
+  previous: DerivedWorkLogEntry,
+  next: DerivedWorkLogEntry,
+): DerivedWorkLogEntry {
+  const thoughts = mergeThoughts(
+    previous.thoughts,
+    next.thoughts,
+    previous.thoughtMergeMode,
+    next.thoughtMergeMode,
+  );
+  const detail = latestThoughtPreview(thoughts) ?? next.detail ?? previous.detail;
+  const collapseKey = next.collapseKey ?? previous.collapseKey;
+  const thoughtMergeMode = next.thoughtMergeMode ?? previous.thoughtMergeMode;
+  const turnId = next.turnId ?? previous.turnId;
+
+  return {
+    id: previous.id,
+    createdAt: previous.createdAt,
+    label: previous.label,
+    tone: "thinking",
+    activityKind: next.activityKind,
+    ...(turnId !== undefined ? { turnId } : {}),
+    ...(detail ? { detail } : {}),
+    ...(thoughts.length > 0 ? { thoughts } : {}),
+    ...(collapseKey ? { collapseKey } : {}),
+    ...(thoughtMergeMode ? { thoughtMergeMode } : {}),
+  };
+}
+
+function mergeThoughts(
+  previous: ReadonlyArray<string> | undefined,
+  next: ReadonlyArray<string> | undefined,
+  previousMode: "append" | "push" | undefined,
+  nextMode: "append" | "push" | undefined,
+): string[] {
+  const merged = [...(previous ?? [])];
+  if (!next || next.length === 0) {
+    return merged;
+  }
+
+  let shouldAppendToLast = nextMode === "append" && previousMode === "append" && merged.length > 0;
+
+  for (const thought of next) {
+    if (shouldAppendToLast) {
+      merged[merged.length - 1] = `${merged[merged.length - 1] ?? ""}${thought}`;
+      shouldAppendToLast = false;
+      continue;
+    }
+
+    const normalized = normalizeThoughtText(thought);
+    if (!normalized) {
+      continue;
+    }
+    const previousNormalized = normalizeThoughtText(merged.at(-1));
+    if (nextMode === "push" && previousNormalized === normalized) {
+      continue;
+    }
+    merged.push(thought);
+  }
+
+  return merged;
+}
+
+function normalizeThoughtText(value: string | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function latestThoughtPreview(thoughts: ReadonlyArray<string> | undefined): string | undefined {
+  if (!thoughts) {
+    return undefined;
+  }
+
+  for (let index = thoughts.length - 1; index >= 0; index -= 1) {
+    const preview = normalizeThoughtText(thoughts[index]);
+    if (preview) {
+      return preview;
+    }
+  }
+
+  return undefined;
 }
 
 function mergeChangedFiles(

@@ -2549,6 +2549,8 @@ describe("ProviderRuntimeIngestion", () => {
     expect(started?.kind).toBe("task.started");
     expect(started?.summary).toBe("Plan task started");
     expect(progress?.kind).toBe("task.progress");
+    expect(progress?.tone).toBe("thinking");
+    expect(progress?.summary).toBe("Thinking");
     expect(progressPayload?.detail).toBe("Code reviewer is validating the desktop rollout chunks.");
     expect(progressPayload?.summary).toBe(
       "Code reviewer is validating the desktop rollout chunks.",
@@ -2560,6 +2562,79 @@ describe("ProviderRuntimeIngestion", () => {
         (entry: ProviderRuntimeTestProposedPlan) => entry.id === "plan:thread-1:turn:turn-task-1",
       )?.planMarkdown,
     ).toBe("# Plan title");
+  });
+
+  it("projects reasoning deltas into thinking activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-thinking-delta-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-thinking-1"),
+      itemId: "reasoning-item-1",
+      payload: {
+        streamKind: "reasoning_text",
+        delta: "Need to inspect",
+      },
+    });
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-thinking-delta-2"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-thinking-1"),
+      itemId: "reasoning-item-1",
+      payload: {
+        streamKind: "reasoning_summary_text",
+        delta: " the ingestion path.",
+        summaryIndex: 0,
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "thinking.delta",
+      ),
+    );
+
+    const firstDelta = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-thinking-delta-1",
+    );
+    const secondDelta = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-thinking-delta-2",
+    );
+
+    const firstPayload =
+      firstDelta?.payload && typeof firstDelta.payload === "object"
+        ? (firstDelta.payload as Record<string, unknown>)
+        : undefined;
+    const secondPayload =
+      secondDelta?.payload && typeof secondDelta.payload === "object"
+        ? (secondDelta.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(firstDelta?.tone).toBe("thinking");
+    expect(firstDelta?.summary).toBe("Thinking");
+    expect(firstDelta?.turnId).toBe("turn-thinking-1");
+    expect(firstPayload).toMatchObject({
+      text: "Need to inspect",
+      streamKind: "reasoning_text",
+      itemId: "reasoning-item-1",
+    });
+
+    expect(secondDelta?.tone).toBe("thinking");
+    expect(secondPayload).toMatchObject({
+      text: " the ingestion path.",
+      streamKind: "reasoning_summary_text",
+      itemId: "reasoning-item-1",
+      summaryIndex: 0,
+    });
   });
 
   it("projects structured user input request and resolution as thread activities", async () => {

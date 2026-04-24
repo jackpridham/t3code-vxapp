@@ -593,6 +593,94 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
   });
 
+  it("collapses consecutive thinking updates into a single expandable entry", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "thinking-progress",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Compare the provider event shapes.",
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: "Need to inspect",
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: " the ingestion path.",
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+
+    expect(entry).toMatchObject({
+      id: "thinking-progress",
+      label: "Thinking",
+      tone: "thinking",
+      detail: "Need to inspect the ingestion path.",
+    });
+    expect(entry?.thoughts).toEqual([
+      "Compare the provider event shapes.",
+      "Need to inspect the ingestion path.",
+    ]);
+  });
+
+  it("keeps distinct thinking snapshots when progress updates repeat within one turn", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "thinking-progress-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Compare the provider event shapes.",
+        },
+      }),
+      makeActivity({
+        id: "thinking-progress-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Check how ChatView groups work rows.",
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+
+    expect(entry?.thoughts).toEqual([
+      "Compare the provider event shapes.",
+      "Check how ChatView groups work rows.",
+    ]);
+  });
+
   it("filters by turn id when provided", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),

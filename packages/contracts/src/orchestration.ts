@@ -404,6 +404,7 @@ export const OrchestrationCheckpointSummary = Schema.Struct({
 export type OrchestrationCheckpointSummary = typeof OrchestrationCheckpointSummary.Type;
 
 export const OrchestrationThreadActivityTone = Schema.Literals([
+  "thinking",
   "info",
   "tool",
   "approval",
