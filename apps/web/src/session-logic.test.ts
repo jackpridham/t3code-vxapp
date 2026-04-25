@@ -1248,7 +1248,7 @@ describe("deriveTimelineEntries", () => {
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       "message",
-      "thinking",
+      "work",
       "proposed-plan",
       "work",
     ]);

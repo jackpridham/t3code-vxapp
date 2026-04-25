@@ -9,6 +9,7 @@ import {
   type ProjectScript,
   type ProviderKind,
   type ProjectEntry,
+  type ProgramId,
   type ProjectId,
   type ProviderApprovalDecision,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -3370,6 +3371,9 @@ export default function ChatView({
         orchestratorProjectId: (activeThread.orchestratorProjectId ??
           activeProject.id) as ProjectId,
         orchestratorThreadId: (activeThread.orchestratorThreadId ?? activeThread.id) as ThreadId,
+        programId: activeThread.programId as ProgramId | undefined,
+        executiveProjectId: activeThread.executiveProjectId as ProjectId | undefined,
+        executiveThreadId: activeThread.executiveThreadId as ThreadId | undefined,
       })
       .then(() => {
         return api.orchestration.dispatchCommand({

@@ -127,12 +127,31 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         continue;
       }
 
+      if (timelineEntry.kind === "work" && timelineEntry.entry.presentation === "thinking-bubble") {
+        nextRows.push({
+          kind: "thinking",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          thinking: {
+            id: timelineEntry.entry.id,
+            createdAt: timelineEntry.entry.createdAt,
+            label: timelineEntry.entry.label,
+            detail: timelineEntry.entry.detail ?? "",
+            thoughts: timelineEntry.entry.thoughts ?? [],
+            tone: "thinking",
+            presentation: "thinking-bubble",
+          },
+        });
+        continue;
+      }
+
       if (timelineEntry.kind === "work") {
         const groupedEntries = [timelineEntry.entry];
         let cursor = index + 1;
         while (cursor < timelineEntries.length) {
           const nextEntry = timelineEntries[cursor];
           if (!nextEntry || nextEntry.kind !== "work") break;
+          if (nextEntry.entry.presentation === "thinking-bubble") break;
           groupedEntries.push(nextEntry.entry);
           cursor += 1;
         }
@@ -152,16 +171,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           id: timelineEntry.id,
           createdAt: timelineEntry.createdAt,
           proposedPlan: timelineEntry.proposedPlan,
-        });
-        continue;
-      }
-
-      if (timelineEntry.kind === "thinking") {
-        nextRows.push({
-          kind: "thinking",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          thinking: timelineEntry.thinking,
         });
         continue;
       }
@@ -540,8 +549,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
-type TimelineThinking = Extract<TimelineEntry, { kind: "thinking" }>["thinking"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
+type TimelineThinking = {
+  id: string;
+  createdAt: string;
+  label: string;
+  detail: string;
+  thoughts: ReadonlyArray<string>;
+  tone: "thinking";
+  presentation: "thinking-bubble";
+};
 type TimelineRow =
   | {
       kind: "work";
@@ -581,10 +598,11 @@ function estimateTimelineThinkingHeight(
   isExpanded: boolean,
   timelineWidthPx: number | null,
 ): number {
+  const latestThought = thinking.detail ?? thinking.thoughts.at(-1) ?? "";
   const width = Math.max(320, timelineWidthPx ?? 720);
   const charsPerLine = Math.max(26, Math.floor((width * 0.8) / 8.5));
   if (!isExpanded) {
-    const previewLines = Math.max(1, Math.ceil(thinking.latestThought.length / charsPerLine));
+    const previewLines = Math.max(1, Math.ceil(latestThought.length / charsPerLine));
     return 92 + Math.min(previewLines * 20, 120);
   }
 
@@ -630,6 +648,7 @@ const ThinkingBubble = memo(function ThinkingBubble(props: {
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const latestThought = props.thinking.detail ?? props.thinking.thoughts.at(-1) ?? "";
   const thoughtCountLabel = `${props.thinking.thoughts.length} ${
     props.thinking.thoughts.length === 1 ? "thought" : "thoughts"
   }`;
@@ -678,7 +697,7 @@ const ThinkingBubble = memo(function ThinkingBubble(props: {
         </ol>
       ) : (
         <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/88">
-          {props.thinking.latestThought}
+          {latestThought}
         </p>
       )}
     </div>

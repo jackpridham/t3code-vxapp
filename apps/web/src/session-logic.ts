@@ -42,6 +42,7 @@ export interface WorkLogEntry {
   changedFiles?: ReadonlyArray<string>;
   rawPayload?: string;
   tone: "thinking" | "tool" | "info" | "error";
+  presentation?: "thinking-bubble";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
@@ -101,12 +102,6 @@ export type TimelineEntry =
       kind: "message";
       createdAt: string;
       message: ChatMessage;
-    }
-  | {
-      id: string;
-      kind: "thinking";
-      createdAt: string;
-      thinking: ThinkingEntry;
     }
   | {
       id: string;
@@ -1264,9 +1259,17 @@ export function deriveTimelineEntries(
   }));
   const thinkingRows: TimelineEntry[] = thinkingEntries.map((thinking) => ({
     id: thinking.id,
-    kind: "thinking",
+    kind: "work",
     createdAt: thinking.createdAt,
-    thinking,
+    entry: {
+      id: thinking.id,
+      createdAt: thinking.createdAt,
+      label: "Thinking",
+      detail: thinking.latestThought,
+      thoughts: thinking.thoughts,
+      tone: "thinking",
+      presentation: "thinking-bubble",
+    },
   }));
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
     id: proposedPlan.id,

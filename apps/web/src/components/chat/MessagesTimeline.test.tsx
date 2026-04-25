@@ -278,16 +278,19 @@ describe("MessagesTimeline", () => {
         timelineEntries={[
           {
             id: "thinking:turn-1",
-            kind: "thinking",
+            kind: "work",
             createdAt: "2026-03-17T19:12:28.000Z",
-            thinking: {
+            entry: {
               id: "thinking:turn-1",
               createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Thinking",
+              detail: "The ingestion path is rebinding message ids.",
               thoughts: [
                 "Inspect the provider event ordering.",
                 "The ingestion path is rebinding message ids.",
               ],
-              latestThought: "The ingestion path is rebinding message ids.",
+              tone: "thinking",
+              presentation: "thinking-bubble",
             },
           },
         ]}
