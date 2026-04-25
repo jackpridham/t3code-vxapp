@@ -83,11 +83,13 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   orchestratorWakes: "projection.orchestrator-wakes",
 } as const;
 
-type ProjectorName =
-  (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES];
+const CORE_PROJECTOR_NAME_SET = new Set<string>(Object.values(ORCHESTRATION_PROJECTOR_NAMES));
+
+type ProjectorEventType = OrchestrationEvent["type"];
 
 export interface ProjectorDefinition {
-  readonly name: ProjectorName;
+  readonly name: string;
+  readonly eventTypes: ReadonlyArray<ProjectorEventType>;
   readonly apply: (
     event: OrchestrationEvent,
     attachmentSideEffects: AttachmentSideEffects,
@@ -97,6 +99,28 @@ export interface ProjectorDefinition {
 export interface AttachmentSideEffects extends ProjectionAttachmentSideEffects {
   readonly deletedThreadIds: Set<string>;
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
+}
+
+function defineProjector(input: ProjectorDefinition): ProjectorDefinition {
+  return input;
+}
+
+function projectorAppliesToEvent(
+  projector: ProjectorDefinition,
+  event: OrchestrationEvent,
+): boolean {
+  return projector.eventTypes.includes(event.type);
+}
+
+function projectorSource(projector: ProjectorDefinition): "core" | "vxapp" {
+  return CORE_PROJECTOR_NAME_SET.has(projector.name) ? "core" : "vxapp";
+}
+
+function createAttachmentSideEffects(): AttachmentSideEffects {
+  return {
+    deletedThreadIds: new Set<string>(),
+    prunedThreadRelativePaths: new Map<string, Set<string>>(),
+  };
 }
 
 const materializeAttachmentsForProjection = Effect.fn("materializeAttachmentsForProjection")(
@@ -1732,82 +1756,155 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     });
 
     const projectors: ReadonlyArray<ProjectorDefinition> = [
-      {
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
+        eventTypes: ["project.created", "project.meta-updated", "project.deleted"],
         apply: applyProjectsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.programs,
+        eventTypes: ["program.created", "program.meta-updated", "program.deleted"],
         apply: applyProgramsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
+        eventTypes: [
+          "program.notification-upserted",
+          "program.notification-consumed",
+          "program.notification-dropped",
+        ],
         apply: applyProgramNotificationsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.ctoAttention,
+        eventTypes: [
+          "program.notification-upserted",
+          "program.notification-consumed",
+          "program.notification-dropped",
+        ],
         apply: applyCtoAttentionProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+        eventTypes: ["thread.message-sent", "thread.reverted"],
         apply: applyThreadMessagesProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+        eventTypes: ["thread.proposed-plan-upserted", "thread.reverted"],
         apply: applyThreadProposedPlansProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+        eventTypes: ["thread.activity-appended", "thread.reverted"],
         apply: applyThreadActivitiesProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+        eventTypes: ["thread.session-set"],
         apply: applyThreadSessionsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
+        eventTypes: [
+          "thread.turn-start-requested",
+          "thread.session-set",
+          "thread.message-sent",
+          "thread.turn-interrupt-requested",
+          "thread.turn-checkpoint-recorded",
+          "thread.turn-diff-completed",
+          "thread.reverted",
+        ],
         apply: applyThreadTurnsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+        eventTypes: [],
         apply: applyCheckpointsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
+        eventTypes: [
+          "thread.activity-appended",
+          "thread.approval-response-requested",
+          "thread.user-input-response-requested",
+        ],
         apply: applyPendingApprovalsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
+        eventTypes: ["thread.orchestrator-wake-upserted"],
         apply: applyOrchestratorWakesProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
+        eventTypes: [
+          "thread.created",
+          "thread.archived",
+          "thread.unarchived",
+          "thread.meta-updated",
+          "thread.runtime-mode-set",
+          "thread.interaction-mode-set",
+          "thread.deleted",
+          "thread.message-sent",
+          "thread.proposed-plan-upserted",
+          "thread.activity-appended",
+          "thread.orchestrator-wake-upserted",
+          "thread.session-set",
+          "thread.turn-checkpoint-recorded",
+          "thread.turn-diff-completed",
+          "thread.reverted",
+        ],
         apply: applyThreadsProjection,
-      },
+      }),
       ...getVxappProjectionProjectors(),
     ];
 
-    const applyProjectorForEvent = Effect.fn("applyProjectorForEvent")(function* (
-      projector: ProjectorDefinition,
-      event: OrchestrationEvent,
-    ) {
-      const attachmentSideEffects: AttachmentSideEffects = {
-        deletedThreadIds: new Set<string>(),
-        prunedThreadRelativePaths: new Map<string, Set<string>>(),
-      };
+    const applyProjectorEventsInTransaction = Effect.fn("applyProjectorEventsInTransaction")(
+      function* (projector: ProjectorDefinition, events: ReadonlyArray<OrchestrationEvent>) {
+        if (events.length === 0) {
+          return [] as ReadonlyArray<ProjectionAttachmentSideEffects>;
+        }
 
-      yield* projector.apply(event, attachmentSideEffects).pipe(
-        Effect.flatMap(() =>
-          projectionStateRepository.upsert({
-            projector: projector.name,
-            lastAppliedSequence: event.sequence,
-            updatedAt: event.occurredAt,
-          }),
-        ),
-      );
+        const attachmentSideEffects = yield* Effect.forEach(
+          events,
+          (event) =>
+            Effect.gen(function* () {
+              const applicable = projectorAppliesToEvent(projector, event);
+              const source = projectorSource(projector);
+              if (!applicable) {
+                yield* Effect.logDebug("orchestration projector skipped event", {
+                  projector: projector.name,
+                  projectorSource: source,
+                  eventType: event.type,
+                  sequence: event.sequence,
+                  commandId: event.commandId,
+                  durationMs: 0,
+                });
+                return null;
+              }
 
-      return attachmentSideEffects;
-    });
+              const startedAtMs = Date.now();
+              const nextAttachmentSideEffects = createAttachmentSideEffects();
+              yield* projector.apply(event, nextAttachmentSideEffects);
+              yield* Effect.logDebug("orchestration projector applied event", {
+                projector: projector.name,
+                projectorSource: source,
+                eventType: event.type,
+                sequence: event.sequence,
+                commandId: event.commandId,
+                durationMs: Math.max(0, Date.now() - startedAtMs),
+              });
+              return nextAttachmentSideEffects as ProjectionAttachmentSideEffects;
+            }),
+          { concurrency: 1 },
+        );
+
+        return attachmentSideEffects.filter(
+          (sideEffect): sideEffect is ProjectionAttachmentSideEffects => sideEffect !== null,
+        );
+      },
+    );
 
     const flushAttachmentSideEffects: OrchestrationProjectionPipelineShape["flushAttachmentSideEffects"] =
       (sideEffects) =>
@@ -1829,14 +1926,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           Effect.asVoid,
         );
 
-    const runProjectorForEvent = Effect.fn("runProjectorForEvent")(function* (
+    const runProjectorForEvents = Effect.fn("runProjectorForEvents")(function* (
       projector: ProjectorDefinition,
-      event: OrchestrationEvent,
+      events: ReadonlyArray<OrchestrationEvent>,
     ) {
       const attachmentSideEffects = yield* sql.withTransaction(
-        applyProjectorForEvent(projector, event),
+        applyProjectorEventsInTransaction(projector, events).pipe(
+          Effect.flatMap((nextAttachmentSideEffects) => {
+            const lastEvent = events.at(-1) ?? null;
+            if (lastEvent === null) {
+              return Effect.succeed(nextAttachmentSideEffects);
+            }
+
+            return projectionStateRepository
+              .upsert({
+                projector: projector.name,
+                lastAppliedSequence: lastEvent.sequence,
+                updatedAt: lastEvent.occurredAt,
+              })
+              .pipe(Effect.as(nextAttachmentSideEffects));
+          }),
+        ),
       );
-      yield* flushAttachmentSideEffects([attachmentSideEffects]);
+      yield* flushAttachmentSideEffects(attachmentSideEffects);
     });
 
     const bootstrapProjector = (projector: ProjectorDefinition) =>
@@ -1850,16 +1962,75 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               eventStore.readFromSequence(
                 Option.isSome(stateRow) ? stateRow.value.lastAppliedSequence : 0,
               ),
-              (event) => runProjectorForEvent(projector, event),
+              (event) => runProjectorForEvents(projector, [event]),
             ),
           ),
         );
 
+    const projectEventsInTransaction: OrchestrationProjectionPipelineShape["projectEventsInTransaction"] =
+      (events) =>
+        events.length === 0
+          ? Effect.succeed([])
+          : Effect.gen(function* () {
+              const startedAtMs = Date.now();
+              const applicableProjectors = projectors.filter((projector) =>
+                events.some((event) => projectorAppliesToEvent(projector, event)),
+              );
+              const applicableCoreProjectorCount = applicableProjectors.filter(
+                (projector) => projectorSource(projector) === "core",
+              ).length;
+              const applicableVxappProjectorCount =
+                applicableProjectors.length - applicableCoreProjectorCount;
+              const skippedProjectorCount = projectors.length - applicableProjectors.length;
+              const eventTypes = Array.from(new Set(events.map((event) => event.type)));
+              const rows = yield* Effect.forEach(
+                projectors,
+                (projector) => applyProjectorEventsInTransaction(projector, events),
+                {
+                  concurrency: 1,
+                },
+              );
+              const sideEffects = rows.flat();
+              const lastEvent = events.at(-1) ?? null;
+              if (lastEvent === null) {
+                return sideEffects;
+              }
+
+              yield* projectionStateRepository.upsertMany(
+                projectors.map((projector) => ({
+                  projector: projector.name,
+                  lastAppliedSequence: lastEvent.sequence,
+                  updatedAt: lastEvent.occurredAt,
+                })),
+              );
+
+              yield* Effect.logDebug("orchestration projection batch completed", {
+                eventCount: events.length,
+                eventTypes,
+                commandId: lastEvent.commandId,
+                finalSequence: lastEvent.sequence,
+                projectorCount: projectors.length,
+                applicableCoreProjectorCount,
+                applicableVxappProjectorCount,
+                skippedProjectorCount,
+                projectionStateRowsWritten: projectors.length,
+                durationMs: Math.max(0, Date.now() - startedAtMs),
+              });
+
+              return sideEffects;
+            });
+
     const projectEventInTransaction: OrchestrationProjectionPipelineShape["projectEventInTransaction"] =
-      (event) =>
-        Effect.forEach(projectors, (projector) => applyProjectorForEvent(projector, event), {
-          concurrency: 1,
-        });
+      (event) => projectEventsInTransaction([event]);
+
+    const projectEvents: OrchestrationProjectionPipelineShape["projectEvents"] = (events) =>
+      sql.withTransaction(projectEventsInTransaction(events)).pipe(
+        Effect.flatMap((sideEffects) => flushAttachmentSideEffects(sideEffects)),
+        Effect.asVoid,
+        Effect.catchTag("SqlError", (sqlError) =>
+          Effect.fail(toPersistenceSqlError("ProjectionPipeline.projectEvents:query")(sqlError)),
+        ),
+      );
 
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
       sql.withTransaction(projectEventInTransaction(event)).pipe(
@@ -1891,7 +2062,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
     return {
       bootstrap,
+      projectEvents,
       projectEvent,
+      projectEventsInTransaction,
       projectEventInTransaction,
       flushAttachmentSideEffects,
     } satisfies OrchestrationProjectionPipelineShape;

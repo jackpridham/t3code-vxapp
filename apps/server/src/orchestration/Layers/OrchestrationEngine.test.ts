@@ -635,11 +635,31 @@ describe("OrchestrationEngine", () => {
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
       projectEvent: () => Effect.void,
+      projectEvents: () => Effect.void,
       projectEventInTransaction: (event) => {
         if (
           shouldFailRequestedProjection &&
           event.commandId === CommandId.makeUnsafe("cmd-turn-start-atomic") &&
           event.type === "thread.turn-start-requested"
+        ) {
+          shouldFailRequestedProjection = false;
+          return Effect.fail(
+            new PersistenceSqlError({
+              operation: "test.projection",
+              detail: "projection failed",
+            }),
+          );
+        }
+        return Effect.succeed([]);
+      },
+      projectEventsInTransaction: (events) => {
+        if (
+          shouldFailRequestedProjection &&
+          events.some(
+            (event) =>
+              event.commandId === CommandId.makeUnsafe("cmd-turn-start-atomic") &&
+              event.type === "thread.turn-start-requested",
+          )
         ) {
           shouldFailRequestedProjection = false;
           return Effect.fail(
@@ -779,10 +799,28 @@ describe("OrchestrationEngine", () => {
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
       projectEvent: () => Effect.void,
+      projectEvents: () => Effect.void,
       projectEventInTransaction: (event) => {
         if (
           shouldFailProjection &&
           event.commandId === CommandId.makeUnsafe("cmd-thread-meta-sync-fail")
+        ) {
+          shouldFailProjection = false;
+          return Effect.fail(
+            new PersistenceSqlError({
+              operation: "test.projection",
+              detail: "projection failed",
+            }),
+          );
+        }
+        return Effect.succeed([]);
+      },
+      projectEventsInTransaction: (events) => {
+        if (
+          shouldFailProjection &&
+          events.some(
+            (event) => event.commandId === CommandId.makeUnsafe("cmd-thread-meta-sync-fail"),
+          )
         ) {
           shouldFailProjection = false;
           return Effect.fail(

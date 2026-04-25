@@ -1,9 +1,13 @@
 import type {
   OrchestrationCheckpointSummary,
   OrchestrationGetCurrentStateResult,
+  OrchestrationGetProjectByIdInput,
+  OrchestrationGetProjectByIdResult,
   OrchestrationGetProjectByWorkspaceInput,
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetReadinessResult,
+  OrchestrationGetThreadByIdInput,
+  OrchestrationGetThreadByIdResult,
   OrchestrationListOrchestratorWakesInput,
   OrchestrationListOrchestratorWakesResult,
   OrchestrationListProjectThreadsInput,
@@ -44,12 +48,18 @@ export interface ProjectionOperationalQueryShape {
     OrchestrationListProjectsResult,
     ProjectionRepositoryError
   >;
+  readonly getProjectById: (
+    input: OrchestrationGetProjectByIdInput,
+  ) => Effect.Effect<OrchestrationGetProjectByIdResult, ProjectionRepositoryError>;
   readonly getProjectByWorkspace: (
     input: OrchestrationGetProjectByWorkspaceInput,
   ) => Effect.Effect<OrchestrationGetProjectByWorkspaceResult, ProjectionRepositoryError>;
   readonly listProjectThreads: (
     input: OrchestrationListProjectThreadsInput,
   ) => Effect.Effect<OrchestrationListProjectThreadsResult, ProjectionRepositoryError>;
+  readonly getThreadById: (
+    input: OrchestrationGetThreadByIdInput,
+  ) => Effect.Effect<OrchestrationGetThreadByIdResult, ProjectionRepositoryError>;
   readonly listSessionThreads: (
     input: OrchestrationListSessionThreadsInput,
   ) => Effect.Effect<OrchestrationListSessionThreadsResult, ProjectionRepositoryError>;

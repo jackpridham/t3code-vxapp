@@ -357,6 +357,9 @@ describe("wsNativeApi", () => {
     });
     await api.orchestration.getReadiness();
     await api.orchestration.listProjects();
+    await api.orchestration.getProjectById({
+      projectId: ProjectId.makeUnsafe("project-1"),
+    });
     await api.orchestration.getProjectByWorkspace({
       workspaceRoot: "/tmp/project",
     });
@@ -364,6 +367,9 @@ describe("wsNativeApi", () => {
       projectId: ProjectId.makeUnsafe("project-1"),
       includeArchived: false,
       includeDeleted: false,
+    });
+    await api.orchestration.getThreadById({
+      threadId: ThreadId.makeUnsafe("thread-1"),
     });
     await api.orchestration.listSessionThreads({
       rootThreadId: ThreadId.makeUnsafe("thread-1"),
@@ -378,18 +384,42 @@ describe("wsNativeApi", () => {
     });
     expect(requestMock).toHaveBeenNthCalledWith(3, ORCHESTRATION_WS_METHODS.getReadiness);
     expect(requestMock).toHaveBeenNthCalledWith(4, ORCHESTRATION_WS_METHODS.listProjects);
-    expect(requestMock).toHaveBeenNthCalledWith(5, ORCHESTRATION_WS_METHODS.getProjectByWorkspace, {
+    expect(requestMock).toHaveBeenNthCalledWith(5, ORCHESTRATION_WS_METHODS.getProjectById, {
+      projectId: "project-1",
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(6, ORCHESTRATION_WS_METHODS.getProjectByWorkspace, {
       workspaceRoot: "/tmp/project",
     });
-    expect(requestMock).toHaveBeenNthCalledWith(6, ORCHESTRATION_WS_METHODS.listProjectThreads, {
+    expect(requestMock).toHaveBeenNthCalledWith(7, ORCHESTRATION_WS_METHODS.listProjectThreads, {
       projectId: "project-1",
       includeArchived: false,
       includeDeleted: false,
     });
-    expect(requestMock).toHaveBeenNthCalledWith(7, ORCHESTRATION_WS_METHODS.listSessionThreads, {
+    expect(requestMock).toHaveBeenNthCalledWith(8, ORCHESTRATION_WS_METHODS.getThreadById, {
+      threadId: "thread-1",
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(9, ORCHESTRATION_WS_METHODS.listSessionThreads, {
       rootThreadId: "thread-1",
       includeArchived: true,
       includeDeleted: false,
+    });
+  });
+
+  it("forwards orchestration dry-run requests to their websocket method", async () => {
+    requestMock.mockResolvedValue(undefined);
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    const command = {
+      type: "thread.archive",
+      commandId: CommandId.makeUnsafe("cmd-dry-run-1"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+    } as const;
+
+    await api.orchestration.dryRunCommand(command);
+
+    expect(requestMock).toHaveBeenCalledWith(ORCHESTRATION_WS_METHODS.dryRunCommand, {
+      command,
     });
   });
 

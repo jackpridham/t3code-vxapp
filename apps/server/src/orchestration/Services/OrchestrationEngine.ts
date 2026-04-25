@@ -11,6 +11,7 @@
  * @module OrchestrationEngineService
  */
 import type {
+  OrchestrationDryRunResult,
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationReadModel,
@@ -54,6 +55,13 @@ export interface OrchestrationEngineShape {
   readonly dispatch: (
     command: OrchestrationCommand,
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>;
+
+  /**
+   * Preview the events a command would emit without mutating persistence.
+   */
+  readonly dryRunDispatch: (
+    command: OrchestrationCommand,
+  ) => Effect.Effect<OrchestrationDryRunResult, OrchestrationDispatchError, never>;
 
   /**
    * Stream persisted domain events in dispatch order.

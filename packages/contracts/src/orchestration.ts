@@ -25,14 +25,17 @@ export const ORCHESTRATION_WS_METHODS = {
   getReadiness: "orchestration.getReadiness",
   getCurrentState: "orchestration.getCurrentState",
   listProjects: "orchestration.listProjects",
+  getProjectById: "orchestration.getProjectById",
   getProjectByWorkspace: "orchestration.getProjectByWorkspace",
   listProjectThreads: "orchestration.listProjectThreads",
+  getThreadById: "orchestration.getThreadById",
   listSessionThreads: "orchestration.listSessionThreads",
   listThreadMessages: "orchestration.listThreadMessages",
   listThreadActivities: "orchestration.listThreadActivities",
   listThreadSessions: "orchestration.listThreadSessions",
   listOrchestratorWakes: "orchestration.listOrchestratorWakes",
   dispatchCommand: "orchestration.dispatchCommand",
+  dryRunCommand: "orchestration.dryRunCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFileDiff: "orchestration.getFileDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
@@ -1653,6 +1656,13 @@ export const OrchestrationGetProjectByWorkspaceResult = Schema.NullOr(Orchestrat
 export type OrchestrationGetProjectByWorkspaceResult =
   typeof OrchestrationGetProjectByWorkspaceResult.Type;
 
+export const OrchestrationGetProjectByIdInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OrchestrationGetProjectByIdInput = typeof OrchestrationGetProjectByIdInput.Type;
+export const OrchestrationGetProjectByIdResult = Schema.NullOr(OrchestrationProjectSummary);
+export type OrchestrationGetProjectByIdResult = typeof OrchestrationGetProjectByIdResult.Type;
+
 export const OrchestrationListProjectThreadsInput = Schema.Struct({
   projectId: ProjectId,
   includeArchived: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
@@ -1662,6 +1672,13 @@ export type OrchestrationListProjectThreadsInput = typeof OrchestrationListProje
 export const OrchestrationListProjectThreadsResult = Schema.Array(OrchestrationThreadSummary);
 export type OrchestrationListProjectThreadsResult =
   typeof OrchestrationListProjectThreadsResult.Type;
+
+export const OrchestrationGetThreadByIdInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationGetThreadByIdInput = typeof OrchestrationGetThreadByIdInput.Type;
+export const OrchestrationGetThreadByIdResult = Schema.NullOr(OrchestrationThreadSummary);
+export type OrchestrationGetThreadByIdResult = typeof OrchestrationGetThreadByIdResult.Type;
 
 export const OrchestrationListSessionThreadsInput = Schema.Struct({
   rootThreadId: ThreadId,
@@ -1715,6 +1732,21 @@ export type OrchestrationListOrchestratorWakesInput =
 export const OrchestrationListOrchestratorWakesResult = Schema.Array(OrchestratorWakeItem);
 export type OrchestrationListOrchestratorWakesResult =
   typeof OrchestrationListOrchestratorWakesResult.Type;
+
+export const OrchestrationDryRunSkippedEffect = Schema.Literals([
+  "attachments.persist",
+  "project-hooks.before-prompt",
+]);
+export type OrchestrationDryRunSkippedEffect = typeof OrchestrationDryRunSkippedEffect.Type;
+
+export const OrchestrationDryRunResult = Schema.Struct({
+  currentSequence: NonNegativeInt,
+  finalSequence: NonNegativeInt,
+  normalizedCommand: OrchestrationCommand,
+  events: Schema.Array(OrchestrationEvent),
+  skippedEffects: Schema.Array(OrchestrationDryRunSkippedEffect),
+});
+export type OrchestrationDryRunResult = typeof OrchestrationDryRunResult.Type;
 
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
@@ -1783,6 +1815,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationListProjectsInput,
     output: OrchestrationListProjectsResult,
   },
+  getProjectById: {
+    input: OrchestrationGetProjectByIdInput,
+    output: OrchestrationGetProjectByIdResult,
+  },
   getProjectByWorkspace: {
     input: OrchestrationGetProjectByWorkspaceInput,
     output: OrchestrationGetProjectByWorkspaceResult,
@@ -1790,6 +1826,10 @@ export const OrchestrationRpcSchemas = {
   listProjectThreads: {
     input: OrchestrationListProjectThreadsInput,
     output: OrchestrationListProjectThreadsResult,
+  },
+  getThreadById: {
+    input: OrchestrationGetThreadByIdInput,
+    output: OrchestrationGetThreadByIdResult,
   },
   listSessionThreads: {
     input: OrchestrationListSessionThreadsInput,
@@ -1814,6 +1854,10 @@ export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  dryRunCommand: {
+    input: ClientOrchestrationCommand,
+    output: OrchestrationDryRunResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,

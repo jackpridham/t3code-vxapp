@@ -84,6 +84,16 @@ const makeProjectionStateRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionStateRepository.upsert:query")),
     );
 
+  const upsertMany: ProjectionStateRepositoryShape["upsertMany"] = (rows) =>
+    rows.length === 0
+      ? Effect.void
+      : Effect.forEach(rows, upsertProjectionStateRow, {
+          concurrency: 1,
+          discard: true,
+        }).pipe(
+          Effect.mapError(toPersistenceSqlError("ProjectionStateRepository.upsertMany:query")),
+        );
+
   const getByProjector: ProjectionStateRepositoryShape["getByProjector"] = (input) =>
     getProjectionStateRow(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionStateRepository.getByProjector:query")),
@@ -104,6 +114,7 @@ const makeProjectionStateRepository = Effect.gen(function* () {
 
   return {
     upsert,
+    upsertMany,
     getByProjector,
     listAll,
     minLastAppliedSequence,

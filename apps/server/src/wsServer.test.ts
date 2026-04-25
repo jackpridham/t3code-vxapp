@@ -365,7 +365,8 @@ async function sendRequest(
 
   const id = crypto.randomUUID();
   const body =
-    method === ORCHESTRATION_WS_METHODS.dispatchCommand
+    method === ORCHESTRATION_WS_METHODS.dispatchCommand ||
+    method === ORCHESTRATION_WS_METHODS.dryRunCommand
       ? { _tag: method, command: params }
       : params && typeof params === "object" && !Array.isArray(params)
         ? { _tag: method, ...(params as Record<string, unknown>) }
@@ -951,6 +952,438 @@ describe("WebSocket Server", () => {
             checkpoints: [],
           }),
         ]),
+      }),
+    );
+  });
+
+  it("serves direct project and thread lookup RPCs without falling back to snapshots", async () => {
+    server = await createTestServer({
+      cwd: "/test/direct-read-workspace",
+      autoBootstrapProjectFromCwd: true,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    const bootstrapThreadId = (welcome.data as { bootstrapThreadId?: string }).bootstrapThreadId;
+    expect(bootstrapProjectId).toBeDefined();
+    expect(bootstrapThreadId).toBeDefined();
+
+    const projectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getProjectById, {
+      projectId: bootstrapProjectId,
+    });
+    expect(projectResponse.error).toBeUndefined();
+    expect(projectResponse.result).toEqual(
+      expect.objectContaining({
+        id: bootstrapProjectId,
+        workspaceRoot: "/test/direct-read-workspace",
+      }),
+    );
+
+    const threadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getThreadById, {
+      threadId: bootstrapThreadId,
+    });
+    expect(threadResponse.error).toBeUndefined();
+    expect(threadResponse.result).toEqual(
+      expect.objectContaining({
+        id: bootstrapThreadId,
+        projectId: bootstrapProjectId,
+        title: "New thread",
+      }),
+    );
+  });
+
+  it("dry-runs orchestration commands without mutating persisted state or attachments", async () => {
+    const baseDir = makeTempDir("t3code-ws-dry-run-");
+    server = await createTestServer({ cwd: "/test", baseDir });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-ws-dry-run-project-");
+    const createdAt = new Date().toISOString();
+
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-ws-dry-run-project-create",
+      projectId: "project-dry-run",
+      title: "Dry Run Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-ws-dry-run-thread-create",
+      threadId: "thread-dry-run",
+      projectId: "project-dry-run",
+      title: "Dry Run Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const beforeEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(beforeEventsResponse.error).toBeUndefined();
+    expect(beforeEventsResponse.result).toHaveLength(2);
+
+    const dryRunResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dryRunCommand, {
+      type: "thread.turn.start",
+      commandId: "cmd-ws-dry-run-turn-start",
+      threadId: "thread-dry-run",
+      message: {
+        messageId: "msg-ws-dry-run-1",
+        role: "user",
+        text: "preview me",
+        attachments: [
+          {
+            type: "image",
+            name: "dry-run.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+            dataUrl: "data:image/png;base64,AAAAAA==",
+          },
+        ],
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      createdAt,
+    });
+    expect(dryRunResponse.error).toBeUndefined();
+    expect(dryRunResponse.result).toEqual(
+      expect.objectContaining({
+        currentSequence: 2,
+        finalSequence: 4,
+        normalizedCommand: expect.objectContaining({
+          type: "thread.turn.start",
+          threadId: "thread-dry-run",
+        }),
+        skippedEffects: expect.arrayContaining([
+          "attachments.persist",
+          "project-hooks.before-prompt",
+        ]),
+      }),
+    );
+    expect(
+      (dryRunResponse.result as { events: Array<{ type: string }> }).events.map(
+        (event) => event.type,
+      ),
+    ).toEqual(["thread.message-sent", "thread.turn-start-requested"]);
+
+    await expect(
+      waitForPush(
+        ws,
+        ORCHESTRATION_WS_CHANNELS.domainEvent,
+        (push) => (push.data as { commandId?: string }).commandId === "cmd-ws-dry-run-turn-start",
+        5,
+        200,
+      ),
+    ).rejects.toThrow("Timed out waiting for WebSocket message");
+
+    const afterEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(afterEventsResponse.error).toBeUndefined();
+    expect(afterEventsResponse.result).toHaveLength(2);
+
+    const { attachmentsDir } = deriveServerPathsSync(baseDir, undefined);
+    expect(fs.existsSync(attachmentsDir)).toBe(false);
+  });
+
+  it("supports the live-server dry-run command matrix used by T3 helper flows", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-ws-dry-run-matrix-project-");
+    const createdAt = new Date().toISOString();
+
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-ws-dry-run-matrix-project-create",
+      projectId: "project-dry-run-matrix",
+      title: "Dry Run Matrix Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-ws-dry-run-matrix-thread-create",
+      threadId: "thread-dry-run-matrix",
+      projectId: "project-dry-run-matrix",
+      title: "Dry Run Matrix Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const existingProjectResponse = await sendRequest(
+      ws,
+      ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
+      {
+        workspaceRoot,
+      },
+    );
+    expect(existingProjectResponse.error).toBeUndefined();
+    expect(existingProjectResponse.result).toEqual(
+      expect.objectContaining({
+        id: "project-dry-run-matrix",
+        workspaceRoot,
+      }),
+    );
+
+    const beforeEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(beforeEventsResponse.error).toBeUndefined();
+    expect(beforeEventsResponse.result).toHaveLength(2);
+
+    const dryRunCases = [
+      {
+        command: {
+          type: "project.create",
+          commandId: "cmd-ws-dry-run-preview-project-create",
+          projectId: "project-dry-run-preview",
+          title: "Preview Project",
+          workspaceRoot,
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          createdAt,
+        },
+        expectedEventTypes: ["project.created"],
+        expectedNormalizedCommand: {
+          type: "project.create",
+          commandId: "cmd-ws-dry-run-preview-project-create",
+          projectId: "project-dry-run-preview",
+          workspaceRoot,
+        },
+      },
+      {
+        command: {
+          type: "project.delete",
+          commandId: "cmd-ws-dry-run-preview-project-delete",
+          projectId: "project-dry-run-matrix",
+        },
+        expectedEventTypes: ["project.deleted"],
+        expectedNormalizedCommand: {
+          type: "project.delete",
+          commandId: "cmd-ws-dry-run-preview-project-delete",
+          projectId: "project-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.create",
+          commandId: "cmd-ws-dry-run-preview-thread-create",
+          threadId: "thread-dry-run-preview",
+          projectId: "project-dry-run-matrix",
+          title: "Preview Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        },
+        expectedEventTypes: ["thread.created"],
+        expectedNormalizedCommand: {
+          type: "thread.create",
+          commandId: "cmd-ws-dry-run-preview-thread-create",
+          threadId: "thread-dry-run-preview",
+          projectId: "project-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: "cmd-ws-dry-run-preview-turn-interrupt",
+          threadId: "thread-dry-run-matrix",
+          turnId: "turn-preview-interrupt",
+          createdAt,
+        },
+        expectedEventTypes: ["thread.turn-interrupt-requested"],
+        expectedNormalizedCommand: {
+          type: "thread.turn.interrupt",
+          commandId: "cmd-ws-dry-run-preview-turn-interrupt",
+          threadId: "thread-dry-run-matrix",
+          turnId: "turn-preview-interrupt",
+        },
+      },
+      {
+        command: {
+          type: "thread.session.stop",
+          commandId: "cmd-ws-dry-run-preview-session-stop",
+          threadId: "thread-dry-run-matrix",
+          createdAt,
+        },
+        expectedEventTypes: ["thread.session-stop-requested"],
+        expectedNormalizedCommand: {
+          type: "thread.session.stop",
+          commandId: "cmd-ws-dry-run-preview-session-stop",
+          threadId: "thread-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.checkpoint.revert",
+          commandId: "cmd-ws-dry-run-preview-checkpoint-revert",
+          threadId: "thread-dry-run-matrix",
+          turnCount: 1,
+          createdAt,
+        },
+        expectedEventTypes: ["thread.checkpoint-revert-requested"],
+        expectedNormalizedCommand: {
+          type: "thread.checkpoint.revert",
+          commandId: "cmd-ws-dry-run-preview-checkpoint-revert",
+          threadId: "thread-dry-run-matrix",
+          turnCount: 1,
+        },
+      },
+      {
+        command: {
+          type: "thread.archive",
+          commandId: "cmd-ws-dry-run-preview-thread-archive",
+          threadId: "thread-dry-run-matrix",
+        },
+        expectedEventTypes: ["thread.archived"],
+        expectedNormalizedCommand: {
+          type: "thread.archive",
+          commandId: "cmd-ws-dry-run-preview-thread-archive",
+          threadId: "thread-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.delete",
+          commandId: "cmd-ws-dry-run-preview-thread-delete",
+          threadId: "thread-dry-run-matrix",
+        },
+        expectedEventTypes: ["thread.deleted"],
+        expectedNormalizedCommand: {
+          type: "thread.delete",
+          commandId: "cmd-ws-dry-run-preview-thread-delete",
+          threadId: "thread-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.meta.update",
+          commandId: "cmd-ws-dry-run-preview-thread-meta-update",
+          threadId: "thread-dry-run-matrix",
+          title: "Preview Renamed Thread",
+          labels: ["dry-run", "preview"],
+        },
+        expectedEventTypes: ["thread.meta-updated"],
+        expectedNormalizedCommand: {
+          type: "thread.meta.update",
+          commandId: "cmd-ws-dry-run-preview-thread-meta-update",
+          threadId: "thread-dry-run-matrix",
+          title: "Preview Renamed Thread",
+          labels: ["dry-run", "preview"],
+        },
+      },
+    ] as const;
+
+    for (const dryRunCase of dryRunCases) {
+      const response = await sendRequest(
+        ws,
+        ORCHESTRATION_WS_METHODS.dryRunCommand,
+        dryRunCase.command,
+      );
+
+      expect(response.error).toBeUndefined();
+      expect(response.result).toEqual(
+        expect.objectContaining({
+          currentSequence: 2,
+          finalSequence: 3,
+          normalizedCommand: expect.objectContaining(dryRunCase.expectedNormalizedCommand),
+          skippedEffects: [],
+        }),
+      );
+      expect(
+        (response.result as { events: Array<{ type: string }> }).events.map((event) => event.type),
+      ).toEqual(dryRunCase.expectedEventTypes);
+
+      await expect(
+        waitForPush(
+          ws,
+          ORCHESTRATION_WS_CHANNELS.domainEvent,
+          (push) =>
+            (push.data as { commandId?: string }).commandId === dryRunCase.command.commandId,
+          5,
+          200,
+        ),
+      ).rejects.toThrow("Timed out waiting for WebSocket message");
+    }
+
+    const afterEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(afterEventsResponse.error).toBeUndefined();
+    expect(afterEventsResponse.result).toHaveLength(2);
+
+    const projectAfterDryRuns = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getProjectById, {
+      projectId: "project-dry-run-matrix",
+    });
+    expect(projectAfterDryRuns.error).toBeUndefined();
+    expect(projectAfterDryRuns.result).toEqual(
+      expect.objectContaining({
+        id: "project-dry-run-matrix",
+        title: "Dry Run Matrix Project",
+        deletedAt: null,
+      }),
+    );
+
+    const threadAfterDryRuns = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getThreadById, {
+      threadId: "thread-dry-run-matrix",
+    });
+    expect(threadAfterDryRuns.error).toBeUndefined();
+    expect(threadAfterDryRuns.result).toEqual(
+      expect.objectContaining({
+        id: "thread-dry-run-matrix",
+        title: "Dry Run Matrix Thread",
+        archivedAt: null,
+        deletedAt: null,
       }),
     );
   });

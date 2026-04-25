@@ -38,12 +38,30 @@ export interface OrchestrationProjectionPipelineShape {
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**
+   * Project a contiguous command batch of orchestration events.
+   *
+   * Projectors are executed sequentially to preserve deterministic ordering,
+   * while projector cursors advance once to the final event sequence.
+   */
+  readonly projectEvents: (
+    events: ReadonlyArray<OrchestrationEvent>,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
    * Project a single orchestration event assuming the caller already owns the
    * surrounding SQL transaction. Attachment side effects are returned so the
    * caller can flush them only after the outer transaction commits.
    */
   readonly projectEventInTransaction: (
     event: OrchestrationEvent,
+  ) => Effect.Effect<ReadonlyArray<ProjectionAttachmentSideEffects>, ProjectionRepositoryError>;
+
+  /**
+   * Project a contiguous command batch of orchestration events assuming the
+   * caller already owns the surrounding SQL transaction.
+   */
+  readonly projectEventsInTransaction: (
+    events: ReadonlyArray<OrchestrationEvent>,
   ) => Effect.Effect<ReadonlyArray<ProjectionAttachmentSideEffects>, ProjectionRepositoryError>;
 
   /**

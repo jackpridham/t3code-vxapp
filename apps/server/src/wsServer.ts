@@ -354,27 +354,39 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const normalizeDispatchCommand = Effect.fnUntraced(function* (input: {
     readonly command: ClientOrchestrationCommand;
+    readonly mode: "live" | "dry-run";
   }) {
+    const skippedEffects: Array<"attachments.persist" | "project-hooks.before-prompt"> = [];
+
     if (input.command.type === "project.create") {
       return {
-        ...input.command,
-        workspaceRoot: yield* workspacePaths
-          .normalizeWorkspaceRoot(input.command.workspaceRoot)
-          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message }))),
-      } satisfies OrchestrationCommand;
+        command: {
+          ...input.command,
+          workspaceRoot: yield* workspacePaths
+            .normalizeWorkspaceRoot(input.command.workspaceRoot)
+            .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message }))),
+        } satisfies OrchestrationCommand,
+        skippedEffects,
+      } as const;
     }
 
     if (input.command.type === "project.meta.update" && input.command.workspaceRoot !== undefined) {
       return {
-        ...input.command,
-        workspaceRoot: yield* workspacePaths
-          .normalizeWorkspaceRoot(input.command.workspaceRoot)
-          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message }))),
-      } satisfies OrchestrationCommand;
+        command: {
+          ...input.command,
+          workspaceRoot: yield* workspacePaths
+            .normalizeWorkspaceRoot(input.command.workspaceRoot)
+            .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message }))),
+        } satisfies OrchestrationCommand,
+        skippedEffects,
+      } as const;
     }
 
     if (input.command.type !== "thread.turn.start") {
-      return input.command as OrchestrationCommand;
+      return {
+        command: input.command as OrchestrationCommand,
+        skippedEffects,
+      } as const;
     }
     const turnStartCommand = input.command;
 
@@ -421,35 +433,52 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             });
           }
 
-          yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true }).pipe(
-            Effect.mapError(
-              () =>
-                new RouteRequestError({
-                  message: `Failed to create attachment directory for '${attachment.name}'.`,
-                }),
-            ),
-          );
-          yield* fileSystem.writeFile(attachmentPath, bytes).pipe(
-            Effect.mapError(
-              () =>
-                new RouteRequestError({
-                  message: `Failed to persist attachment '${attachment.name}'.`,
-                }),
-            ),
-          );
+          if (input.mode === "live") {
+            yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true }).pipe(
+              Effect.mapError(
+                () =>
+                  new RouteRequestError({
+                    message: `Failed to create attachment directory for '${attachment.name}'.`,
+                  }),
+              ),
+            );
+            yield* fileSystem.writeFile(attachmentPath, bytes).pipe(
+              Effect.mapError(
+                () =>
+                  new RouteRequestError({
+                    message: `Failed to persist attachment '${attachment.name}'.`,
+                  }),
+              ),
+            );
+          } else {
+            skippedEffects.push("attachments.persist");
+          }
 
           return persistedAttachment;
         }),
       { concurrency: 1 },
     );
 
-    return yield* projectHooksService.prepareTurnStartCommand({
+    const normalizedTurnStartCommand = {
       ...turnStartCommand,
       message: {
         ...turnStartCommand.message,
         attachments: normalizedAttachments,
       },
-    });
+    };
+
+    if (input.mode === "dry-run") {
+      skippedEffects.push("project-hooks.before-prompt");
+      return {
+        command: normalizedTurnStartCommand satisfies OrchestrationCommand,
+        skippedEffects,
+      } as const;
+    }
+
+    return {
+      command: yield* projectHooksService.prepareTurnStartCommand(normalizedTurnStartCommand),
+      skippedEffects,
+    } as const;
   });
 
   // HTTP server — serves static files or redirects to Vite dev server
@@ -819,6 +848,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case ORCHESTRATION_WS_METHODS.listProjects:
         return yield* projectionOperationalQuery.listProjects();
 
+      case ORCHESTRATION_WS_METHODS.getProjectById: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.getProjectById(body);
+      }
+
       case ORCHESTRATION_WS_METHODS.getProjectByWorkspace: {
         const body = stripRequestTag(request.body);
         return yield* projectionOperationalQuery.getProjectByWorkspace(body);
@@ -827,6 +861,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case ORCHESTRATION_WS_METHODS.listProjectThreads: {
         const body = stripRequestTag(request.body);
         return yield* projectionOperationalQuery.listProjectThreads(body);
+      }
+
+      case ORCHESTRATION_WS_METHODS.getThreadById: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.getThreadById(body);
       }
 
       case ORCHESTRATION_WS_METHODS.listSessionThreads: {
@@ -861,8 +900,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
         const { command } = request.body;
-        const normalizedCommand = yield* normalizeDispatchCommand({ command });
-        return yield* orchestrationEngine.dispatch(normalizedCommand);
+        const normalized = yield* normalizeDispatchCommand({ command, mode: "live" });
+        return yield* orchestrationEngine.dispatch(normalized.command);
+      }
+
+      case ORCHESTRATION_WS_METHODS.dryRunCommand: {
+        const { command } = request.body;
+        const normalized = yield* normalizeDispatchCommand({ command, mode: "dry-run" });
+        const dryRunResult = yield* orchestrationEngine.dryRunDispatch(normalized.command);
+        return {
+          ...dryRunResult,
+          skippedEffects: [
+            ...new Set([...dryRunResult.skippedEffects, ...normalized.skippedEffects]),
+          ],
+        };
       }
 
       case ORCHESTRATION_WS_METHODS.getTurnDiff: {

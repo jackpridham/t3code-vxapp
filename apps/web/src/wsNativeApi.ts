@@ -226,10 +226,12 @@ export function createWsNativeApi(): NativeApi {
       getReadiness: () => transport.request(ORCHESTRATION_WS_METHODS.getReadiness),
       getCurrentState: () => transport.request(ORCHESTRATION_WS_METHODS.getCurrentState),
       listProjects: () => transport.request(ORCHESTRATION_WS_METHODS.listProjects),
+      getProjectById: (input) => transport.request(ORCHESTRATION_WS_METHODS.getProjectById, input),
       getProjectByWorkspace: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getProjectByWorkspace, input),
       listProjectThreads: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.listProjectThreads, input),
+      getThreadById: (input) => transport.request(ORCHESTRATION_WS_METHODS.getThreadById, input),
       listSessionThreads: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.listSessionThreads, input),
       listThreadMessages: (input) =>
@@ -242,6 +244,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(ORCHESTRATION_WS_METHODS.listOrchestratorWakes, input),
       dispatchCommand: (command) =>
         transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, { command }),
+      dryRunCommand: (command) =>
+        transport.request(ORCHESTRATION_WS_METHODS.dryRunCommand, { command }),
       getTurnDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getTurnDiff, input),
       getFileDiff: (input) => transport.request(ORCHESTRATION_WS_METHODS.getFileDiff, input),
       getFullThreadDiff: (input) =>
