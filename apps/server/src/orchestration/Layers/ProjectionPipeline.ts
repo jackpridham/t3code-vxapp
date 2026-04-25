@@ -112,6 +112,42 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null {
   return typeof requestId === "string" ? ApprovalRequestId.makeUnsafe(requestId) : null;
 }
 
+function extractActivityDetail(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const detail = (payload as Record<string, unknown>).detail;
+  return typeof detail === "string" ? detail : null;
+}
+
+function resolvesPendingApprovalFromFailureActivity(
+  activityKind: string,
+  payload: unknown,
+): boolean {
+  const detail = extractActivityDetail(payload)?.toLowerCase();
+  if (!detail) {
+    return false;
+  }
+
+  if (activityKind === "provider.approval.respond.failed") {
+    return (
+      detail.includes("stale pending approval request") ||
+      detail.includes("unknown pending approval request") ||
+      detail.includes("unknown pending permission request")
+    );
+  }
+
+  if (activityKind === "provider.user-input.respond.failed") {
+    return (
+      detail.includes("stale pending user-input request") ||
+      detail.includes("unknown pending user-input request") ||
+      detail.includes("unknown pending user input request")
+    );
+  }
+
+  return false;
+}
+
 function checkpointStatusToProjectionTurnState(
   status: "ready" | "missing" | "error",
 ): ProjectionTurn["state"] {
@@ -1573,6 +1609,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         case "thread.activity-appended": {
+          const activityKind = event.payload.activity.kind;
+          if (
+            activityKind !== "approval.requested" &&
+            activityKind !== "approval.resolved" &&
+            activityKind !== "user-input.requested" &&
+            activityKind !== "user-input.resolved" &&
+            activityKind !== "provider.approval.respond.failed" &&
+            activityKind !== "provider.user-input.respond.failed"
+          ) {
+            return;
+          }
           const requestId =
             extractActivityRequestId(event.payload.activity.payload) ??
             event.metadata.requestId ??
@@ -1583,7 +1630,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingRow = yield* projectionPendingApprovalRepository.getByRequestId({
             requestId,
           });
-          if (event.payload.activity.kind === "approval.resolved") {
+          const resolvedByFailureActivity = resolvesPendingApprovalFromFailureActivity(
+            activityKind,
+            event.payload.activity.payload,
+          );
+          if (
+            activityKind === "approval.resolved" ||
+            activityKind === "user-input.resolved" ||
+            resolvedByFailureActivity
+          ) {
             const resolvedDecisionRaw =
               typeof event.payload.activity.payload === "object" &&
               event.payload.activity.payload !== null &&
@@ -1643,6 +1698,26 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             turnId: Option.isSome(existingRow) ? existingRow.value.turnId : null,
             status: "resolved",
             decision: event.payload.decision,
+            createdAt: Option.isSome(existingRow)
+              ? existingRow.value.createdAt
+              : event.payload.createdAt,
+            resolvedAt: event.payload.createdAt,
+          });
+          return;
+        }
+
+        case "thread.user-input-response-requested": {
+          const existingRow = yield* projectionPendingApprovalRepository.getByRequestId({
+            requestId: event.payload.requestId,
+          });
+          yield* projectionPendingApprovalRepository.upsert({
+            requestId: event.payload.requestId,
+            threadId: Option.isSome(existingRow)
+              ? existingRow.value.threadId
+              : event.payload.threadId,
+            turnId: Option.isSome(existingRow) ? existingRow.value.turnId : null,
+            status: "resolved",
+            decision: null,
             createdAt: Option.isSome(existingRow)
               ? existingRow.value.createdAt
               : event.payload.createdAt,

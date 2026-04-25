@@ -36,6 +36,7 @@ import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId =>
@@ -275,6 +276,25 @@ describe("ProviderCommandReactor", () => {
           Effect.map((binding) => Option.getOrUndefined(binding)),
         ),
       );
+    const getPendingApproval = (requestId: string) =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const rows = yield* sql<{
+            readonly status: string;
+            readonly decision: string | null;
+            readonly resolvedAt: string | null;
+          }>`
+            SELECT
+              status,
+              decision,
+              resolved_at AS "resolvedAt"
+            FROM projection_pending_approvals
+            WHERE request_id = ${requestId}
+          `;
+          return rows[0] ?? null;
+        }),
+      );
 
     return {
       engine,
@@ -290,6 +310,7 @@ describe("ProviderCommandReactor", () => {
       stateDir,
       drain,
       getBinding,
+      getPendingApproval,
     };
   }
 
@@ -1592,6 +1613,10 @@ describe("ProviderCommandReactor", () => {
       requestId: "approval-request-1",
       detail: expect.stringContaining("Stale pending approval request: approval-request-1"),
     });
+    expect(await harness.getPendingApproval("approval-request-1")).toMatchObject({
+      status: "resolved",
+      decision: null,
+    });
 
     const resolvedActivity = thread?.activities.find(
       (activity) =>
@@ -1702,6 +1727,10 @@ describe("ProviderCommandReactor", () => {
     expect(failureActivity?.payload).toMatchObject({
       requestId: "user-input-request-1",
       detail: expect.stringContaining("Stale pending user-input request: user-input-request-1"),
+    });
+    expect(await harness.getPendingApproval("user-input-request-1")).toMatchObject({
+      status: "resolved",
+      decision: null,
     });
 
     const resolvedActivity = thread?.activities.find(

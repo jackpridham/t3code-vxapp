@@ -906,6 +906,14 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadOrchestratorWakeUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.orchestrator-wake.upsert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  wakeItem: OrchestratorWakeItem,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -929,6 +937,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadOrchestratorWakeUpsertCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -956,6 +965,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadOrchestratorWakeUpsertCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -1027,14 +1037,6 @@ const ThreadActivityAppendCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
-  createdAt: IsoDateTime,
-});
-
-const ThreadOrchestratorWakeUpsertCommand = Schema.Struct({
-  type: Schema.Literal("thread.orchestrator-wake.upsert"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  wakeItem: OrchestratorWakeItem,
   createdAt: IsoDateTime,
 });
 

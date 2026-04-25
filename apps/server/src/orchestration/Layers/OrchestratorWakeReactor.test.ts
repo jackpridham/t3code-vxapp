@@ -1189,6 +1189,9 @@ describe("OrchestratorWakeReactor", () => {
             message.text.includes(
               "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
             ) &&
+            message.text.includes(
+              "vx t3 lanes finalize-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+            ) &&
             message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
             message.text.includes("--json") &&
             message.text.includes("Wake context:") &&
@@ -1216,6 +1219,9 @@ describe("OrchestratorWakeReactor", () => {
           message.text.includes("Worker updates are ready for review.") &&
           message.text.includes(
             "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+          ) &&
+          message.text.includes(
+            "vx t3 lanes finalize-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
           ) &&
           message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
           message.text.includes("--json") &&

@@ -1486,6 +1486,91 @@ describe("WebSocket Server", () => {
     expect(response.error?.message).toContain("Workspace root does not exist:");
   });
 
+  it("accepts thread.orchestrator-wake.upsert over dispatchCommand", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-ws-wake-project-");
+    const createdAt = new Date().toISOString();
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-ws-wake-project-create",
+      projectId: "project-wake",
+      title: "Wake Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-ws-wake-thread-create",
+      threadId: "thread-orch",
+      projectId: "project-wake",
+      title: "Wake Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const wakeUpsertResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.orchestrator-wake.upsert",
+      commandId: "cmd-ws-wake-upsert",
+      threadId: "thread-orch",
+      wakeItem: {
+        wakeId: "wake:thread-worker:turn-1:completed",
+        orchestratorThreadId: "thread-orch",
+        orchestratorProjectId: "project-wake",
+        workerThreadId: "thread-worker",
+        workerProjectId: "project-worker",
+        workerTurnId: "turn-1",
+        workflowId: "wf-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "completed",
+        summary: "Worker completed its assigned turn",
+        queuedAt: createdAt,
+        state: "pending",
+      },
+      createdAt,
+    });
+    expect(wakeUpsertResponse.error).toBeUndefined();
+    expect((wakeUpsertResponse.result as { sequence?: number } | undefined)?.sequence).toEqual(
+      expect.any(Number),
+    );
+
+    const push = await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (candidate) => {
+      const event = candidate.data as { type?: string };
+      return event.type === "thread.orchestrator-wake-upserted";
+    });
+    expect(push.data).toEqual(
+      expect.objectContaining({
+        type: "thread.orchestrator-wake-upserted",
+        payload: expect.objectContaining({
+          threadId: "thread-orch",
+          wakeItem: expect.objectContaining({
+            wakeId: "wake:thread-worker:turn-1:completed",
+            state: "pending",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("keeps orchestration domain push behavior for provider runtime events", async () => {
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     const emitRuntimeEvent = (event: ProviderRuntimeEvent) => {

@@ -262,6 +262,19 @@ function buildSettlementCommand(input: {
   ].join(" ");
 }
 
+function buildFinalizeCommand(input: {
+  readonly item: OrchestratorWakeItem;
+  readonly workspace: string;
+}): string {
+  return [
+    "vx t3 lanes finalize-observer",
+    `--orchestrator-thread ${shellQuote(input.item.orchestratorThreadId)}`,
+    `--worker-thread ${shellQuote(input.item.workerThreadId)}`,
+    `--workspace ${shellQuote(input.workspace)}`,
+    "--json",
+  ].join(" ");
+}
+
 function formatNullableContext(value: string | null | undefined): string {
   return value && value.trim().length > 0 ? value : "none";
 }
@@ -311,6 +324,13 @@ function buildOrchestratorWakePrompt(input: {
     }
     return buildSettlementCommand({ item, workspace });
   });
+  const finalizeLines = items.map((item) => {
+    const workspace = resolveWorkerWorkspaceForWake({ item, readModel });
+    if (!workspace) {
+      return `# Could not resolve workspace for worker ${item.workerThreadId}; inspect the worker thread before finalizing the delivered wake.`;
+    }
+    return buildFinalizeCommand({ item, workspace });
+  });
   const contextLines = items.map((item) => buildWakeContextLine({ item, readModel }));
 
   return [
@@ -321,6 +341,11 @@ function buildOrchestratorWakePrompt(input: {
     "Run this first, one command per worker outcome:",
     "```bash",
     ...settlementLines,
+    "```",
+    "",
+    "After reviewing a delivered wake, consume it with:",
+    "```bash",
+    ...finalizeLines,
     "```",
     "",
     "Wake context:",
