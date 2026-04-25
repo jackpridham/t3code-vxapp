@@ -117,6 +117,21 @@ function runtimeModeForThread(thread: OrchestrationReadModel["threads"][number])
   return thread.session?.runtimeMode ?? thread.runtimeMode ?? "full-access";
 }
 
+function persistedSessionBindingPruneReason(
+  thread: OrchestrationReadModel["threads"][number] | undefined,
+): "missing-thread" | "archived-thread" | "deleted-thread" | null {
+  if (!thread) {
+    return "missing-thread";
+  }
+  if (thread.deletedAt !== null) {
+    return "deleted-thread";
+  }
+  if (thread.archivedAt !== null) {
+    return "archived-thread";
+  }
+  return null;
+}
+
 function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
@@ -1439,6 +1454,12 @@ const make = Effect.fn("make")(function* () {
           }
 
           const thread = readModel.threads.find((entry) => entry.id === threadId);
+          const pruneReason = persistedSessionBindingPruneReason(thread);
+          if (pruneReason) {
+            yield* providerSessionDirectory.remove(threadId);
+            return;
+          }
+
           if (!thread) {
             return;
           }

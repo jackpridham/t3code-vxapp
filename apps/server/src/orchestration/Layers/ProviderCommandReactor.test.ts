@@ -276,6 +276,7 @@ describe("ProviderCommandReactor", () => {
           Effect.map((binding) => Option.getOrUndefined(binding)),
         ),
       );
+    const directory = await runtime.runPromise(Effect.service(ProviderSessionDirectory));
     const getPendingApproval = (requestId: string) =>
       runtime.runPromise(
         Effect.gen(function* () {
@@ -309,6 +310,7 @@ describe("ProviderCommandReactor", () => {
       generateThreadTitle,
       stateDir,
       drain,
+      directory,
       getBinding,
       getPendingApproval,
     };
@@ -1788,6 +1790,19 @@ describe("ProviderCommandReactor", () => {
     const now = new Date().toISOString();
 
     await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "ready",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed",
+          lastRuntimeEventAt: now,
+        },
+      }),
+    );
+
+    await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.makeUnsafe("cmd-session-set-for-archive"),
@@ -1821,5 +1836,47 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.status).toBe("stopped");
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.activeTurnId).toBeNull();
+    expect(await harness.getBinding()).toBeUndefined();
+  });
+
+  it("removes persisted provider bindings when a thread is deleted", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("cmd-thread-archive-before-delete"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+      }),
+    );
+    await harness.drain();
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed.deleted",
+          lastRuntimeEventAt: now,
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.makeUnsafe("cmd-thread-delete-clears-binding"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+      }),
+    );
+    await harness.drain();
+
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+    expect(thread?.deletedAt).not.toBeNull();
+    expect(await harness.getBinding()).toBeUndefined();
   });
 });

@@ -272,7 +272,13 @@ describe("isRecoverableThreadResumeError", () => {
     ).toBe(false);
   });
 
-  it("ignores non-recoverable resume errors", () => {
+  it("matches thread/resume timeouts so sessions can fall back to thread/start", () => {
+    expect(isRecoverableThreadResumeError(new Error("Timed out waiting for thread/resume."))).toBe(
+      true,
+    );
+  });
+
+  it("ignores other non-recoverable resume errors", () => {
     expect(
       isRecoverableThreadResumeError(
         new Error("thread/resume failed: timed out waiting for server"),

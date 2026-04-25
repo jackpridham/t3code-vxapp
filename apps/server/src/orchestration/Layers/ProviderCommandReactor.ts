@@ -34,6 +34,7 @@ type ProviderIntentEvent = Extract<
   {
     type:
       | "thread.archived"
+      | "thread.deleted"
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
@@ -929,29 +930,41 @@ const make = Effect.gen(function* () {
     event: Extract<ProviderIntentEvent, { type: "thread.archived" }>,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
-    if (!thread) {
-      return;
-    }
-
     const archivedAt = event.payload.archivedAt;
-    if (thread.session && thread.session.status !== "stopped") {
+    if (thread?.session && thread.session.status !== "stopped") {
       yield* providerService.stopSession({ threadId: thread.id });
     }
 
-    yield* setThreadSession({
-      threadId: thread.id,
-      session: {
+    if (thread) {
+      yield* setThreadSession({
         threadId: thread.id,
-        status: "stopped",
-        providerName: thread.session?.providerName ?? null,
-        runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-        activeTurnId: null,
-        lastError: thread.session?.lastError ?? null,
-        updatedAt: archivedAt,
-      },
-      createdAt: archivedAt,
-    });
-    sessionBoundaryFences.delete(thread.id);
+        session: {
+          threadId: thread.id,
+          status: "stopped",
+          providerName: thread.session?.providerName ?? null,
+          runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+          activeTurnId: null,
+          lastError: thread.session?.lastError ?? null,
+          updatedAt: archivedAt,
+        },
+        createdAt: archivedAt,
+      });
+    }
+
+    yield* providerSessionDirectory.remove(event.payload.threadId);
+    sessionBoundaryFences.delete(event.payload.threadId);
+  });
+
+  const processThreadDeleted = Effect.fnUntraced(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.deleted" }>,
+  ) {
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (thread?.session && thread.session.status !== "stopped") {
+      yield* providerService.stopSession({ threadId: thread.id });
+    }
+
+    yield* providerSessionDirectory.remove(event.payload.threadId);
+    sessionBoundaryFences.delete(event.payload.threadId);
   });
 
   const processDomainEvent = (event: ProviderIntentEvent) =>
@@ -959,6 +972,9 @@ const make = Effect.gen(function* () {
       switch (event.type) {
         case "thread.archived":
           yield* processThreadArchived(event);
+          return;
+        case "thread.deleted":
+          yield* processThreadDeleted(event);
           return;
         case "thread.runtime-mode-set": {
           const thread = yield* resolveThread(event.payload.threadId);
@@ -1016,6 +1032,7 @@ const make = Effect.gen(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
         event.type === "thread.archived" ||
+        event.type === "thread.deleted" ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||

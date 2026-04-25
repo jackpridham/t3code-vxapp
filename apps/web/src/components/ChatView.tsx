@@ -165,6 +165,7 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
+import { DevOrchestrationMenu } from "./chat/DevOrchestrationMenu";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -450,7 +451,10 @@ export default function ChatView({
   const serverThread = useThreadById(threadId);
   const isMobile = useIsMobile();
   const projects = useStore((store) => store.projects);
+  const programs = useStore((store) => store.programs ?? []);
+  const programNotifications = useStore((store) => store.programNotifications ?? []);
   const threads = useStore((store) => store.threads);
+  const allOrchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -3870,6 +3874,14 @@ export default function ChatView({
       <ThreadErrorBanner
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
+      />
+      <DevOrchestrationMenu
+        activeThread={activeThread}
+        activeProject={activeProject}
+        programs={programs}
+        threads={threads}
+        programNotifications={programNotifications}
+        orchestratorWakeItems={allOrchestratorWakeItems}
       />
       {orchestrationNoticeCount > 0 ? (
         <div className="border-b border-border px-3 py-2 sm:px-5">

@@ -540,6 +540,105 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.activeTurnId).toBeNull();
   });
 
+  it("prunes persisted bindings for archived, deleted, and missing threads during startup reconcile", async () => {
+    const harness = await createHarness({ autoStart: false });
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-thread-create-delete-target"),
+        threadId: asThreadId("thread-delete-target"),
+        projectId: asProjectId("project-1"),
+        title: "Delete Target",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("cmd-thread-archive-startup-prune"),
+        threadId: asThreadId("thread-1"),
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("cmd-thread-archive-delete-target"),
+        threadId: asThreadId("thread-delete-target"),
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.makeUnsafe("cmd-thread-delete-startup-prune"),
+        threadId: asThreadId("thread-delete-target"),
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: asThreadId("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed.archived",
+          lastRuntimeEventAt: createdAt,
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: asThreadId("thread-delete-target"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed.deleted",
+          lastRuntimeEventAt: createdAt,
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: asThreadId("thread-missing"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed.missing",
+          lastRuntimeEventAt: createdAt,
+        },
+      }),
+    );
+
+    await harness.start();
+
+    expect(
+      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-1"))),
+    ).toMatchObject({ _tag: "None" });
+    expect(
+      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-delete-target"))),
+    ).toMatchObject({ _tag: "None" });
+    expect(
+      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-missing"))),
+    ).toMatchObject({ _tag: "None" });
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = new Date().toISOString();
