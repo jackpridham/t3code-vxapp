@@ -1,4 +1,4 @@
-import { type MessageId, type TurnId } from "@t3tools/contracts";
+import { type MessageId } from "@t3tools/contracts";
 import {
   memo,
   useCallback,
@@ -16,17 +16,13 @@ import {
 } from "@tanstack/react-virtual";
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
-import { type TurnDiffSummary } from "../../types";
-import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
-import { Undo2Icon } from "lucide-react";
+import { ChevronDownIcon, Undo2Icon } from "lucide-react";
 import { Button } from "../ui/button";
 import { clamp } from "effect/Number";
 import { estimateTimelineMessageHeight } from "../timelineHeight";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
-import { ChangedFilesTree } from "./ChangedFilesTree";
-import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageMeta } from "./MessageMeta";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { computeMessageDurationStart } from "./MessagesTimeline.logic";
@@ -58,17 +54,14 @@ interface MessagesTimelineProps {
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionDuration: string | null;
-  turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   markdownCwd: string | undefined;
-  resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
 }
@@ -83,17 +76,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timelineEntries,
   completionDividerBeforeEntryId,
   completionDuration,
-  turnDiffSummaryByAssistantMessageId,
   nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
-  onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
   markdownCwd,
-  resolvedTheme,
   timestampFormat,
   workspaceRoot,
 }: MessagesTimelineProps) {
@@ -166,6 +156,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         continue;
       }
 
+      if (timelineEntry.kind === "thinking") {
+        nextRows.push({
+          kind: "thinking",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          thinking: timelineEntry.thinking,
+        });
+        continue;
+      }
+
       nextRows.push({
         kind: "message",
         id: timelineEntry.id,
@@ -232,6 +232,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     minimum: 0,
     maximum: rows.length,
   });
+  const [expandedThinkingById, setExpandedThinkingById] = useState<Record<string, boolean>>({});
+  const onToggleThinking = useCallback((thinkingId: string) => {
+    setExpandedThinkingById((current) => ({
+      ...current,
+      [thinkingId]: !(current[thinkingId] ?? false),
+    }));
+  }, []);
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
@@ -242,6 +249,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       const row = rows[index];
       if (!row) return 96;
       if (row.kind === "work") return 112;
+      if (row.kind === "thinking") {
+        return estimateTimelineThinkingHeight(
+          row.thinking,
+          expandedThinkingById[row.id] ?? false,
+          timelineWidthPx,
+        );
+      }
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
@@ -254,6 +268,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
   }, [rowVirtualizer, timelineWidthPx]);
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [expandedThinkingById, rowVirtualizer]);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
@@ -289,15 +306,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
-  const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
-    Record<string, boolean>
-  >({});
-  const onToggleAllDirectories = useCallback((turnId: TurnId) => {
-    setAllDirectoriesExpandedByTurnId((current) => ({
-      ...current,
-      [turnId]: !(current[turnId] ?? true),
-    }));
-  }, []);
 
   const renderRowContent = (row: TimelineRow) => (
     <div
@@ -317,6 +325,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             />
           );
         })()}
+
+      {row.kind === "thinking" && (
+        <ThinkingBubble
+          thinking={row.thinking}
+          isExpanded={expandedThinkingById[row.id] ?? false}
+          onToggle={() => onToggleThinking(row.id)}
+        />
+      )}
 
       {row.kind === "message" &&
         row.message.role === "user" &&
@@ -430,63 +446,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   cwd={markdownCwd}
                   isStreaming={Boolean(row.message.streaming)}
                 />
-                {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
-                  if (!turnSummary) return null;
-                  const checkpointFiles = turnSummary.files;
-                  if (checkpointFiles.length === 0) return null;
-                  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-                  const changedFileCountLabel = String(checkpointFiles.length);
-                  const allDirectoriesExpanded =
-                    allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
-                  return (
-                    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-                          <span>Changed files ({changedFileCountLabel})</span>
-                          {hasNonZeroStat(summaryStat) && (
-                            <>
-                              <span className="mx-1">•</span>
-                              <DiffStatLabel
-                                additions={summaryStat.additions}
-                                deletions={summaryStat.deletions}
-                              />
-                            </>
-                          )}
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            data-scroll-anchor-ignore
-                            onClick={() => onToggleAllDirectories(turnSummary.turnId)}
-                          >
-                            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
-                          >
-                            View diff
-                          </Button>
-                        </div>
-                      </div>
-                      <ChangedFilesTree
-                        key={`changed-files-tree:${turnSummary.turnId}`}
-                        turnId={turnSummary.turnId}
-                        files={checkpointFiles}
-                        allDirectoriesExpanded={allDirectoriesExpanded}
-                        resolvedTheme={resolvedTheme}
-                        onOpenTurnDiff={onOpenTurnDiff}
-                      />
-                    </div>
-                  );
-                })()}
                 {!row.showCompletionDivider && (
                   <MessageMeta
                     createdAt={row.message.createdAt}
@@ -581,6 +540,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
+type TimelineThinking = Extract<TimelineEntry, { kind: "thinking" }>["thinking"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineRow =
   | {
@@ -588,6 +548,12 @@ type TimelineRow =
       id: string;
       createdAt: string;
       groupedEntries: Extract<TimelineEntry, { kind: "work" }>["entry"][];
+    }
+  | {
+      kind: "thinking";
+      id: string;
+      createdAt: string;
+      thinking: TimelineThinking;
     }
   | {
       kind: "message";
@@ -608,6 +574,28 @@ type TimelineRow =
 function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan): number {
   const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
   return 120 + Math.min(estimatedLines * 22, 880);
+}
+
+function estimateTimelineThinkingHeight(
+  thinking: TimelineThinking,
+  isExpanded: boolean,
+  timelineWidthPx: number | null,
+): number {
+  const width = Math.max(320, timelineWidthPx ?? 720);
+  const charsPerLine = Math.max(26, Math.floor((width * 0.8) / 8.5));
+  if (!isExpanded) {
+    const previewLines = Math.max(1, Math.ceil(thinking.latestThought.length / charsPerLine));
+    return 92 + Math.min(previewLines * 20, 120);
+  }
+
+  const totalLines = Math.max(
+    1,
+    thinking.thoughts.reduce(
+      (sum, thought) => sum + Math.max(1, Math.ceil(thought.length / charsPerLine)),
+      0,
+    ),
+  );
+  return 108 + Math.min(totalLines * 22 + thinking.thoughts.length * 10, 960);
 }
 
 function formatWorkingTimer(startIso: string, endIso: string): string | null {
@@ -636,6 +624,66 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
 function formatDividerTimestamp(createdAt: string, timestampFormat: TimestampFormat): string {
   return formatShortTimestamp(createdAt, timestampFormat).replace(/\s+/g, "").toUpperCase();
 }
+
+const ThinkingBubble = memo(function ThinkingBubble(props: {
+  thinking: TimelineThinking;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const thoughtCountLabel = `${props.thinking.thoughts.length} ${
+    props.thinking.thoughts.length === 1 ? "thought" : "thoughts"
+  }`;
+  const hasThoughtHistory = props.thinking.thoughts.length > 1;
+  const thoughtOccurrences = new Map<string, number>();
+
+  return (
+    <div className="max-w-[80%] rounded-2xl rounded-bl-sm border border-border/70 bg-card/55 px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground/65">
+            Thinking
+          </p>
+          <p className="text-[11px] text-muted-foreground/60">{thoughtCountLabel}</p>
+        </div>
+        {hasThoughtHistory ? (
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground/75 transition-colors duration-150 hover:bg-background/70 hover:text-foreground/80"
+            aria-expanded={props.isExpanded}
+            aria-label={props.isExpanded ? "Collapse thinking history" : "Expand thinking history"}
+            onClick={props.onToggle}
+          >
+            <ChevronDownIcon
+              className={`size-3 transition-transform ${props.isExpanded ? "rotate-180" : ""}`}
+            />
+            <span>{props.isExpanded ? "Hide" : "Show all"}</span>
+          </button>
+        ) : null}
+      </div>
+
+      {props.isExpanded ? (
+        <ol className="space-y-2 pl-5 text-[13px] leading-6 text-foreground/88">
+          {props.thinking.thoughts.map((thought) => {
+            const occurrence = (thoughtOccurrences.get(thought) ?? 0) + 1;
+            thoughtOccurrences.set(thought, occurrence);
+            return (
+              <li
+                key={`${props.thinking.id}:thought:${thought}:${occurrence}`}
+                className="list-decimal"
+              >
+                <pre className="whitespace-pre-wrap break-words font-sans">{thought}</pre>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/88">
+          {props.thinking.latestThought}
+        </p>
+      )}
+    </div>
+  );
+});
 
 const UserMessageTerminalContextInlineLabel = memo(
   function UserMessageTerminalContextInlineLabel(props: { context: ParsedTerminalContextEntry }) {

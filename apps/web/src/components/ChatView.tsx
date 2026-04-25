@@ -16,7 +16,6 @@ import {
   type ResolvedKeybindingsConfig,
   type ServerProvider,
   type ThreadId,
-  type TurnId,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
@@ -33,7 +32,6 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
 import { useSkillSuggestions } from "~/lib/skillReactQuery";
 import { isElectron } from "../env";
-import { stripDiffSearchParams } from "../diffRouteSearch";
 import { buildChangesWindowHref } from "../lib/changesWindow";
 import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import { resolveChatDocumentTitle, useDocumentTitle } from "../lib/documentTitle";
@@ -52,6 +50,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  deriveThinkingEntries,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -972,6 +971,13 @@ export default function ChatView({
       }),
     [latestTurnSettled, threadActivities],
   );
+  const thinkingEntries = useMemo(
+    () =>
+      deriveThinkingEntries(threadActivities, undefined, {
+        latestTurnSettled,
+      }),
+    [latestTurnSettled, threadActivities],
+  );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
     [activeLatestTurn?.turnId, threadActivities],
@@ -1260,8 +1266,13 @@ export default function ChatView({
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        thinkingEntries,
+      ),
+    [activeThread?.proposedPlans, thinkingEntries, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -3781,21 +3792,6 @@ export default function ChatView({
     setExpandedImage(preview);
   }, []);
   const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
-  const onOpenTurnDiff = useCallback(
-    (turnId: TurnId, filePath?: string) => {
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-        search: (previous) => {
-          const rest = stripDiffSearchParams(previous);
-          return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
-        },
-      });
-    },
-    [navigate, threadId],
-  );
   const onRevertUserMessage = (messageId: MessageId) => {
     const targetTurnCount = revertTurnCountByUserMessageId.get(messageId);
     if (typeof targetTurnCount !== "number") {
@@ -3976,17 +3972,14 @@ export default function ChatView({
                 timelineEntries={timelineEntries}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionDuration={completionDuration}
-                turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 nowIso={nowIso}
                 expandedWorkGroups={expandedWorkGroups}
                 onToggleWorkGroup={onToggleWorkGroup}
-                onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
-                resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
               />

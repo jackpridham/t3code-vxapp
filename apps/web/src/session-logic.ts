@@ -47,6 +47,14 @@ export interface WorkLogEntry {
   requestKind?: PendingApproval["requestKind"];
 }
 
+export interface ThinkingEntry {
+  id: string;
+  createdAt: string;
+  turnId?: TurnId | null;
+  thoughts: ReadonlyArray<string>;
+  latestThought: string;
+}
+
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
@@ -93,6 +101,12 @@ export type TimelineEntry =
       kind: "message";
       createdAt: string;
       message: ChatMessage;
+    }
+  | {
+      id: string;
+      kind: "thinking";
+      createdAt: string;
+      thinking: ThinkingEntry;
     }
   | {
       id: string;
@@ -472,6 +486,7 @@ export function deriveWorkLogEntries(
           options.latestTurnSettled === true && isTransientRuntimeRetryDiagnosticActivity(activity)
         ),
     )
+    .filter((activity) => activity.tone !== "thinking")
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.kind !== "context-window.updated")
@@ -481,6 +496,85 @@ export function deriveWorkLogEntries(
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+export function deriveThinkingEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+  options: { latestTurnSettled?: boolean } = {},
+): ThinkingEntry[] {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const aggregatedByKey = new Map<
+    string,
+    {
+      id: string;
+      createdAt: string;
+      turnId?: TurnId | null;
+      thoughts: string[];
+      latestThought: string;
+      thoughtMergeMode: "append" | "push";
+    }
+  >();
+
+  for (const activity of ordered) {
+    if (latestTurnId && activity.turnId !== latestTurnId) {
+      continue;
+    }
+    if (options.latestTurnSettled === true && isTransientRuntimeRetryDiagnosticActivity(activity)) {
+      continue;
+    }
+
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const thinkingData = extractThinkingWorkLogData(activity, payload);
+    if (!thinkingData) {
+      continue;
+    }
+
+    const groupId = thinkingData.collapseKey ?? `thinking:${activity.id}`;
+    const nextThoughts = thinkingData.thoughts;
+    const nextLatestThought = latestThoughtPreview(nextThoughts) ?? thinkingData.preview ?? null;
+    if (nextLatestThought === null) {
+      continue;
+    }
+
+    const existing = aggregatedByKey.get(groupId);
+    if (!existing) {
+      aggregatedByKey.set(groupId, {
+        id: groupId,
+        createdAt: activity.createdAt,
+        ...(activity.turnId !== undefined ? { turnId: activity.turnId } : {}),
+        thoughts: [...nextThoughts],
+        latestThought: nextLatestThought,
+        thoughtMergeMode: thinkingData.mergeMode,
+      });
+      continue;
+    }
+
+    const thoughts = mergeThoughts(
+      existing.thoughts,
+      nextThoughts,
+      existing.thoughtMergeMode,
+      thinkingData.mergeMode,
+    );
+    const latestThought =
+      latestThoughtPreview(thoughts) ?? nextLatestThought ?? existing.latestThought;
+    aggregatedByKey.set(groupId, {
+      ...existing,
+      thoughts,
+      latestThought,
+      thoughtMergeMode: thinkingData.mergeMode,
+      ...(existing.turnId === undefined && activity.turnId !== undefined
+        ? { turnId: activity.turnId }
+        : {}),
+    });
+  }
+
+  return [...aggregatedByKey.values()]
+    .map(({ thoughtMergeMode: _thoughtMergeMode, ...entry }) => entry)
+    .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
 function isTransientRuntimeRetryDiagnosticActivity(activity: OrchestrationThreadActivity): boolean {
@@ -1160,12 +1254,19 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
+  thinkingEntries: ThinkingEntry[],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
     kind: "message",
     createdAt: message.createdAt,
     message,
+  }));
+  const thinkingRows: TimelineEntry[] = thinkingEntries.map((thinking) => ({
+    id: thinking.id,
+    kind: "thinking",
+    createdAt: thinking.createdAt,
+    thinking,
   }));
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
     id: proposedPlan.id,
@@ -1179,7 +1280,7 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  return [...messageRows, ...thinkingRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }

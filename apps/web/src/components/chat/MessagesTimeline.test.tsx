@@ -10,10 +10,6 @@ vi.mock("../ChatMarkdown", () => ({
   default: ({ children }: { children?: unknown }) => children ?? null,
 }));
 
-vi.mock("./ChangedFilesTree", () => ({
-  ChangedFilesTree: () => null,
-}));
-
 vi.mock("./ProposedPlanCard", () => ({
   ProposedPlanCard: ({ planMarkdown }: { planMarkdown: string }) => planMarkdown,
 }));
@@ -166,17 +162,14 @@ describe("MessagesTimeline", () => {
         ]}
         completionDividerBeforeEntryId={null}
         completionDuration={null}
-        turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
-        onOpenTurnDiff={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
-        resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
       />,
@@ -212,17 +205,14 @@ describe("MessagesTimeline", () => {
         ]}
         completionDividerBeforeEntryId={null}
         completionDuration={null}
-        turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
-        onOpenTurnDiff={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
-        resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
       />,
@@ -258,17 +248,14 @@ describe("MessagesTimeline", () => {
         ]}
         completionDividerBeforeEntryId={null}
         completionDuration={null}
-        turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
-        onOpenTurnDiff={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
-        resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
       />,
@@ -276,6 +263,53 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Context compacted");
     expect(markup).toContain("Work log");
+  });
+
+  it("renders a collapsed thinking bubble with the latest thought preview", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isHydratingHistory={false}
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "thinking:turn-1",
+            kind: "thinking",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            thinking: {
+              id: "thinking:turn-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              thoughts: [
+                "Inspect the provider event ordering.",
+                "The ingestion path is rebinding message ids.",
+              ],
+              latestThought: "The ingestion path is rebinding message ids.",
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionDuration={null}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Thinking");
+    expect(markup).toContain("2 thoughts");
+    expect(markup).toContain("The ingestion path is rebinding message ids.");
+    expect(markup).not.toContain("Inspect the provider event ordering.");
   });
 
   it("renders a loading message while thread history is hydrating", async () => {
@@ -291,17 +325,14 @@ describe("MessagesTimeline", () => {
         timelineEntries={[]}
         completionDividerBeforeEntryId={null}
         completionDuration={null}
-        turnDiffSummaryByAssistantMessageId={new Map()}
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
-        onOpenTurnDiff={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
         onImageExpand={() => {}}
         markdownCwd={undefined}
-        resolvedTheme="light"
         timestampFormat="locale"
         workspaceRoot={undefined}
       />,

@@ -937,34 +937,41 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
     }
 
     case "program.meta-updated": {
-      let changed = false;
       const currentPrograms = state.programs ?? [];
-      const programs = currentPrograms.map((program) => {
-        if (program.id !== event.payload.programId) {
-          return program;
-        }
-        changed = true;
-        return {
-          ...program,
-          ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
-          ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
-          ...(event.payload.status !== undefined ? { status: event.payload.status } : {}),
-          ...(event.payload.executiveProjectId !== undefined
-            ? { executiveProjectId: event.payload.executiveProjectId }
-            : {}),
-          ...(event.payload.executiveThreadId !== undefined
-            ? { executiveThreadId: event.payload.executiveThreadId }
-            : {}),
-          ...(event.payload.currentOrchestratorThreadId !== undefined
-            ? { currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId }
-            : {}),
-          ...(event.payload.completedAt !== undefined
-            ? { completedAt: event.payload.completedAt }
-            : {}),
-          updatedAt: event.payload.updatedAt,
-        };
-      });
-      return changed ? { ...state, programs } : state;
+      const programIndex = currentPrograms.findIndex(
+        (program) => program.id === event.payload.programId,
+      );
+      if (programIndex < 0) {
+        return state;
+      }
+
+      const currentProgram = currentPrograms[programIndex];
+      if (!currentProgram) {
+        return state;
+      }
+
+      const updatedProgram = {
+        ...currentProgram,
+        ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+        ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
+        ...(event.payload.status !== undefined ? { status: event.payload.status } : {}),
+        ...(event.payload.executiveProjectId !== undefined
+          ? { executiveProjectId: event.payload.executiveProjectId }
+          : {}),
+        ...(event.payload.executiveThreadId !== undefined
+          ? { executiveThreadId: event.payload.executiveThreadId }
+          : {}),
+        ...(event.payload.currentOrchestratorThreadId !== undefined
+          ? { currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId }
+          : {}),
+        ...(event.payload.completedAt !== undefined
+          ? { completedAt: event.payload.completedAt }
+          : {}),
+        updatedAt: event.payload.updatedAt,
+      };
+      const programs = currentPrograms.slice();
+      programs[programIndex] = updatedProgram;
+      return { ...state, programs };
     }
 
     case "program.deleted": {
