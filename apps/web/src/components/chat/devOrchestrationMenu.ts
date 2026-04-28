@@ -43,6 +43,11 @@ export interface DevOrchestratorTarget {
   readonly programTitle: Program["title"] | null;
 }
 
+export interface DevOrchestrationTargets {
+  readonly programTargets: readonly DevProgramTarget[];
+  readonly orchestratorTargets: readonly DevOrchestratorTarget[];
+}
+
 export const DEV_PROGRAM_NOTIFICATION_KIND_SECTIONS: readonly DevProgramNotificationSection[] = [
   {
     id: "actionable",
@@ -279,6 +284,24 @@ export function resolveDevOrchestratorTargets(input: {
       String(left.programTitle ?? "").localeCompare(String(right.programTitle ?? "")) ||
       left.orchestratorThreadId.localeCompare(right.orchestratorThreadId),
   );
+}
+
+export function resolveDevOrchestrationTargets(input: {
+  readonly thread: Thread | undefined;
+  readonly project: Project | undefined;
+  readonly programs: readonly Program[];
+  readonly threads: readonly Thread[];
+}): DevOrchestrationTargets {
+  const programTargets = resolveDevProgramTargets(input);
+  return {
+    programTargets,
+    orchestratorTargets: resolveDevOrchestratorTargets({
+      thread: input.thread,
+      project: input.project,
+      threads: input.threads,
+      programTargets,
+    }),
+  };
 }
 
 export function buildDevProgramNotificationCommand(input: {

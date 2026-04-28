@@ -3,7 +3,7 @@ import { BellRingIcon, ChevronDownIcon, FlaskConicalIcon, ListTodoIcon } from "l
 import { Fragment, useMemo, useState } from "react";
 
 import { readNativeApi } from "~/nativeApi";
-import type { Program, ProgramNotification, Project, Thread } from "../../types";
+import type { ProgramNotification, Project, Thread } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
@@ -15,8 +15,8 @@ import {
   buildDevWakeUpsertCommand,
   DEV_ORCHESTRATOR_WAKE_OPTIONS,
   DEV_PROGRAM_NOTIFICATION_KIND_SECTIONS,
-  resolveDevOrchestratorTargets,
-  resolveDevProgramTargets,
+  type DevOrchestratorTarget,
+  type DevProgramTarget,
 } from "./devOrchestrationMenu";
 
 function formatWakeStateLabel(state: OrchestratorWakeItem["state"]): string {
@@ -34,22 +34,22 @@ function formatWakeStateLabel(state: OrchestratorWakeItem["state"]): string {
   }
 }
 
-function formatTargetRoles(target: ReturnType<typeof resolveDevProgramTargets>[number]): string {
+function formatTargetRoles(target: DevProgramTarget): string {
   return target.roles.join(", ");
 }
 
 export function DevOrchestrationMenu({
   activeThread,
   activeProject,
-  programs,
-  threads,
+  programTargets,
+  orchestratorTargets,
   programNotifications,
   orchestratorWakeItems,
 }: {
   activeThread: Thread | undefined;
   activeProject: Project | undefined;
-  programs: readonly Program[];
-  threads: readonly Thread[];
+  programTargets: readonly DevProgramTarget[];
+  orchestratorTargets: readonly DevOrchestratorTarget[];
   programNotifications: readonly ProgramNotification[];
   orchestratorWakeItems: readonly OrchestratorWakeItem[];
 }) {
@@ -57,27 +57,6 @@ export function DevOrchestrationMenu({
   const [isSending, setIsSending] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
-
-  const programTargets = useMemo(
-    () =>
-      resolveDevProgramTargets({
-        thread: activeThread,
-        project: activeProject,
-        programs,
-        threads,
-      }),
-    [activeProject, activeThread, programs, threads],
-  );
-  const orchestratorTargets = useMemo(
-    () =>
-      resolveDevOrchestratorTargets({
-        thread: activeThread,
-        project: activeProject,
-        threads,
-        programTargets,
-      }),
-    [activeProject, activeThread, programTargets, threads],
-  );
 
   const relevantProgramIds = useMemo(
     () => new Set(programTargets.map((target) => target.programId)),

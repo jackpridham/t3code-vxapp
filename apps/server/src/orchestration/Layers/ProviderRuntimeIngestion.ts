@@ -15,6 +15,7 @@ import {
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
+import { projectThinkingActivitiesFromRuntimeEvent } from "@t3tools/orchestration-core/provider-thinking-activities";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -236,6 +237,17 @@ function runtimeEventToActivities(
       ? { sequence: eventWithSequence.sessionSequence }
       : {};
   })();
+  const thinkingActivities = projectThinkingActivitiesFromRuntimeEvent(
+    maybeSequence.sequence === undefined
+      ? { event }
+      : {
+          event,
+          sequence: maybeSequence.sequence,
+        },
+  );
+  if (thinkingActivities.length > 0) {
+    return thinkingActivities;
+  }
   switch (event.type) {
     case "request.opened": {
       if (event.payload.requestType === "tool_user_input") {
@@ -401,59 +413,6 @@ function runtimeEventToActivities(
             ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
             ...(event.payload.description
               ? { detail: truncateDetail(event.payload.description) }
-              : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
-    }
-
-    case "task.progress": {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "thinking",
-          kind: "task.progress",
-          summary: "Thinking",
-          payload: {
-            taskId: event.payload.taskId,
-            detail: event.payload.summary ?? event.payload.description,
-            ...(event.payload.summary ? { summary: event.payload.summary } : {}),
-            ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
-            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
-    }
-
-    case "content.delta": {
-      if (
-        event.payload.streamKind !== "reasoning_text" &&
-        event.payload.streamKind !== "reasoning_summary_text"
-      ) {
-        return [];
-      }
-
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "thinking",
-          kind: "thinking.delta",
-          summary: "Thinking",
-          payload: {
-            text: event.payload.delta,
-            streamKind: event.payload.streamKind,
-            ...(event.itemId ? { itemId: event.itemId } : {}),
-            ...(event.payload.contentIndex !== undefined
-              ? { contentIndex: event.payload.contentIndex }
-              : {}),
-            ...(event.payload.summaryIndex !== undefined
-              ? { summaryIndex: event.payload.summaryIndex }
               : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,

@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:chil
 import readline from "node:readline";
 import { readCodexAccountSnapshot, type CodexAccountSnapshot } from "./codexAccount";
 import { expandHomePath } from "../pathExpansion";
+import packageJson from "../../package.json" with { type: "json" };
 
 interface JsonRpcProbeResponse {
   readonly id?: unknown;
@@ -20,7 +21,7 @@ export function buildCodexInitializeParams() {
     clientInfo: {
       name: "t3code_desktop",
       title: "T3 Code Desktop",
-      version: "0.1.0",
+      version: packageJson.version,
     },
     capabilities: {
       experimentalApi: true,

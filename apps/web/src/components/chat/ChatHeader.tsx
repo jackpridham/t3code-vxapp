@@ -2,6 +2,7 @@ import { type ProjectHook, type ThreadId } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   ArrowUpRightIcon,
+  FlaskConicalIcon,
   FolderOpenIcon,
   PanelLeftCloseIcon,
   PanelLeftIcon,
@@ -35,11 +36,14 @@ interface ChatHeaderProps {
   changesPanelOpen: boolean;
   mobileSidebarOpen?: boolean | undefined;
   showChangesDrawerToggle: boolean;
+  showDevOrchestrationToggle?: boolean | undefined;
+  devOrchestrationPanelOpen?: boolean | undefined;
   onAddProjectHook: (input: NewProjectHookInput) => Promise<void>;
   onUpdateProjectHook: (hookId: string, input: NewProjectHookInput) => Promise<void>;
   onDeleteProjectHook: (hookId: string) => Promise<void>;
   onToggleTerminal: () => void;
   onToggleChangesPanel: () => void;
+  onToggleDevOrchestrationPanel?: (() => void) | undefined;
   onToggleMobileSidebar?: (() => void) | undefined;
   onOpenChangesWindow: () => void;
   onLabelClick?: (label: string) => void;
@@ -60,11 +64,14 @@ export const ChatHeader = memo(function ChatHeader({
   changesPanelOpen,
   mobileSidebarOpen,
   showChangesDrawerToggle,
+  showDevOrchestrationToggle,
+  devOrchestrationPanelOpen,
   onAddProjectHook,
   onUpdateProjectHook,
   onDeleteProjectHook,
   onToggleTerminal,
   onToggleChangesPanel,
+  onToggleDevOrchestrationPanel,
   onToggleMobileSidebar,
   onOpenChangesWindow,
   onLabelClick,
@@ -286,6 +293,25 @@ export const ChatHeader = memo(function ChatHeader({
             onDeleteHook={onDeleteProjectHook}
           />
         )}
+        {showDevOrchestrationToggle ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Toggle
+                  className="shrink-0"
+                  pressed={Boolean(devOrchestrationPanelOpen)}
+                  onPressedChange={onToggleDevOrchestrationPanel}
+                  aria-label="Toggle dev orchestration notifications"
+                  variant="outline"
+                  size="xs"
+                >
+                  <FlaskConicalIcon className="size-3" />
+                </Toggle>
+              }
+            />
+            <TooltipPopup side="bottom">Toggle dev orchestration notifications</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

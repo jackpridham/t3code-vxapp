@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, FileSystem, Layer, Path } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
@@ -69,6 +70,7 @@ export function makeServerProviderLayer(): Layer.Layer<
   | ServerConfig
   | ServerSettingsService
   | FileSystem.FileSystem
+  | ChildProcessSpawner.ChildProcessSpawner
   | AnalyticsService
 > {
   return Effect.gen(function* () {

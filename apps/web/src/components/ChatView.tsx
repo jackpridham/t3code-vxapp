@@ -167,6 +167,7 @@ import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { DevOrchestrationMenu } from "./chat/DevOrchestrationMenu";
+import { resolveDevOrchestrationTargets } from "./chat/devOrchestrationMenu";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -535,6 +536,7 @@ export default function ChatView({
   const [isComposerManuallyHidden, setIsComposerManuallyHidden] = useState(false);
   const [isComposerRevealedWhileScrolled, setIsComposerRevealedWhileScrolled] = useState(false);
   const [areOrchestrationNoticesHidden, setAreOrchestrationNoticesHidden] = useState(false);
+  const [isDevOrchestrationMenuOpen, setIsDevOrchestrationMenuOpen] = useState(false);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -772,10 +774,24 @@ export default function ChatView({
         : null,
     [activeThread, projects, threads],
   );
+  const devOrchestrationTargets = useMemo(
+    () =>
+      resolveDevOrchestrationTargets({
+        thread: activeThread,
+        project: activeProject,
+        programs,
+        threads,
+      }),
+    [activeProject, activeThread, programs, threads],
+  );
+  const showDevOrchestrationToggle =
+    devOrchestrationTargets.programTargets.length > 0 ||
+    devOrchestrationTargets.orchestratorTargets.length > 0;
 
   useEffect(() => {
     if (!activeThread) {
       initializedComposerVisibilityThreadIdRef.current = null;
+      setIsDevOrchestrationMenuOpen(false);
       return;
     }
     if (initializedComposerVisibilityThreadIdRef.current === activeThread.id) {
@@ -798,6 +814,7 @@ export default function ChatView({
         workerOrchestrationNoticesVisibility,
       }),
     );
+    setIsDevOrchestrationMenuOpen(false);
   }, [
     activeThread,
     sidebarOrchestrationModeEnabled,
@@ -3858,11 +3875,14 @@ export default function ChatView({
           changesPanelOpen={changesPanelOpen}
           mobileSidebarOpen={mobileSidebarOpen}
           showChangesDrawerToggle={showChangesDrawerToggle}
+          showDevOrchestrationToggle={showDevOrchestrationToggle}
+          devOrchestrationPanelOpen={isDevOrchestrationMenuOpen}
           onAddProjectHook={saveProjectHook}
           onUpdateProjectHook={updateProjectHook}
           onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleChangesPanel={toggleChangesPanel}
+          onToggleDevOrchestrationPanel={() => setIsDevOrchestrationMenuOpen((open) => !open)}
           onToggleMobileSidebar={onToggleMobileSidebar}
           onOpenChangesWindow={openChangesWindow}
           onLabelClick={(label) => {
@@ -3879,14 +3899,16 @@ export default function ChatView({
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
-      <DevOrchestrationMenu
-        activeThread={activeThread}
-        activeProject={activeProject}
-        programs={programs}
-        threads={threads}
-        programNotifications={programNotifications}
-        orchestratorWakeItems={allOrchestratorWakeItems}
-      />
+      {showDevOrchestrationToggle && isDevOrchestrationMenuOpen ? (
+        <DevOrchestrationMenu
+          activeThread={activeThread}
+          activeProject={activeProject}
+          programTargets={devOrchestrationTargets.programTargets}
+          orchestratorTargets={devOrchestrationTargets.orchestratorTargets}
+          programNotifications={programNotifications}
+          orchestratorWakeItems={allOrchestratorWakeItems}
+        />
+      ) : null}
       {orchestrationNoticeCount > 0 ? (
         <div className="border-b border-border px-3 py-2 sm:px-5">
           <div className="mb-2 flex items-center justify-between gap-3">

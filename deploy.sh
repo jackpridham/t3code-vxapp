@@ -23,13 +23,19 @@ export PATH="$(dirname "$BUN_BIN"):$PATH"
 
 usage() {
     cat <<'EOF'
-Usage: ./deploy.sh [--full|--build-only|--restart-only|--status] [--no-wake]
+Usage: ./deploy.sh [--full|--build-only|--ui-only|--restart-only|--status] [--no-wake]
 
 Default mode is --full:
   1. bun install
   2. bun run build
   3. restart the live server
   4. verify http://127.0.0.1:7421/
+
+`--ui-only`:
+  1. bun install
+  2. build only the web workspace
+  3. refresh apps/server/dist/client
+  4. keep the current server process running
 
 Options:
   --no-wake       Skip the post-deploy CTO wake after restart.
@@ -106,6 +112,18 @@ run_build() {
     step "Building production assets"
     cd "$REPO_ROOT"
     "$BUN_BIN" run build
+}
+
+run_web_build() {
+    step "Building web UI assets"
+    cd "$REPO_ROOT"
+    "$BUN_BIN" run build --filter=@t3tools/web
+}
+
+bundle_web_client() {
+    step "Refreshing bundled web client assets"
+    cd "$REPO_ROOT/apps/server"
+    "$NODE_BIN" scripts/cli.ts bundle-client
 }
 
 prepare_startup_wake_suppression() {
@@ -260,7 +278,7 @@ main() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --full|--build-only|--restart-only|--status|-h|--help|help)
+            --full|--build-only|--ui-only|--restart-only|--status|-h|--help|help)
                 mode="$1"
                 ;;
             --no-wake)
@@ -289,6 +307,12 @@ main() {
         --build-only)
             run_install
             run_build
+            ;;
+        --ui-only)
+            run_install
+            run_web_build
+            bundle_web_client
+            show_status
             ;;
         --restart-only)
             if service_is_active; then

@@ -9,6 +9,7 @@
     ],
     "catalog": {
       "effect": "4.0.0-beta.43",
+      "@effect/openapi-generator": "4.0.0-beta.43",
       "@effect/platform-node": "4.0.0-beta.43",
       "@effect/sql-sqlite-bun": "4.0.0-beta.43",
       "@effect/vitest": "4.0.0-beta.43",
@@ -27,7 +28,7 @@
     "dev:web": "node scripts/dev-runner.ts dev:web",
     "start": "turbo run start --filter=t3",
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck --only --filter=t3 --filter=@t3tools/web --filter=@t3tools/shared --filter=@t3tools/contracts --filter=@t3tools/orchestration-core --filter=@t3tools/scripts",
     "lint": "oxlint --report-unused-disable-directives",
     "test": "turbo run test",
     "fmt": "oxfmt",
