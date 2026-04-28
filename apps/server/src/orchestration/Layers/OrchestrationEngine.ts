@@ -48,6 +48,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateId: command.projectId,
       };
     case "program.create":
+    case "program.scope.update":
+    case "program.repo-pr.upsert":
+    case "program.local-validation.upsert":
+    case "program.app-validation.upsert":
+    case "program.observed-repo.upsert":
+    case "program.post-flight.set":
     case "program.meta.update":
     case "program.delete":
     case "program.notification.upsert":

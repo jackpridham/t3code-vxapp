@@ -75,6 +75,24 @@ function labelsIncludeAgent(labels: ReadonlyArray<string>, agent: string): boole
   return labels.some((label) => label.trim().toLowerCase() === expected);
 }
 
+function requireActiveProgram(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly programId: string;
+}) {
+  const program = (input.readModel.programs ?? []).find(
+    (entry) => entry.id === input.programId && entry.deletedAt === null,
+  );
+  if (program) {
+    return Effect.succeed(program);
+  }
+
+  return new OrchestrationCommandInvariantError({
+    commandType: input.command.type,
+    detail: `Program '${input.programId}' does not exist.`,
+  });
+}
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
@@ -273,26 +291,82 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           title: command.title,
           objective: command.objective ?? null,
           status,
+          declaredRepos: command.declaredRepos,
+          affectedAppTargets: command.affectedAppTargets,
+          requiredLocalSuites: command.requiredLocalSuites,
+          requiredExternalE2ESuites: command.requiredExternalE2ESuites,
+          requireDevelopmentDeploy: command.requireDevelopmentDeploy,
+          requireExternalE2E: command.requireExternalE2E,
+          requireCleanPostFlight: command.requireCleanPostFlight,
+          requirePrPerRepo: command.requirePrPerRepo,
           executiveProjectId: command.executiveProjectId,
           executiveThreadId: command.executiveThreadId,
           currentOrchestratorThreadId: command.currentOrchestratorThreadId ?? null,
+          repoPrs: [],
+          localValidation: [],
+          appValidations: [],
+          observedRepos: [],
+          postFlight: null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
           completedAt: status === "completed" ? command.createdAt : null,
+          cancelReason: null,
+          cancelledAt: null,
+          supersededByProgramId: null,
+        },
+      };
+    }
+
+    case "program.scope.update": {
+      yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.scope-updated",
+        payload: {
+          programId: command.programId,
+          ...(command.declaredRepos !== undefined ? { declaredRepos: command.declaredRepos } : {}),
+          ...(command.affectedAppTargets !== undefined
+            ? { affectedAppTargets: command.affectedAppTargets }
+            : {}),
+          ...(command.requiredLocalSuites !== undefined
+            ? { requiredLocalSuites: command.requiredLocalSuites }
+            : {}),
+          ...(command.requiredExternalE2ESuites !== undefined
+            ? { requiredExternalE2ESuites: command.requiredExternalE2ESuites }
+            : {}),
+          ...(command.requireDevelopmentDeploy !== undefined
+            ? { requireDevelopmentDeploy: command.requireDevelopmentDeploy }
+            : {}),
+          ...(command.requireExternalE2E !== undefined
+            ? { requireExternalE2E: command.requireExternalE2E }
+            : {}),
+          ...(command.requireCleanPostFlight !== undefined
+            ? { requireCleanPostFlight: command.requireCleanPostFlight }
+            : {}),
+          ...(command.requirePrPerRepo !== undefined
+            ? { requirePrPerRepo: command.requirePrPerRepo }
+            : {}),
+          updatedAt: occurredAt,
         },
       };
     }
 
     case "program.meta.update": {
-      const program = (readModel.programs ?? []).find(
-        (entry) => entry.id === command.programId && entry.deletedAt === null,
-      );
-      if (!program) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Program '${command.programId}' does not exist.`,
-        });
-      }
+      const program = yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
       if (command.executiveProjectId !== undefined) {
         yield* requireProject({
           readModel,
@@ -346,21 +420,137 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : nextStatus === "completed" && program.completedAt === null
               ? { completedAt: occurredAt }
               : {}),
+          ...(command.cancelReason !== undefined ? { cancelReason: command.cancelReason } : {}),
+          ...(command.cancelledAt !== undefined ? { cancelledAt: command.cancelledAt } : {}),
+          ...(command.supersededByProgramId !== undefined
+            ? { supersededByProgramId: command.supersededByProgramId }
+            : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.repo-pr.upsert": {
+      yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.repo-pr-upserted",
+        payload: {
+          programId: command.programId,
+          repoPr: command.repoPr,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.local-validation.upsert": {
+      yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.local-validation-upserted",
+        payload: {
+          programId: command.programId,
+          localValidation: command.localValidation,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.app-validation.upsert": {
+      yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.app-validation-upserted",
+        payload: {
+          programId: command.programId,
+          appValidation: command.appValidation,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.observed-repo.upsert": {
+      yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.observed-repo-upserted",
+        payload: {
+          programId: command.programId,
+          observedRepo: command.observedRepo,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "program.post-flight.set": {
+      yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "program",
+          aggregateId: command.programId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "program.post-flight-set",
+        payload: {
+          programId: command.programId,
+          postFlight: command.postFlight,
           updatedAt: occurredAt,
         },
       };
     }
 
     case "program.delete": {
-      const program = (readModel.programs ?? []).find(
-        (entry) => entry.id === command.programId && entry.deletedAt === null,
-      );
-      if (!program) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Program '${command.programId}' does not exist.`,
-        });
-      }
+      yield* requireActiveProgram({
+        readModel,
+        command,
+        programId: command.programId,
+      });
       const occurredAt = nowIso();
       return {
         ...withEventBase({

@@ -10,6 +10,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ProgramId,
   ProgramNotificationId,
@@ -176,10 +177,167 @@ export type OrchestrationProjectKind = typeof OrchestrationProjectKind.Type;
 export const OrchestrationProgramStatus = Schema.Literals([
   "active",
   "blocked",
+  "awaiting_founder",
+  "awaiting_external",
+  "closeout_in_progress",
+  "founder_review_ready",
   "completed",
   "cancelled",
 ]);
 export type OrchestrationProgramStatus = typeof OrchestrationProgramStatus.Type;
+
+export const ProgramDeclaredRepos = Schema.Array(TrimmedNonEmptyString);
+export type ProgramDeclaredRepos = typeof ProgramDeclaredRepos.Type;
+const NonEmptyProgramDeclaredRepos = ProgramDeclaredRepos.check(Schema.isNonEmpty());
+
+export const ProgramAffectedAppTargets = Schema.Array(TrimmedNonEmptyString);
+export type ProgramAffectedAppTargets = typeof ProgramAffectedAppTargets.Type;
+
+export const ProgramRequiredLocalSuite = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  suiteId: TrimmedNonEmptyString,
+  description: TrimmedNonEmptyString,
+});
+export type ProgramRequiredLocalSuite = typeof ProgramRequiredLocalSuite.Type;
+
+export const ProgramRequiredExternalE2ESuite = Schema.Struct({
+  target: TrimmedNonEmptyString,
+  suiteId: TrimmedNonEmptyString,
+  description: TrimmedNonEmptyString,
+});
+export type ProgramRequiredExternalE2ESuite = typeof ProgramRequiredExternalE2ESuite.Type;
+
+export const ProgramRepoPr = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+  number: PositiveInt,
+  state: TrimmedNonEmptyString,
+  isDraft: Schema.Boolean,
+  reviewDecision: TrimmedNonEmptyString,
+  mergeStateStatus: TrimmedNonEmptyString,
+  headRefName: TrimmedNonEmptyString,
+  baseRefName: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+export type ProgramRepoPr = typeof ProgramRepoPr.Type;
+
+export const ProgramLocalValidation = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  suiteId: TrimmedNonEmptyString,
+  kind: TrimmedNonEmptyString,
+  status: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+  recordedAt: IsoDateTime,
+});
+export type ProgramLocalValidation = typeof ProgramLocalValidation.Type;
+
+export const ProgramAppValidationKind = Schema.Literals(["development_deploy", "external_e2e"]);
+export type ProgramAppValidationKind = typeof ProgramAppValidationKind.Type;
+
+export const ProgramAppValidation = Schema.Struct({
+  target: TrimmedNonEmptyString,
+  kind: ProgramAppValidationKind,
+  suiteId: TrimmedNonEmptyString,
+  status: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  command: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+  recordedAt: IsoDateTime,
+});
+export type ProgramAppValidation = typeof ProgramAppValidation.Type;
+
+export const ProgramObservedRepo = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  source: TrimmedNonEmptyString,
+  observedAt: IsoDateTime,
+});
+export type ProgramObservedRepo = typeof ProgramObservedRepo.Type;
+
+export const ProgramPostFlight = Schema.Struct({
+  status: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  recordedAt: IsoDateTime,
+});
+export type ProgramPostFlight = typeof ProgramPostFlight.Type;
+
+const ProgramDeliveryScopeReadModelFields = {
+  declaredRepos: Schema.optional(ProgramDeclaredRepos).pipe(Schema.withDecodingDefault(() => [])),
+  affectedAppTargets: Schema.optional(ProgramAffectedAppTargets).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  requiredLocalSuites: Schema.optional(Schema.Array(ProgramRequiredLocalSuite)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  requiredExternalE2ESuites: Schema.optional(Schema.Array(ProgramRequiredExternalE2ESuite)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  requireDevelopmentDeploy: Schema.optional(Schema.Boolean).pipe(
+    Schema.withDecodingDefault(() => false),
+  ),
+  requireExternalE2E: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
+  requireCleanPostFlight: Schema.optional(Schema.Boolean).pipe(
+    Schema.withDecodingDefault(() => false),
+  ),
+  requirePrPerRepo: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
+} as const;
+
+const ProgramDeliveryScopeCreateFields = {
+  declaredRepos: NonEmptyProgramDeclaredRepos,
+  affectedAppTargets: ProgramAffectedAppTargets,
+  requiredLocalSuites: Schema.Array(ProgramRequiredLocalSuite),
+  requiredExternalE2ESuites: Schema.Array(ProgramRequiredExternalE2ESuite),
+  requireDevelopmentDeploy: Schema.Boolean,
+  requireExternalE2E: Schema.Boolean,
+  requireCleanPostFlight: Schema.Boolean,
+  requirePrPerRepo: Schema.Boolean,
+} as const;
+
+const ProgramDeliveryScopeUpdateFields = {
+  declaredRepos: Schema.optional(NonEmptyProgramDeclaredRepos),
+  affectedAppTargets: Schema.optional(ProgramAffectedAppTargets),
+  requiredLocalSuites: Schema.optional(Schema.Array(ProgramRequiredLocalSuite)),
+  requiredExternalE2ESuites: Schema.optional(Schema.Array(ProgramRequiredExternalE2ESuite)),
+  requireDevelopmentDeploy: Schema.optional(Schema.Boolean),
+  requireExternalE2E: Schema.optional(Schema.Boolean),
+  requireCleanPostFlight: Schema.optional(Schema.Boolean),
+  requirePrPerRepo: Schema.optional(Schema.Boolean),
+} as const;
+
+const ProgramEvidenceReadModelFields = {
+  repoPrs: Schema.optional(Schema.Array(ProgramRepoPr)).pipe(Schema.withDecodingDefault(() => [])),
+  localValidation: Schema.optional(Schema.Array(ProgramLocalValidation)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  appValidations: Schema.optional(Schema.Array(ProgramAppValidation)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  observedRepos: Schema.optional(Schema.Array(ProgramObservedRepo)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  postFlight: Schema.optional(Schema.NullOr(ProgramPostFlight)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+} as const;
+
+const ProgramTerminalMetadataReadModelFields = {
+  cancelReason: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  cancelledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  supersededByProgramId: Schema.optional(Schema.NullOr(ProgramId)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+} as const;
+
+const ProgramTerminalMetadataUpdateFields = {
+  completedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  cancelReason: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  cancelledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  supersededByProgramId: Schema.optional(Schema.NullOr(ProgramId)),
+} as const;
 
 export const OrchestrationProgramNotificationKind = Schema.Literals([
   "decision_required",
@@ -269,12 +427,15 @@ export const OrchestrationProgram = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: Schema.NullOr(TrimmedNonEmptyString),
   status: OrchestrationProgramStatus,
+  ...ProgramDeliveryScopeReadModelFields,
   executiveProjectId: ProjectId,
   executiveThreadId: ThreadId,
   currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  ...ProgramEvidenceReadModelFields,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   completedAt: Schema.NullOr(IsoDateTime),
+  ...ProgramTerminalMetadataReadModelFields,
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type OrchestrationProgram = typeof OrchestrationProgram.Type;
@@ -668,11 +829,20 @@ export const ProgramCreateCommand = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   status: Schema.optional(OrchestrationProgramStatus),
+  ...ProgramDeliveryScopeCreateFields,
   executiveProjectId: ProjectId,
   executiveThreadId: ThreadId,
   currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   createdAt: IsoDateTime,
 });
+
+export const ProgramScopeUpdateCommand = Schema.Struct({
+  type: Schema.Literal("program.scope.update"),
+  commandId: CommandId,
+  programId: ProgramId,
+  ...ProgramDeliveryScopeUpdateFields,
+});
+export type ProgramScopeUpdateCommand = typeof ProgramScopeUpdateCommand.Type;
 
 const ProgramMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("program.meta.update"),
@@ -684,8 +854,48 @@ const ProgramMetaUpdateCommand = Schema.Struct({
   executiveProjectId: Schema.optional(ProjectId),
   executiveThreadId: Schema.optional(ThreadId),
   currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
-  completedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  ...ProgramTerminalMetadataUpdateFields,
 });
+
+export const ProgramRepoPrUpsertCommand = Schema.Struct({
+  type: Schema.Literal("program.repo-pr.upsert"),
+  commandId: CommandId,
+  programId: ProgramId,
+  repoPr: ProgramRepoPr,
+});
+export type ProgramRepoPrUpsertCommand = typeof ProgramRepoPrUpsertCommand.Type;
+
+export const ProgramLocalValidationUpsertCommand = Schema.Struct({
+  type: Schema.Literal("program.local-validation.upsert"),
+  commandId: CommandId,
+  programId: ProgramId,
+  localValidation: ProgramLocalValidation,
+});
+export type ProgramLocalValidationUpsertCommand = typeof ProgramLocalValidationUpsertCommand.Type;
+
+export const ProgramAppValidationUpsertCommand = Schema.Struct({
+  type: Schema.Literal("program.app-validation.upsert"),
+  commandId: CommandId,
+  programId: ProgramId,
+  appValidation: ProgramAppValidation,
+});
+export type ProgramAppValidationUpsertCommand = typeof ProgramAppValidationUpsertCommand.Type;
+
+export const ProgramObservedRepoUpsertCommand = Schema.Struct({
+  type: Schema.Literal("program.observed-repo.upsert"),
+  commandId: CommandId,
+  programId: ProgramId,
+  observedRepo: ProgramObservedRepo,
+});
+export type ProgramObservedRepoUpsertCommand = typeof ProgramObservedRepoUpsertCommand.Type;
+
+export const ProgramPostFlightSetCommand = Schema.Struct({
+  type: Schema.Literal("program.post-flight.set"),
+  commandId: CommandId,
+  programId: ProgramId,
+  postFlight: ProgramPostFlight,
+});
+export type ProgramPostFlightSetCommand = typeof ProgramPostFlightSetCommand.Type;
 
 const ProgramDeleteCommand = Schema.Struct({
   type: Schema.Literal("program.delete"),
@@ -922,7 +1132,13 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ProgramCreateCommand,
+  ProgramScopeUpdateCommand,
   ProgramMetaUpdateCommand,
+  ProgramRepoPrUpsertCommand,
+  ProgramLocalValidationUpsertCommand,
+  ProgramAppValidationUpsertCommand,
+  ProgramObservedRepoUpsertCommand,
+  ProgramPostFlightSetCommand,
   ProgramDeleteCommand,
   ProgramNotificationUpsertCommand,
   ProgramNotificationConsumeCommand,
@@ -950,7 +1166,13 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ProgramCreateCommand,
+  ProgramScopeUpdateCommand,
   ProgramMetaUpdateCommand,
+  ProgramRepoPrUpsertCommand,
+  ProgramLocalValidationUpsertCommand,
+  ProgramAppValidationUpsertCommand,
+  ProgramObservedRepoUpsertCommand,
+  ProgramPostFlightSetCommand,
   ProgramDeleteCommand,
   ProgramNotificationUpsertCommand,
   ProgramNotificationConsumeCommand,
@@ -1075,7 +1297,13 @@ export const OrchestrationEventType = Schema.Literals([
   "project.meta-updated",
   "project.deleted",
   "program.created",
+  "program.scope-updated",
   "program.meta-updated",
+  "program.repo-pr-upserted",
+  "program.local-validation-upserted",
+  "program.app-validation-upserted",
+  "program.observed-repo-upserted",
+  "program.post-flight-set",
   "program.deleted",
   "program.notification-upserted",
   "program.notification-consumed",
@@ -1145,12 +1373,21 @@ export const ProgramCreatedPayload = Schema.Struct({
   title: TrimmedNonEmptyString,
   objective: Schema.NullOr(TrimmedNonEmptyString),
   status: OrchestrationProgramStatus,
+  ...ProgramDeliveryScopeReadModelFields,
   executiveProjectId: ProjectId,
   executiveThreadId: ThreadId,
   currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  ...ProgramEvidenceReadModelFields,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   completedAt: Schema.NullOr(IsoDateTime),
+  ...ProgramTerminalMetadataReadModelFields,
+});
+
+export const ProgramScopeUpdatedPayload = Schema.Struct({
+  programId: ProgramId,
+  ...ProgramDeliveryScopeUpdateFields,
+  updatedAt: IsoDateTime,
 });
 
 export const ProgramMetaUpdatedPayload = Schema.Struct({
@@ -1161,7 +1398,37 @@ export const ProgramMetaUpdatedPayload = Schema.Struct({
   executiveProjectId: Schema.optional(ProjectId),
   executiveThreadId: Schema.optional(ThreadId),
   currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
-  completedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  ...ProgramTerminalMetadataUpdateFields,
+  updatedAt: IsoDateTime,
+});
+
+export const ProgramRepoPrUpsertedPayload = Schema.Struct({
+  programId: ProgramId,
+  repoPr: ProgramRepoPr,
+  updatedAt: IsoDateTime,
+});
+
+export const ProgramLocalValidationUpsertedPayload = Schema.Struct({
+  programId: ProgramId,
+  localValidation: ProgramLocalValidation,
+  updatedAt: IsoDateTime,
+});
+
+export const ProgramAppValidationUpsertedPayload = Schema.Struct({
+  programId: ProgramId,
+  appValidation: ProgramAppValidation,
+  updatedAt: IsoDateTime,
+});
+
+export const ProgramObservedRepoUpsertedPayload = Schema.Struct({
+  programId: ProgramId,
+  observedRepo: ProgramObservedRepo,
+  updatedAt: IsoDateTime,
+});
+
+export const ProgramPostFlightSetPayload = Schema.Struct({
+  programId: ProgramId,
+  postFlight: ProgramPostFlight,
   updatedAt: IsoDateTime,
 });
 
@@ -1410,8 +1677,38 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("program.scope-updated"),
+    payload: ProgramScopeUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("program.meta-updated"),
     payload: ProgramMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.repo-pr-upserted"),
+    payload: ProgramRepoPrUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.local-validation-upserted"),
+    payload: ProgramLocalValidationUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.app-validation-upserted"),
+    payload: ProgramAppValidationUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.observed-repo-upserted"),
+    payload: ProgramObservedRepoUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("program.post-flight-set"),
+    payload: ProgramPostFlightSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -25,10 +25,16 @@ import {
   ProjectMetaUpdatedPayload,
   ProgramCreatedPayload,
   ProgramDeletedPayload,
+  ProgramAppValidationUpsertedPayload,
+  ProgramLocalValidationUpsertedPayload,
   ProgramMetaUpdatedPayload,
   ProgramNotificationConsumedPayload,
   ProgramNotificationDroppedPayload,
   ProgramNotificationUpsertedPayload,
+  ProgramObservedRepoUpsertedPayload,
+  ProgramPostFlightSetPayload,
+  ProgramRepoPrUpsertedPayload,
+  ProgramScopeUpdatedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -97,6 +103,20 @@ function updateProgram(
   patch: ProgramPatch,
 ): OrchestrationProgram[] {
   return programs.map((program) => (program.id === programId ? { ...program, ...patch } : program));
+}
+
+function upsertCollectionItemByKey<T>(
+  items: ReadonlyArray<T>,
+  nextItem: T,
+  matches: (item: T) => boolean,
+): T[] {
+  const index = items.findIndex(matches);
+  if (index < 0) {
+    return [...items, nextItem];
+  }
+  const nextItems = items.slice();
+  nextItems[index] = nextItem;
+  return nextItems;
 }
 
 function updateProgramNotification(
@@ -335,12 +355,28 @@ export function projectEvent(
             title: payload.title,
             objective: payload.objective,
             status: payload.status,
+            declaredRepos: payload.declaredRepos,
+            affectedAppTargets: payload.affectedAppTargets,
+            requiredLocalSuites: payload.requiredLocalSuites,
+            requiredExternalE2ESuites: payload.requiredExternalE2ESuites,
+            requireDevelopmentDeploy: payload.requireDevelopmentDeploy,
+            requireExternalE2E: payload.requireExternalE2E,
+            requireCleanPostFlight: payload.requireCleanPostFlight,
+            requirePrPerRepo: payload.requirePrPerRepo,
             executiveProjectId: payload.executiveProjectId,
             executiveThreadId: payload.executiveThreadId,
             currentOrchestratorThreadId: payload.currentOrchestratorThreadId,
+            repoPrs: payload.repoPrs,
+            localValidation: payload.localValidation,
+            appValidations: payload.appValidations,
+            observedRepos: payload.observedRepos,
+            postFlight: payload.postFlight,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             completedAt: payload.completedAt,
+            cancelReason: payload.cancelReason,
+            cancelledAt: payload.cancelledAt,
+            supersededByProgramId: payload.supersededByProgramId,
             deletedAt: null,
           },
           event.type,
@@ -355,6 +391,40 @@ export function projectEvent(
             : [...programs, program],
         };
       });
+
+    case "program.scope-updated":
+      return decodeForEvent(ProgramScopeUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            ...(payload.declaredRepos !== undefined
+              ? { declaredRepos: payload.declaredRepos }
+              : {}),
+            ...(payload.affectedAppTargets !== undefined
+              ? { affectedAppTargets: payload.affectedAppTargets }
+              : {}),
+            ...(payload.requiredLocalSuites !== undefined
+              ? { requiredLocalSuites: payload.requiredLocalSuites }
+              : {}),
+            ...(payload.requiredExternalE2ESuites !== undefined
+              ? { requiredExternalE2ESuites: payload.requiredExternalE2ESuites }
+              : {}),
+            ...(payload.requireDevelopmentDeploy !== undefined
+              ? { requireDevelopmentDeploy: payload.requireDevelopmentDeploy }
+              : {}),
+            ...(payload.requireExternalE2E !== undefined
+              ? { requireExternalE2E: payload.requireExternalE2E }
+              : {}),
+            ...(payload.requireCleanPostFlight !== undefined
+              ? { requireCleanPostFlight: payload.requireCleanPostFlight }
+              : {}),
+            ...(payload.requirePrPerRepo !== undefined
+              ? { requirePrPerRepo: payload.requirePrPerRepo }
+              : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
 
     case "program.meta-updated":
       return decodeForEvent(ProgramMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
@@ -374,6 +444,114 @@ export function projectEvent(
               ? { currentOrchestratorThreadId: payload.currentOrchestratorThreadId }
               : {}),
             ...(payload.completedAt !== undefined ? { completedAt: payload.completedAt } : {}),
+            ...(payload.cancelReason !== undefined ? { cancelReason: payload.cancelReason } : {}),
+            ...(payload.cancelledAt !== undefined ? { cancelledAt: payload.cancelledAt } : {}),
+            ...(payload.supersededByProgramId !== undefined
+              ? { supersededByProgramId: payload.supersededByProgramId }
+              : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "program.repo-pr-upserted":
+      return decodeForEvent(
+        ProgramRepoPrUpsertedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            repoPrs: upsertCollectionItemByKey(
+              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
+                ?.repoPrs ?? [],
+              payload.repoPr,
+              (entry) => entry.repo === payload.repoPr.repo,
+            ),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "program.local-validation-upserted":
+      return decodeForEvent(
+        ProgramLocalValidationUpsertedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            localValidation: upsertCollectionItemByKey(
+              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
+                ?.localValidation ?? [],
+              payload.localValidation,
+              (entry) =>
+                entry.repo === payload.localValidation.repo &&
+                entry.suiteId === payload.localValidation.suiteId &&
+                entry.kind === payload.localValidation.kind,
+            ),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "program.app-validation-upserted":
+      return decodeForEvent(
+        ProgramAppValidationUpsertedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            appValidations: upsertCollectionItemByKey(
+              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
+                ?.appValidations ?? [],
+              payload.appValidation,
+              (entry) =>
+                entry.target === payload.appValidation.target &&
+                entry.suiteId === payload.appValidation.suiteId &&
+                entry.kind === payload.appValidation.kind,
+            ),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "program.observed-repo-upserted":
+      return decodeForEvent(
+        ProgramObservedRepoUpsertedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            observedRepos: upsertCollectionItemByKey(
+              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
+                ?.observedRepos ?? [],
+              payload.observedRepo,
+              (entry) =>
+                entry.repo === payload.observedRepo.repo &&
+                entry.source === payload.observedRepo.source,
+            ),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "program.post-flight-set":
+      return decodeForEvent(ProgramPostFlightSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
+            postFlight: payload.postFlight,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -825,11 +1003,13 @@ export function projectEvent(
           .slice(-MAX_THREAD_CHECKPOINTS);
         const existingLatestTurn =
           thread.latestTurn?.turnId === payload.turnId ? thread.latestTurn : null;
-        const nextLatestTurnState = isCheckpointEventForRunningActiveTurn(thread, payload.turnId)
-          ? existingLatestTurn?.state === "interrupted"
-            ? "interrupted"
-            : "running"
-          : checkpointStatusToLatestTurnState(payload.status, existingLatestTurn);
+        const nextLatestTurnState =
+          isCheckpointEventForRunningActiveTurn(thread, payload.turnId) &&
+          payload.status === "missing"
+            ? existingLatestTurn?.state === "interrupted"
+              ? "interrupted"
+              : "running"
+            : checkpointStatusToLatestTurnState(payload.status, existingLatestTurn);
         const latestTurnCompletedAt =
           nextLatestTurnState === "running"
             ? (existingLatestTurn?.completedAt ?? null)

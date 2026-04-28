@@ -123,6 +123,20 @@ function createAttachmentSideEffects(): AttachmentSideEffects {
   };
 }
 
+function upsertCollectionItemByKey<T>(
+  items: ReadonlyArray<T>,
+  nextItem: T,
+  matches: (item: T) => boolean,
+): T[] {
+  const index = items.findIndex(matches);
+  if (index < 0) {
+    return [...items, nextItem];
+  }
+  const nextItems = items.slice();
+  nextItems[index] = nextItem;
+  return nextItems;
+}
+
 const materializeAttachmentsForProjection = Effect.fn("materializeAttachmentsForProjection")(
   (input: { readonly attachments: ReadonlyArray<ChatAttachment> }) =>
     Effect.succeed(input.attachments.length === 0 ? [] : input.attachments),
@@ -840,15 +854,69 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             title: event.payload.title,
             objective: event.payload.objective,
             status: event.payload.status,
+            declaredRepos: event.payload.declaredRepos ?? [],
+            affectedAppTargets: event.payload.affectedAppTargets ?? [],
+            requiredLocalSuites: event.payload.requiredLocalSuites ?? [],
+            requiredExternalE2ESuites: event.payload.requiredExternalE2ESuites ?? [],
+            requireDevelopmentDeploy: event.payload.requireDevelopmentDeploy ?? false,
+            requireExternalE2E: event.payload.requireExternalE2E ?? false,
+            requireCleanPostFlight: event.payload.requireCleanPostFlight ?? false,
+            requirePrPerRepo: event.payload.requirePrPerRepo ?? false,
             executiveProjectId: event.payload.executiveProjectId,
             executiveThreadId: event.payload.executiveThreadId,
             currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId,
+            repoPrs: event.payload.repoPrs ?? [],
+            localValidation: event.payload.localValidation ?? [],
+            appValidations: event.payload.appValidations ?? [],
+            observedRepos: event.payload.observedRepos ?? [],
+            postFlight: event.payload.postFlight ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             completedAt: event.payload.completedAt,
+            cancelReason: event.payload.cancelReason ?? null,
+            cancelledAt: event.payload.cancelledAt ?? null,
+            supersededByProgramId: event.payload.supersededByProgramId ?? null,
             deletedAt: null,
           });
           return;
+
+        case "program.scope-updated": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            ...(event.payload.declaredRepos !== undefined
+              ? { declaredRepos: event.payload.declaredRepos }
+              : {}),
+            ...(event.payload.affectedAppTargets !== undefined
+              ? { affectedAppTargets: event.payload.affectedAppTargets }
+              : {}),
+            ...(event.payload.requiredLocalSuites !== undefined
+              ? { requiredLocalSuites: event.payload.requiredLocalSuites }
+              : {}),
+            ...(event.payload.requiredExternalE2ESuites !== undefined
+              ? { requiredExternalE2ESuites: event.payload.requiredExternalE2ESuites }
+              : {}),
+            ...(event.payload.requireDevelopmentDeploy !== undefined
+              ? { requireDevelopmentDeploy: event.payload.requireDevelopmentDeploy }
+              : {}),
+            ...(event.payload.requireExternalE2E !== undefined
+              ? { requireExternalE2E: event.payload.requireExternalE2E }
+              : {}),
+            ...(event.payload.requireCleanPostFlight !== undefined
+              ? { requireCleanPostFlight: event.payload.requireCleanPostFlight }
+              : {}),
+            ...(event.payload.requirePrPerRepo !== undefined
+              ? { requirePrPerRepo: event.payload.requirePrPerRepo }
+              : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
 
         case "program.meta-updated": {
           const existingRow = yield* projectionProgramRepository.getById({
@@ -876,6 +944,114 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.completedAt !== undefined
               ? { completedAt: event.payload.completedAt }
               : {}),
+            ...(event.payload.cancelReason !== undefined
+              ? { cancelReason: event.payload.cancelReason }
+              : {}),
+            ...(event.payload.cancelledAt !== undefined
+              ? { cancelledAt: event.payload.cancelledAt }
+              : {}),
+            ...(event.payload.supersededByProgramId !== undefined
+              ? { supersededByProgramId: event.payload.supersededByProgramId }
+              : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.repo-pr-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            repoPrs: upsertCollectionItemByKey(
+              existingRow.value.repoPrs,
+              event.payload.repoPr,
+              (entry) => entry.repo === event.payload.repoPr.repo,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.local-validation-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            localValidation: upsertCollectionItemByKey(
+              existingRow.value.localValidation,
+              event.payload.localValidation,
+              (entry) =>
+                entry.repo === event.payload.localValidation.repo &&
+                entry.suiteId === event.payload.localValidation.suiteId &&
+                entry.kind === event.payload.localValidation.kind,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.app-validation-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            appValidations: upsertCollectionItemByKey(
+              existingRow.value.appValidations,
+              event.payload.appValidation,
+              (entry) =>
+                entry.target === event.payload.appValidation.target &&
+                entry.suiteId === event.payload.appValidation.suiteId &&
+                entry.kind === event.payload.appValidation.kind,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.observed-repo-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            observedRepos: upsertCollectionItemByKey(
+              existingRow.value.observedRepos,
+              event.payload.observedRepo,
+              (entry) =>
+                entry.repo === event.payload.observedRepo.repo &&
+                entry.source === event.payload.observedRepo.source,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.post-flight-set": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            postFlight: event.payload.postFlight,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -1763,7 +1939,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }),
       defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.programs,
-        eventTypes: ["program.created", "program.meta-updated", "program.deleted"],
+        eventTypes: [
+          "program.created",
+          "program.scope-updated",
+          "program.meta-updated",
+          "program.repo-pr-upserted",
+          "program.local-validation-upserted",
+          "program.app-validation-upserted",
+          "program.observed-repo-upserted",
+          "program.post-flight-set",
+          "program.deleted",
+        ],
         apply: applyProgramsProjection,
       }),
       defineProjector({
