@@ -4,6 +4,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  TurnId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -464,5 +465,63 @@ describe("orchestration decider", () => {
         }),
       ),
     ).rejects.toThrow("does not exist on thread");
+  });
+
+  it("rejects turn starts when the target thread already has a live active turn", async () => {
+    const now = "2026-04-22T00:00:00.000Z";
+    const projectId = ProjectId.makeUnsafe("project-running-turn");
+    const threadId = ThreadId.makeUnsafe("thread-running-turn");
+    const withProject = await readModelWithProject({ now, projectId });
+    const withThread = await projectSequence(
+      withProject,
+      await decide(threadCreateCommand({ now, projectId, threadId }), withProject),
+    );
+    const withRunningTurnThreads = [...withThread.threads];
+    const runningThreadIndex = withRunningTurnThreads.findIndex((thread) => thread.id === threadId);
+    if (runningThreadIndex < 0) {
+      throw new Error("thread-running-turn missing from test setup");
+    }
+    const runningThread = withRunningTurnThreads[runningThreadIndex];
+    if (!runningThread) {
+      throw new Error("thread-running-turn lookup returned no thread");
+    }
+    const withRunningTurn: OrchestrationReadModel = {
+      ...withThread,
+      threads: withRunningTurnThreads,
+    };
+    withRunningTurnThreads[runningThreadIndex] = {
+      ...runningThread,
+      session: {
+        threadId,
+        status: "running",
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: TurnId.makeUnsafe("turn-running"),
+        lastError: null,
+        updatedAt: now,
+      },
+    };
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.turn.start",
+            commandId: CommandId.makeUnsafe("cmd-turn-overlap"),
+            threadId,
+            message: {
+              messageId: MessageId.makeUnsafe("message-user-overlap"),
+              role: "user",
+              text: "Please continue.",
+              attachments: [],
+            },
+            runtimeMode: "full-access",
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            createdAt: now,
+          },
+          readModel: withRunningTurn,
+        }),
+      ),
+    ).rejects.toThrow("already has active turn");
   });
 });

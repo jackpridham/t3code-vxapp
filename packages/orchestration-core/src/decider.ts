@@ -21,6 +21,7 @@ import {
   requireThreadArchived,
   requireThreadAbsent,
   requireThreadNotArchived,
+  requireThreadTurnStartSlotAvailable,
 } from "./commandInvariants.ts";
 
 const nowIso = () => new Date().toISOString();
@@ -768,6 +769,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         readModel,
         command,
         threadId: command.threadId,
+      });
+      yield* requireThreadTurnStartSlotAvailable({
+        thread: targetThread,
+        command,
       });
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan

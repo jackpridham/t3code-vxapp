@@ -11,6 +11,7 @@ import {
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
+import { threadHasLiveActiveTurn } from "@t3tools/orchestration-core/command-invariants";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -88,6 +89,25 @@ const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 const DEFAULT_THREAD_TITLE = "New thread";
+
+function ensureThreadHasNoLiveActiveTurn(
+  thread: {
+    readonly id: ThreadId;
+    readonly session: OrchestrationSession | null;
+  },
+  source: string,
+) {
+  const activeTurnId = thread.session?.activeTurnId ?? null;
+  if (!threadHasLiveActiveTurn(thread) || activeTurnId === null) {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    new Error(
+      `Cannot start a new provider turn from ${source}; thread '${thread.id}' already has active turn '${activeTurnId}'.`,
+    ),
+  );
+}
 
 function canReplaceThreadTitle(currentTitle: string, titleSeed?: string): boolean {
   const trimmedCurrentTitle = currentTitle.trim();
@@ -458,11 +478,14 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
+    yield* ensureThreadHasNoLiveActiveTurn(thread, "sendTurnForThread:preflight");
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,
       input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
     );
+    const preparedThread = (yield* resolveThread(input.threadId)) ?? thread;
+    yield* ensureThreadHasNoLiveActiveTurn(preparedThread, "sendTurnForThread:pre-send");
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }

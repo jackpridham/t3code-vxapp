@@ -316,6 +316,35 @@ describe("ProviderCommandReactor", () => {
     };
   }
 
+  async function markThreadReady(
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    input: {
+      readonly commandId: string;
+      readonly updatedAt: string;
+      readonly providerName?: "codex" | "claudeAgent";
+      readonly runtimeMode?: "approval-required" | "full-access";
+    },
+  ) {
+    await harness.drain();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe(input.commandId),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: input.providerName ?? "codex",
+          runtimeMode: input.runtimeMode ?? "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: input.updatedAt,
+        },
+        createdAt: input.updatedAt,
+      }),
+    );
+  }
+
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -392,24 +421,10 @@ describe("ProviderCommandReactor", () => {
     const firstTurnId = firstThread?.session?.activeTurnId ?? null;
     expect(firstThread?.session?.status).toBe("running");
 
-    const readyNow = new Date(Date.now() + 1_000).toISOString();
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.makeUnsafe("cmd-session-set-ready-after-first-turn"),
-        threadId: ThreadId.makeUnsafe("thread-1"),
-        session: {
-          threadId: ThreadId.makeUnsafe("thread-1"),
-          status: "ready",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: readyNow,
-        },
-        createdAt: readyNow,
-      }),
-    );
+    await markThreadReady(harness, {
+      commandId: "cmd-session-set-ready-after-first-turn",
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
 
     const secondNow = new Date(Date.now() + 2_000).toISOString();
     await Effect.runPromise(
@@ -438,6 +453,51 @@ describe("ProviderCommandReactor", () => {
     expect(secondThread?.session?.status).toBe("running");
     expect(firstTurnId).toEqual(asTurnId("turn-1"));
     expect(secondThread?.session?.activeTurnId).toEqual(asTurnId("turn-2"));
+  });
+
+  it("rejects overlapping thread.turn.start commands before a second provider send can happen", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-overlap-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-overlap-1"),
+          role: "user",
+          text: "first turn",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await expect(
+      Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-turn-start-overlap-2"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: asMessageId("user-message-overlap-2"),
+            role: "user",
+            text: "second turn too early",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: new Date(Date.now() + 1_000).toISOString(),
+        }),
+      ),
+    ).rejects.toThrow("already has active turn");
+
+    expect(harness.sendTurn.mock.calls.length).toBe(1);
   });
 
   it("does not resurrect a completed turn id when a fresh turn start is requested", async () => {
@@ -986,6 +1046,10 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await markThreadReady(harness, {
+      commandId: "cmd-session-ready-unsupported-1",
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -1038,6 +1102,10 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await markThreadReady(harness, {
+      commandId: "cmd-session-ready-unchanged-1",
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -1093,6 +1161,11 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await markThreadReady(harness, {
+      commandId: "cmd-session-ready-claude-effort-1",
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+      providerName: "claudeAgent",
+    });
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -1165,6 +1238,11 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await markThreadReady(harness, {
+      commandId: "cmd-session-ready-runtime-mode-1",
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+      runtimeMode: "full-access",
+    });
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -1184,6 +1262,10 @@ describe("ProviderCommandReactor", () => {
       return thread?.runtimeMode === "approval-required";
     });
     await waitFor(() => harness.startSession.mock.calls.length === 2);
+    await markThreadReady(harness, {
+      commandId: "cmd-session-ready-runtime-mode-2",
+      updatedAt: new Date(Date.now() + 2_000).toISOString(),
+    });
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
@@ -1287,6 +1369,10 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await markThreadReady(harness, {
+      commandId: "cmd-session-ready-provider-switch-1",
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
 
     await Effect.runPromise(
       harness.engine.dispatch({
