@@ -13,6 +13,7 @@ export * from "./orchestration";
 export * from "./projectHooks";
 export * from "./editor";
 export * from "./project";
+export * from "./workerRuntime";
 export {
   OrchestrationCtoAttentionItem,
   OrchestrationCtoAttentionKind,

@@ -4,8 +4,10 @@ import {
   MessageId,
   type OrchestratorWakeItem,
   type OrchestrationEvent,
+  type OrchestrationProgramNotificationKind,
   type OrchestrationReadModel,
   type OrchestrationThread,
+  ProgramNotificationId,
   type ProviderRuntimeEvent,
   ThreadId,
   type TurnId,
@@ -217,6 +219,80 @@ function buildWakeSummary(input: {
   }
 }
 
+function resolveProgramForWorkerWake(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly workerThread: OrchestrationThread;
+}): NonNullable<OrchestrationReadModel["programs"]>[number] | null {
+  const { readModel, workerThread } = input;
+  const programs = readModel.programs ?? [];
+  if (workerThread.programId !== undefined) {
+    const byId = programs.find(
+      (program) => program.id === workerThread.programId && program.deletedAt === null,
+    );
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const candidates = programs
+    .filter((program) => program.deletedAt === null)
+    .map((program) => {
+      let score = 0;
+      if (
+        workerThread.orchestratorThreadId !== undefined &&
+        program.currentOrchestratorThreadId === workerThread.orchestratorThreadId
+      ) {
+        score += 4;
+      }
+      if (
+        workerThread.executiveThreadId !== undefined &&
+        program.executiveThreadId === workerThread.executiveThreadId
+      ) {
+        score += 2;
+      }
+      if (
+        workerThread.executiveProjectId !== undefined &&
+        program.executiveProjectId === workerThread.executiveProjectId
+      ) {
+        score += 1;
+      }
+      return { program, score };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .toSorted((left, right) => right.score - left.score);
+
+  const strongest = candidates[0];
+  if (!strongest) {
+    return null;
+  }
+  const competingTopScoreCount = candidates.filter(
+    (candidate) => candidate.score === strongest.score,
+  ).length;
+  if (competingTopScoreCount !== 1) {
+    return null;
+  }
+  return strongest.program;
+}
+
+function programNotificationKindForWakeOutcome(
+  outcome: OrchestratorWakeItem["outcome"],
+): OrchestrationProgramNotificationKind {
+  return outcome === "completed" ? "worker_completed" : "status_update";
+}
+
+function programNotificationSeverityForWakeOutcome(
+  outcome: OrchestratorWakeItem["outcome"],
+): "info" | "warning" | "critical" {
+  switch (outcome) {
+    case "completed":
+      return "info";
+    case "interrupted":
+      return "warning";
+    case "failed":
+      return "critical";
+  }
+}
+
 function isOrchestratorInactive(thread: OrchestrationThread): boolean {
   const session = thread.session;
   if (!session) {
@@ -255,6 +331,19 @@ function buildSettlementCommand(input: {
 }): string {
   return [
     "vx t3 lanes settle-observer",
+    `--orchestrator-thread ${shellQuote(input.item.orchestratorThreadId)}`,
+    `--worker-thread ${shellQuote(input.item.workerThreadId)}`,
+    `--workspace ${shellQuote(input.workspace)}`,
+    "--json",
+  ].join(" ");
+}
+
+function buildFinalizeCommand(input: {
+  readonly item: OrchestratorWakeItem;
+  readonly workspace: string;
+}): string {
+  return [
+    "vx t3 lanes finalize-observer",
     `--orchestrator-thread ${shellQuote(input.item.orchestratorThreadId)}`,
     `--worker-thread ${shellQuote(input.item.workerThreadId)}`,
     `--workspace ${shellQuote(input.workspace)}`,
@@ -311,6 +400,13 @@ function buildOrchestratorWakePrompt(input: {
     }
     return buildSettlementCommand({ item, workspace });
   });
+  const finalizeLines = items.map((item) => {
+    const workspace = resolveWorkerWorkspaceForWake({ item, readModel });
+    if (!workspace) {
+      return `# Could not resolve workspace for worker ${item.workerThreadId}; inspect the worker thread before finalizing the delivered wake.`;
+    }
+    return buildFinalizeCommand({ item, workspace });
+  });
   const contextLines = items.map((item) => buildWakeContextLine({ item, readModel }));
 
   return [
@@ -321,6 +417,11 @@ function buildOrchestratorWakePrompt(input: {
     "Run this first, one command per worker outcome:",
     "```bash",
     ...settlementLines,
+    "```",
+    "",
+    "After reviewing a delivered wake, consume it with:",
+    "```bash",
+    ...finalizeLines,
     "```",
     "",
     "Wake context:",
@@ -571,6 +672,87 @@ const make = Effect.gen(function* () {
       .pipe(Effect.asVoid);
   });
 
+  const syncProgramRelationshipAndNotifyForWake = Effect.fn(
+    "syncProgramRelationshipAndNotifyForWake",
+  )(function* (input: {
+    readonly readModel: OrchestrationReadModel;
+    readonly workerThread: OrchestrationThread;
+    readonly wakeItem: OrchestratorWakeItem;
+    readonly createdAt: string;
+  }) {
+    const program = resolveProgramForWorkerWake({
+      readModel: input.readModel,
+      workerThread: input.workerThread,
+    });
+    if (!program) {
+      return;
+    }
+
+    const threadProgramId = input.workerThread.programId ?? null;
+    const threadExecutiveProjectId = input.workerThread.executiveProjectId ?? null;
+    const threadExecutiveThreadId = input.workerThread.executiveThreadId ?? null;
+    if (
+      threadProgramId !== program.id ||
+      threadExecutiveProjectId !== program.executiveProjectId ||
+      threadExecutiveThreadId !== program.executiveThreadId
+    ) {
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.meta.update",
+          commandId: serverCommandId("program-link-sync"),
+          threadId: input.workerThread.id,
+          programId: program.id,
+          executiveProjectId: program.executiveProjectId,
+          executiveThreadId: program.executiveThreadId,
+        })
+        .pipe(Effect.asVoid);
+    }
+
+    if (
+      input.workerThread.orchestratorThreadId !== undefined &&
+      program.currentOrchestratorThreadId !== input.workerThread.orchestratorThreadId
+    ) {
+      yield* orchestrationEngine
+        .dispatch({
+          type: "program.meta.update",
+          commandId: serverCommandId("program-orchestrator-sync"),
+          programId: program.id,
+          currentOrchestratorThreadId: input.workerThread.orchestratorThreadId,
+        })
+        .pipe(Effect.asVoid);
+    }
+
+    yield* orchestrationEngine
+      .dispatch({
+        type: "program.notification.upsert",
+        commandId: serverCommandId("program-wake-notify"),
+        notificationId: ProgramNotificationId.makeUnsafe(`program-status:${program.id}`),
+        programId: program.id,
+        executiveProjectId: program.executiveProjectId,
+        executiveThreadId: program.executiveThreadId,
+        orchestratorThreadId:
+          input.workerThread.orchestratorThreadId ?? program.currentOrchestratorThreadId,
+        kind: programNotificationKindForWakeOutcome(input.wakeItem.outcome),
+        severity: programNotificationSeverityForWakeOutcome(input.wakeItem.outcome),
+        summary: input.wakeItem.summary,
+        evidence: {
+          sourceThreadId: input.workerThread.id,
+          sourceRole: "worker",
+          workerThreadId: input.workerThread.id,
+          workerTurnId: input.wakeItem.workerTurnId,
+          orchestratorThreadId:
+            input.workerThread.orchestratorThreadId ?? program.currentOrchestratorThreadId,
+          programId: program.id,
+          wakeId: input.wakeItem.wakeId,
+          outcome: input.wakeItem.outcome,
+          workflowId: input.wakeItem.workflowId ?? null,
+        },
+        queuedAt: input.createdAt,
+        createdAt: input.createdAt,
+      })
+      .pipe(Effect.asVoid);
+  });
+
   const enqueueWakeFromCompletedTurn = Effect.fn("enqueueWakeFromCompletedTurn")(function* (
     event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>,
   ) {
@@ -728,6 +910,14 @@ const make = Effect.gen(function* () {
       createdAt: supersededAt ?? event.createdAt,
       commandTag: supersededAt === null ? "upsert" : "upsert-superseded",
     });
+    if (supersededAt === null) {
+      yield* syncProgramRelationshipAndNotifyForWake({
+        readModel,
+        workerThread,
+        wakeItem,
+        createdAt: event.createdAt,
+      });
+    }
   });
 
   const enqueueWakeFromTerminalTurnDiff = Effect.fn("enqueueWakeFromTerminalTurnDiff")(function* (
@@ -895,6 +1085,14 @@ const make = Effect.gen(function* () {
       createdAt: supersededAt ?? event.payload.completedAt,
       commandTag: supersededAt === null ? "diff-upsert" : "diff-upsert-superseded",
     });
+    if (supersededAt === null) {
+      yield* syncProgramRelationshipAndNotifyForWake({
+        readModel,
+        workerThread,
+        wakeItem,
+        createdAt: event.payload.completedAt,
+      });
+    }
   });
 
   const consumeDeliveringWakeItemsForCompletedReviewTurn = Effect.fn(

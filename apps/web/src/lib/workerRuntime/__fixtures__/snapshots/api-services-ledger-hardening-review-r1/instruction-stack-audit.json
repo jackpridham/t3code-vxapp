@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/api-services-ledger-hardening-review-r1",
+  "repo": "api-vxapp",
+  "status": "error",
+  "findings": [
+    {
+      "kind": "audit_write_error",
+      "detail": "t3_instruction_stack_audit_write failed"
+    }
+  ],
+  "packAudit": {}
+}

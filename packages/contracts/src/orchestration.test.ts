@@ -91,6 +91,29 @@ const decodeThreadOrchestratorWakeUpsertedPayload = Schema.decodeUnknownEffect(
   ThreadOrchestratorWakeUpsertedPayload,
 );
 
+const PROGRAM_DELIVERY_SPEC = {
+  declaredRepos: ["t3code-vxapp"],
+  affectedAppTargets: ["web"],
+  requiredLocalSuites: [
+    {
+      repo: "t3code-vxapp",
+      suiteId: "lint",
+      description: "Run lint before closeout.",
+    },
+  ],
+  requiredExternalE2ESuites: [
+    {
+      target: "web",
+      suiteId: "founder-e2e",
+      description: "Founder-visible E2E contract.",
+    },
+  ],
+  requireDevelopmentDeploy: true,
+  requireExternalE2E: true,
+  requireCleanPostFlight: true,
+  requirePrPerRepo: true,
+} as const;
+
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeTurnDiffInput({
@@ -1096,6 +1119,21 @@ it.effect("decodes executive program contracts and read-model defaults", () =>
     assert.strictEqual(program.id, "program-cto");
     assert.strictEqual(program.status, "active");
     assert.strictEqual(program.currentOrchestratorThreadId, "thread-jasper");
+    assert.deepStrictEqual(program.declaredRepos, []);
+    assert.deepStrictEqual(program.requiredLocalSuites, []);
+    assert.deepStrictEqual(program.requiredExternalE2ESuites, []);
+    assert.deepStrictEqual(program.repoPrs, []);
+    assert.deepStrictEqual(program.localValidation, []);
+    assert.deepStrictEqual(program.appValidations, []);
+    assert.deepStrictEqual(program.observedRepos, []);
+    assert.strictEqual(program.requireDevelopmentDeploy, false);
+    assert.strictEqual(program.requireExternalE2E, false);
+    assert.strictEqual(program.requireCleanPostFlight, false);
+    assert.strictEqual(program.requirePrPerRepo, false);
+    assert.strictEqual(program.postFlight, null);
+    assert.strictEqual(program.cancelReason, null);
+    assert.strictEqual(program.cancelledAt, null);
+    assert.strictEqual(program.supersededByProgramId, null);
 
     const createCommand = yield* decodeProgramCreateCommand({
       type: "program.create",
@@ -1103,12 +1141,14 @@ it.effect("decodes executive program contracts and read-model defaults", () =>
       programId: "program-cto",
       title: "Founder task",
       objective: "Run founder task through CTO and Jasper.",
+      ...PROGRAM_DELIVERY_SPEC,
       executiveProjectId: "project-cto",
       executiveThreadId: "thread-cto",
       currentOrchestratorThreadId: "thread-jasper",
       createdAt: "2026-04-20T00:00:00.000Z",
     });
     assert.strictEqual(createCommand.status, undefined);
+    assert.deepStrictEqual(createCommand.declaredRepos, ["t3code-vxapp"]);
 
     const createdPayload = yield* decodeProgramCreatedPayload({
       programId: "program-cto",
@@ -1123,6 +1163,9 @@ it.effect("decodes executive program contracts and read-model defaults", () =>
       completedAt: null,
     });
     assert.strictEqual(createdPayload.currentOrchestratorThreadId, null);
+    assert.deepStrictEqual(createdPayload.declaredRepos, []);
+    assert.deepStrictEqual(createdPayload.repoPrs, []);
+    assert.strictEqual(createdPayload.postFlight, null);
 
     const notification = yield* decodeOrchestrationProgramNotification({
       notificationId: "notif-cto",
@@ -1255,6 +1298,85 @@ it.effect("decodes executive program contracts and read-model defaults", () =>
     assert.deepStrictEqual(legacyReadModel.programs, []);
     assert.deepStrictEqual(legacyReadModel.programNotifications, []);
     assert.deepStrictEqual(legacyReadModel.ctoAttentionItems, []);
+  }),
+);
+
+it.effect("rejects program.create without declaredRepos", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeProgramCreateCommand({
+        type: "program.create",
+        commandId: "cmd-program-missing-scope",
+        programId: "program-cto",
+        title: "Founder task",
+        objective: "Run founder task through CTO and Jasper.",
+        affectedAppTargets: [],
+        requiredLocalSuites: [],
+        requiredExternalE2ESuites: [],
+        requireDevelopmentDeploy: false,
+        requireExternalE2E: false,
+        requireCleanPostFlight: false,
+        requirePrPerRepo: true,
+        executiveProjectId: "project-cto",
+        executiveThreadId: "thread-cto",
+        createdAt: "2026-04-20T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("rejects program.create with empty declaredRepos", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeProgramCreateCommand({
+        type: "program.create",
+        commandId: "cmd-program-empty-scope",
+        programId: "program-cto",
+        title: "Founder task",
+        objective: "Run founder task through CTO and Jasper.",
+        declaredRepos: [],
+        affectedAppTargets: [],
+        requiredLocalSuites: [],
+        requiredExternalE2ESuites: [],
+        requireDevelopmentDeploy: false,
+        requireExternalE2E: false,
+        requireCleanPostFlight: false,
+        requirePrPerRepo: true,
+        executiveProjectId: "project-cto",
+        executiveThreadId: "thread-cto",
+        createdAt: "2026-04-20T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("accepts the expanded program status set", () =>
+  Effect.gen(function* () {
+    for (const status of [
+      "active",
+      "blocked",
+      "awaiting_founder",
+      "awaiting_external",
+      "closeout_in_progress",
+      "founder_review_ready",
+      "completed",
+      "cancelled",
+    ] as const) {
+      const command = yield* decodeProgramCreateCommand({
+        type: "program.create",
+        commandId: `cmd-program-${status}`,
+        programId: `program-${status}`,
+        title: "Founder task",
+        ...PROGRAM_DELIVERY_SPEC,
+        status,
+        executiveProjectId: "project-cto",
+        executiveThreadId: "thread-cto",
+        createdAt: "2026-04-20T00:00:00.000Z",
+      });
+      assert.strictEqual(command.status, status);
+    }
   }),
 );
 

@@ -1,0 +1,345 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1",
+  "runtimeDir": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.agents/runtime",
+  "skillsDir": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills",
+  "agentsSkillsDir": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.agents/skills",
+  "repo": "slave-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit",
+  "packs": [
+    {
+      "id": "global:000-safety-kernel",
+      "slug": "000-safety-kernel",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/000-safety-kernel",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:000-safety-kernel",
+        "slug": "000-safety-kernel",
+        "localNumber": 0,
+        "name": "Safety Kernel",
+        "type": "safety",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Baseline worker safety rules: authority model, forbidden actions, destructive command ban, escalation classes.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning",
+          "orchestration",
+          "diagnostics"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:001-t3-worker-basics",
+      "slug": "001-t3-worker-basics",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/001-t3-worker-basics",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:001-t3-worker-basics",
+        "slug": "001-t3-worker-basics",
+        "localNumber": 1,
+        "name": "T3 Worker Basics",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Worker contract, context modes, status updates, allowed tooling by context.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:008-terse-worker-reporting",
+      "slug": "008-terse-worker-reporting",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/008-terse-worker-reporting",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:008-terse-worker-reporting",
+        "slug": "008-terse-worker-reporting",
+        "localNumber": 8,
+        "name": "Terse Worker Reporting",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Token-trimmed worker progress, blocker, and closeout reporting style.",
+        "allowedTaskClasses": [
+          "source-editing-implementation",
+          "test-authoring",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": [],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:024-vx-plan-implement",
+      "slug": "024-vx-plan-implement",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/024-vx-plan-implement",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:024-vx-plan-implement",
+        "slug": "024-vx-plan-implement",
+        "localNumber": 24,
+        "name": "vx-plan Implement",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Implementation preflight, step execution, validation/feedback, plan-deviation rules.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:015-vx-apps-plan-state"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:025-vx-plan-implement-phase",
+      "slug": "025-vx-plan-implement-phase",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/025-vx-plan-implement-phase",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:025-vx-plan-implement-phase",
+        "slug": "025-vx-plan-implement-phase",
+        "localNumber": 25,
+        "name": "vx-plan Implement Phase",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Phase selection, phase-dependency checks, phase status updates, phase closeout.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:024-vx-plan-implement"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:051-vx-git-closeout-authority",
+      "slug": "051-vx-git-closeout-authority",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/051-vx-git-closeout-authority",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:051-vx-git-closeout-authority",
+        "slug": "051-vx-git-closeout-authority",
+        "localNumber": 51,
+        "name": "vx Git Closeout Authority",
+        "type": "git-closeout",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Commit authority, push authority, submodule two-step commit, closeout forbidden without grant.",
+        "allowedTaskClasses": ["closeout"],
+        "grants": ["commit", "push"],
+        "forbids": ["stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:050-vx-git-read"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["closeout"]
+      }
+    },
+    {
+      "id": "repo:slave-vxapp:100-slave-repo-orientation",
+      "slug": "100-slave-repo-orientation",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/100-slave-repo-orientation",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:slave-vxapp:100-slave-repo-orientation",
+        "slug": "100-slave-repo-orientation",
+        "localNumber": 100,
+        "name": "Slave Repo Orientation",
+        "type": "repo-orientation",
+        "repo": "slave-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Orient to slave-vxapp Laravel/Inertia tenant runtime, Vite asset loading, theme manager boundaries, and focused validation commands.",
+        "allowedTaskClasses": [
+          "orientation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "specialist",
+          "closeout"
+        ],
+        "grants": ["read", "inspect", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "repo:slave-vxapp:110-slave-plan-execution",
+      "slug": "110-slave-plan-execution",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/110-slave-plan-execution",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:slave-vxapp:110-slave-plan-execution",
+        "slug": "110-slave-plan-execution",
+        "localNumber": 110,
+        "name": "Slave Plan Execution",
+        "type": "implementation",
+        "repo": "slave-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Execute slave-vxapp JSON plan phases while preserving tenant/theme boundaries.",
+        "allowedTaskClasses": ["source-editing-implementation", "specialist"],
+        "grants": ["read", "inspect", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [
+          "global:000-safety-kernel",
+          "global:001-t3-worker-basics",
+          "repo:slave-vxapp:100-slave-repo-orientation"
+        ],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:slave-vxapp:112-slave-edit-rules",
+      "slug": "112-slave-edit-rules",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/112-slave-edit-rules",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:slave-vxapp:112-slave-edit-rules",
+        "slug": "112-slave-edit-rules",
+        "localNumber": 112,
+        "name": "Slave Edit Rules",
+        "type": "implementation",
+        "repo": "slave-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Scoped edit rules for slave-vxapp Laravel, Blade, TypeScript, and SCSS changes.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "inspect", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [
+          "global:000-safety-kernel",
+          "global:001-t3-worker-basics",
+          "repo:slave-vxapp:100-slave-repo-orientation"
+        ],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:slave-vxapp:113-slave-validation-selection",
+      "slug": "113-slave-validation-selection",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/113-slave-validation-selection",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:slave-vxapp:113-slave-validation-selection",
+        "slug": "113-slave-validation-selection",
+        "localNumber": 113,
+        "name": "Slave Validation Selection",
+        "type": "implementation",
+        "repo": "slave-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Focused validation command selection for slave-vxapp theme manager work.",
+        "allowedTaskClasses": ["source-editing-implementation", "test-authoring", "closeout"],
+        "grants": ["read", "inspect", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [
+          "global:000-safety-kernel",
+          "global:001-t3-worker-basics",
+          "repo:slave-vxapp:100-slave-repo-orientation"
+        ],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:slave-vxapp:141-slave-commit-closeout",
+      "slug": "141-slave-commit-closeout",
+      "link": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills/141-slave-commit-closeout",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:slave-vxapp:141-slave-commit-closeout",
+        "slug": "141-slave-commit-closeout",
+        "localNumber": 141,
+        "name": "Slave Commit Closeout",
+        "type": "closeout",
+        "repo": "slave-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Commit-authorized closeout for slave-vxapp and its kb-vxapp artifacts when the dispatch contract grants commit.",
+        "allowedTaskClasses": [
+          "closeout",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring"
+        ],
+        "grants": ["read", "inspect", "run-local-tests", "commit"],
+        "forbids": ["push", "stash", "deploy", "branch-delete"],
+        "requires": [
+          "global:000-safety-kernel",
+          "global:001-t3-worker-basics",
+          "global:051-vx-git-closeout-authority"
+        ],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "closeout"]
+      }
+    }
+  ]
+}

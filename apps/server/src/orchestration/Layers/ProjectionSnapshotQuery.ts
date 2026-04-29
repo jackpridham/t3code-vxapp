@@ -11,12 +11,10 @@ import {
   ProjectHooks,
   ProjectScript,
   OrchestrationProjectKind,
-  OrchestrationProgramStatus,
   ProgramNotificationEvidence,
   OrchestratorWakeItem,
   OrchestrationSnapshotProfile,
   ProjectId,
-  ProgramId,
   ThreadId,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -41,10 +39,14 @@ import {
   toPersistenceSqlError,
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
+import {
+  decodeProjectionProgramDbRow,
+  ProjectionProgramDbRowSchema,
+  toOrchestrationProgram,
+} from "../../persistence/programProjectionRow.ts";
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionCtoAttention } from "../../persistence/Services/ProjectionCtoAttention.ts";
 import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
-import { ProjectionProgram } from "../../persistence/Services/ProjectionPrograms.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
@@ -69,15 +71,6 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     hooks: Schema.fromJsonString(ProjectHooks),
-  }),
-);
-const ProjectionProgramDbRowSchema = ProjectionProgram.mapFields(
-  Struct.assign({
-    programId: ProgramId,
-    status: OrchestrationProgramStatus,
-    executiveProjectId: ProjectId,
-    executiveThreadId: ThreadId,
-    currentOrchestratorThreadId: Schema.NullOr(ThreadId),
   }),
 );
 const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.mapFields(
@@ -335,12 +328,28 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           title,
           objective,
           status,
+          declared_repos_json AS "declaredRepos",
+          affected_app_targets_json AS "affectedAppTargets",
+          required_local_suites_json AS "requiredLocalSuites",
+          required_external_e2e_suites_json AS "requiredExternalE2ESuites",
+          require_development_deploy AS "requireDevelopmentDeploy",
+          require_external_e2e AS "requireExternalE2E",
+          require_clean_post_flight AS "requireCleanPostFlight",
+          require_pr_per_repo AS "requirePrPerRepo",
           executive_project_id AS "executiveProjectId",
           executive_thread_id AS "executiveThreadId",
           current_orchestrator_thread_id AS "currentOrchestratorThreadId",
+          repo_prs_json AS "repoPrs",
+          local_validation_json AS "localValidation",
+          app_validations_json AS "appValidations",
+          observed_repos_json AS "observedRepos",
+          post_flight_json AS "postFlight",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           completed_at AS "completedAt",
+          cancel_reason AS "cancelReason",
+          cancelled_at AS "cancelledAt",
+          superseded_by_program_id AS "supersededByProgramId",
           deleted_at AS "deletedAt"
         FROM projection_programs
         ORDER BY created_at ASC, program_id ASC
@@ -1395,19 +1404,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             );
 
-          const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) => ({
-            id: row.programId,
-            title: row.title,
-            objective: row.objective,
-            status: row.status,
-            executiveProjectId: row.executiveProjectId,
-            executiveThreadId: row.executiveThreadId,
-            currentOrchestratorThreadId: row.currentOrchestratorThreadId,
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt,
-            completedAt: row.completedAt,
-            deletedAt: row.deletedAt,
-          }));
+          const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) =>
+            toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
+          );
 
           const programNotifications: ReadonlyArray<OrchestrationProgramNotification> =
             programNotificationRows.map((row) => ({

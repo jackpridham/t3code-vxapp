@@ -1,0 +1,242 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1",
+  "runtimeDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.agents/runtime",
+  "skillsDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills",
+  "agentsSkillsDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.agents/skills",
+  "repo": "vue-vxapp",
+  "taskClass": "review-only",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "packs": [
+    {
+      "id": "global:000-safety-kernel",
+      "slug": "000-safety-kernel",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills/000-safety-kernel",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:000-safety-kernel",
+        "slug": "000-safety-kernel",
+        "localNumber": 0,
+        "name": "Safety Kernel",
+        "type": "safety",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Baseline worker safety rules: authority model, forbidden actions, destructive command ban, escalation classes.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning",
+          "orchestration",
+          "diagnostics"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:001-t3-worker-basics",
+      "slug": "001-t3-worker-basics",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills/001-t3-worker-basics",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:001-t3-worker-basics",
+        "slug": "001-t3-worker-basics",
+        "localNumber": 1,
+        "name": "T3 Worker Basics",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Worker contract, context modes, status updates, allowed tooling by context.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:006-worker-command-telemetry",
+      "slug": "006-worker-command-telemetry",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills/006-worker-command-telemetry",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:006-worker-command-telemetry",
+        "slug": "006-worker-command-telemetry",
+        "localNumber": 6,
+        "name": "Worker Command Telemetry",
+        "type": "diagnostics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Interpret worker-local command telemetry summaries and route friction signals without enforcing runtime behavior in prose.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["review-only", "closeout", "isolated", "pack-managed"]
+      }
+    },
+    {
+      "id": "global:026-vx-plan-review-refine",
+      "slug": "026-vx-plan-review-refine",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills/026-vx-plan-review-refine",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:026-vx-plan-review-refine",
+        "slug": "026-vx-plan-review-refine",
+        "localNumber": 26,
+        "name": "vx-plan Review/Refine",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Implementation review, review verdicts, refine from review, review loop guards.",
+        "allowedTaskClasses": ["review-only", "source-editing-implementation"],
+        "grants": ["read", "edit", "inspect"],
+        "forbids": ["commit", "push", "stash", "deploy"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["review-only", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:063-generated-output-ownership",
+      "slug": "063-generated-output-ownership",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills/063-generated-output-ownership",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:063-generated-output-ownership",
+        "slug": "063-generated-output-ownership",
+        "localNumber": 63,
+        "name": "Generated Output Ownership",
+        "type": "specialist",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Generated output ownership, enum regeneration, consumer/submodule drift handling.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "repo:vue-vxapp:100-vue-repo-orientation",
+      "slug": "100-vue-repo-orientation",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills/100-vue-repo-orientation",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:vue-vxapp:100-vue-repo-orientation",
+        "slug": "100-vue-repo-orientation",
+        "localNumber": 100,
+        "name": "Vue Repo Orientation",
+        "type": "repo-orientation",
+        "repo": "vue-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Orient to vue-vxapp: vue conventions, code rules, best practices, frontend design, theme, enums.",
+        "allowedTaskClasses": [
+          "orientation",
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "specialist"
+        ],
+        "grants": ["read", "inspect", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "minimal", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:vue-vxapp:130-vue-review",
+      "slug": "130-vue-review",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills/130-vue-review",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:vue-vxapp:130-vue-review",
+        "slug": "130-vue-review",
+        "localNumber": 130,
+        "name": "Vue Review",
+        "type": "review",
+        "repo": "vue-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Review checklist for vue-vxapp: code rules, best practices, frontend design review mode.",
+        "allowedTaskClasses": ["review-only"],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [
+          "global:000-safety-kernel",
+          "global:001-t3-worker-basics",
+          "repo:vue-vxapp:100-vue-repo-orientation"
+        ],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["review-only"]
+      }
+    }
+  ]
+}

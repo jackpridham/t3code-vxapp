@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "effect-codex-app-server/client": ["./src/client.ts"],
+      "effect-codex-app-server/errors": ["./src/errors.ts"],
+      "effect-codex-app-server/protocol": ["./src/protocol.ts"],
+      "effect-codex-app-server/rpc": ["./src/rpc.ts"],
+      "effect-codex-app-server/schema": ["./src/schema.ts"]
+    },
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "namespaceImportPackages": ["@effect/platform-node"],
+        "diagnosticSeverity": {
+          "importFromBarrel": "error",
+          "anyUnknownInErrorContext": "warning",
+          "instanceOfSchema": "warning",
+          "deterministicKeys": "warning"
+        }
+      }
+    ]
+  },
+  "include": ["src", "scripts", "test"]
+}

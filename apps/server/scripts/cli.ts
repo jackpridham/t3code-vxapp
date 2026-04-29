@@ -19,6 +19,8 @@ class CliError extends Data.TaggedError("CliError")<{
   readonly cause?: unknown;
 }> {}
 
+const CLIENT_DIST_PREFIX = "dist/client/";
+
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
@@ -38,6 +40,15 @@ const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.Comm
 interface PublishIconBackup {
   readonly targetPath: string;
   readonly backupPath: string;
+}
+
+function readClientOverridePathSuffix(targetRelativePath: string): string {
+  if (!targetRelativePath.startsWith(CLIENT_DIST_PREFIX)) {
+    throw new CliError({
+      message: `Unexpected client asset override target: ${targetRelativePath}`,
+    });
+  }
+  return targetRelativePath.slice(CLIENT_DIST_PREFIX.length);
 }
 
 const applyPublishIconOverrides = Effect.fn("applyPublishIconOverrides")(function* (
@@ -85,16 +96,18 @@ const restorePublishIconOverrides = Effect.fn("restorePublishIconOverrides")(fun
   }
 });
 
-const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")(function* (
-  repoRoot: string,
-  serverDir: string,
-) {
+const applyDevelopmentIconOverridesToClientTarget = Effect.fn(
+  "applyDevelopmentIconOverridesToClientTarget",
+)(function* (repoRoot: string, clientTarget: string) {
   const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
 
   for (const override of DEVELOPMENT_ICON_OVERRIDES) {
     const sourcePath = path.join(repoRoot, override.sourceRelativePath);
-    const targetPath = path.join(serverDir, override.targetRelativePath);
+    const targetPath = path.join(
+      clientTarget,
+      readClientOverridePathSuffix(override.targetRelativePath),
+    );
 
     if (!(yield* fs.exists(sourcePath))) {
       return yield* new CliError({
@@ -110,7 +123,95 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
     yield* fs.copyFile(sourcePath, targetPath);
   }
 
-  yield* Effect.log("[cli] Applied development icon overrides to dist/client");
+  yield* Effect.log("[cli] Applied development icon overrides to staged client bundle");
+});
+
+const bundleWebClient = Effect.fn("bundleWebClient")(function* (
+  repoRoot: string,
+  serverDir: string,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const webDist = path.join(repoRoot, "apps/web/dist");
+  const distDir = path.join(serverDir, "dist");
+  const clientTarget = path.join(distDir, "client");
+  const stagingTarget = path.join(distDir, `client-staged-${Date.now()}`);
+  const backupTarget = path.join(distDir, `client-backup-${Date.now()}`);
+  let movedExistingClient = false;
+  let activatedStagedClient = false;
+
+  if (!(yield* fs.exists(webDist))) {
+    return yield* new CliError({
+      message: `Missing web dist: ${webDist}. Build the web app first.`,
+    });
+  }
+
+  yield* fs.makeDirectory(distDir, { recursive: true });
+  yield* fs.remove(stagingTarget, { recursive: true, force: true });
+  yield* fs.remove(backupTarget, { recursive: true, force: true });
+
+  const bundleClientEffect = Effect.gen(function* () {
+    yield* fs.copy(webDist, stagingTarget);
+    yield* applyDevelopmentIconOverridesToClientTarget(repoRoot, stagingTarget);
+
+    if (yield* fs.exists(clientTarget)) {
+      yield* fs.rename(clientTarget, backupTarget);
+      movedExistingClient = true;
+    }
+
+    yield* fs.rename(stagingTarget, clientTarget);
+    activatedStagedClient = true;
+
+    if (movedExistingClient) {
+      yield* fs.remove(backupTarget, { recursive: true, force: true });
+    }
+
+    yield* Effect.log("[cli] Bundled web app into dist/client");
+  });
+
+  yield* bundleClientEffect.pipe(
+    Effect.catchCause((cause) =>
+      Effect.gen(function* () {
+        if (!activatedStagedClient && movedExistingClient && !(yield* fs.exists(clientTarget))) {
+          yield* fs
+            .rename(backupTarget, clientTarget)
+            .pipe(
+              Effect.catch((restoreError) =>
+                Effect.logError(
+                  `[cli] Failed to restore previous client bundle after bundling error: ${String(
+                    restoreError,
+                  )}`,
+                ),
+              ),
+            );
+        }
+
+        yield* fs
+          .remove(stagingTarget, { recursive: true, force: true })
+          .pipe(
+            Effect.catch((cleanupError) =>
+              Effect.logError(
+                `[cli] Failed to remove staged client bundle after error: ${String(cleanupError)}`,
+              ),
+            ),
+          );
+        yield* fs
+          .remove(backupTarget, { recursive: true, force: true })
+          .pipe(
+            Effect.catch((cleanupError) =>
+              Effect.logError(
+                `[cli] Failed to remove backup client bundle after error: ${String(cleanupError)}`,
+              ),
+            ),
+          );
+
+        return yield* new CliError({
+          message: "Failed to bundle the web client.",
+          cause,
+        });
+      }),
+    ),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -141,17 +242,23 @@ const buildCmd = Command.make(
       );
 
       const webDist = path.join(repoRoot, "apps/web/dist");
-      const clientTarget = path.join(serverDir, "dist/client");
 
       if (yield* fs.exists(webDist)) {
-        yield* fs.copy(webDist, clientTarget);
-        yield* applyDevelopmentIconOverrides(repoRoot, serverDir);
-        yield* Effect.log("[cli] Bundled web app into dist/client");
+        yield* bundleWebClient(repoRoot, serverDir);
       } else {
         yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
       }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
+
+const bundleClientCmd = Command.make("bundle-client", {}, () =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const repoRoot = yield* RepoRoot;
+    const serverDir = path.join(repoRoot, "apps/server");
+    yield* bundleWebClient(repoRoot, serverDir);
+  }),
+).pipe(Command.withDescription("Bundle apps/web/dist into apps/server/dist/client."));
 
 // ---------------------------------------------------------------------------
 // publish subcommand
@@ -256,7 +363,7 @@ const publishCmd = Command.make(
 
 const cli = Command.make("cli").pipe(
   Command.withDescription("T3 server build & publish CLI."),
-  Command.withSubcommands([buildCmd, publishCmd]),
+  Command.withSubcommands([buildCmd, bundleClientCmd, publishCmd]),
 );
 
 Command.run(cli, { version: "0.0.0" }).pipe(

@@ -39,8 +39,9 @@ export const WorkLogGroup = memo(function WorkLogGroup({
       : groupedEntries;
   const hiddenCount = groupedEntries.length - visibleEntries.length;
   const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
+  const onlyThinkingEntries = groupedEntries.every((entry) => entry.tone === "thinking");
   const showHeader = hasOverflow || !onlyToolEntries;
-  const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
+  const groupLabel = onlyToolEntries ? "Tool calls" : onlyThinkingEntries ? "Thinking" : "Work log";
 
   return (
     <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
@@ -110,7 +111,11 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   return "text-muted-foreground/40";
 }
 
-function workEntryPreview(workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles">) {
+function workEntryPreview(
+  workEntry: Pick<WorkLogEntry, "detail" | "command" | "changedFiles" | "thoughts">,
+) {
+  const latestThought = visibleThoughts(workEntry.thoughts).at(-1);
+  if (latestThought) return latestThought;
   if (workEntry.command) return workEntry.command;
   if (workEntry.detail) return workEntry.detail;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
@@ -123,11 +128,19 @@ function workEntryPreview(workEntry: Pick<WorkLogEntry, "detail" | "command" | "
 
 function hasExpandableWorkEntryContent(workEntry: WorkLogEntry): boolean {
   return (
+    visibleThoughts(workEntry.thoughts).length > 0 ||
     Boolean(workEntry.command) ||
     Boolean(workEntry.detail) ||
     Boolean(workEntry.rawPayload) ||
     (workEntry.changedFiles?.length ?? 0) > 0
   );
+}
+
+function visibleThoughts(thoughts: ReadonlyArray<string> | undefined): string[] {
+  if (!thoughts) {
+    return [];
+  }
+  return thoughts.map((thought) => thought.trim()).filter((thought) => thought.length > 0);
 }
 
 function workEntryIcon(workEntry: WorkLogEntry): LucideIcon {
@@ -181,6 +194,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
   const showExpandToggle = hasExpandableWorkEntryContent(workEntry);
+  const thoughtItems = visibleThoughts(workEntry.thoughts);
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -248,6 +262,20 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
         {showExpandToggle ? (
           <CollapsibleContent>
             <div className="mt-2 space-y-2 pl-6">
+              {thoughtItems.length > 0 ? (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                    Thoughts
+                  </p>
+                  <ol className="space-y-2 pl-4 text-[11px] leading-5 text-foreground/85">
+                    {thoughtItems.map((thought) => (
+                      <li key={`${workEntry.id}:thought:${thought}`} className="list-decimal">
+                        <pre className="whitespace-pre-wrap break-words font-mono">{thought}</pre>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
               {workEntry.command ? (
                 <div className="space-y-1">
                   <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
@@ -258,7 +286,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
                   </pre>
                 </div>
               ) : null}
-              {workEntry.detail ? (
+              {workEntry.detail && thoughtItems.length === 0 ? (
                 <div className="space-y-1">
                   <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
                     Detail
@@ -286,7 +314,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
                   </div>
                 </div>
               ) : null}
-              {workEntry.rawPayload ? (
+              {workEntry.rawPayload && thoughtItems.length === 0 ? (
                 <div className="space-y-1">
                   <p className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
                     Raw payload

@@ -1,477 +1,306 @@
 #!/usr/bin/env python3
 """
-Copy a trimmed subset of the live T3 production database into the dev database.
+seed-dev-db.py — Populate the T3 dev database with test projects and threads.
 
-This replaces the old synthetic fixture with a schema-tolerant prod snapshot flow:
-
-1. Copy `~/.t3/userdata/state.sqlite` to a temporary database using SQLite's
-   backup API, which is safe for WAL-mode databases.
-2. Keep a bounded set of the most recent threads per project.
-3. Expand that set to include directly related lineage/wake/plan threads.
-4. Delete all thread-scoped rows outside that retained thread set.
-5. Clear live runtime/session state by default so the dev DB does not try to
-   resume stale provider sessions from production.
-6. Vacuum the result and atomically replace the dev database.
+Inserts into BOTH orchestration_events (source of truth) AND projection
+tables so the server replays correctly on restart.
 
 Usage:
-    python3 scripts/seed-dev-db.py
-    python3 scripts/seed-dev-db.py --threads-per-project 8
-    python3 scripts/seed-dev-db.py --keep-runtime-state
-    python3 scripts/seed-dev-db.py --dest-db /tmp/t3-dev-state.sqlite
+    python3 scripts/seed-dev-db.py          # seed (idempotent)
+    python3 scripts/seed-dev-db.py --reset  # wipe all data first
 """
 
-from __future__ import annotations
-
-import argparse
-import os
+import json
 import sqlite3
 import sys
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable, Sequence
+import uuid
+from datetime import datetime, timezone, timedelta
 
-DEFAULT_SOURCE_DB = Path.home() / ".t3" / "userdata" / "state.sqlite"
-DEFAULT_DEST_DB = Path.home() / ".t3" / "dev" / "state.sqlite"
-DEFAULT_THREADS_PER_PROJECT = 5
-SQLITE_SIDE_CARS = ("-wal", "-shm")
+DB_PATH = "/home/gizmo/.t3/dev/state.sqlite"
+
+BASE_TIME = datetime(2026, 4, 4, 2, 0, 0, tzinfo=timezone.utc)
 
 
-@dataclass(frozen=True)
-class SeedConfig:
-    source_db: Path
-    dest_db: Path
-    threads_per_project: int
-    keep_runtime_state: bool
+def ts(offset_seconds: int = 0) -> str:
+    return (BASE_TIME + timedelta(seconds=offset_seconds)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def parse_args(argv: Sequence[str]) -> SeedConfig:
-    parser = argparse.ArgumentParser(
-        description="Copy a trimmed slice of the live T3 prod DB into the dev DB.",
+def new_id() -> str:
+    return str(uuid.uuid4())
+
+
+# ── IDs (stable so seed is idempotent) ────────────────────────────────────────
+
+PROJ_ORCHESTRATOR = "5d395fe5-0f03-4dc1-991b-3325f9512515"
+PROJ_VORTEX       = "ab7111f5-3311-4fe7-bd77-9fd76fffcd5d"
+PROJ_T3CODE       = "c1234567-0000-4000-8000-t3codevxapp001"
+PROJ_VUE          = "d2345678-0000-4000-8000-vuevxapp000001"
+PROJ_API          = "e3456789-0000-4000-8000-apivxapp000001"
+
+THREAD_JASPER   = "1567c915-7df7-497f-9b9b-4559bf6f57c1"
+THREAD_PHASE_C  = "cf2a44aa-0400-4e5c-ba1a-686142e363ba"
+THREAD_PHASE_D  = "819d6702-bae3-4b63-baf3-6e9b235c72ca"
+THREAD_PHASE_E  = "43d0fe5c-fa94-4cab-9869-4a9d8b279bd5"
+THREAD_RUNNING  = "f9999999-0000-4000-8000-runningthread1"
+
+DEFAULT_MODEL = {"provider": "codex", "model": "gpt-5-codex"}
+
+
+# ── Event helpers ──────────────────────────────────────────────────────────────
+
+_seq = [2]  # start after auto-bootstrapped events
+
+
+def next_seq() -> int:
+    _seq[0] += 1
+    return _seq[0]
+
+
+def insert_event(db, aggregate_kind, stream_id, event_type, payload: dict,
+                 stream_version=0, offset=0):
+    event_id = new_id()
+    command_id = new_id()
+    db.execute(
+        """
+        INSERT OR IGNORE INTO orchestration_events
+            (event_id, aggregate_kind, stream_id, stream_version, event_type,
+             occurred_at, command_id, causation_event_id, correlation_id,
+             actor_kind, payload_json, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'seed', ?, '{}')
+        """,
+        (event_id, aggregate_kind, stream_id, stream_version, event_type,
+         ts(offset), command_id, command_id, json.dumps(payload)),
     )
-    parser.add_argument(
-        "--source-db",
-        type=Path,
-        default=DEFAULT_SOURCE_DB,
-        help=f"Source SQLite database path (default: {DEFAULT_SOURCE_DB})",
-    )
-    parser.add_argument(
-        "--dest-db",
-        type=Path,
-        default=DEFAULT_DEST_DB,
-        help=f"Destination SQLite database path (default: {DEFAULT_DEST_DB})",
-    )
-    parser.add_argument(
-        "--threads-per-project",
-        type=int,
-        default=DEFAULT_THREADS_PER_PROJECT,
-        help=f"Recent threads to keep per project (default: {DEFAULT_THREADS_PER_PROJECT})",
-    )
-    parser.add_argument(
-        "--keep-runtime-state",
-        action="store_true",
-        help="Preserve projection_thread_sessions/provider_session_runtime rows instead of clearing them.",
-    )
-    args = parser.parse_args(argv)
-
-    if args.threads_per_project <= 0:
-        parser.error("--threads-per-project must be greater than zero")
-
-    return SeedConfig(
-        source_db=args.source_db.expanduser().resolve(),
-        dest_db=args.dest_db.expanduser().resolve(),
-        threads_per_project=args.threads_per_project,
-        keep_runtime_state=args.keep_runtime_state,
-    )
+    return event_id
 
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+# ── Project events ─────────────────────────────────────────────────────────────
 
-
-def connect_db(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
-    if readonly:
-        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    return sqlite3.connect(path)
-
-
-def remove_sidecars(path: Path) -> None:
-    for suffix in SQLITE_SIDE_CARS:
-        sidecar = Path(f"{path}{suffix}")
-        if sidecar.exists():
-            sidecar.unlink()
-
-
-def format_mib(path: Path) -> str:
-    if not path.exists():
-        return "0.0 MiB"
-    return f"{path.stat().st_size / (1024 * 1024):.1f} MiB"
-
-
-def chunked(values: Iterable[str], size: int = 200) -> Iterable[list[str]]:
-    chunk: list[str] = []
-    for value in values:
-        chunk.append(value)
-        if len(chunk) >= size:
-            yield chunk
-            chunk = []
-    if chunk:
-        yield chunk
-
-
-def fetch_scalar_int(db: sqlite3.Connection, query: str, params: Sequence[object] = ()) -> int:
-    row = db.execute(query, params).fetchone()
-    return 0 if row is None or row[0] is None else int(row[0])
-
-
-def collect_counts(db: sqlite3.Connection) -> dict[str, int]:
-    return {
-        "projects": fetch_scalar_int(db, "SELECT COUNT(*) FROM projection_projects"),
-        "threads": fetch_scalar_int(db, "SELECT COUNT(*) FROM projection_threads"),
-        "messages": fetch_scalar_int(db, "SELECT COUNT(*) FROM projection_thread_messages"),
-        "activities": fetch_scalar_int(db, "SELECT COUNT(*) FROM projection_thread_activities"),
-        "turns": fetch_scalar_int(db, "SELECT COUNT(*) FROM projection_turns"),
-        "plans": fetch_scalar_int(db, "SELECT COUNT(*) FROM projection_thread_proposed_plans"),
-        "wakes": fetch_scalar_int(db, "SELECT COUNT(*) FROM projection_orchestrator_wakes"),
-        "events": fetch_scalar_int(db, "SELECT COUNT(*) FROM orchestration_events"),
+def seed_project(db, project_id, title, workspace_root, kind="project", offset=0):
+    payload = {
+        "projectId": project_id,
+        "title": title,
+        "workspaceRoot": workspace_root,
+        "kind": kind,
+        "defaultModelSelection": DEFAULT_MODEL,
+        "scripts": [],
+        "hooks": [],
+        "createdAt": ts(offset),
+        "updatedAt": ts(offset),
     }
+    insert_event(db, "project", project_id, "project.created", payload, offset=offset)
+
+    db.execute(
+        """
+        INSERT OR REPLACE INTO projection_projects
+            (project_id, title, workspace_root, scripts_json, hooks_json, kind, created_at, updated_at)
+        VALUES (?, ?, ?, '[]', '[]', ?, ?, ?)
+        """,
+        (project_id, title, workspace_root, kind, ts(offset), ts(offset)),
+    )
 
 
-def print_counts(label: str, counts: dict[str, int]) -> None:
-    ordered = ", ".join(f"{key}={value}" for key, value in counts.items())
-    print(f"{label}: {ordered}")
+# ── Thread events ──────────────────────────────────────────────────────────────
 
-
-def collect_all_project_ids(db: sqlite3.Connection) -> set[str]:
-    return {
-        row[0]
-        for row in db.execute(
-            "SELECT project_id FROM projection_projects ORDER BY created_at ASC, project_id ASC",
-        )
+def seed_thread(db, thread_id, project_id, title, worktree_path=None,
+                labels=None, spawn_role=None, spawned_by=None,
+                orchestrator_thread_id=None, parent_thread_id=None,
+                workflow_id=None, offset=0):
+    labels = labels or []
+    lineage = {k: v for k, v in {
+        "orchestratorProjectId": PROJ_ORCHESTRATOR if spawn_role == "worker" else None,
+        "orchestratorThreadId": orchestrator_thread_id,
+        "parentThreadId": parent_thread_id,
+        "spawnRole": spawn_role,
+        "spawnedBy": spawned_by,
+        "workflowId": workflow_id,
+    }.items() if v is not None}
+    payload = {
+        "threadId": thread_id,
+        "projectId": project_id,
+        "title": title,
+        "labels": labels,
+        "modelSelection": DEFAULT_MODEL,
+        "runtimeMode": "full-access",
+        "interactionMode": "default",
+        "branch": None,
+        "worktreePath": worktree_path,
+        **lineage,
+        "createdAt": ts(offset),
+        "updatedAt": ts(offset),
     }
-
-
-def collect_base_thread_ids(db: sqlite3.Connection, threads_per_project: int) -> set[str]:
-    project_ids = sorted(collect_all_project_ids(db))
-    thread_ids: set[str] = set()
-    for project_id in project_ids:
-        rows = db.execute(
-            """
-            SELECT thread_id
-            FROM projection_threads
-            WHERE project_id = ?
-            ORDER BY updated_at DESC, created_at DESC, thread_id DESC
-            LIMIT ?
-            """,
-            (project_id, threads_per_project),
-        )
-        thread_ids.update(row[0] for row in rows)
-    return thread_ids
-
-
-def filter_existing_thread_ids(db: sqlite3.Connection, thread_ids: Iterable[str]) -> set[str]:
-    existing: set[str] = set()
-    for chunk in chunked(sorted(set(thread_ids))):
-        placeholders = ",".join("?" for _ in chunk)
-        query = f"SELECT thread_id FROM projection_threads WHERE thread_id IN ({placeholders})"
-        existing.update(row[0] for row in db.execute(query, chunk))
-    return existing
-
-
-def collect_related_thread_ids(db: sqlite3.Connection, thread_ids: set[str]) -> set[str]:
-    related: set[str] = set()
-    if not thread_ids:
-        return related
-
-    for chunk in chunked(sorted(thread_ids)):
-        placeholders = ",".join("?" for _ in chunk)
-
-        query = f"""
-            SELECT orchestrator_thread_id, parent_thread_id
-            FROM projection_threads
-            WHERE thread_id IN ({placeholders})
-        """
-        for row in db.execute(query, chunk):
-            for value in row:
-                if value:
-                    related.add(value)
-
-        query = f"""
-            SELECT implementation_thread_id
-            FROM projection_thread_proposed_plans
-            WHERE thread_id IN ({placeholders})
-              AND implementation_thread_id IS NOT NULL
-        """
-        related.update(row[0] for row in db.execute(query, chunk))
-
-        query = f"""
-            SELECT source_proposed_plan_thread_id
-            FROM projection_turns
-            WHERE thread_id IN ({placeholders})
-              AND source_proposed_plan_thread_id IS NOT NULL
-        """
-        related.update(row[0] for row in db.execute(query, chunk))
-
-        pair_placeholders = ",".join("?" for _ in chunk)
-        query = f"""
-            SELECT orchestrator_thread_id, worker_thread_id
-            FROM projection_orchestrator_wakes
-            WHERE orchestrator_thread_id IN ({placeholders})
-               OR worker_thread_id IN ({pair_placeholders})
-        """
-        for row in db.execute(query, [*chunk, *chunk]):
-            for value in row:
-                if value:
-                    related.add(value)
-
-    return related
-
-
-def expand_thread_closure(db: sqlite3.Connection, seed_thread_ids: set[str]) -> set[str]:
-    kept = filter_existing_thread_ids(db, seed_thread_ids)
-    while True:
-        related = filter_existing_thread_ids(db, collect_related_thread_ids(db, kept))
-        new_ids = related - kept
-        if not new_ids:
-            return kept
-        kept.update(new_ids)
-
-
-def stage_keep_table(db: sqlite3.Connection, name: str, column: str, values: Iterable[str]) -> None:
-    db.execute(f"DROP TABLE IF EXISTS temp.{name}")
-    db.execute(f"CREATE TEMP TABLE {name} ({column} TEXT PRIMARY KEY)")
-    db.executemany(
-        f"INSERT INTO temp.{name} ({column}) VALUES (?)",
-        ((value,) for value in sorted(set(values))),
-    )
-
-
-def trim_destination_db(db: sqlite3.Connection, keep_project_ids: set[str], keep_thread_ids: set[str], *,
-                        keep_runtime_state: bool) -> None:
-    stage_keep_table(db, "keep_projects", "project_id", keep_project_ids)
-    stage_keep_table(db, "keep_threads", "thread_id", keep_thread_ids)
+    insert_event(db, "thread", thread_id, "thread.created", payload, offset=offset)
 
     db.execute(
         """
-        DELETE FROM projection_orchestrator_wakes
-        WHERE orchestrator_thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-           OR worker_thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
+        INSERT OR REPLACE INTO projection_threads
+            (thread_id, project_id, title, labels_json, worktree_path,
+             spawn_role, spawned_by, orchestrator_thread_id, parent_thread_id,
+             workflow_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-    )
-    db.execute(
-        """
-        DELETE FROM projection_thread_proposed_plans
-        WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM projection_turns
-        WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM projection_thread_activities
-        WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM projection_thread_messages
-        WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM checkpoint_diff_blobs
-        WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM projection_threads
-        WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM projection_projects
-        WHERE project_id NOT IN (SELECT project_id FROM temp.keep_projects)
-        """,
+        (thread_id, project_id, title, json.dumps(labels), worktree_path,
+         spawn_role, spawned_by, orchestrator_thread_id, parent_thread_id,
+         workflow_id, ts(offset), ts(offset + 120)),
     )
 
-    if keep_runtime_state:
-        db.execute(
-            """
-            DELETE FROM projection_thread_sessions
-            WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-            """,
-        )
-        db.execute(
-            """
-            DELETE FROM provider_session_runtime
-            WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-            """,
-        )
-        db.execute(
-            """
-            DELETE FROM projection_pending_approvals
-            WHERE thread_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-            """,
-        )
-    else:
-        db.execute("DELETE FROM projection_thread_sessions")
-        db.execute("DELETE FROM provider_session_runtime")
-        db.execute("DELETE FROM projection_pending_approvals")
+
+# ── Message helpers ────────────────────────────────────────────────────────────
+
+def seed_message(db, thread_id, role, text, turn_id=None, offset=0):
+    message_id = new_id()
+    payload = {
+        "messageId": message_id,
+        "threadId": thread_id,
+        "turnId": turn_id,
+        "role": role,
+        "text": text,
+        "attachments": [],
+        "createdAt": ts(offset),
+        "updatedAt": ts(offset),
+    }
+    insert_event(db, "thread", thread_id, "thread.message.created", payload, offset=offset)
 
     db.execute(
         """
-        DELETE FROM orchestration_events
-        WHERE aggregate_kind = 'thread'
-          AND stream_id NOT IN (SELECT thread_id FROM temp.keep_threads)
+        INSERT OR REPLACE INTO projection_thread_messages
+            (message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at, attachments_json)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?, '[]')
         """,
+        (message_id, thread_id, turn_id, role, text, ts(offset), ts(offset)),
     )
+    return message_id
+
+
+def seed_turn(db, thread_id, turn_id, state="completed", offset=0):
+    completed_at = ts(offset + 45) if state == "completed" else None
     db.execute(
         """
-        DELETE FROM orchestration_events
-        WHERE aggregate_kind = 'project'
-          AND stream_id NOT IN (SELECT project_id FROM temp.keep_projects)
+        INSERT OR REPLACE INTO projection_turns
+            (thread_id, turn_id, state, requested_at, started_at, completed_at, checkpoint_files_json)
+        VALUES (?, ?, ?, ?, ?, ?, '[]')
         """,
-    )
-    db.execute(
-        """
-        DELETE FROM orchestration_command_receipts
-        WHERE aggregate_kind = 'thread'
-          AND aggregate_id NOT IN (SELECT thread_id FROM temp.keep_threads)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM orchestration_command_receipts
-        WHERE aggregate_kind = 'project'
-          AND aggregate_id NOT IN (SELECT project_id FROM temp.keep_projects)
-        """,
-    )
-    db.execute(
-        """
-        DELETE FROM orchestration_command_receipts
-        WHERE result_sequence NOT IN (SELECT sequence FROM orchestration_events)
-        """,
+        (thread_id, turn_id, state, ts(offset), ts(offset + 2), completed_at),
     )
 
-    max_sequence = fetch_scalar_int(db, "SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events")
-    projection_state_count = fetch_scalar_int(
-        db,
-        "SELECT COUNT(*) FROM projection_state",
-    )
-    if projection_state_count > 0:
-        db.execute(
-            """
-            UPDATE projection_state
-            SET last_applied_sequence = ?, updated_at = ?
-            """,
-            (max_sequence, utc_now_iso()),
-        )
+
+# ── Main seed ──────────────────────────────────────────────────────────────────
+
+def seed(db):
+    seed_project(db, PROJ_ORCHESTRATOR, "agents-vxapp",   "/home/gizmo/agents-vxapp",   kind="orchestrator", offset=-7200)
+    seed_project(db, PROJ_VORTEX,       "vortex-scripts", "/home/gizmo/vortex-scripts",  offset=-7190)
+    seed_project(db, PROJ_T3CODE,       "t3code-vxapp",   "/home/gizmo/t3code-vxapp",    offset=-7180)
+    seed_project(db, PROJ_VUE,          "vue-vxapp",      "/home/gizmo/vue-vxapp",        offset=-7170)
+    seed_project(db, PROJ_API,          "api-vxapp",      "/home/gizmo/api-vxapp",        offset=-7160)
+
+    seed_thread(db, THREAD_JASPER, PROJ_ORCHESTRATOR,
+        title="Jasper — Orchestrator",
+        worktree_path="/home/gizmo/agents-vxapp",
+        labels=["orchestrator"], spawn_role="orchestrator", spawned_by="human",
+        offset=-7100)
+    t = new_id()
+    seed_turn(db, THREAD_JASPER, t, state="completed", offset=-7090)
+    seed_message(db, THREAD_JASPER, "user",
+        "Implement Phase C notifications and Phase D artifact panel for T3 Code.",
+        turn_id=t, offset=-7090)
+    seed_message(db, THREAD_JASPER, "assistant",
+        "Dispatching Phase C (notifications) and Phase D (artifact viewer) in parallel.\n\n"
+        "Self-review written to "
+        "`@Docs/@Scratch/agents-vxapp/self-review-t3-orchestration-phases-cdef-2.md`",
+        turn_id=t, offset=-7000)
+
+    seed_thread(db, THREAD_PHASE_C, PROJ_T3CODE,
+        title="Phase C: Notification system",
+        worktree_path="/home/gizmo/vortex-scripts",
+        labels=["worker"], spawn_role="worker", spawned_by="jasper",
+        orchestrator_thread_id=THREAD_JASPER, parent_thread_id=THREAD_JASPER,
+        workflow_id="t3-orchestration", offset=-3600)
+    t = new_id()
+    seed_turn(db, THREAD_PHASE_C, t, state="completed", offset=-3590)
+    seed_message(db, THREAD_PHASE_C, "user",
+        "Implement toast notifications for orchestration events and a settings panel.",
+        turn_id=t, offset=-3590)
+    seed_message(db, THREAD_PHASE_C, "assistant",
+        "Implementation complete. Created:\n"
+        "- `src/notificationSettings.ts` — preferences schema\n"
+        "- `src/notificationDispatch.ts` — central dispatch\n"
+        "- `src/components/settings/SettingsPanels.tsx` — settings UI\n\n"
+        "Self-review: @Docs/@Scratch/vortex-scripts/dispatch-options-feasibility.md\n\n"
+        "All 58 tests passing, typecheck clean.",
+        turn_id=t, offset=-3500)
+
+    seed_thread(db, THREAD_PHASE_D, PROJ_T3CODE,
+        title="Phase D: Artifact viewer panel",
+        worktree_path="/home/gizmo/vortex-scripts",
+        labels=["worker"], spawn_role="worker", spawned_by="jasper",
+        orchestrator_thread_id=THREAD_JASPER, parent_thread_id=THREAD_JASPER,
+        workflow_id="t3-orchestration", offset=-3000)
+    t = new_id()
+    seed_turn(db, THREAD_PHASE_D, t, state="completed", offset=-2990)
+    seed_message(db, THREAD_PHASE_D, "user",
+        "Implement ArtifactPanel slide-out component and readFile API.",
+        turn_id=t, offset=-2990)
+    seed_message(db, THREAD_PHASE_D, "assistant",
+        "Done. Added `readFile` RPC to server, wired `ArtifactPanel` in `__root.tsx`.\n\n"
+        "Key files:\n"
+        "- `src/components/ArtifactPanel.tsx` — slide-out panel\n"
+        "- `src/artifactDiscovery.ts` — workspace file search\n\n"
+        "Self-review: "
+        "[self-review](/@Docs/@Scratch/vortex-scripts/dispatch-options-feasibility.md)\n\n"
+        "Also see: @Docs/@Scratch/vortex-scripts/submodule-detached-head-after-pull.md",
+        turn_id=t, offset=-2900)
+
+    seed_thread(db, THREAD_PHASE_E, PROJ_VORTEX,
+        title="Phase E: T3 Thread → Knowledge Pipeline",
+        worktree_path="/home/gizmo/vortex-scripts",
+        labels=["worker"], spawn_role="worker", spawned_by="jasper",
+        orchestrator_thread_id=THREAD_JASPER, parent_thread_id=THREAD_JASPER,
+        workflow_id="t3-orchestration", offset=-2000)
+    t = new_id()
+    seed_turn(db, THREAD_PHASE_E, t, state="completed", offset=-1990)
+    seed_message(db, THREAD_PHASE_E, "user",
+        "Wire T3 threads into KI pipeline for knowledge extraction.",
+        turn_id=t, offset=-1990)
+    seed_message(db, THREAD_PHASE_E, "assistant",
+        "Pipeline wired. New commands:\n"
+        "- `vx agents knowledge --queue-thread --thread <id>`\n"
+        "- `vx agents knowledge --process`\n\n"
+        "Summariser: 29.5s → 0.035s (843× speedup).\n\n"
+        "See: @Docs/@Scratch/vortex-scripts/vue-common-correct-reference-for-api-common.md",
+        turn_id=t, offset=-1900)
+
+    seed_thread(db, THREAD_RUNNING, PROJ_API,
+        title="Phase G: Something in progress",
+        worktree_path="/home/gizmo/api-vxapp",
+        labels=["worker"], spawn_role="worker", spawned_by="jasper",
+        orchestrator_thread_id=THREAD_JASPER, parent_thread_id=THREAD_JASPER,
+        workflow_id="t3-orchestration", offset=-120)
+    t = new_id()
+    seed_turn(db, THREAD_RUNNING, t, state="running", offset=-100)
+    seed_message(db, THREAD_RUNNING, "user",
+        "Add rate-limiting middleware to the API.", turn_id=t, offset=-100)
+
+    db.commit()
+    print("✓ Seeded 5 projects + 5 threads into events + projections")
+    print("  Phase D thread has @Docs/@Scratch artifact links for panel testing")
+    print("  Phase G thread has a running turn for notification testing")
 
 
-def validate_source_db(config: SeedConfig) -> None:
-    if not config.source_db.exists():
-        raise FileNotFoundError(f"Source DB does not exist: {config.source_db}")
-    if config.source_db == config.dest_db:
-        raise ValueError("--source-db and --dest-db must be different paths")
-
-
-def backup_prod_db(source_db: Path, temp_db: Path) -> None:
-    source = connect_db(source_db, readonly=True)
-    destination = connect_db(temp_db)
-    try:
-        source.backup(destination)
-    finally:
-        destination.close()
-        source.close()
-
-
-def atomically_replace_destination(temp_db_conn: sqlite3.Connection, temp_db: Path, dest_db: Path) -> None:
-    dest_db.parent.mkdir(parents=True, exist_ok=True)
-    staged_dest = dest_db.with_suffix(f"{dest_db.suffix}.staged")
-    if staged_dest.exists():
-        staged_dest.unlink()
-    remove_sidecars(staged_dest)
-
-    destination = connect_db(staged_dest)
-    try:
-        temp_db_conn.backup(destination)
-    finally:
-        destination.close()
-
-    remove_sidecars(dest_db)
-    os.replace(staged_dest, dest_db)
-    remove_sidecars(staged_dest)
-    if temp_db.exists():
-        temp_db.unlink()
-    remove_sidecars(temp_db)
-
-
-def seed_dev_db(config: SeedConfig) -> None:
-    validate_source_db(config)
-    config.dest_db.parent.mkdir(parents=True, exist_ok=True)
-
-    temp_db = config.dest_db.with_suffix(f"{config.dest_db.suffix}.tmp")
-    if temp_db.exists():
-        temp_db.unlink()
-    remove_sidecars(temp_db)
-
-    print(f"Backing up {config.source_db} -> {temp_db}")
-    backup_prod_db(config.source_db, temp_db)
-
-    db = connect_db(temp_db)
-    try:
-        before_counts = collect_counts(db)
-        keep_project_ids = collect_all_project_ids(db)
-        base_thread_ids = collect_base_thread_ids(db, config.threads_per_project)
-        keep_thread_ids = expand_thread_closure(db, base_thread_ids)
-
-        print_counts("Before trim", before_counts)
-        print(
-            "Keeping "
-            f"{len(keep_project_ids)} projects and {len(keep_thread_ids)} threads "
-            f"({len(base_thread_ids)} directly selected, {len(keep_thread_ids) - len(base_thread_ids)} related)",
-        )
-
-        trim_destination_db(
-            db,
-            keep_project_ids,
-            keep_thread_ids,
-            keep_runtime_state=config.keep_runtime_state,
-        )
-        db.commit()
-
-        print("Running VACUUM")
-        db.execute("VACUUM")
-        after_counts = collect_counts(db)
-        print_counts("After trim", after_counts)
-
-        atomically_replace_destination(db, temp_db, config.dest_db)
-    finally:
-        db.close()
-
-    print(f"Seeded dev DB: {config.dest_db} ({format_mib(config.dest_db)})")
-    if config.keep_runtime_state:
-        print("Preserved provider runtime/session state")
-    else:
-        print("Cleared provider runtime/session state")
-
-
-def main(argv: Sequence[str]) -> int:
-    try:
-        config = parse_args(argv)
-        seed_dev_db(config)
-        return 0
-    except (FileNotFoundError, PermissionError, ValueError, sqlite3.Error) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+def reset(db):
+    for table in [
+        "orchestration_events", "orchestration_command_receipts",
+        "projection_projects", "projection_threads", "projection_thread_messages",
+        "projection_turns", "projection_thread_sessions", "projection_thread_activities",
+        "projection_state",
+    ]:
+        db.execute(f"DELETE FROM {table}")
+    db.commit()
+    print("✓ Wiped all event + projection data")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    db = sqlite3.connect(DB_PATH)
+    if "--reset" in sys.argv:
+        reset(db)
+    seed(db)
+    db.close()

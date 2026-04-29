@@ -14,6 +14,55 @@ export interface SelectableModelOption {
   name: string;
 }
 
+export function getModelSelectionOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): string | boolean | undefined {
+  if (!modelSelection?.options) {
+    return undefined;
+  }
+  const options = modelSelection.options as Record<string, string | boolean | undefined>;
+  return options[id];
+}
+
+export function getModelSelectionStringOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): string | undefined {
+  const value = getModelSelectionOptionValue(modelSelection, id);
+  return typeof value === "string" ? value : undefined;
+}
+
+export function getModelSelectionBooleanOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): boolean | undefined {
+  const value = getModelSelectionOptionValue(modelSelection, id);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+export function createModelSelection(
+  provider: "codex",
+  model: string,
+  options?: CodexModelOptions | null,
+): ModelSelection;
+export function createModelSelection(
+  provider: "claudeAgent",
+  model: string,
+  options?: ClaudeModelOptions | null,
+): ModelSelection;
+export function createModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: CodexModelOptions | ClaudeModelOptions | null,
+): ModelSelection {
+  return {
+    provider,
+    model,
+    ...(options ? { options } : {}),
+  } as ModelSelection;
+}
+
 // ── Effort helpers ────────────────────────────────────────────────────
 
 /** Check whether a capabilities object includes a given effort value. */

@@ -1,4 +1,5 @@
 import type {
+  OrchestrationDryRunResult,
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectId,
@@ -47,6 +48,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
         aggregateId: command.projectId,
       };
     case "program.create":
+    case "program.scope.update":
+    case "program.repo-pr.upsert":
+    case "program.local-validation.upsert":
+    case "program.app-validation.upsert":
+    case "program.observed-repo.upsert":
+    case "program.post-flight.set":
     case "program.meta.update":
     case "program.delete":
     case "program.notification.upsert":
@@ -98,6 +105,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     });
 
     return Effect.gen(function* () {
+      const commandStartedAtMs = Date.now();
       const existingReceipt = yield* commandReceiptRepository.getByCommandId({
         commandId: envelope.command.commandId,
       });
@@ -118,26 +126,41 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         return;
       }
 
+      const deciderStartedAtMs = Date.now();
       const eventBase = yield* decideOrchestrationCommand({
         command: envelope.command,
         readModel,
       });
+      const deciderDurationMs = Math.max(0, Date.now() - deciderStartedAtMs);
       const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
       const committedCommand = yield* sql
         .withTransaction(
           Effect.gen(function* () {
             const committedEvents: OrchestrationEvent[] = [];
-            const committedAttachmentSideEffects: ProjectionAttachmentSideEffects[] = [];
             let nextReadModel = readModel;
+            let appendDurationMs = 0;
+            let inMemoryProjectionDurationMs = 0;
 
             for (const nextEvent of eventBases) {
+              const appendStartedAtMs = Date.now();
               const savedEvent = yield* eventStore.append(nextEvent);
+              appendDurationMs += Math.max(0, Date.now() - appendStartedAtMs);
+              const inMemoryProjectionStartedAtMs = Date.now();
               nextReadModel = yield* projectEvent(nextReadModel, savedEvent);
-              const attachmentSideEffects =
-                yield* projectionPipeline.projectEventInTransaction(savedEvent);
-              committedAttachmentSideEffects.push(...attachmentSideEffects);
+              inMemoryProjectionDurationMs += Math.max(
+                0,
+                Date.now() - inMemoryProjectionStartedAtMs,
+              );
               committedEvents.push(savedEvent);
             }
+
+            const persistentProjectionStartedAtMs = Date.now();
+            const committedAttachmentSideEffects: ReadonlyArray<ProjectionAttachmentSideEffects> =
+              yield* projectionPipeline.projectEventsInTransaction(committedEvents);
+            const persistentProjectionDurationMs = Math.max(
+              0,
+              Date.now() - persistentProjectionStartedAtMs,
+            );
 
             const lastSavedEvent = committedEvents.at(-1) ?? null;
             if (lastSavedEvent === null) {
@@ -147,6 +170,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               });
             }
 
+            const receiptStartedAtMs = Date.now();
             yield* commandReceiptRepository.upsert({
               commandId: envelope.command.commandId,
               aggregateKind: lastSavedEvent.aggregateKind,
@@ -156,12 +180,17 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               status: "accepted",
               error: null,
             });
+            const receiptDurationMs = Math.max(0, Date.now() - receiptStartedAtMs);
 
             return {
+              appendDurationMs,
               committedAttachmentSideEffects,
               committedEvents,
+              inMemoryProjectionDurationMs,
               lastSequence: lastSavedEvent.sequence,
               nextReadModel,
+              persistentProjectionDurationMs,
+              receiptDurationMs,
             } as const;
           }),
         )
@@ -180,6 +209,20 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       for (const event of committedCommand.committedEvents) {
         yield* PubSub.publish(eventPubSub, event);
       }
+      yield* Effect.logDebug("orchestration command dispatch completed", {
+        commandId: envelope.command.commandId,
+        commandType: envelope.command.type,
+        eventCount: committedCommand.committedEvents.length,
+        eventTypes: committedCommand.committedEvents.map((event) => event.type),
+        initialSequence: dispatchStartSequence,
+        finalSequence: committedCommand.lastSequence,
+        deciderDurationMs,
+        appendDurationMs: committedCommand.appendDurationMs,
+        inMemoryProjectionDurationMs: committedCommand.inMemoryProjectionDurationMs,
+        persistentProjectionDurationMs: committedCommand.persistentProjectionDurationMs,
+        receiptDurationMs: committedCommand.receiptDurationMs,
+        totalDurationMs: Math.max(0, Date.now() - commandStartedAtMs),
+      });
       yield* Deferred.succeed(envelope.result, { sequence: committedCommand.lastSequence });
     }).pipe(
       Effect.catch((error) =>
@@ -242,10 +285,39 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       return yield* Deferred.await(result);
     });
 
+  const dryRunDispatch: OrchestrationEngineShape["dryRunDispatch"] = (command) =>
+    Effect.gen(function* () {
+      const currentReadModel = readModel;
+      const currentSequence = currentReadModel.snapshotSequence;
+      const eventBase = yield* decideOrchestrationCommand({
+        command,
+        readModel: currentReadModel,
+      });
+      const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase];
+      const events: Array<OrchestrationEvent> = [];
+      for (let index = 0; index < eventBases.length; index += 1) {
+        const base = eventBases[index];
+        events.push(
+          Object.assign({}, base, {
+            sequence: currentSequence + index + 1,
+          }),
+        );
+      }
+
+      return {
+        currentSequence,
+        finalSequence: events.at(-1)?.sequence ?? currentSequence,
+        normalizedCommand: command,
+        events,
+        skippedEffects: [],
+      } satisfies OrchestrationDryRunResult;
+    });
+
   return {
     getReadModel,
     readEvents,
     dispatch,
+    dryRunDispatch,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.

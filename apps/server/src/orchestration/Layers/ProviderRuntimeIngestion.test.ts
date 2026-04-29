@@ -540,6 +540,105 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.activeTurnId).toBeNull();
   });
 
+  it("prunes persisted bindings for archived, deleted, and missing threads during startup reconcile", async () => {
+    const harness = await createHarness({ autoStart: false });
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-thread-create-delete-target"),
+        threadId: asThreadId("thread-delete-target"),
+        projectId: asProjectId("project-1"),
+        title: "Delete Target",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("cmd-thread-archive-startup-prune"),
+        threadId: asThreadId("thread-1"),
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.makeUnsafe("cmd-thread-archive-delete-target"),
+        threadId: asThreadId("thread-delete-target"),
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.makeUnsafe("cmd-thread-delete-startup-prune"),
+        threadId: asThreadId("thread-delete-target"),
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: asThreadId("thread-1"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed.archived",
+          lastRuntimeEventAt: createdAt,
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: asThreadId("thread-delete-target"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed.deleted",
+          lastRuntimeEventAt: createdAt,
+        },
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.directory.upsert({
+        threadId: asThreadId("thread-missing"),
+        provider: "codex",
+        runtimeMode: "approval-required",
+        status: "stopped",
+        runtimePayload: {
+          lastRuntimeEvent: "test.seed.missing",
+          lastRuntimeEventAt: createdAt,
+        },
+      }),
+    );
+
+    await harness.start();
+
+    expect(
+      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-1"))),
+    ).toMatchObject({ _tag: "None" });
+    expect(
+      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-delete-target"))),
+    ).toMatchObject({ _tag: "None" });
+    expect(
+      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-missing"))),
+    ).toMatchObject({ _tag: "None" });
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = new Date().toISOString();
@@ -2549,6 +2648,8 @@ describe("ProviderRuntimeIngestion", () => {
     expect(started?.kind).toBe("task.started");
     expect(started?.summary).toBe("Plan task started");
     expect(progress?.kind).toBe("task.progress");
+    expect(progress?.tone).toBe("thinking");
+    expect(progress?.summary).toBe("Thinking");
     expect(progressPayload?.detail).toBe("Code reviewer is validating the desktop rollout chunks.");
     expect(progressPayload?.summary).toBe(
       "Code reviewer is validating the desktop rollout chunks.",
@@ -2560,6 +2661,84 @@ describe("ProviderRuntimeIngestion", () => {
         (entry: ProviderRuntimeTestProposedPlan) => entry.id === "plan:thread-1:turn:turn-task-1",
       )?.planMarkdown,
     ).toBe("# Plan title");
+  });
+
+  it("projects reasoning deltas into thinking activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-thinking-delta-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-thinking-1"),
+      itemId: "reasoning-item-1",
+      payload: {
+        streamKind: "reasoning_text",
+        delta: "Need to inspect",
+      },
+    });
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-thinking-delta-2"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-thinking-1"),
+      itemId: "reasoning-item-1",
+      payload: {
+        streamKind: "reasoning_summary_text",
+        delta: " the ingestion path.",
+        summaryIndex: 0,
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.id === "evt-thinking-delta-1",
+        ) &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.id === "evt-thinking-delta-2",
+        ),
+    );
+
+    const firstDelta = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-thinking-delta-1",
+    );
+    const secondDelta = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.id === "evt-thinking-delta-2",
+    );
+
+    const firstPayload =
+      firstDelta?.payload && typeof firstDelta.payload === "object"
+        ? (firstDelta.payload as Record<string, unknown>)
+        : undefined;
+    const secondPayload =
+      secondDelta?.payload && typeof secondDelta.payload === "object"
+        ? (secondDelta.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(firstDelta?.tone).toBe("thinking");
+    expect(firstDelta?.summary).toBe("Thinking");
+    expect(firstDelta?.turnId).toBe("turn-thinking-1");
+    expect(firstPayload).toMatchObject({
+      text: "Need to inspect",
+      streamKind: "reasoning_text",
+      itemId: "reasoning-item-1",
+    });
+
+    expect(secondDelta?.tone).toBe("thinking");
+    expect(secondPayload).toMatchObject({
+      text: " the ingestion path.",
+      streamKind: "reasoning_summary_text",
+      itemId: "reasoning-item-1",
+      summaryIndex: 0,
+    });
   });
 
   it("projects structured user input request and resolution as thread activities", async () => {

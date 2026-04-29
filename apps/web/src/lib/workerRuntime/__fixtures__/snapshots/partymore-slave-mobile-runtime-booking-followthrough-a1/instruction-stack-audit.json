@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1",
+  "repo": "slave-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1",
+    "runtimeDir": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/partymore-slave-mobile-runtime-booking-followthrough-a1/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

@@ -3,8 +3,11 @@ import { DEFAULT_MODEL_BY_PROVIDER, type ModelCapabilities } from "@t3tools/cont
 
 import {
   applyClaudePromptEffortPrefix,
+  createModelSelection,
   getDefaultContextWindow,
   getDefaultEffort,
+  getModelSelectionBooleanOptionValue,
+  getModelSelectionStringOptionValue,
   hasContextWindowOption,
   hasEffortLevel,
   isClaudeUltrathinkPrompt,
@@ -139,6 +142,25 @@ describe("resolveEffort", () => {
 });
 
 describe("misc helpers", () => {
+  it("creates model selections and reads option values", () => {
+    const selection = createModelSelection("codex", "gpt-5.4", {
+      reasoningEffort: "high",
+      fastMode: true,
+    });
+
+    expect(selection).toEqual({
+      provider: "codex",
+      model: "gpt-5.4",
+      options: {
+        reasoningEffort: "high",
+        fastMode: true,
+      },
+    });
+    expect(getModelSelectionStringOptionValue(selection, "reasoningEffort")).toBe("high");
+    expect(getModelSelectionBooleanOptionValue(selection, "fastMode")).toBe(true);
+    expect(getModelSelectionStringOptionValue(selection, "missing")).toBeUndefined();
+  });
+
   it("detects ultrathink prompts", () => {
     expect(isClaudeUltrathinkPrompt("Ultrathink:\nInvestigate")).toBe(true);
     expect(isClaudeUltrathinkPrompt("Investigate")).toBe(false);

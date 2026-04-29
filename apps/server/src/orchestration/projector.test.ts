@@ -72,18 +72,34 @@ describe("orchestration projector", () => {
       ),
     );
 
-    expect(next.programs).toEqual([
+    expect(next.programs).toMatchObject([
       {
         id: "program-1",
         title: "CTO program",
         objective: "Ship the web-operated CTO layer.",
         status: "active",
+        declaredRepos: [],
+        affectedAppTargets: [],
+        requiredLocalSuites: [],
+        requiredExternalE2ESuites: [],
+        requireDevelopmentDeploy: false,
+        requireExternalE2E: false,
+        requireCleanPostFlight: false,
+        requirePrPerRepo: false,
         executiveProjectId: "project-cto",
         executiveThreadId: "thread-cto",
         currentOrchestratorThreadId: "thread-jasper",
+        repoPrs: [],
+        localValidation: [],
+        appValidations: [],
+        observedRepos: [],
+        postFlight: null,
         createdAt: now,
         updatedAt: now,
         completedAt: null,
+        cancelReason: null,
+        cancelledAt: null,
+        supersededByProgramId: null,
         deletedAt: null,
       },
     ]);
@@ -168,6 +184,226 @@ describe("orchestration projector", () => {
       ),
     );
     expect((deleted.programs ?? [])[0]?.deletedAt).toBe(later);
+  });
+
+  it("applies scope and evidence program events", async () => {
+    const now = new Date().toISOString();
+    const later = new Date(Date.parse(now) + 1_000).toISOString();
+    const created = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "program.created",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: now,
+          commandId: "cmd-program-create",
+          payload: {
+            programId: "program-1",
+            title: "CTO program",
+            objective: null,
+            status: "active",
+            executiveProjectId: "project-cto",
+            executiveThreadId: "thread-cto",
+            currentOrchestratorThreadId: null,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: null,
+          },
+        }),
+      ),
+    );
+
+    const scoped = await Effect.runPromise(
+      projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: "program.scope-updated",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-scope",
+          payload: {
+            programId: "program-1",
+            declaredRepos: ["t3code-vxapp"],
+            affectedAppTargets: ["web"],
+            requirePrPerRepo: true,
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    const withRepoPr = await Effect.runPromise(
+      projectEvent(
+        scoped,
+        makeEvent({
+          sequence: 3,
+          type: "program.repo-pr-upserted",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-pr",
+          payload: {
+            programId: "program-1",
+            repoPr: {
+              repo: "t3code-vxapp",
+              url: "https://github.com/t3tools/t3code-vxapp/pull/42",
+              number: 42,
+              state: "OPEN",
+              isDraft: false,
+              reviewDecision: "APPROVED",
+              mergeStateStatus: "CLEAN",
+              headRefName: "feature/program-closeout",
+              baseRefName: "main",
+              updatedAt: later,
+            },
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    const withLocalValidation = await Effect.runPromise(
+      projectEvent(
+        withRepoPr,
+        makeEvent({
+          sequence: 4,
+          type: "program.local-validation-upserted",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-local",
+          payload: {
+            programId: "program-1",
+            localValidation: {
+              repo: "t3code-vxapp",
+              suiteId: "lint",
+              kind: "bun_lint",
+              status: "passed",
+              summary: "bun lint passed",
+              command: "bun lint",
+              recordedAt: later,
+            },
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    const withAppValidation = await Effect.runPromise(
+      projectEvent(
+        withLocalValidation,
+        makeEvent({
+          sequence: 5,
+          type: "program.app-validation-upserted",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-app",
+          payload: {
+            programId: "program-1",
+            appValidation: {
+              target: "web",
+              kind: "external_e2e",
+              suiteId: "founder-e2e",
+              status: "passed",
+              summary: "Founder E2E passed",
+              command: "vx apps web --test founder-e2e",
+              url: "https://web.dev.example.test",
+              recordedAt: later,
+            },
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    const withObservedRepo = await Effect.runPromise(
+      projectEvent(
+        withAppValidation,
+        makeEvent({
+          sequence: 6,
+          type: "program.observed-repo-upserted",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-observed",
+          payload: {
+            programId: "program-1",
+            observedRepo: {
+              repo: "t3code-vxapp",
+              source: "git-status",
+              observedAt: later,
+            },
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    const settled = await Effect.runPromise(
+      projectEvent(
+        withObservedRepo,
+        makeEvent({
+          sequence: 7,
+          type: "program.post-flight-set",
+          aggregateKind: "program",
+          aggregateId: "program-1",
+          occurredAt: later,
+          commandId: "cmd-program-post-flight",
+          payload: {
+            programId: "program-1",
+            postFlight: {
+              status: "clean",
+              summary: "Worktree clean after closeout",
+              recordedAt: later,
+            },
+            updatedAt: later,
+          },
+        }),
+      ),
+    );
+
+    expect(settled.programs?.[0]).toMatchObject({
+      id: "program-1",
+      declaredRepos: ["t3code-vxapp"],
+      affectedAppTargets: ["web"],
+      requirePrPerRepo: true,
+      repoPrs: [
+        {
+          repo: "t3code-vxapp",
+          number: 42,
+        },
+      ],
+      localValidation: [
+        {
+          repo: "t3code-vxapp",
+          suiteId: "lint",
+          kind: "bun_lint",
+        },
+      ],
+      appValidations: [
+        {
+          target: "web",
+          suiteId: "founder-e2e",
+          kind: "external_e2e",
+        },
+      ],
+      observedRepos: [
+        {
+          repo: "t3code-vxapp",
+          source: "git-status",
+        },
+      ],
+      postFlight: {
+        status: "clean",
+        summary: "Worktree clean after closeout",
+        recordedAt: later,
+      },
+    });
   });
 
   it("applies program notification lifecycle events", async () => {

@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, FileSystem, Layer, Path } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
@@ -40,6 +41,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { WorkerRuntimeLive } from "./workerRuntime/Layers/WorkerRuntime.ts";
 import {
   makeVxappOrchestratorWakeReactorLayer,
   makeVxappRuntimeServicesLayer,
@@ -69,6 +71,7 @@ export function makeServerProviderLayer(): Layer.Layer<
   | ServerConfig
   | ServerSettingsService
   | FileSystem.FileSystem
+  | ChildProcessSpawner.ChildProcessSpawner
   | AnalyticsService
 > {
   return Effect.gen(function* () {
@@ -138,6 +141,7 @@ export function makeServerRuntimeServicesLayer() {
     Layer.provideMerge(WorkspaceEntriesLive),
   );
   const orchestratorWakeReactorLayer = makeVxappOrchestratorWakeReactorLayer(runtimeServicesLayer);
+  const workerRuntimeLayer = WorkerRuntimeLive.pipe(Layer.provideMerge(runtimeServicesBaseLayer));
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
@@ -166,6 +170,7 @@ export function makeServerRuntimeServicesLayer() {
     workspaceEntriesLayer,
     workspaceFileSystemLayer,
     projectFaviconResolverLayer,
+    workerRuntimeLayer,
     vxappRuntimeServicesLayer,
     gitManagerLayer,
     terminalLayer,

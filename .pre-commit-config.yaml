@@ -1,0 +1,30 @@
+minimum_pre_commit_version: "3.0.0"
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      - id: docs-submodule-local-sync
+        name: "@Docs Submodule Local Sync"
+        entry: scripts/hooks/check-submodule-policy.sh --path @Docs --label @Docs --expected-branch main --enforce-branch --pointer-source index
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: docs-submodule-sync-advisory
+        name: "@Docs Submodule Sync Advisory"
+        entry: scripts/hooks/check-submodule-policy.sh --path @Docs --label @Docs --expected-branch main --enforce-branch --pointer-source index --advisory --fetch-remote --require-remote-match
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: docs-submodule-sync
+        name: "@Docs Submodule Sync"
+        entry: scripts/hooks/check-submodule-policy.sh --path @Docs --label @Docs --expected-branch main --enforce-branch --pointer-source head --fetch-remote --require-remote-match
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

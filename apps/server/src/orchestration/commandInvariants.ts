@@ -12,4 +12,6 @@ export {
   requireThreadAbsent,
   requireThreadArchived,
   requireThreadNotArchived,
+  requireThreadTurnStartSlotAvailable,
+  threadHasLiveActiveTurn,
 } from "@t3tools/orchestration-core/command-invariants";

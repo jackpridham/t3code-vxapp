@@ -137,6 +137,7 @@ import {
 import { SidebarBrandHeader } from "./sidebar/SidebarBrandHeader";
 import { CtoAttentionPanel } from "./sidebar/CtoAttentionPanel";
 import { ProgramNotificationsPanel } from "./sidebar/ProgramNotificationsPanel";
+import { SidebarOrchestrationPreview } from "./sidebar/orchestration/SidebarOrchestrationPreview";
 import { useOrchestrationProjectBuckets } from "./sidebar/useOrchestrationProjectBuckets";
 import {
   buildPrStatusIndicator,
@@ -2829,6 +2830,8 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
             <CtoAttentionPanel groups={ctoAttentionGroups} />
 
             <ProgramNotificationsPanel groups={programNotificationGroups} />
+
+            {import.meta.env.DEV ? <SidebarOrchestrationPreview /> : null}
 
             <SidebarGroup className="px-2 py-2">
               <div className="mb-1 flex items-center gap-1.5 pl-2 pr-1.5">

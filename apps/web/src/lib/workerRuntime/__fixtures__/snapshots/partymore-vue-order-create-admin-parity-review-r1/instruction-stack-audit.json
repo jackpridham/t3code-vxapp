@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1",
+  "repo": "vue-vxapp",
+  "taskClass": "review-only",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1",
+    "runtimeDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

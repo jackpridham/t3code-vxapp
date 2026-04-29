@@ -71,6 +71,10 @@ const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
+const workerRuntimeFixturesRoot = path.resolve(
+  import.meta.dirname,
+  "../../web/src/lib/workerRuntime/__fixtures__/snapshots",
+);
 
 const defaultOpenService: OpenShape = {
   openBrowser: () => Effect.void,
@@ -365,7 +369,8 @@ async function sendRequest(
 
   const id = crypto.randomUUID();
   const body =
-    method === ORCHESTRATION_WS_METHODS.dispatchCommand
+    method === ORCHESTRATION_WS_METHODS.dispatchCommand ||
+    method === ORCHESTRATION_WS_METHODS.dryRunCommand
       ? { _tag: method, command: params }
       : params && typeof params === "object" && !Array.isArray(params)
         ? { _tag: method, ...(params as Record<string, unknown>) }
@@ -1044,6 +1049,438 @@ describe("WebSocket Server", () => {
     );
   });
 
+  it("serves direct project and thread lookup RPCs without falling back to snapshots", async () => {
+    server = await createTestServer({
+      cwd: "/test/direct-read-workspace",
+      autoBootstrapProjectFromCwd: true,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    const bootstrapThreadId = (welcome.data as { bootstrapThreadId?: string }).bootstrapThreadId;
+    expect(bootstrapProjectId).toBeDefined();
+    expect(bootstrapThreadId).toBeDefined();
+
+    const projectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getProjectById, {
+      projectId: bootstrapProjectId,
+    });
+    expect(projectResponse.error).toBeUndefined();
+    expect(projectResponse.result).toEqual(
+      expect.objectContaining({
+        id: bootstrapProjectId,
+        workspaceRoot: "/test/direct-read-workspace",
+      }),
+    );
+
+    const threadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getThreadById, {
+      threadId: bootstrapThreadId,
+    });
+    expect(threadResponse.error).toBeUndefined();
+    expect(threadResponse.result).toEqual(
+      expect.objectContaining({
+        id: bootstrapThreadId,
+        projectId: bootstrapProjectId,
+        title: "New thread",
+      }),
+    );
+  });
+
+  it("dry-runs orchestration commands without mutating persisted state or attachments", async () => {
+    const baseDir = makeTempDir("t3code-ws-dry-run-");
+    server = await createTestServer({ cwd: "/test", baseDir });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-ws-dry-run-project-");
+    const createdAt = new Date().toISOString();
+
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-ws-dry-run-project-create",
+      projectId: "project-dry-run",
+      title: "Dry Run Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-ws-dry-run-thread-create",
+      threadId: "thread-dry-run",
+      projectId: "project-dry-run",
+      title: "Dry Run Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const beforeEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(beforeEventsResponse.error).toBeUndefined();
+    expect(beforeEventsResponse.result).toHaveLength(2);
+
+    const dryRunResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dryRunCommand, {
+      type: "thread.turn.start",
+      commandId: "cmd-ws-dry-run-turn-start",
+      threadId: "thread-dry-run",
+      message: {
+        messageId: "msg-ws-dry-run-1",
+        role: "user",
+        text: "preview me",
+        attachments: [
+          {
+            type: "image",
+            name: "dry-run.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+            dataUrl: "data:image/png;base64,AAAAAA==",
+          },
+        ],
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      createdAt,
+    });
+    expect(dryRunResponse.error).toBeUndefined();
+    expect(dryRunResponse.result).toEqual(
+      expect.objectContaining({
+        currentSequence: 2,
+        finalSequence: 4,
+        normalizedCommand: expect.objectContaining({
+          type: "thread.turn.start",
+          threadId: "thread-dry-run",
+        }),
+        skippedEffects: expect.arrayContaining([
+          "attachments.persist",
+          "project-hooks.before-prompt",
+        ]),
+      }),
+    );
+    expect(
+      (dryRunResponse.result as { events: Array<{ type: string }> }).events.map(
+        (event) => event.type,
+      ),
+    ).toEqual(["thread.message-sent", "thread.turn-start-requested"]);
+
+    await expect(
+      waitForPush(
+        ws,
+        ORCHESTRATION_WS_CHANNELS.domainEvent,
+        (push) => (push.data as { commandId?: string }).commandId === "cmd-ws-dry-run-turn-start",
+        5,
+        200,
+      ),
+    ).rejects.toThrow("Timed out waiting for WebSocket message");
+
+    const afterEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(afterEventsResponse.error).toBeUndefined();
+    expect(afterEventsResponse.result).toHaveLength(2);
+
+    const { attachmentsDir } = deriveServerPathsSync(baseDir, undefined);
+    expect(fs.existsSync(attachmentsDir)).toBe(false);
+  });
+
+  it("supports the live-server dry-run command matrix used by T3 helper flows", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-ws-dry-run-matrix-project-");
+    const createdAt = new Date().toISOString();
+
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-ws-dry-run-matrix-project-create",
+      projectId: "project-dry-run-matrix",
+      title: "Dry Run Matrix Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-ws-dry-run-matrix-thread-create",
+      threadId: "thread-dry-run-matrix",
+      projectId: "project-dry-run-matrix",
+      title: "Dry Run Matrix Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const existingProjectResponse = await sendRequest(
+      ws,
+      ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
+      {
+        workspaceRoot,
+      },
+    );
+    expect(existingProjectResponse.error).toBeUndefined();
+    expect(existingProjectResponse.result).toEqual(
+      expect.objectContaining({
+        id: "project-dry-run-matrix",
+        workspaceRoot,
+      }),
+    );
+
+    const beforeEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(beforeEventsResponse.error).toBeUndefined();
+    expect(beforeEventsResponse.result).toHaveLength(2);
+
+    const dryRunCases = [
+      {
+        command: {
+          type: "project.create",
+          commandId: "cmd-ws-dry-run-preview-project-create",
+          projectId: "project-dry-run-preview",
+          title: "Preview Project",
+          workspaceRoot,
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          createdAt,
+        },
+        expectedEventTypes: ["project.created"],
+        expectedNormalizedCommand: {
+          type: "project.create",
+          commandId: "cmd-ws-dry-run-preview-project-create",
+          projectId: "project-dry-run-preview",
+          workspaceRoot,
+        },
+      },
+      {
+        command: {
+          type: "project.delete",
+          commandId: "cmd-ws-dry-run-preview-project-delete",
+          projectId: "project-dry-run-matrix",
+        },
+        expectedEventTypes: ["project.deleted"],
+        expectedNormalizedCommand: {
+          type: "project.delete",
+          commandId: "cmd-ws-dry-run-preview-project-delete",
+          projectId: "project-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.create",
+          commandId: "cmd-ws-dry-run-preview-thread-create",
+          threadId: "thread-dry-run-preview",
+          projectId: "project-dry-run-matrix",
+          title: "Preview Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        },
+        expectedEventTypes: ["thread.created"],
+        expectedNormalizedCommand: {
+          type: "thread.create",
+          commandId: "cmd-ws-dry-run-preview-thread-create",
+          threadId: "thread-dry-run-preview",
+          projectId: "project-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: "cmd-ws-dry-run-preview-turn-interrupt",
+          threadId: "thread-dry-run-matrix",
+          turnId: "turn-preview-interrupt",
+          createdAt,
+        },
+        expectedEventTypes: ["thread.turn-interrupt-requested"],
+        expectedNormalizedCommand: {
+          type: "thread.turn.interrupt",
+          commandId: "cmd-ws-dry-run-preview-turn-interrupt",
+          threadId: "thread-dry-run-matrix",
+          turnId: "turn-preview-interrupt",
+        },
+      },
+      {
+        command: {
+          type: "thread.session.stop",
+          commandId: "cmd-ws-dry-run-preview-session-stop",
+          threadId: "thread-dry-run-matrix",
+          createdAt,
+        },
+        expectedEventTypes: ["thread.session-stop-requested"],
+        expectedNormalizedCommand: {
+          type: "thread.session.stop",
+          commandId: "cmd-ws-dry-run-preview-session-stop",
+          threadId: "thread-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.checkpoint.revert",
+          commandId: "cmd-ws-dry-run-preview-checkpoint-revert",
+          threadId: "thread-dry-run-matrix",
+          turnCount: 1,
+          createdAt,
+        },
+        expectedEventTypes: ["thread.checkpoint-revert-requested"],
+        expectedNormalizedCommand: {
+          type: "thread.checkpoint.revert",
+          commandId: "cmd-ws-dry-run-preview-checkpoint-revert",
+          threadId: "thread-dry-run-matrix",
+          turnCount: 1,
+        },
+      },
+      {
+        command: {
+          type: "thread.archive",
+          commandId: "cmd-ws-dry-run-preview-thread-archive",
+          threadId: "thread-dry-run-matrix",
+        },
+        expectedEventTypes: ["thread.archived"],
+        expectedNormalizedCommand: {
+          type: "thread.archive",
+          commandId: "cmd-ws-dry-run-preview-thread-archive",
+          threadId: "thread-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.delete",
+          commandId: "cmd-ws-dry-run-preview-thread-delete",
+          threadId: "thread-dry-run-matrix",
+        },
+        expectedEventTypes: ["thread.deleted"],
+        expectedNormalizedCommand: {
+          type: "thread.delete",
+          commandId: "cmd-ws-dry-run-preview-thread-delete",
+          threadId: "thread-dry-run-matrix",
+        },
+      },
+      {
+        command: {
+          type: "thread.meta.update",
+          commandId: "cmd-ws-dry-run-preview-thread-meta-update",
+          threadId: "thread-dry-run-matrix",
+          title: "Preview Renamed Thread",
+          labels: ["dry-run", "preview"],
+        },
+        expectedEventTypes: ["thread.meta-updated"],
+        expectedNormalizedCommand: {
+          type: "thread.meta.update",
+          commandId: "cmd-ws-dry-run-preview-thread-meta-update",
+          threadId: "thread-dry-run-matrix",
+          title: "Preview Renamed Thread",
+          labels: ["dry-run", "preview"],
+        },
+      },
+    ] as const;
+
+    for (const dryRunCase of dryRunCases) {
+      const response = await sendRequest(
+        ws,
+        ORCHESTRATION_WS_METHODS.dryRunCommand,
+        dryRunCase.command,
+      );
+
+      expect(response.error).toBeUndefined();
+      expect(response.result).toEqual(
+        expect.objectContaining({
+          currentSequence: 2,
+          finalSequence: 3,
+          normalizedCommand: expect.objectContaining(dryRunCase.expectedNormalizedCommand),
+          skippedEffects: [],
+        }),
+      );
+      expect(
+        (response.result as { events: Array<{ type: string }> }).events.map((event) => event.type),
+      ).toEqual(dryRunCase.expectedEventTypes);
+
+      await expect(
+        waitForPush(
+          ws,
+          ORCHESTRATION_WS_CHANNELS.domainEvent,
+          (push) =>
+            (push.data as { commandId?: string }).commandId === dryRunCase.command.commandId,
+          5,
+          200,
+        ),
+      ).rejects.toThrow("Timed out waiting for WebSocket message");
+    }
+
+    const afterEventsResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.replayEvents, {
+      fromSequenceExclusive: 0,
+    });
+    expect(afterEventsResponse.error).toBeUndefined();
+    expect(afterEventsResponse.result).toHaveLength(2);
+
+    const projectAfterDryRuns = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getProjectById, {
+      projectId: "project-dry-run-matrix",
+    });
+    expect(projectAfterDryRuns.error).toBeUndefined();
+    expect(projectAfterDryRuns.result).toEqual(
+      expect.objectContaining({
+        id: "project-dry-run-matrix",
+        title: "Dry Run Matrix Project",
+        deletedAt: null,
+      }),
+    );
+
+    const threadAfterDryRuns = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getThreadById, {
+      threadId: "thread-dry-run-matrix",
+    });
+    expect(threadAfterDryRuns.error).toBeUndefined();
+    expect(threadAfterDryRuns.result).toEqual(
+      expect.objectContaining({
+        id: "thread-dry-run-matrix",
+        title: "Dry Run Matrix Thread",
+        archivedAt: null,
+        deletedAt: null,
+      }),
+    );
+  });
+
   it("includes bootstrap ids in welcome when cwd project and thread already exist", async () => {
     const baseDir = makeTempDir("t3code-state-bootstrap-existing-");
     const { dbPath } = deriveServerPathsSync(baseDir, undefined);
@@ -1549,6 +1986,180 @@ describe("WebSocket Server", () => {
     );
   });
 
+  it("returns a normalized worker runtime snapshot for selected worker threads", async () => {
+    const runtimeFixtureId = "partymore-vue-order-create-admin-parity-p1";
+    const worktreePath = makeTempDir("t3code-worker-runtime-");
+    const runtimeDir = path.join(worktreePath, ".agents", "runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    for (const fileName of [
+      "context-plan.json",
+      "dispatch-contract.json",
+      "installed-packs.json",
+      "instruction-stack-audit.json",
+    ]) {
+      fs.copyFileSync(
+        path.join(workerRuntimeFixturesRoot, runtimeFixtureId, fileName),
+        path.join(runtimeDir, fileName),
+      );
+    }
+
+    server = await createTestServer({ cwd: worktreePath, autoBootstrapProjectFromCwd: true });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-worker-runtime-thread-create",
+      threadId: "thread-worker-runtime",
+      projectId: bootstrapProjectId,
+      title: "Worker Runtime Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath,
+      spawnRole: "worker",
+      createdAt: new Date().toISOString(),
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
+      threadId: "thread-worker-runtime",
+    });
+    expect(runtimeResponse.error).toBeUndefined();
+    expect(runtimeResponse.result).toEqual(
+      expect.objectContaining({
+        threadId: "thread-worker-runtime",
+        worktreePath,
+        runtimeDir,
+        summary: expect.objectContaining({
+          repo: "vue-vxapp",
+          taskClass: "review-only",
+          contextMode: "isolated",
+          closeoutAuthority: "code_tests",
+          auditStatus: "error",
+        }),
+        sourceFiles: expect.objectContaining({
+          contextPlan: expect.objectContaining({ status: "loaded" }),
+          dispatchContract: expect.objectContaining({ status: "loaded" }),
+          installedPacks: expect.objectContaining({ status: "loaded" }),
+          instructionStackAudit: expect.objectContaining({ status: "loaded" }),
+        }),
+      }),
+    );
+  });
+
+  it("reports missing worker runtime files without failing the whole request", async () => {
+    const worktreePath = makeTempDir("t3code-worker-runtime-missing-");
+    const runtimeDir = path.join(worktreePath, ".agents", "runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeDir, "context-plan.json"),
+      JSON.stringify({
+        schema_version: "1.0.0",
+        repo: "vue-vxapp",
+        taskClass: "review-only",
+        contextMode: "isolated",
+        closeoutAuthority: "code_tests",
+        selectedPacks: [],
+      }),
+      "utf8",
+    );
+
+    server = await createTestServer({ cwd: worktreePath, autoBootstrapProjectFromCwd: true });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-worker-runtime-partial-thread-create",
+      threadId: "thread-worker-runtime-partial",
+      projectId: bootstrapProjectId,
+      title: "Worker Runtime Partial Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath,
+      spawnRole: "worker",
+      createdAt: new Date().toISOString(),
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
+      threadId: "thread-worker-runtime-partial",
+    });
+    expect(runtimeResponse.error).toBeUndefined();
+    expect(runtimeResponse.result).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          repo: "vue-vxapp",
+          auditStatus: "missing",
+        }),
+        sourceFiles: expect.objectContaining({
+          contextPlan: expect.objectContaining({ status: "loaded" }),
+          dispatchContract: expect.objectContaining({ status: "missing" }),
+          installedPacks: expect.objectContaining({ status: "missing" }),
+          instructionStackAudit: expect.objectContaining({ status: "missing" }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects runtime snapshot requests for non-worker threads", async () => {
+    const projectRoot = makeTempDir("t3code-worker-runtime-project-");
+    server = await createTestServer({ cwd: projectRoot, autoBootstrapProjectFromCwd: true });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-non-worker-runtime-thread-create",
+      threadId: "thread-non-worker-runtime",
+      projectId: bootstrapProjectId,
+      title: "Non Worker Runtime Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: new Date().toISOString(),
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
+      threadId: "thread-non-worker-runtime",
+    });
+    expect(runtimeResponse.error?.message).toContain("is not a worker thread");
+  });
+
   it("returns error for unknown methods", async () => {
     server = await createTestServer({ cwd: "/test" });
     const addr = server.address();
@@ -1706,6 +2317,91 @@ describe("WebSocket Server", () => {
 
     expect(response.result).toBeUndefined();
     expect(response.error?.message).toContain("Workspace root does not exist:");
+  });
+
+  it("accepts thread.orchestrator-wake.upsert over dispatchCommand", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-ws-wake-project-");
+    const createdAt = new Date().toISOString();
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-ws-wake-project-create",
+      projectId: "project-wake",
+      title: "Wake Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-ws-wake-thread-create",
+      threadId: "thread-orch",
+      projectId: "project-wake",
+      title: "Wake Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const wakeUpsertResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.orchestrator-wake.upsert",
+      commandId: "cmd-ws-wake-upsert",
+      threadId: "thread-orch",
+      wakeItem: {
+        wakeId: "wake:thread-worker:turn-1:completed",
+        orchestratorThreadId: "thread-orch",
+        orchestratorProjectId: "project-wake",
+        workerThreadId: "thread-worker",
+        workerProjectId: "project-worker",
+        workerTurnId: "turn-1",
+        workflowId: "wf-1",
+        workerTitleSnapshot: "Worker One",
+        outcome: "completed",
+        summary: "Worker completed its assigned turn",
+        queuedAt: createdAt,
+        state: "pending",
+      },
+      createdAt,
+    });
+    expect(wakeUpsertResponse.error).toBeUndefined();
+    expect((wakeUpsertResponse.result as { sequence?: number } | undefined)?.sequence).toEqual(
+      expect.any(Number),
+    );
+
+    const push = await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (candidate) => {
+      const event = candidate.data as { type?: string };
+      return event.type === "thread.orchestrator-wake-upserted";
+    });
+    expect(push.data).toEqual(
+      expect.objectContaining({
+        type: "thread.orchestrator-wake-upserted",
+        payload: expect.objectContaining({
+          threadId: "thread-orch",
+          wakeItem: expect.objectContaining({
+            wakeId: "wake:thread-worker:turn-1:completed",
+            state: "pending",
+          }),
+        }),
+      }),
+    );
   });
 
   it("keeps orchestration domain push behavior for provider runtime events", async () => {

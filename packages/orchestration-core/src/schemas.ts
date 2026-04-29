@@ -3,7 +3,13 @@ import {
   ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,
   ProjectDeletedPayload as ContractsProjectDeletedPayloadSchema,
   ProgramCreatedPayload as ContractsProgramCreatedPayloadSchema,
+  ProgramScopeUpdatedPayload as ContractsProgramScopeUpdatedPayloadSchema,
   ProgramMetaUpdatedPayload as ContractsProgramMetaUpdatedPayloadSchema,
+  ProgramRepoPrUpsertedPayload as ContractsProgramRepoPrUpsertedPayloadSchema,
+  ProgramLocalValidationUpsertedPayload as ContractsProgramLocalValidationUpsertedPayloadSchema,
+  ProgramAppValidationUpsertedPayload as ContractsProgramAppValidationUpsertedPayloadSchema,
+  ProgramObservedRepoUpsertedPayload as ContractsProgramObservedRepoUpsertedPayloadSchema,
+  ProgramPostFlightSetPayload as ContractsProgramPostFlightSetPayloadSchema,
   ProgramDeletedPayload as ContractsProgramDeletedPayloadSchema,
   ProgramNotificationUpsertedPayload as ContractsProgramNotificationUpsertedPayloadSchema,
   ProgramNotificationConsumedPayload as ContractsProgramNotificationConsumedPayloadSchema,
@@ -36,7 +42,15 @@ export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchem
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema;
 
 export const ProgramCreatedPayload = ContractsProgramCreatedPayloadSchema;
+export const ProgramScopeUpdatedPayload = ContractsProgramScopeUpdatedPayloadSchema;
 export const ProgramMetaUpdatedPayload = ContractsProgramMetaUpdatedPayloadSchema;
+export const ProgramRepoPrUpsertedPayload = ContractsProgramRepoPrUpsertedPayloadSchema;
+export const ProgramLocalValidationUpsertedPayload =
+  ContractsProgramLocalValidationUpsertedPayloadSchema;
+export const ProgramAppValidationUpsertedPayload =
+  ContractsProgramAppValidationUpsertedPayloadSchema;
+export const ProgramObservedRepoUpsertedPayload = ContractsProgramObservedRepoUpsertedPayloadSchema;
+export const ProgramPostFlightSetPayload = ContractsProgramPostFlightSetPayloadSchema;
 export const ProgramDeletedPayload = ContractsProgramDeletedPayloadSchema;
 export const ProgramNotificationUpsertedPayload = ContractsProgramNotificationUpsertedPayloadSchema;
 export const ProgramNotificationConsumedPayload = ContractsProgramNotificationConsumedPayloadSchema;

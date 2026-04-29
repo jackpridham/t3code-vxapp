@@ -122,6 +122,152 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
     }),
   );
 
+  it.effect("looks up bounded project and thread summaries by id", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionOperationalQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-lookup',
+          'Lookup Project',
+          '/tmp/project-lookup',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '[]',
+          '2026-04-06T00:00:00.000Z',
+          '2026-04-06T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          labels_json,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-lookup',
+          'project-lookup',
+          'Lookup Thread',
+          '["worker"]',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          'turn-lookup',
+          '2026-04-06T00:00:02.000Z',
+          '2026-04-06T00:00:03.000Z',
+          '2026-04-06T00:00:04.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_sessions (
+          thread_id,
+          status,
+          provider_name,
+          provider_session_id,
+          provider_thread_id,
+          runtime_mode,
+          active_turn_id,
+          last_error,
+          updated_at
+        )
+        VALUES (
+          'thread-lookup',
+          'ready',
+          'codex',
+          NULL,
+          NULL,
+          'full-access',
+          NULL,
+          NULL,
+          '2026-04-06T00:00:05.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id,
+          turn_id,
+          pending_message_id,
+          source_proposed_plan_thread_id,
+          source_proposed_plan_id,
+          assistant_message_id,
+          state,
+          requested_at,
+          started_at,
+          completed_at,
+          checkpoint_turn_count,
+          checkpoint_ref,
+          checkpoint_status,
+          checkpoint_files_json
+        )
+        VALUES (
+          'thread-lookup',
+          'turn-lookup',
+          NULL,
+          NULL,
+          NULL,
+          'message-lookup',
+          'completed',
+          '2026-04-06T00:00:06.000Z',
+          '2026-04-06T00:00:06.000Z',
+          '2026-04-06T00:00:07.000Z',
+          NULL,
+          NULL,
+          NULL,
+          '[]'
+        )
+      `;
+
+      const project = yield* query.getProjectById({
+        projectId: ProjectId.makeUnsafe("project-lookup"),
+      });
+      const thread = yield* query.getThreadById({
+        threadId: ThreadId.makeUnsafe("thread-lookup"),
+      });
+
+      assert.equal(project?.id, "project-lookup");
+      assert.equal(project?.workspaceRoot, "/tmp/project-lookup");
+      assert.equal(thread?.id, "thread-lookup");
+      assert.equal(thread?.archivedAt, "2026-04-06T00:00:04.000Z");
+      assert.equal(thread?.session?.status, "ready");
+      assert.equal(thread?.latestTurn?.turnId, "turn-lookup");
+    }),
+  );
+
   it.effect("omits default parent overrides while preserving configured sidebar parents", () =>
     Effect.gen(function* () {
       const query = yield* ProjectionOperationalQuery;

@@ -1,0 +1,24 @@
+{
+  "repo": "agents-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit_push",
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:008-terse-worker-reporting",
+    "global:024-vx-plan-implement",
+    "global:025-vx-plan-implement-phase",
+    "global:050-vx-git-read",
+    "global:051-vx-git-closeout-authority",
+    "global:064-vx-quality-gate-awareness"
+  ],
+  "allowedCapabilities": ["commit", "edit", "inspect", "push", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "deploy", "stash"],
+  "conflicts": [],
+  "warnings": [],
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/stores-managed-target-agents-c1",
+  "repoClaude": "omitted",
+  "legacyGlobalSkills": false
+}

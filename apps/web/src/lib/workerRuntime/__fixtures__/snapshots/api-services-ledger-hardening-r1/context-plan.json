@@ -1,0 +1,27 @@
+{
+  "repo": "api-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:008-terse-worker-reporting",
+    "global:024-vx-plan-implement",
+    "global:025-vx-plan-implement-phase",
+    "global:063-generated-output-ownership",
+    "repo:api-vxapp:100-api-repo-orientation",
+    "repo:api-vxapp:109-api-repo-escalation",
+    "repo:api-vxapp:110-api-plan-execution",
+    "repo:api-vxapp:112-api-edit-rules",
+    "repo:api-vxapp:113-api-validation-selection"
+  ],
+  "allowedCapabilities": ["edit", "inspect", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "commit", "deploy", "push", "stash"],
+  "conflicts": [],
+  "warnings": [],
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/api-services-ledger-hardening-r1",
+  "repoClaude": "omitted",
+  "legacyGlobalSkills": false
+}

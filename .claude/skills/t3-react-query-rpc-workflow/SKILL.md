@@ -109,7 +109,7 @@ Avoid sending `{ includeArchived: false }` unless the server schema explicitly r
 Use distinct query keys:
 
 ```ts
-["artifacts", targetId, includeArchived ? "withArchived" : "active"]
+["artifacts", targetId, includeArchived ? "withArchived" : "active"];
 ```
 
 ## Cache Boundary Rules

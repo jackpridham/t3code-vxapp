@@ -14,6 +14,7 @@ import {
   PROVIDER_OPTIONS,
   derivePendingApprovals,
   derivePendingUserInputs,
+  deriveThinkingEntries,
   deriveTimelineEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
@@ -593,6 +594,181 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
   });
 
+  it("omits thinking updates from the generic work log", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "thinking-progress",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Compare the provider event shapes.",
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: "Need to inspect",
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: " the ingestion path.",
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toEqual([]);
+  });
+
+  it("collapses consecutive thinking updates into a single turn-level thinking entry", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "thinking-progress",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Compare the provider event shapes.",
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: "Need to inspect",
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: " the ingestion path.",
+        },
+      }),
+    ];
+
+    const [entry] = deriveThinkingEntries(activities, undefined);
+
+    expect(entry).toMatchObject({
+      id: "thinking:turn-thinking",
+      turnId: "turn-thinking",
+      latestThought: "Need to inspect the ingestion path.",
+    });
+    expect(entry?.thoughts).toEqual([
+      "Compare the provider event shapes.",
+      "Need to inspect the ingestion path.",
+    ]);
+  });
+
+  it("keeps distinct thinking snapshots when progress updates repeat within one turn", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "thinking-progress-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Compare the provider event shapes.",
+        },
+      }),
+      makeActivity({
+        id: "thinking-progress-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Check how ChatView groups work rows.",
+        },
+      }),
+    ];
+
+    const [entry] = deriveThinkingEntries(activities, undefined);
+
+    expect(entry?.thoughts).toEqual([
+      "Compare the provider event shapes.",
+      "Check how ChatView groups work rows.",
+    ]);
+  });
+
+  it("keeps a single turn-level thinking entry even when tool rows interleave", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "thinking-progress-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Inspect provider event ordering.",
+        },
+      }),
+      makeActivity({
+        id: "tool-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "tool.completed",
+        summary: "Read file",
+        tone: "tool",
+      }),
+      makeActivity({
+        id: "thinking-progress-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Check the web store projection path.",
+        },
+      }),
+    ];
+
+    const [entry] = deriveThinkingEntries(activities, undefined);
+
+    expect(deriveThinkingEntries(activities, undefined)).toHaveLength(1);
+    expect(entry?.thoughts).toEqual([
+      "Inspect provider event ordering.",
+      "Check the web store projection path.",
+    ]);
+  });
+
   it("filters by turn id when provided", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),
@@ -1059,10 +1235,24 @@ describe("deriveTimelineEntries", () => {
           tone: "tool",
         },
       ],
+      [
+        {
+          id: "thinking:turn-1",
+          createdAt: "2026-02-23T00:00:01.500Z",
+          turnId: TurnId.makeUnsafe("turn-1"),
+          thoughts: ["Inspect the repo layout."],
+          latestThought: "Inspect the repo layout.",
+        },
+      ],
     );
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["message", "proposed-plan", "work"]);
-    expect(entries[1]).toMatchObject({
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "work",
+      "proposed-plan",
+      "work",
+    ]);
+    expect(entries[2]).toMatchObject({
       kind: "proposed-plan",
       proposedPlan: {
         planMarkdown: "# Ship it",
@@ -1090,6 +1280,7 @@ describe("deriveTimelineEntries", () => {
           streaming: false,
         },
       ],
+      [],
       [],
       [],
     );

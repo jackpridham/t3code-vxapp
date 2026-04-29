@@ -331,7 +331,7 @@ describe("OrchestratorWakeReactor", () => {
     });
   });
 
-  it("keeps CTO attention empty for a Jasper-linked worker wake until a separate program notification is emitted", async () => {
+  it("auto-creates a passive program notification for a Jasper-linked worker wake", async () => {
     const harness = await createHarness();
     runtime = harness.runtime;
     scope = harness.scope;
@@ -344,6 +344,14 @@ describe("OrchestratorWakeReactor", () => {
         programId,
         title: "Jasper linked program",
         objective: "Keep wake handling separate from CTO attention.",
+        declaredRepos: ["t3code-vxapp"],
+        affectedAppTargets: [],
+        requiredLocalSuites: [],
+        requiredExternalE2ESuites: [],
+        requireDevelopmentDeploy: false,
+        requireExternalE2E: false,
+        requireCleanPostFlight: false,
+        requirePrPerRepo: true,
         executiveProjectId: asProjectId("project-orch"),
         executiveThreadId: asThreadId("thread-orch"),
         currentOrchestratorThreadId: asThreadId("thread-orch"),
@@ -380,7 +388,10 @@ describe("OrchestratorWakeReactor", () => {
       (model) =>
         model.orchestratorWakeItems.some(
           (item) => item.workerTurnId === asTurnId("turn-jasper-linked"),
-        ) && (model.ctoAttentionItems?.length ?? 0) === 0,
+        ) &&
+        (model.programNotifications ?? []).some(
+          (notification) => notification.notificationId === "program-status:program-jasper-linked",
+        ),
     );
     const wakeItem = wakeReadModel.orchestratorWakeItems.find(
       (item) => item.workerTurnId === asTurnId("turn-jasper-linked"),
@@ -393,40 +404,108 @@ describe("OrchestratorWakeReactor", () => {
       outcome: "completed",
     });
     expect(wakeReadModel.ctoAttentionItems ?? []).toHaveLength(0);
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "program.notification.upsert",
-        commandId: CommandId.makeUnsafe("cmd-jasper-linked-notification"),
-        notificationId: ProgramNotificationId.makeUnsafe("notif-jasper-linked"),
-        programId,
-        kind: "final_review_ready",
-        summary: "Jasper review is ready.",
-        evidence: {
-          workerThreadId: "thread-worker",
-        },
-        createdAt: "2026-04-05T12:00:10.000Z",
-      }),
-    );
-
-    const notificationReadModel = await waitForReadModel(
-      harness.engine,
-      (model) => (model.ctoAttentionItems?.length ?? 0) === 1,
-    );
-    expect(notificationReadModel.orchestratorWakeItems).toContainEqual(
+    expect(wakeReadModel.orchestratorWakeItems).toContainEqual(
       expect.objectContaining({
         wakeId: "wake:thread-worker:turn-jasper-linked:completed",
         orchestratorThreadId: asThreadId("thread-orch"),
       }),
     );
-    expect(notificationReadModel.ctoAttentionItems).toEqual([
+    expect(wakeReadModel.programNotifications).toContainEqual(
       expect.objectContaining({
-        notificationId: ProgramNotificationId.makeUnsafe("notif-jasper-linked"),
+        notificationId: ProgramNotificationId.makeUnsafe("program-status:program-jasper-linked"),
         programId,
-        kind: "final_review_ready",
-        state: "required",
+        orchestratorThreadId: asThreadId("thread-orch"),
+        kind: "worker_completed",
+        severity: "info",
+        state: "pending",
       }),
-    ]);
+    );
+  });
+
+  it("backfills missing worker program linkage before notifying the CTO program", async () => {
+    const harness = await createHarness();
+    runtime = harness.runtime;
+    scope = harness.scope;
+
+    const programId = ProgramId.makeUnsafe("program-backfill");
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "program.create",
+        commandId: CommandId.makeUnsafe("cmd-program-backfill"),
+        programId,
+        title: "Backfill program",
+        objective: "Backfill Jasper -> CTO linkage from orchestrator ownership.",
+        declaredRepos: ["t3code-vxapp"],
+        affectedAppTargets: [],
+        requiredLocalSuites: [],
+        requiredExternalE2ESuites: [],
+        requireDevelopmentDeploy: false,
+        requireExternalE2E: false,
+        requireCleanPostFlight: false,
+        requirePrPerRepo: true,
+        executiveProjectId: asProjectId("project-orch"),
+        executiveThreadId: asThreadId("thread-orch"),
+        currentOrchestratorThreadId: asThreadId("thread-orch"),
+        createdAt: "2026-04-05T12:09:00.000Z",
+      }),
+    );
+
+    await setThreadSession(harness.engine, {
+      threadId: asThreadId("thread-orch"),
+      status: "running",
+      activeTurnId: asTurnId("turn-orch-backfill"),
+      updatedAt: "2026-04-05T12:09:30.000Z",
+    });
+    await createWorkerThread(harness.engine, {
+      threadId: asThreadId("thread-worker-backfill"),
+      orchestratorProjectId: asProjectId("project-orch"),
+      orchestratorThreadId: asThreadId("thread-orch"),
+      parentThreadId: asThreadId("thread-orch"),
+      workflowId: "wf-thread-orch-backfill",
+    });
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-complete-backfill"),
+      provider: "codex",
+      createdAt: "2026-04-05T12:10:00.000Z",
+      threadId: asThreadId("thread-worker-backfill"),
+      turnId: asTurnId("turn-worker-backfill"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const readModel = await waitForReadModel(
+      harness.engine,
+      (model) =>
+        model.threads.some(
+          (thread) =>
+            thread.id === asThreadId("thread-worker-backfill") &&
+            thread.programId === programId &&
+            thread.executiveProjectId === asProjectId("project-orch") &&
+            thread.executiveThreadId === asThreadId("thread-orch"),
+        ) &&
+        (model.programNotifications ?? []).some(
+          (notification) => notification.notificationId === "program-status:program-backfill",
+        ),
+    );
+
+    expect(
+      readModel.threads.find((thread) => thread.id === asThreadId("thread-worker-backfill")),
+    ).toMatchObject({
+      programId,
+      executiveProjectId: asProjectId("project-orch"),
+      executiveThreadId: asThreadId("thread-orch"),
+    });
+    expect(readModel.programNotifications).toContainEqual(
+      expect.objectContaining({
+        notificationId: ProgramNotificationId.makeUnsafe("program-status:program-backfill"),
+        programId,
+        orchestratorThreadId: asThreadId("thread-orch"),
+        kind: "worker_completed",
+      }),
+    );
   });
 
   it("creates a pending interrupted wake from a turn diff when runtime completion was missed", async () => {
@@ -1189,6 +1268,9 @@ describe("OrchestratorWakeReactor", () => {
             message.text.includes(
               "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
             ) &&
+            message.text.includes(
+              "vx t3 lanes finalize-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+            ) &&
             message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
             message.text.includes("--json") &&
             message.text.includes("Wake context:") &&
@@ -1216,6 +1298,9 @@ describe("OrchestratorWakeReactor", () => {
           message.text.includes("Worker updates are ready for review.") &&
           message.text.includes(
             "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+          ) &&
+          message.text.includes(
+            "vx t3 lanes finalize-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
           ) &&
           message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
           message.text.includes("--json") &&

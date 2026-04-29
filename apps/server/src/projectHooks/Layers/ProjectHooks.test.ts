@@ -143,6 +143,14 @@ function makeEngine(
       dispatch(command);
       return Effect.succeed({ sequence: 1 });
     },
+    dryRunDispatch: (command) =>
+      Effect.succeed({
+        currentSequence: readModel.snapshotSequence,
+        finalSequence: readModel.snapshotSequence,
+        normalizedCommand: command,
+        events: [],
+        skippedEffects: [],
+      }),
     streamDomainEvents: Stream.empty,
   };
 }

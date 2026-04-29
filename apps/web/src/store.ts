@@ -98,6 +98,25 @@ function updateProject(
   return changed ? next : projects;
 }
 
+function updateProgram(
+  programs: Program[],
+  programId: Program["id"],
+  updater: (program: Program) => Program,
+): Program[] {
+  let changed = false;
+  const next = programs.map((program) => {
+    if (program.id !== programId) {
+      return program;
+    }
+    const updated = updater(program);
+    if (updated !== program) {
+      changed = true;
+    }
+    return updated;
+  });
+  return changed ? next : programs;
+}
+
 type ReadModelProgram = NonNullable<OrchestrationReadModel["programs"]>[number];
 type ReadModelProgramNotification = NonNullable<
   OrchestrationReadModel["programNotifications"]
@@ -922,12 +941,28 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         title: event.payload.title,
         objective: event.payload.objective,
         status: event.payload.status,
+        declaredRepos: event.payload.declaredRepos,
+        affectedAppTargets: event.payload.affectedAppTargets,
+        requiredLocalSuites: event.payload.requiredLocalSuites,
+        requiredExternalE2ESuites: event.payload.requiredExternalE2ESuites,
+        requireDevelopmentDeploy: event.payload.requireDevelopmentDeploy,
+        requireExternalE2E: event.payload.requireExternalE2E,
+        requireCleanPostFlight: event.payload.requireCleanPostFlight,
+        requirePrPerRepo: event.payload.requirePrPerRepo,
         executiveProjectId: event.payload.executiveProjectId,
         executiveThreadId: event.payload.executiveThreadId,
         currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId,
+        repoPrs: event.payload.repoPrs,
+        localValidation: event.payload.localValidation,
+        appValidations: event.payload.appValidations,
+        observedRepos: event.payload.observedRepos,
+        postFlight: event.payload.postFlight,
         createdAt: event.payload.createdAt,
         updatedAt: event.payload.updatedAt,
         completedAt: event.payload.completedAt,
+        cancelReason: event.payload.cancelReason,
+        cancelledAt: event.payload.cancelledAt,
+        supersededByProgramId: event.payload.supersededByProgramId,
         deletedAt: null,
       });
       const programs = existing
@@ -936,40 +971,150 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       return { ...state, programs };
     }
 
-    case "program.meta-updated": {
-      let changed = false;
+    case "program.scope-updated": {
       const currentPrograms = state.programs ?? [];
-      const programs = [...currentPrograms];
-      for (let index = 0; index < programs.length; index += 1) {
-        const program = programs[index];
-        if (!program || program.id !== event.payload.programId) {
-          continue;
-        }
-        changed = true;
-        const nextProgram = Object.assign(
-          {},
-          program,
-          event.payload.title !== undefined ? { title: event.payload.title } : null,
-          event.payload.objective !== undefined ? { objective: event.payload.objective } : null,
-          event.payload.status !== undefined ? { status: event.payload.status } : null,
-          event.payload.executiveProjectId !== undefined
-            ? { executiveProjectId: event.payload.executiveProjectId }
-            : null,
-          event.payload.executiveThreadId !== undefined
-            ? { executiveThreadId: event.payload.executiveThreadId }
-            : null,
-          event.payload.currentOrchestratorThreadId !== undefined
-            ? { currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId }
-            : null,
-          event.payload.completedAt !== undefined
-            ? { completedAt: event.payload.completedAt }
-            : null,
-          { updatedAt: event.payload.updatedAt },
-        );
-        programs[index] = nextProgram;
-        break;
+      const programs = updateProgram(currentPrograms, event.payload.programId, (program) => ({
+        ...program,
+        ...(event.payload.declaredRepos !== undefined
+          ? { declaredRepos: event.payload.declaredRepos }
+          : {}),
+        ...(event.payload.affectedAppTargets !== undefined
+          ? { affectedAppTargets: event.payload.affectedAppTargets }
+          : {}),
+        ...(event.payload.requiredLocalSuites !== undefined
+          ? { requiredLocalSuites: event.payload.requiredLocalSuites }
+          : {}),
+        ...(event.payload.requiredExternalE2ESuites !== undefined
+          ? { requiredExternalE2ESuites: event.payload.requiredExternalE2ESuites }
+          : {}),
+        ...(event.payload.requireDevelopmentDeploy !== undefined
+          ? { requireDevelopmentDeploy: event.payload.requireDevelopmentDeploy }
+          : {}),
+        ...(event.payload.requireExternalE2E !== undefined
+          ? { requireExternalE2E: event.payload.requireExternalE2E }
+          : {}),
+        ...(event.payload.requireCleanPostFlight !== undefined
+          ? { requireCleanPostFlight: event.payload.requireCleanPostFlight }
+          : {}),
+        ...(event.payload.requirePrPerRepo !== undefined
+          ? { requirePrPerRepo: event.payload.requirePrPerRepo }
+          : {}),
+        updatedAt: event.payload.updatedAt,
+      }));
+      return programs === currentPrograms ? state : { ...state, programs };
+    }
+
+    case "program.meta-updated": {
+      const currentPrograms = state.programs ?? [];
+      const programIndex = currentPrograms.findIndex(
+        (program) => program.id === event.payload.programId,
+      );
+      if (programIndex < 0) {
+        return state;
       }
-      return changed ? { ...state, programs } : state;
+
+      const currentProgram = currentPrograms[programIndex];
+      if (!currentProgram) {
+        return state;
+      }
+
+      const updatedProgram = {
+        ...currentProgram,
+        ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+        ...(event.payload.objective !== undefined ? { objective: event.payload.objective } : {}),
+        ...(event.payload.status !== undefined ? { status: event.payload.status } : {}),
+        ...(event.payload.executiveProjectId !== undefined
+          ? { executiveProjectId: event.payload.executiveProjectId }
+          : {}),
+        ...(event.payload.executiveThreadId !== undefined
+          ? { executiveThreadId: event.payload.executiveThreadId }
+          : {}),
+        ...(event.payload.currentOrchestratorThreadId !== undefined
+          ? { currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId }
+          : {}),
+        ...(event.payload.completedAt !== undefined
+          ? { completedAt: event.payload.completedAt }
+          : {}),
+        ...(event.payload.cancelReason !== undefined
+          ? { cancelReason: event.payload.cancelReason }
+          : {}),
+        ...(event.payload.cancelledAt !== undefined
+          ? { cancelledAt: event.payload.cancelledAt }
+          : {}),
+        ...(event.payload.supersededByProgramId !== undefined
+          ? { supersededByProgramId: event.payload.supersededByProgramId }
+          : {}),
+        updatedAt: event.payload.updatedAt,
+      };
+      const programs = currentPrograms.slice();
+      programs[programIndex] = updatedProgram;
+      return { ...state, programs };
+    }
+
+    case "program.repo-pr-upserted": {
+      const currentPrograms = state.programs ?? [];
+      const programs = updateProgram(currentPrograms, event.payload.programId, (program) => ({
+        ...program,
+        repoPrs: upsertCollectionItemByKey({
+          existing: program.repoPrs ?? [],
+          nextItem: event.payload.repoPr,
+          getKey: (entry) => entry.repo,
+        }),
+        updatedAt: event.payload.updatedAt,
+      }));
+      return programs === currentPrograms ? state : { ...state, programs };
+    }
+
+    case "program.local-validation-upserted": {
+      const currentPrograms = state.programs ?? [];
+      const programs = updateProgram(currentPrograms, event.payload.programId, (program) => ({
+        ...program,
+        localValidation: upsertCollectionItemByKey({
+          existing: program.localValidation ?? [],
+          nextItem: event.payload.localValidation,
+          getKey: (entry) => `${entry.repo}|${entry.suiteId}|${entry.kind}`,
+        }),
+        updatedAt: event.payload.updatedAt,
+      }));
+      return programs === currentPrograms ? state : { ...state, programs };
+    }
+
+    case "program.app-validation-upserted": {
+      const currentPrograms = state.programs ?? [];
+      const programs = updateProgram(currentPrograms, event.payload.programId, (program) => ({
+        ...program,
+        appValidations: upsertCollectionItemByKey({
+          existing: program.appValidations ?? [],
+          nextItem: event.payload.appValidation,
+          getKey: (entry) => `${entry.target}|${entry.suiteId}|${entry.kind}`,
+        }),
+        updatedAt: event.payload.updatedAt,
+      }));
+      return programs === currentPrograms ? state : { ...state, programs };
+    }
+
+    case "program.observed-repo-upserted": {
+      const currentPrograms = state.programs ?? [];
+      const programs = updateProgram(currentPrograms, event.payload.programId, (program) => ({
+        ...program,
+        observedRepos: upsertCollectionItemByKey({
+          existing: program.observedRepos ?? [],
+          nextItem: event.payload.observedRepo,
+          getKey: (entry) => `${entry.repo}|${entry.source}`,
+        }),
+        updatedAt: event.payload.updatedAt,
+      }));
+      return programs === currentPrograms ? state : { ...state, programs };
+    }
+
+    case "program.post-flight-set": {
+      const currentPrograms = state.programs ?? [];
+      const programs = updateProgram(currentPrograms, event.payload.programId, (program) => ({
+        ...program,
+        postFlight: event.payload.postFlight,
+        updatedAt: event.payload.updatedAt,
+      }));
+      return programs === currentPrograms ? state : { ...state, programs };
     }
 
     case "program.deleted": {

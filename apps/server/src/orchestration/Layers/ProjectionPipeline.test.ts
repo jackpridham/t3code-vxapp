@@ -1475,6 +1475,142 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect(
+    "bootstrap advances skipped projector cursors to the final sequence of replayed commands",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = new Date().toISOString();
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.makeUnsafe("evt-bootstrap-project"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.makeUnsafe("project-bootstrap"),
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-bootstrap-project"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-bootstrap-project"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.makeUnsafe("project-bootstrap"),
+            title: "Bootstrap Project",
+            workspaceRoot: "/tmp/project-bootstrap",
+            defaultModelSelection: null,
+            scripts: [],
+            hooks: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.makeUnsafe("evt-bootstrap-thread"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-bootstrap"),
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-bootstrap-thread"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-bootstrap-thread"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-bootstrap"),
+            projectId: ProjectId.makeUnsafe("project-bootstrap"),
+            title: "Bootstrap Thread",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.makeUnsafe("evt-bootstrap-message"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-bootstrap"),
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-bootstrap-turn"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-bootstrap-turn"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-bootstrap"),
+            messageId: MessageId.makeUnsafe("message-bootstrap"),
+            role: "user",
+            text: "hello bootstrap",
+            attachments: [],
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.turn-start-requested",
+          eventId: EventId.makeUnsafe("evt-bootstrap-turn-start"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.makeUnsafe("thread-bootstrap"),
+          occurredAt: now,
+          commandId: CommandId.makeUnsafe("cmd-bootstrap-turn"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-bootstrap-turn"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.makeUnsafe("thread-bootstrap"),
+            messageId: MessageId.makeUnsafe("message-bootstrap"),
+            createdAt: now,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const checkpointProjectorRows = yield* sql<{
+          readonly lastAppliedSequence: number;
+        }>`
+        SELECT last_applied_sequence AS "lastAppliedSequence"
+        FROM projection_state
+        WHERE projector = ${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}
+      `;
+        const maxSequenceRows = yield* sql<{ readonly maxSequence: number }>`
+        SELECT MAX(sequence) AS "maxSequence"
+        FROM orchestration_events
+      `;
+        assert.deepEqual(checkpointProjectorRows, [
+          { lastAppliedSequence: maxSequenceRows[0]?.maxSequence ?? 0 },
+        ]);
+
+        const pendingTurnRows = yield* sql<{
+          readonly threadId: string;
+          readonly messageId: string;
+        }>`
+        SELECT
+          thread_id AS "threadId",
+          pending_message_id AS "messageId"
+        FROM projection_turns
+        WHERE thread_id = 'thread-bootstrap'
+          AND turn_id IS NULL
+          AND state = 'pending'
+      `;
+        assert.deepEqual(pendingTurnRows, [
+          {
+            threadId: "thread-bootstrap",
+            messageId: "message-bootstrap",
+          },
+        ]);
+      }),
+  );
+
   it.effect("keeps accumulated assistant text when completion payload text is empty", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
@@ -3215,6 +3351,100 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         WHERE projector = 'projection.projects'
       `;
       assert.deepEqual(projectorRows, [{ lastAppliedSequence: 1 }]);
+    }),
+  );
+
+  it.effect("advances each projector cursor once per multi-event command", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = new Date().toISOString();
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-batched-project"),
+        projectId: ProjectId.makeUnsafe("project-batched"),
+        title: "Batched Project",
+        workspaceRoot: "/tmp/project-batched",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      });
+
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-batched-thread"),
+        threadId: ThreadId.makeUnsafe("thread-batched"),
+        projectId: ProjectId.makeUnsafe("project-batched"),
+        title: "Batched Thread",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        interactionMode: "default",
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+
+      yield* sql`
+        CREATE TABLE projection_state_update_log (
+          projector TEXT NOT NULL
+        )
+      `;
+      yield* sql`
+        CREATE TRIGGER log_projection_state_updates
+        AFTER UPDATE ON projection_state
+        BEGIN
+          INSERT INTO projection_state_update_log(projector)
+          VALUES (NEW.projector);
+        END
+      `;
+
+      const result = yield* engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-batched-turn"),
+        threadId: ThreadId.makeUnsafe("thread-batched"),
+        message: {
+          messageId: MessageId.makeUnsafe("message-batched"),
+          role: "user",
+          text: "hello batch",
+          attachments: [],
+        },
+        interactionMode: "default",
+        runtimeMode: "approval-required",
+        createdAt,
+      });
+
+      const updateCountRows = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS "count"
+        FROM projection_state_update_log
+      `;
+      assert.equal(
+        updateCountRows[0]?.count ?? 0,
+        Object.keys(ORCHESTRATION_PROJECTOR_NAMES).length,
+      );
+
+      const distinctProjectorRows = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(DISTINCT projector) AS "count"
+        FROM projection_state_update_log
+      `;
+      assert.equal(
+        distinctProjectorRows[0]?.count ?? 0,
+        Object.keys(ORCHESTRATION_PROJECTOR_NAMES).length,
+      );
+
+      const checkpointProjectorRows = yield* sql<{
+        readonly lastAppliedSequence: number;
+      }>`
+        SELECT last_applied_sequence AS "lastAppliedSequence"
+        FROM projection_state
+        WHERE projector = ${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}
+      `;
+      assert.deepEqual(checkpointProjectorRows, [{ lastAppliedSequence: result.sequence }]);
     }),
   );
 

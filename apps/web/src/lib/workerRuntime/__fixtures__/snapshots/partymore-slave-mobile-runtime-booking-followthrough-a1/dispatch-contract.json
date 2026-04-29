@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "repo": "slave-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit",
+  "validationProfile": null,
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:008-terse-worker-reporting",
+    "global:024-vx-plan-implement",
+    "global:025-vx-plan-implement-phase",
+    "global:051-vx-git-closeout-authority",
+    "repo:slave-vxapp:100-slave-repo-orientation",
+    "repo:slave-vxapp:110-slave-plan-execution",
+    "repo:slave-vxapp:112-slave-edit-rules",
+    "repo:slave-vxapp:113-slave-validation-selection",
+    "repo:slave-vxapp:141-slave-commit-closeout"
+  ],
+  "allowedCapabilities": ["commit", "edit", "inspect", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "deploy", "push", "stash"]
+}

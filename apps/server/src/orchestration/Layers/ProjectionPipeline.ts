@@ -83,11 +83,13 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   orchestratorWakes: "projection.orchestrator-wakes",
 } as const;
 
-type ProjectorName =
-  (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES];
+const CORE_PROJECTOR_NAME_SET = new Set<string>(Object.values(ORCHESTRATION_PROJECTOR_NAMES));
+
+type ProjectorEventType = OrchestrationEvent["type"];
 
 export interface ProjectorDefinition {
-  readonly name: ProjectorName;
+  readonly name: string;
+  readonly eventTypes: ReadonlyArray<ProjectorEventType>;
   readonly apply: (
     event: OrchestrationEvent,
     attachmentSideEffects: AttachmentSideEffects,
@@ -97,6 +99,42 @@ export interface ProjectorDefinition {
 export interface AttachmentSideEffects extends ProjectionAttachmentSideEffects {
   readonly deletedThreadIds: Set<string>;
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
+}
+
+function defineProjector(input: ProjectorDefinition): ProjectorDefinition {
+  return input;
+}
+
+function projectorAppliesToEvent(
+  projector: ProjectorDefinition,
+  event: OrchestrationEvent,
+): boolean {
+  return projector.eventTypes.includes(event.type);
+}
+
+function projectorSource(projector: ProjectorDefinition): "core" | "vxapp" {
+  return CORE_PROJECTOR_NAME_SET.has(projector.name) ? "core" : "vxapp";
+}
+
+function createAttachmentSideEffects(): AttachmentSideEffects {
+  return {
+    deletedThreadIds: new Set<string>(),
+    prunedThreadRelativePaths: new Map<string, Set<string>>(),
+  };
+}
+
+function upsertCollectionItemByKey<T>(
+  items: ReadonlyArray<T>,
+  nextItem: T,
+  matches: (item: T) => boolean,
+): T[] {
+  const index = items.findIndex(matches);
+  if (index < 0) {
+    return [...items, nextItem];
+  }
+  const nextItems = items.slice();
+  nextItems[index] = nextItem;
+  return nextItems;
 }
 
 const materializeAttachmentsForProjection = Effect.fn("materializeAttachmentsForProjection")(
@@ -110,6 +148,42 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null {
   }
   const requestId = (payload as Record<string, unknown>).requestId;
   return typeof requestId === "string" ? ApprovalRequestId.makeUnsafe(requestId) : null;
+}
+
+function extractActivityDetail(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const detail = (payload as Record<string, unknown>).detail;
+  return typeof detail === "string" ? detail : null;
+}
+
+function resolvesPendingApprovalFromFailureActivity(
+  activityKind: string,
+  payload: unknown,
+): boolean {
+  const detail = extractActivityDetail(payload)?.toLowerCase();
+  if (!detail) {
+    return false;
+  }
+
+  if (activityKind === "provider.approval.respond.failed") {
+    return (
+      detail.includes("stale pending approval request") ||
+      detail.includes("unknown pending approval request") ||
+      detail.includes("unknown pending permission request")
+    );
+  }
+
+  if (activityKind === "provider.user-input.respond.failed") {
+    return (
+      detail.includes("stale pending user-input request") ||
+      detail.includes("unknown pending user-input request") ||
+      detail.includes("unknown pending user input request")
+    );
+  }
+
+  return false;
 }
 
 function checkpointStatusToProjectionTurnState(
@@ -780,15 +854,69 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             title: event.payload.title,
             objective: event.payload.objective,
             status: event.payload.status,
+            declaredRepos: event.payload.declaredRepos ?? [],
+            affectedAppTargets: event.payload.affectedAppTargets ?? [],
+            requiredLocalSuites: event.payload.requiredLocalSuites ?? [],
+            requiredExternalE2ESuites: event.payload.requiredExternalE2ESuites ?? [],
+            requireDevelopmentDeploy: event.payload.requireDevelopmentDeploy ?? false,
+            requireExternalE2E: event.payload.requireExternalE2E ?? false,
+            requireCleanPostFlight: event.payload.requireCleanPostFlight ?? false,
+            requirePrPerRepo: event.payload.requirePrPerRepo ?? false,
             executiveProjectId: event.payload.executiveProjectId,
             executiveThreadId: event.payload.executiveThreadId,
             currentOrchestratorThreadId: event.payload.currentOrchestratorThreadId,
+            repoPrs: event.payload.repoPrs ?? [],
+            localValidation: event.payload.localValidation ?? [],
+            appValidations: event.payload.appValidations ?? [],
+            observedRepos: event.payload.observedRepos ?? [],
+            postFlight: event.payload.postFlight ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             completedAt: event.payload.completedAt,
+            cancelReason: event.payload.cancelReason ?? null,
+            cancelledAt: event.payload.cancelledAt ?? null,
+            supersededByProgramId: event.payload.supersededByProgramId ?? null,
             deletedAt: null,
           });
           return;
+
+        case "program.scope-updated": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            ...(event.payload.declaredRepos !== undefined
+              ? { declaredRepos: event.payload.declaredRepos }
+              : {}),
+            ...(event.payload.affectedAppTargets !== undefined
+              ? { affectedAppTargets: event.payload.affectedAppTargets }
+              : {}),
+            ...(event.payload.requiredLocalSuites !== undefined
+              ? { requiredLocalSuites: event.payload.requiredLocalSuites }
+              : {}),
+            ...(event.payload.requiredExternalE2ESuites !== undefined
+              ? { requiredExternalE2ESuites: event.payload.requiredExternalE2ESuites }
+              : {}),
+            ...(event.payload.requireDevelopmentDeploy !== undefined
+              ? { requireDevelopmentDeploy: event.payload.requireDevelopmentDeploy }
+              : {}),
+            ...(event.payload.requireExternalE2E !== undefined
+              ? { requireExternalE2E: event.payload.requireExternalE2E }
+              : {}),
+            ...(event.payload.requireCleanPostFlight !== undefined
+              ? { requireCleanPostFlight: event.payload.requireCleanPostFlight }
+              : {}),
+            ...(event.payload.requirePrPerRepo !== undefined
+              ? { requirePrPerRepo: event.payload.requirePrPerRepo }
+              : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
 
         case "program.meta-updated": {
           const existingRow = yield* projectionProgramRepository.getById({
@@ -816,6 +944,114 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.completedAt !== undefined
               ? { completedAt: event.payload.completedAt }
               : {}),
+            ...(event.payload.cancelReason !== undefined
+              ? { cancelReason: event.payload.cancelReason }
+              : {}),
+            ...(event.payload.cancelledAt !== undefined
+              ? { cancelledAt: event.payload.cancelledAt }
+              : {}),
+            ...(event.payload.supersededByProgramId !== undefined
+              ? { supersededByProgramId: event.payload.supersededByProgramId }
+              : {}),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.repo-pr-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            repoPrs: upsertCollectionItemByKey(
+              existingRow.value.repoPrs,
+              event.payload.repoPr,
+              (entry) => entry.repo === event.payload.repoPr.repo,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.local-validation-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            localValidation: upsertCollectionItemByKey(
+              existingRow.value.localValidation,
+              event.payload.localValidation,
+              (entry) =>
+                entry.repo === event.payload.localValidation.repo &&
+                entry.suiteId === event.payload.localValidation.suiteId &&
+                entry.kind === event.payload.localValidation.kind,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.app-validation-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            appValidations: upsertCollectionItemByKey(
+              existingRow.value.appValidations,
+              event.payload.appValidation,
+              (entry) =>
+                entry.target === event.payload.appValidation.target &&
+                entry.suiteId === event.payload.appValidation.suiteId &&
+                entry.kind === event.payload.appValidation.kind,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.observed-repo-upserted": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            observedRepos: upsertCollectionItemByKey(
+              existingRow.value.observedRepos,
+              event.payload.observedRepo,
+              (entry) =>
+                entry.repo === event.payload.observedRepo.repo &&
+                entry.source === event.payload.observedRepo.source,
+            ),
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "program.post-flight-set": {
+          const existingRow = yield* projectionProgramRepository.getById({
+            programId: event.payload.programId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProgramRepository.upsert({
+            ...existingRow.value,
+            postFlight: event.payload.postFlight,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -1573,6 +1809,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
         case "thread.activity-appended": {
+          const activityKind = event.payload.activity.kind;
+          if (
+            activityKind !== "approval.requested" &&
+            activityKind !== "approval.resolved" &&
+            activityKind !== "user-input.requested" &&
+            activityKind !== "user-input.resolved" &&
+            activityKind !== "provider.approval.respond.failed" &&
+            activityKind !== "provider.user-input.respond.failed"
+          ) {
+            return;
+          }
           const requestId =
             extractActivityRequestId(event.payload.activity.payload) ??
             event.metadata.requestId ??
@@ -1583,7 +1830,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingRow = yield* projectionPendingApprovalRepository.getByRequestId({
             requestId,
           });
-          if (event.payload.activity.kind === "approval.resolved") {
+          const resolvedByFailureActivity = resolvesPendingApprovalFromFailureActivity(
+            activityKind,
+            event.payload.activity.payload,
+          );
+          if (
+            activityKind === "approval.resolved" ||
+            activityKind === "user-input.resolved" ||
+            resolvedByFailureActivity
+          ) {
             const resolvedDecisionRaw =
               typeof event.payload.activity.payload === "object" &&
               event.payload.activity.payload !== null &&
@@ -1651,88 +1906,191 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.user-input-response-requested": {
+          const existingRow = yield* projectionPendingApprovalRepository.getByRequestId({
+            requestId: event.payload.requestId,
+          });
+          yield* projectionPendingApprovalRepository.upsert({
+            requestId: event.payload.requestId,
+            threadId: Option.isSome(existingRow)
+              ? existingRow.value.threadId
+              : event.payload.threadId,
+            turnId: Option.isSome(existingRow) ? existingRow.value.turnId : null,
+            status: "resolved",
+            decision: null,
+            createdAt: Option.isSome(existingRow)
+              ? existingRow.value.createdAt
+              : event.payload.createdAt,
+            resolvedAt: event.payload.createdAt,
+          });
+          return;
+        }
+
         default:
           return;
       }
     });
 
     const projectors: ReadonlyArray<ProjectorDefinition> = [
-      {
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
+        eventTypes: ["project.created", "project.meta-updated", "project.deleted"],
         apply: applyProjectsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.programs,
+        eventTypes: [
+          "program.created",
+          "program.scope-updated",
+          "program.meta-updated",
+          "program.repo-pr-upserted",
+          "program.local-validation-upserted",
+          "program.app-validation-upserted",
+          "program.observed-repo-upserted",
+          "program.post-flight-set",
+          "program.deleted",
+        ],
         apply: applyProgramsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
+        eventTypes: [
+          "program.notification-upserted",
+          "program.notification-consumed",
+          "program.notification-dropped",
+        ],
         apply: applyProgramNotificationsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.ctoAttention,
+        eventTypes: [
+          "program.notification-upserted",
+          "program.notification-consumed",
+          "program.notification-dropped",
+        ],
         apply: applyCtoAttentionProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+        eventTypes: ["thread.message-sent", "thread.reverted"],
         apply: applyThreadMessagesProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+        eventTypes: ["thread.proposed-plan-upserted", "thread.reverted"],
         apply: applyThreadProposedPlansProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+        eventTypes: ["thread.activity-appended", "thread.reverted"],
         apply: applyThreadActivitiesProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+        eventTypes: ["thread.session-set"],
         apply: applyThreadSessionsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
+        eventTypes: [
+          "thread.turn-start-requested",
+          "thread.session-set",
+          "thread.message-sent",
+          "thread.turn-interrupt-requested",
+          "thread.turn-checkpoint-recorded",
+          "thread.turn-diff-completed",
+          "thread.reverted",
+        ],
         apply: applyThreadTurnsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+        eventTypes: [],
         apply: applyCheckpointsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
+        eventTypes: [
+          "thread.activity-appended",
+          "thread.approval-response-requested",
+          "thread.user-input-response-requested",
+        ],
         apply: applyPendingApprovalsProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
+        eventTypes: ["thread.orchestrator-wake-upserted"],
         apply: applyOrchestratorWakesProjection,
-      },
-      {
+      }),
+      defineProjector({
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
+        eventTypes: [
+          "thread.created",
+          "thread.archived",
+          "thread.unarchived",
+          "thread.meta-updated",
+          "thread.runtime-mode-set",
+          "thread.interaction-mode-set",
+          "thread.deleted",
+          "thread.message-sent",
+          "thread.proposed-plan-upserted",
+          "thread.activity-appended",
+          "thread.orchestrator-wake-upserted",
+          "thread.session-set",
+          "thread.turn-checkpoint-recorded",
+          "thread.turn-diff-completed",
+          "thread.reverted",
+        ],
         apply: applyThreadsProjection,
-      },
+      }),
       ...getVxappProjectionProjectors(),
     ];
 
-    const applyProjectorForEvent = Effect.fn("applyProjectorForEvent")(function* (
-      projector: ProjectorDefinition,
-      event: OrchestrationEvent,
-    ) {
-      const attachmentSideEffects: AttachmentSideEffects = {
-        deletedThreadIds: new Set<string>(),
-        prunedThreadRelativePaths: new Map<string, Set<string>>(),
-      };
+    const applyProjectorEventsInTransaction = Effect.fn("applyProjectorEventsInTransaction")(
+      function* (projector: ProjectorDefinition, events: ReadonlyArray<OrchestrationEvent>) {
+        if (events.length === 0) {
+          return [] as ReadonlyArray<ProjectionAttachmentSideEffects>;
+        }
 
-      yield* projector.apply(event, attachmentSideEffects).pipe(
-        Effect.flatMap(() =>
-          projectionStateRepository.upsert({
-            projector: projector.name,
-            lastAppliedSequence: event.sequence,
-            updatedAt: event.occurredAt,
-          }),
-        ),
-      );
+        const attachmentSideEffects = yield* Effect.forEach(
+          events,
+          (event) =>
+            Effect.gen(function* () {
+              const applicable = projectorAppliesToEvent(projector, event);
+              const source = projectorSource(projector);
+              if (!applicable) {
+                yield* Effect.logDebug("orchestration projector skipped event", {
+                  projector: projector.name,
+                  projectorSource: source,
+                  eventType: event.type,
+                  sequence: event.sequence,
+                  commandId: event.commandId,
+                  durationMs: 0,
+                });
+                return null;
+              }
 
-      return attachmentSideEffects;
-    });
+              const startedAtMs = Date.now();
+              const nextAttachmentSideEffects = createAttachmentSideEffects();
+              yield* projector.apply(event, nextAttachmentSideEffects);
+              yield* Effect.logDebug("orchestration projector applied event", {
+                projector: projector.name,
+                projectorSource: source,
+                eventType: event.type,
+                sequence: event.sequence,
+                commandId: event.commandId,
+                durationMs: Math.max(0, Date.now() - startedAtMs),
+              });
+              return nextAttachmentSideEffects as ProjectionAttachmentSideEffects;
+            }),
+          { concurrency: 1 },
+        );
+
+        return attachmentSideEffects.filter(
+          (sideEffect): sideEffect is ProjectionAttachmentSideEffects => sideEffect !== null,
+        );
+      },
+    );
 
     const flushAttachmentSideEffects: OrchestrationProjectionPipelineShape["flushAttachmentSideEffects"] =
       (sideEffects) =>
@@ -1754,14 +2112,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           Effect.asVoid,
         );
 
-    const runProjectorForEvent = Effect.fn("runProjectorForEvent")(function* (
+    const runProjectorForEvents = Effect.fn("runProjectorForEvents")(function* (
       projector: ProjectorDefinition,
-      event: OrchestrationEvent,
+      events: ReadonlyArray<OrchestrationEvent>,
     ) {
       const attachmentSideEffects = yield* sql.withTransaction(
-        applyProjectorForEvent(projector, event),
+        applyProjectorEventsInTransaction(projector, events).pipe(
+          Effect.flatMap((nextAttachmentSideEffects) => {
+            const lastEvent = events.at(-1) ?? null;
+            if (lastEvent === null) {
+              return Effect.succeed(nextAttachmentSideEffects);
+            }
+
+            return projectionStateRepository
+              .upsert({
+                projector: projector.name,
+                lastAppliedSequence: lastEvent.sequence,
+                updatedAt: lastEvent.occurredAt,
+              })
+              .pipe(Effect.as(nextAttachmentSideEffects));
+          }),
+        ),
       );
-      yield* flushAttachmentSideEffects([attachmentSideEffects]);
+      yield* flushAttachmentSideEffects(attachmentSideEffects);
     });
 
     const bootstrapProjector = (projector: ProjectorDefinition) =>
@@ -1775,16 +2148,75 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               eventStore.readFromSequence(
                 Option.isSome(stateRow) ? stateRow.value.lastAppliedSequence : 0,
               ),
-              (event) => runProjectorForEvent(projector, event),
+              (event) => runProjectorForEvents(projector, [event]),
             ),
           ),
         );
 
+    const projectEventsInTransaction: OrchestrationProjectionPipelineShape["projectEventsInTransaction"] =
+      (events) =>
+        events.length === 0
+          ? Effect.succeed([])
+          : Effect.gen(function* () {
+              const startedAtMs = Date.now();
+              const applicableProjectors = projectors.filter((projector) =>
+                events.some((event) => projectorAppliesToEvent(projector, event)),
+              );
+              const applicableCoreProjectorCount = applicableProjectors.filter(
+                (projector) => projectorSource(projector) === "core",
+              ).length;
+              const applicableVxappProjectorCount =
+                applicableProjectors.length - applicableCoreProjectorCount;
+              const skippedProjectorCount = projectors.length - applicableProjectors.length;
+              const eventTypes = Array.from(new Set(events.map((event) => event.type)));
+              const rows = yield* Effect.forEach(
+                projectors,
+                (projector) => applyProjectorEventsInTransaction(projector, events),
+                {
+                  concurrency: 1,
+                },
+              );
+              const sideEffects = rows.flat();
+              const lastEvent = events.at(-1) ?? null;
+              if (lastEvent === null) {
+                return sideEffects;
+              }
+
+              yield* projectionStateRepository.upsertMany(
+                projectors.map((projector) => ({
+                  projector: projector.name,
+                  lastAppliedSequence: lastEvent.sequence,
+                  updatedAt: lastEvent.occurredAt,
+                })),
+              );
+
+              yield* Effect.logDebug("orchestration projection batch completed", {
+                eventCount: events.length,
+                eventTypes,
+                commandId: lastEvent.commandId,
+                finalSequence: lastEvent.sequence,
+                projectorCount: projectors.length,
+                applicableCoreProjectorCount,
+                applicableVxappProjectorCount,
+                skippedProjectorCount,
+                projectionStateRowsWritten: projectors.length,
+                durationMs: Math.max(0, Date.now() - startedAtMs),
+              });
+
+              return sideEffects;
+            });
+
     const projectEventInTransaction: OrchestrationProjectionPipelineShape["projectEventInTransaction"] =
-      (event) =>
-        Effect.forEach(projectors, (projector) => applyProjectorForEvent(projector, event), {
-          concurrency: 1,
-        });
+      (event) => projectEventsInTransaction([event]);
+
+    const projectEvents: OrchestrationProjectionPipelineShape["projectEvents"] = (events) =>
+      sql.withTransaction(projectEventsInTransaction(events)).pipe(
+        Effect.flatMap((sideEffects) => flushAttachmentSideEffects(sideEffects)),
+        Effect.asVoid,
+        Effect.catchTag("SqlError", (sqlError) =>
+          Effect.fail(toPersistenceSqlError("ProjectionPipeline.projectEvents:query")(sqlError)),
+        ),
+      );
 
     const projectEvent: OrchestrationProjectionPipelineShape["projectEvent"] = (event) =>
       sql.withTransaction(projectEventInTransaction(event)).pipe(
@@ -1816,7 +2248,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
 
     return {
       bootstrap,
+      projectEvents,
       projectEvent,
+      projectEventsInTransaction,
       projectEventInTransaction,
       flushAttachmentSideEffects,
     } satisfies OrchestrationProjectionPipelineShape;

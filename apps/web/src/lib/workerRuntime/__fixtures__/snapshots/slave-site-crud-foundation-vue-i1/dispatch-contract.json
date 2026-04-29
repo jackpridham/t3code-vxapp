@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "repo": "vue-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit",
+  "validationProfile": null,
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:008-terse-worker-reporting",
+    "global:024-vx-plan-implement",
+    "global:025-vx-plan-implement-phase",
+    "global:050-vx-git-read",
+    "global:051-vx-git-closeout-authority",
+    "global:063-generated-output-ownership",
+    "global:064-vx-quality-gate-awareness",
+    "repo:vue-vxapp:100-vue-repo-orientation",
+    "repo:vue-vxapp:110-vue-plan-execution",
+    "repo:vue-vxapp:112-vue-edit-rules",
+    "repo:vue-vxapp:113-vue-validation-selection",
+    "repo:vue-vxapp:141-vue-commit-closeout"
+  ],
+  "allowedCapabilities": ["commit", "edit", "inspect", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "deploy", "push", "stash"]
+}

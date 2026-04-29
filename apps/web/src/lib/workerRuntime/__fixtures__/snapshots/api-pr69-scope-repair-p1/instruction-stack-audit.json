@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/api-pr69-scope-repair-p1",
+  "repo": "api-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit_push",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/api-pr69-scope-repair-p1",
+    "runtimeDir": "/fixtures/worktrees/api-pr69-scope-repair-p1/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/api-pr69-scope-repair-p1/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/api-pr69-scope-repair-p1/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

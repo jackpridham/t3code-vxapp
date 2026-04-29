@@ -1,11 +1,15 @@
 import { type ProviderKind, type ThreadId } from "@t3tools/contracts";
 import { Effect, Layer, Option } from "effect";
 
-import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
+import {
+  type ProviderSessionRuntime,
+  ProviderSessionRuntimeRepository,
+} from "../../persistence/Services/ProviderSessionRuntime.ts";
 import { ProviderSessionDirectoryPersistenceError, ProviderValidationError } from "../Errors.ts";
 import {
   ProviderSessionDirectory,
   type ProviderRuntimeBinding,
+  type ProviderRuntimeBindingWithMetadata,
   type ProviderSessionDirectoryShape,
 } from "../Services/ProviderSessionDirectory.ts";
 
@@ -44,6 +48,37 @@ function readRuntimePayloadLastRuntimeEventAt(value: unknown): string | null {
   return typeof value.lastRuntimeEventAt === "string" ? value.lastRuntimeEventAt : null;
 }
 
+function toRuntimeBindingWithMetadata(
+  value: Pick<
+    ProviderSessionRuntime,
+    | "threadId"
+    | "providerName"
+    | "adapterKey"
+    | "runtimeMode"
+    | "status"
+    | "resumeCursor"
+    | "runtimePayload"
+    | "lastSeenAt"
+  >,
+  operation: string,
+): Effect.Effect<ProviderRuntimeBindingWithMetadata, ProviderSessionDirectoryPersistenceError> {
+  return decodeProviderKind(value.providerName, operation).pipe(
+    Effect.map(
+      (provider) =>
+        ({
+          threadId: value.threadId,
+          provider,
+          adapterKey: value.adapterKey,
+          runtimeMode: value.runtimeMode,
+          status: value.status,
+          resumeCursor: value.resumeCursor,
+          runtimePayload: value.runtimePayload,
+          lastSeenAt: value.lastSeenAt,
+        }) satisfies ProviderRuntimeBindingWithMetadata,
+    ),
+  );
+}
+
 function mergeRuntimePayload(
   existing: unknown | null,
   next: unknown | null | undefined,
@@ -67,18 +102,8 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
         Option.match(runtime, {
           onNone: () => Effect.succeed(Option.none<ProviderRuntimeBinding>()),
           onSome: (value) =>
-            decodeProviderKind(value.providerName, "ProviderSessionDirectory.getBinding").pipe(
-              Effect.map((provider) =>
-                Option.some({
-                  threadId: value.threadId,
-                  provider,
-                  adapterKey: value.adapterKey,
-                  runtimeMode: value.runtimeMode,
-                  status: value.status,
-                  resumeCursor: value.resumeCursor,
-                  runtimePayload: value.runtimePayload,
-                }),
-              ),
+            toRuntimeBindingWithMetadata(value, "ProviderSessionDirectory.getBinding").pipe(
+              Effect.map((binding) => Option.some(binding)),
             ),
         }),
       ),
@@ -166,12 +191,27 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
       Effect.map((rows) => rows.map((row) => row.threadId)),
     );
 
+  const listBindings: ProviderSessionDirectoryShape["listBindings"] = () =>
+    repository.list().pipe(
+      Effect.mapError(toPersistenceError("ProviderSessionDirectory.listBindings:list")),
+      Effect.flatMap((rows) =>
+        Effect.forEach(
+          rows,
+          (row) => toRuntimeBindingWithMetadata(row, "ProviderSessionDirectory.listBindings"),
+          {
+            concurrency: "unbounded",
+          },
+        ),
+      ),
+    );
+
   return {
     upsert,
     getProvider,
     getBinding,
     remove,
     listThreadIds,
+    listBindings,
   } satisfies ProviderSessionDirectoryShape;
 });
 

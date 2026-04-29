@@ -137,6 +137,31 @@ export function requireThread(input: {
   );
 }
 
+export function threadHasLiveActiveTurn(thread: Pick<OrchestrationThread, "session">): boolean {
+  return (
+    thread.session !== null &&
+    thread.session.activeTurnId !== null &&
+    (thread.session.status === "starting" || thread.session.status === "running")
+  );
+}
+
+export function requireThreadTurnStartSlotAvailable(input: {
+  readonly thread: OrchestrationThread;
+  readonly command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const activeTurnId = input.thread.session?.activeTurnId ?? null;
+  if (!threadHasLiveActiveTurn(input.thread) || activeTurnId === null) {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Thread '${input.thread.id}' already has active turn '${activeTurnId}' and cannot start a new turn until it settles or is interrupted.`,
+    ),
+  );
+}
+
 export function requireThreadArchived(input: {
   readonly readModel: OrchestrationReadModel;
   readonly command: OrchestrationCommand;

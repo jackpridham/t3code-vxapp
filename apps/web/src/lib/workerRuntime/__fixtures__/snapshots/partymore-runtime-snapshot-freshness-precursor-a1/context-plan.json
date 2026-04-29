@@ -1,0 +1,36 @@
+{
+  "repo": "api-vxapp",
+  "taskClass": "planning",
+  "contextMode": "isolated",
+  "closeoutAuthority": "plan_only",
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:006-worker-command-telemetry",
+    "global:008-terse-worker-reporting",
+    "global:015-vx-apps-plan-state",
+    "global:063-generated-output-ownership",
+    "repo:api-vxapp:100-api-repo-orientation",
+    "repo:api-vxapp:103-api-coding-conventions",
+    "repo:api-vxapp:108-api-risk-and-gotchas",
+    "repo:api-vxapp:116-api-legacy-touch-gate",
+    "repo:api-vxapp:118-api-blocker-reporting",
+    "repo:api-vxapp:151-api-oop-service-pattern"
+  ],
+  "allowedCapabilities": ["inspect", "plan-mutate", "read"],
+  "forbiddenCapabilities": [
+    "branch-delete",
+    "commit",
+    "deploy",
+    "edit",
+    "push",
+    "run-local-tests",
+    "stash"
+  ],
+  "conflicts": [],
+  "warnings": [],
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1",
+  "repoClaude": "omitted",
+  "legacyGlobalSkills": false
+}

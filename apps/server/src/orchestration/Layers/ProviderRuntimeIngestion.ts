@@ -15,6 +15,7 @@ import {
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
+import { projectThinkingActivitiesFromRuntimeEvent } from "@t3tools/orchestration-core/provider-thinking-activities";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -115,6 +116,21 @@ function isLifecycleStateEvent(
 
 function runtimeModeForThread(thread: OrchestrationReadModel["threads"][number]) {
   return thread.session?.runtimeMode ?? thread.runtimeMode ?? "full-access";
+}
+
+function persistedSessionBindingPruneReason(
+  thread: OrchestrationReadModel["threads"][number] | undefined,
+): "missing-thread" | "archived-thread" | "deleted-thread" | null {
+  if (!thread) {
+    return "missing-thread";
+  }
+  if (thread.deletedAt !== null) {
+    return "deleted-thread";
+  }
+  if (thread.archivedAt !== null) {
+    return "archived-thread";
+  }
+  return null;
 }
 
 function truncateDetail(value: string, limit = 180): string {
@@ -221,6 +237,17 @@ function runtimeEventToActivities(
       ? { sequence: eventWithSequence.sessionSequence }
       : {};
   })();
+  const thinkingActivities = projectThinkingActivitiesFromRuntimeEvent(
+    maybeSequence.sequence === undefined
+      ? { event }
+      : {
+          event,
+          sequence: maybeSequence.sequence,
+        },
+  );
+  if (thinkingActivities.length > 0) {
+    return thinkingActivities;
+  }
   switch (event.type) {
     case "request.opened": {
       if (event.payload.requestType === "tool_user_input") {
@@ -387,27 +414,6 @@ function runtimeEventToActivities(
             ...(event.payload.description
               ? { detail: truncateDetail(event.payload.description) }
               : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
-    }
-
-    case "task.progress": {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "info",
-          kind: "task.progress",
-          summary: "Reasoning update",
-          payload: {
-            taskId: event.payload.taskId,
-            detail: truncateDetail(event.payload.summary ?? event.payload.description),
-            ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
-            ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
-            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -1407,6 +1413,12 @@ const make = Effect.fn("make")(function* () {
           }
 
           const thread = readModel.threads.find((entry) => entry.id === threadId);
+          const pruneReason = persistedSessionBindingPruneReason(thread);
+          if (pruneReason) {
+            yield* providerSessionDirectory.remove(threadId);
+            return;
+          }
+
           if (!thread) {
             return;
           }

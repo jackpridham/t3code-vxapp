@@ -7,12 +7,14 @@ import {
   OrchestrationGetBootstrapSummaryInput,
   OrchestrationGetCurrentStateInput,
   OrchestrationGetFileDiffInput,
+  OrchestrationGetProjectByIdInput,
   OrchestrationGetProjectByWorkspaceInput,
   ORCHESTRATION_WS_CHANNELS,
   OrchestrationGetReadinessInput,
   OrchestrationGetFullThreadDiffInput,
   ORCHESTRATION_WS_METHODS,
   OrchestrationGetSnapshotInput,
+  OrchestrationGetThreadByIdInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationListOrchestratorWakesInput,
   OrchestrationListProjectThreadsInput,
@@ -52,6 +54,7 @@ import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput 
 import { OpenInEditorInput } from "./editor";
 import {
   ServerConfigUpdatedPayload,
+  ServerGetWorkerRuntimeSnapshotInput,
   ServerListVortexAppArtifactsInput,
   ServerProviderUpdatedPayload,
 } from "./server";
@@ -101,6 +104,7 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
   serverListVortexApps: "server.listVortexApps",
   serverListVortexAppArtifacts: "server.listVortexAppArtifacts",
+  serverGetWorkerRuntimeSnapshot: "server.getWorkerRuntimeSnapshot",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -134,11 +138,13 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(ORCHESTRATION_WS_METHODS.getReadiness, OrchestrationGetReadinessInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getCurrentState, OrchestrationGetCurrentStateInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listProjects, OrchestrationListProjectsInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getProjectById, OrchestrationGetProjectByIdInput),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
     OrchestrationGetProjectByWorkspaceInput,
   ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listProjectThreads, OrchestrationListProjectThreadsInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getThreadById, OrchestrationGetThreadByIdInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listSessionThreads, OrchestrationListSessionThreadsInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listThreadMessages, OrchestrationListThreadMessagesInput),
   tagRequestBody(
@@ -152,6 +158,10 @@ const WebSocketRequestBody = Schema.Union([
   ),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.dispatchCommand,
+    Schema.Struct({ command: ClientOrchestrationCommand }),
+  ),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.dryRunCommand,
     Schema.Struct({ command: ClientOrchestrationCommand }),
   ),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getSnapshot, OrchestrationGetSnapshotInput),
@@ -198,6 +208,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverUpdateSettings, Schema.Struct({ patch: ServerSettingsPatch })),
   tagRequestBody(WS_METHODS.serverListVortexApps, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverListVortexAppArtifacts, ServerListVortexAppArtifactsInput),
+  tagRequestBody(WS_METHODS.serverGetWorkerRuntimeSnapshot, ServerGetWorkerRuntimeSnapshotInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

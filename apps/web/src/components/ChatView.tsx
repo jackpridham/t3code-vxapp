@@ -9,6 +9,7 @@ import {
   type ProjectScript,
   type ProviderKind,
   type ProjectEntry,
+  type ProgramId,
   type ProjectId,
   type ProviderApprovalDecision,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -16,7 +17,6 @@ import {
   type ResolvedKeybindingsConfig,
   type ServerProvider,
   type ThreadId,
-  type TurnId,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   RuntimeMode,
@@ -33,7 +33,6 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
 import { useSkillSuggestions } from "~/lib/skillReactQuery";
 import { isElectron } from "../env";
-import { stripDiffSearchParams } from "../diffRouteSearch";
 import { buildChangesWindowHref } from "../lib/changesWindow";
 import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import { resolveChatDocumentTitle, useDocumentTitle } from "../lib/documentTitle";
@@ -52,6 +51,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  deriveThinkingEntries,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -166,6 +166,8 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
+import { DevOrchestrationMenu } from "./chat/DevOrchestrationMenu";
+import { resolveDevOrchestrationTargets } from "./chat/devOrchestrationMenu";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -457,7 +459,10 @@ export default function ChatView({
   const isDrawerLayout = layoutMode === "drawer";
   const allowAuxiliaryPanels = !isDrawerLayout;
   const projects = useStore((store) => store.projects);
+  const programs = useStore((store) => store.programs ?? []);
+  const programNotifications = useStore((store) => store.programNotifications ?? []);
   const threads = useStore((store) => store.threads);
+  const allOrchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -538,6 +543,7 @@ export default function ChatView({
   const [isComposerManuallyHidden, setIsComposerManuallyHidden] = useState(false);
   const [isComposerRevealedWhileScrolled, setIsComposerRevealedWhileScrolled] = useState(false);
   const [areOrchestrationNoticesHidden, setAreOrchestrationNoticesHidden] = useState(false);
+  const [isDevOrchestrationMenuOpen, setIsDevOrchestrationMenuOpen] = useState(false);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -775,10 +781,24 @@ export default function ChatView({
         : null,
     [activeThread, projects, threads],
   );
+  const devOrchestrationTargets = useMemo(
+    () =>
+      resolveDevOrchestrationTargets({
+        thread: activeThread,
+        project: activeProject,
+        programs,
+        threads,
+      }),
+    [activeProject, activeThread, programs, threads],
+  );
+  const showDevOrchestrationToggle =
+    devOrchestrationTargets.programTargets.length > 0 ||
+    devOrchestrationTargets.orchestratorTargets.length > 0;
 
   useEffect(() => {
     if (!activeThread) {
       initializedComposerVisibilityThreadIdRef.current = null;
+      setIsDevOrchestrationMenuOpen(false);
       return;
     }
     if (initializedComposerVisibilityThreadIdRef.current === activeThread.id) {
@@ -801,6 +821,7 @@ export default function ChatView({
         workerOrchestrationNoticesVisibility,
       }),
     );
+    setIsDevOrchestrationMenuOpen(false);
   }, [
     activeThread,
     sidebarOrchestrationModeEnabled,
@@ -975,6 +996,13 @@ export default function ChatView({
   const workLogEntries = useMemo(
     () =>
       deriveWorkLogEntries(threadActivities, undefined, {
+        latestTurnSettled,
+      }),
+    [latestTurnSettled, threadActivities],
+  );
+  const thinkingEntries = useMemo(
+    () =>
+      deriveThinkingEntries(threadActivities, undefined, {
         latestTurnSettled,
       }),
     [latestTurnSettled, threadActivities],
@@ -1267,8 +1295,13 @@ export default function ChatView({
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        thinkingEntries,
+      ),
+    [activeThread?.proposedPlans, thinkingEntries, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -3367,6 +3400,9 @@ export default function ChatView({
         orchestratorProjectId: (activeThread.orchestratorProjectId ??
           activeProject.id) as ProjectId,
         orchestratorThreadId: (activeThread.orchestratorThreadId ?? activeThread.id) as ThreadId,
+        programId: activeThread.programId as ProgramId | undefined,
+        executiveProjectId: activeThread.executiveProjectId as ProjectId | undefined,
+        executiveThreadId: activeThread.executiveThreadId as ThreadId | undefined,
       })
       .then(() => {
         return api.orchestration.dispatchCommand({
@@ -3793,21 +3829,6 @@ export default function ChatView({
     setExpandedImage(preview);
   }, []);
   const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
-  const onOpenTurnDiff = useCallback(
-    (turnId: TurnId, filePath?: string) => {
-      void navigate({
-        to: "/$threadId",
-        params: { threadId },
-        search: (previous) => {
-          const rest = stripDiffSearchParams(previous);
-          return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
-        },
-      });
-    },
-    [navigate, threadId],
-  );
   const onRevertUserMessage = (messageId: MessageId) => {
     const targetTurnCount = revertTurnCountByUserMessageId.get(messageId);
     if (typeof targetTurnCount !== "number") {
@@ -3879,11 +3900,14 @@ export default function ChatView({
           changesPanelOpen={changesPanelOpen}
           mobileSidebarOpen={mobileSidebarOpen}
           showChangesDrawerToggle={showChangesDrawerToggle}
+          showDevOrchestrationToggle={showDevOrchestrationToggle}
+          devOrchestrationPanelOpen={isDevOrchestrationMenuOpen}
           onAddProjectHook={saveProjectHook}
           onUpdateProjectHook={updateProjectHook}
           onDeleteProjectHook={deleteProjectHook}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleChangesPanel={toggleChangesPanel}
+          onToggleDevOrchestrationPanel={() => setIsDevOrchestrationMenuOpen((open) => !open)}
           onToggleMobileSidebar={onToggleMobileSidebar}
           onOpenChangesWindow={openChangesWindow}
           onLabelClick={(label) => {
@@ -3900,6 +3924,16 @@ export default function ChatView({
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
       />
+      {showDevOrchestrationToggle && isDevOrchestrationMenuOpen ? (
+        <DevOrchestrationMenu
+          activeThread={activeThread}
+          activeProject={activeProject}
+          programTargets={devOrchestrationTargets.programTargets}
+          orchestratorTargets={devOrchestrationTargets.orchestratorTargets}
+          programNotifications={programNotifications}
+          orchestratorWakeItems={allOrchestratorWakeItems}
+        />
+      ) : null}
       {orchestrationNoticeCount > 0 ? (
         <div className="border-b border-border px-3 py-2 sm:px-5">
           <div className="mb-2 flex items-center justify-between gap-3">
@@ -4004,17 +4038,14 @@ export default function ChatView({
                 timelineEntries={timelineEntries}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionDuration={completionDuration}
-                turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                 nowIso={nowIso}
                 expandedWorkGroups={expandedWorkGroups}
                 onToggleWorkGroup={onToggleWorkGroup}
-                onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
-                resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeProject?.cwd ?? undefined}
                 layoutMode={layoutMode}

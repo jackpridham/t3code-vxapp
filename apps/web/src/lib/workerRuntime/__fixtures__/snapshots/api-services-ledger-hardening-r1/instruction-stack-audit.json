@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/api-services-ledger-hardening-r1",
+  "repo": "api-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/api-services-ledger-hardening-r1",
+    "runtimeDir": "/fixtures/worktrees/api-services-ledger-hardening-r1/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/api-services-ledger-hardening-r1/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/api-services-ledger-hardening-r1/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

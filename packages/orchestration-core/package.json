@@ -28,6 +28,10 @@
       "types": "./src/orchestratorNotify.ts",
       "import": "./src/orchestratorNotify.ts"
     },
+    "./provider-thinking-activities": {
+      "types": "./src/providerThinkingActivities.ts",
+      "import": "./src/providerThinkingActivities.ts"
+    },
     "./projector": {
       "types": "./src/projector.ts",
       "import": "./src/projector.ts"

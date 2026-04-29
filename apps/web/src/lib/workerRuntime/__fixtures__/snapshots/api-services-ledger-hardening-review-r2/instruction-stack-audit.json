@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/api-services-ledger-hardening-review-r2",
+  "repo": "api-vxapp",
+  "taskClass": "review-only",
+  "contextMode": "review-only",
+  "closeoutAuthority": "code_tests",
+  "status": "warning",
+  "findings": [
+    {
+      "severity": "warning",
+      "code": "no_claude_md",
+      "detail": "CLAUDE.md not present in workspace root"
+    }
+  ],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/api-services-ledger-hardening-review-r2",
+    "runtimeDir": "/fixtures/worktrees/api-services-ledger-hardening-review-r2/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/api-services-ledger-hardening-review-r2/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/api-services-ledger-hardening-review-r2/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

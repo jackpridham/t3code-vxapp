@@ -173,12 +173,32 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         title: "Founder task",
         objective: "Convert founder request into Jasper orchestration.",
         status: "active",
+        declaredRepos: ["t3code-vxapp"],
+        affectedAppTargets: ["web"],
+        requiredLocalSuites: [],
+        requiredExternalE2ESuites: [],
+        requireDevelopmentDeploy: true,
+        requireExternalE2E: false,
+        requireCleanPostFlight: true,
+        requirePrPerRepo: true,
         executiveProjectId: ProjectId.makeUnsafe("project-cto"),
         executiveThreadId: ThreadId.makeUnsafe("thread-cto"),
         currentOrchestratorThreadId: ThreadId.makeUnsafe("thread-jasper"),
+        repoPrs: [],
+        localValidation: [],
+        appValidations: [],
+        observedRepos: [],
+        postFlight: {
+          status: "clean",
+          summary: "Post-flight checks passed",
+          recordedAt: "2026-04-20T00:00:01.000Z",
+        },
         createdAt: "2026-04-20T00:00:00.000Z",
         updatedAt: "2026-04-20T00:00:01.000Z",
         completedAt: null,
+        cancelReason: null,
+        cancelledAt: null,
+        supersededByProgramId: null,
         deletedAt: null,
       });
 
@@ -186,11 +206,15 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         readonly programId: string;
         readonly objective: string | null;
         readonly currentOrchestratorThreadId: string | null;
+        readonly declaredRepos: string;
+        readonly postFlight: string | null;
       }>`
         SELECT
           program_id AS "programId",
           objective,
-          current_orchestrator_thread_id AS "currentOrchestratorThreadId"
+          current_orchestrator_thread_id AS "currentOrchestratorThreadId",
+          declared_repos_json AS "declaredRepos",
+          post_flight_json AS "postFlight"
         FROM projection_programs
         WHERE program_id = 'program-cto'
       `;
@@ -199,6 +223,9 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
           programId: "program-cto",
           objective: "Convert founder request into Jasper orchestration.",
           currentOrchestratorThreadId: "thread-jasper",
+          declaredRepos: '["t3code-vxapp"]',
+          postFlight:
+            '{"status":"clean","summary":"Post-flight checks passed","recordedAt":"2026-04-20T00:00:01.000Z"}',
         },
       ]);
 
@@ -207,6 +234,8 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       });
       assert.strictEqual(Option.getOrNull(persisted)?.status, "active");
       assert.strictEqual(Option.getOrNull(persisted)?.executiveThreadId, "thread-cto");
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.declaredRepos, ["t3code-vxapp"]);
+      assert.strictEqual(Option.getOrNull(persisted)?.postFlight?.status, "clean");
     }),
   );
 

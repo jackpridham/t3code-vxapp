@@ -31,6 +31,8 @@ import type {
 } from "./project";
 import type {
   ServerConfig,
+  ServerGetWorkerRuntimeSnapshotInput,
+  ServerGetWorkerRuntimeSnapshotResult,
   ServerListVortexAppArtifactsInput,
   ServerListVortexAppArtifactsResult,
   ServerListVortexAppsResult,
@@ -50,7 +52,10 @@ import type {
 import type { ServerUpsertKeybindingInput } from "./server";
 import type {
   ClientOrchestrationCommand,
+  OrchestrationDryRunResult,
   OrchestrationGetSnapshotInput,
+  OrchestrationGetProjectByIdInput,
+  OrchestrationGetProjectByIdResult,
   OrchestrationGetProjectByWorkspaceInput,
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetFileDiffInput,
@@ -69,6 +74,8 @@ import type {
   OrchestrationListThreadMessagesResult,
   OrchestrationListThreadSessionsInput,
   OrchestrationListThreadSessionsResult,
+  OrchestrationGetThreadByIdInput,
+  OrchestrationGetThreadByIdResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
@@ -211,6 +218,9 @@ export interface NativeApi {
     listVortexAppArtifacts: (
       input: ServerListVortexAppArtifactsInput,
     ) => Promise<ServerListVortexAppArtifactsResult>;
+    getWorkerRuntimeSnapshot: (
+      input: ServerGetWorkerRuntimeSnapshotInput,
+    ) => Promise<ServerGetWorkerRuntimeSnapshotResult>;
   };
   orchestration: {
     getBootstrapSummary: () => Promise<OrchestrationReadModel>;
@@ -218,12 +228,18 @@ export interface NativeApi {
     getReadiness: () => Promise<OrchestrationGetReadinessResult>;
     getCurrentState: () => Promise<OrchestrationGetCurrentStateResult>;
     listProjects: () => Promise<OrchestrationListProjectsResult>;
+    getProjectById: (
+      input: OrchestrationGetProjectByIdInput,
+    ) => Promise<OrchestrationGetProjectByIdResult>;
     getProjectByWorkspace: (
       input: OrchestrationGetProjectByWorkspaceInput,
     ) => Promise<OrchestrationGetProjectByWorkspaceResult>;
     listProjectThreads: (
       input: OrchestrationListProjectThreadsInput,
     ) => Promise<OrchestrationListProjectThreadsResult>;
+    getThreadById: (
+      input: OrchestrationGetThreadByIdInput,
+    ) => Promise<OrchestrationGetThreadByIdResult>;
     listSessionThreads: (
       input: OrchestrationListSessionThreadsInput,
     ) => Promise<OrchestrationListSessionThreadsResult>;
@@ -240,6 +256,7 @@ export interface NativeApi {
       input: OrchestrationListOrchestratorWakesInput,
     ) => Promise<OrchestrationListOrchestratorWakesResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
+    dryRunCommand: (command: ClientOrchestrationCommand) => Promise<OrchestrationDryRunResult>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFileDiff: (input: OrchestrationGetFileDiffInput) => Promise<OrchestrationGetFileDiffResult>;
     getFullThreadDiff: (

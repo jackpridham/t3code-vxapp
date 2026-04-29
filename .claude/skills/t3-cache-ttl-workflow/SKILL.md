@@ -13,13 +13,13 @@ The main rule: put the cache at the layer that owns the cost and sharing boundar
 
 Use this decision table:
 
-| Data | Preferred cache | Why |
-| --- | --- | --- |
-| Expensive server command output shared by all clients | SQLite TTL cache | Avoid repeated shelling and keep server-authoritative freshness. |
-| Browser display data that should survive refresh and be immediately available | localStorage TTL cache | Warm UX without blocking on server calls. |
-| In-flight browser RPC result | React Query | De-dupe requests and handle component lifecycle. |
-| Open/closed UI state | React state | Transient and local to component. |
-| Durable user preference | Settings workflow | Use `t3-settings-workflow`, not ad hoc cache. |
+| Data                                                                          | Preferred cache        | Why                                                              |
+| ----------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------- |
+| Expensive server command output shared by all clients                         | SQLite TTL cache       | Avoid repeated shelling and keep server-authoritative freshness. |
+| Browser display data that should survive refresh and be immediately available | localStorage TTL cache | Warm UX without blocking on server calls.                        |
+| In-flight browser RPC result                                                  | React Query            | De-dupe requests and handle component lifecycle.                 |
+| Open/closed UI state                                                          | React state            | Transient and local to component.                                |
+| Durable user preference                                                       | Settings workflow      | Use `t3-settings-workflow`, not ad hoc cache.                    |
 
 If the value is derived from `vx apps ...`, the command must run server-side. Browser caches may store the result after it has crossed NativeApi.
 
