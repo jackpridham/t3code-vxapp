@@ -1,0 +1,259 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/stores-managed-target-agents-c1",
+  "runtimeDir": "/fixtures/worktrees/stores-managed-target-agents-c1/.agents/runtime",
+  "skillsDir": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills",
+  "agentsSkillsDir": "/fixtures/worktrees/stores-managed-target-agents-c1/.agents/skills",
+  "repo": "agents-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit_push",
+  "packs": [
+    {
+      "id": "global:000-safety-kernel",
+      "slug": "000-safety-kernel",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/000-safety-kernel",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:000-safety-kernel",
+        "slug": "000-safety-kernel",
+        "localNumber": 0,
+        "name": "Safety Kernel",
+        "type": "safety",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Baseline worker safety rules: authority model, forbidden actions, destructive command ban, escalation classes.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning",
+          "orchestration",
+          "diagnostics"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:001-t3-worker-basics",
+      "slug": "001-t3-worker-basics",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/001-t3-worker-basics",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:001-t3-worker-basics",
+        "slug": "001-t3-worker-basics",
+        "localNumber": 1,
+        "name": "T3 Worker Basics",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Worker contract, context modes, status updates, allowed tooling by context.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:008-terse-worker-reporting",
+      "slug": "008-terse-worker-reporting",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/008-terse-worker-reporting",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:008-terse-worker-reporting",
+        "slug": "008-terse-worker-reporting",
+        "localNumber": 8,
+        "name": "Terse Worker Reporting",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Token-trimmed worker progress, blocker, and closeout reporting style.",
+        "allowedTaskClasses": [
+          "source-editing-implementation",
+          "test-authoring",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": [],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:024-vx-plan-implement",
+      "slug": "024-vx-plan-implement",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/024-vx-plan-implement",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:024-vx-plan-implement",
+        "slug": "024-vx-plan-implement",
+        "localNumber": 24,
+        "name": "vx-plan Implement",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Implementation preflight, step execution, validation/feedback, plan-deviation rules.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:015-vx-apps-plan-state"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:025-vx-plan-implement-phase",
+      "slug": "025-vx-plan-implement-phase",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/025-vx-plan-implement-phase",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:025-vx-plan-implement-phase",
+        "slug": "025-vx-plan-implement-phase",
+        "localNumber": 25,
+        "name": "vx-plan Implement Phase",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Phase selection, phase-dependency checks, phase status updates, phase closeout.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:024-vx-plan-implement"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:050-vx-git-read",
+      "slug": "050-vx-git-read",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/050-vx-git-read",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:050-vx-git-read",
+        "slug": "050-vx-git-read",
+        "localNumber": 50,
+        "name": "vx Git Read",
+        "type": "git-read",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Status/log/diff, blocker-triggered upstream sync, pull/submodule safety, dirty worktree classification.",
+        "allowedTaskClasses": [
+          "orientation",
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "diagnostics"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["minimal", "repo-guided", "isolated", "review-only", "closeout"]
+      }
+    },
+    {
+      "id": "global:051-vx-git-closeout-authority",
+      "slug": "051-vx-git-closeout-authority",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/051-vx-git-closeout-authority",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:051-vx-git-closeout-authority",
+        "slug": "051-vx-git-closeout-authority",
+        "localNumber": 51,
+        "name": "vx Git Closeout Authority",
+        "type": "git-closeout",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Commit authority, push authority, submodule two-step commit, closeout forbidden without grant.",
+        "allowedTaskClasses": ["closeout"],
+        "grants": ["commit", "push"],
+        "forbids": ["stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:050-vx-git-read"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["closeout"]
+      }
+    },
+    {
+      "id": "global:064-vx-quality-gate-awareness",
+      "slug": "064-vx-quality-gate-awareness",
+      "link": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills/064-vx-quality-gate-awareness",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:064-vx-quality-gate-awareness",
+        "slug": "064-vx-quality-gate-awareness",
+        "localNumber": 64,
+        "name": "vx Quality Gate Awareness",
+        "type": "specialist",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Cross-repo quality gate awareness, validation-surface discovery, hook failure interpretation.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    }
+  ]
+}

@@ -71,6 +71,10 @@ const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
+const workerRuntimeFixturesRoot = path.resolve(
+  import.meta.dirname,
+  "../../web/src/lib/workerRuntime/__fixtures__/snapshots",
+);
 
 const defaultOpenService: OpenShape = {
   openBrowser: () => Effect.void,
@@ -1758,6 +1762,180 @@ describe("WebSocket Server", () => {
     expectAvailableEditors(
       (configResponse.result as { availableEditors: unknown }).availableEditors,
     );
+  });
+
+  it("returns a normalized worker runtime snapshot for selected worker threads", async () => {
+    const runtimeFixtureId = "partymore-vue-order-create-admin-parity-p1";
+    const worktreePath = makeTempDir("t3code-worker-runtime-");
+    const runtimeDir = path.join(worktreePath, ".agents", "runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    for (const fileName of [
+      "context-plan.json",
+      "dispatch-contract.json",
+      "installed-packs.json",
+      "instruction-stack-audit.json",
+    ]) {
+      fs.copyFileSync(
+        path.join(workerRuntimeFixturesRoot, runtimeFixtureId, fileName),
+        path.join(runtimeDir, fileName),
+      );
+    }
+
+    server = await createTestServer({ cwd: worktreePath, autoBootstrapProjectFromCwd: true });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-worker-runtime-thread-create",
+      threadId: "thread-worker-runtime",
+      projectId: bootstrapProjectId,
+      title: "Worker Runtime Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath,
+      spawnRole: "worker",
+      createdAt: new Date().toISOString(),
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
+      threadId: "thread-worker-runtime",
+    });
+    expect(runtimeResponse.error).toBeUndefined();
+    expect(runtimeResponse.result).toEqual(
+      expect.objectContaining({
+        threadId: "thread-worker-runtime",
+        worktreePath,
+        runtimeDir,
+        summary: expect.objectContaining({
+          repo: "vue-vxapp",
+          taskClass: "review-only",
+          contextMode: "isolated",
+          closeoutAuthority: "code_tests",
+          auditStatus: "error",
+        }),
+        sourceFiles: expect.objectContaining({
+          contextPlan: expect.objectContaining({ status: "loaded" }),
+          dispatchContract: expect.objectContaining({ status: "loaded" }),
+          installedPacks: expect.objectContaining({ status: "loaded" }),
+          instructionStackAudit: expect.objectContaining({ status: "loaded" }),
+        }),
+      }),
+    );
+  });
+
+  it("reports missing worker runtime files without failing the whole request", async () => {
+    const worktreePath = makeTempDir("t3code-worker-runtime-missing-");
+    const runtimeDir = path.join(worktreePath, ".agents", "runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeDir, "context-plan.json"),
+      JSON.stringify({
+        schema_version: "1.0.0",
+        repo: "vue-vxapp",
+        taskClass: "review-only",
+        contextMode: "isolated",
+        closeoutAuthority: "code_tests",
+        selectedPacks: [],
+      }),
+      "utf8",
+    );
+
+    server = await createTestServer({ cwd: worktreePath, autoBootstrapProjectFromCwd: true });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-worker-runtime-partial-thread-create",
+      threadId: "thread-worker-runtime-partial",
+      projectId: bootstrapProjectId,
+      title: "Worker Runtime Partial Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath,
+      spawnRole: "worker",
+      createdAt: new Date().toISOString(),
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
+      threadId: "thread-worker-runtime-partial",
+    });
+    expect(runtimeResponse.error).toBeUndefined();
+    expect(runtimeResponse.result).toEqual(
+      expect.objectContaining({
+        summary: expect.objectContaining({
+          repo: "vue-vxapp",
+          auditStatus: "missing",
+        }),
+        sourceFiles: expect.objectContaining({
+          contextPlan: expect.objectContaining({ status: "loaded" }),
+          dispatchContract: expect.objectContaining({ status: "missing" }),
+          installedPacks: expect.objectContaining({ status: "missing" }),
+          instructionStackAudit: expect.objectContaining({ status: "missing" }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects runtime snapshot requests for non-worker threads", async () => {
+    const projectRoot = makeTempDir("t3code-worker-runtime-project-");
+    server = await createTestServer({ cwd: projectRoot, autoBootstrapProjectFromCwd: true });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-non-worker-runtime-thread-create",
+      threadId: "thread-non-worker-runtime",
+      projectId: bootstrapProjectId,
+      title: "Non Worker Runtime Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: new Date().toISOString(),
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
+      threadId: "thread-non-worker-runtime",
+    });
+    expect(runtimeResponse.error?.message).toContain("is not a worker thread");
   });
 
   it("returns error for unknown methods", async () => {

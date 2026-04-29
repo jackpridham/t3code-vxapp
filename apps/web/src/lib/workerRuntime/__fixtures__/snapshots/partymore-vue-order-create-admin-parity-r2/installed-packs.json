@@ -1,0 +1,381 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2",
+  "runtimeDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.agents/runtime",
+  "skillsDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills",
+  "agentsSkillsDir": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.agents/skills",
+  "repo": "vue-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "packs": [
+    {
+      "id": "global:000-safety-kernel",
+      "slug": "000-safety-kernel",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/000-safety-kernel",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:000-safety-kernel",
+        "slug": "000-safety-kernel",
+        "localNumber": 0,
+        "name": "Safety Kernel",
+        "type": "safety",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Baseline worker safety rules: authority model, forbidden actions, destructive command ban, escalation classes.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning",
+          "orchestration",
+          "diagnostics"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:001-t3-worker-basics",
+      "slug": "001-t3-worker-basics",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/001-t3-worker-basics",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:001-t3-worker-basics",
+        "slug": "001-t3-worker-basics",
+        "localNumber": 1,
+        "name": "T3 Worker Basics",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Worker contract, context modes, status updates, allowed tooling by context.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:008-terse-worker-reporting",
+      "slug": "008-terse-worker-reporting",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/008-terse-worker-reporting",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:008-terse-worker-reporting",
+        "slug": "008-terse-worker-reporting",
+        "localNumber": 8,
+        "name": "Terse Worker Reporting",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Token-trimmed worker progress, blocker, and closeout reporting style.",
+        "allowedTaskClasses": [
+          "source-editing-implementation",
+          "test-authoring",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": [],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:024-vx-plan-implement",
+      "slug": "024-vx-plan-implement",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/024-vx-plan-implement",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:024-vx-plan-implement",
+        "slug": "024-vx-plan-implement",
+        "localNumber": 24,
+        "name": "vx-plan Implement",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Implementation preflight, step execution, validation/feedback, plan-deviation rules.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:015-vx-apps-plan-state"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:025-vx-plan-implement-phase",
+      "slug": "025-vx-plan-implement-phase",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/025-vx-plan-implement-phase",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:025-vx-plan-implement-phase",
+        "slug": "025-vx-plan-implement-phase",
+        "localNumber": 25,
+        "name": "vx-plan Implement Phase",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Phase selection, phase-dependency checks, phase status updates, phase closeout.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:024-vx-plan-implement"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:050-vx-git-read",
+      "slug": "050-vx-git-read",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/050-vx-git-read",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:050-vx-git-read",
+        "slug": "050-vx-git-read",
+        "localNumber": 50,
+        "name": "vx Git Read",
+        "type": "git-read",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Status/log/diff, blocker-triggered upstream sync, pull/submodule safety, dirty worktree classification.",
+        "allowedTaskClasses": [
+          "orientation",
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "diagnostics"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["minimal", "repo-guided", "isolated", "review-only", "closeout"]
+      }
+    },
+    {
+      "id": "global:063-generated-output-ownership",
+      "slug": "063-generated-output-ownership",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/063-generated-output-ownership",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:063-generated-output-ownership",
+        "slug": "063-generated-output-ownership",
+        "localNumber": 63,
+        "name": "Generated Output Ownership",
+        "type": "specialist",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Generated output ownership, enum regeneration, consumer/submodule drift handling.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:064-vx-quality-gate-awareness",
+      "slug": "064-vx-quality-gate-awareness",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/064-vx-quality-gate-awareness",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:064-vx-quality-gate-awareness",
+        "slug": "064-vx-quality-gate-awareness",
+        "localNumber": 64,
+        "name": "vx Quality Gate Awareness",
+        "type": "specialist",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Cross-repo quality gate awareness, validation-surface discovery, hook failure interpretation.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "repo:vue-vxapp:100-vue-repo-orientation",
+      "slug": "100-vue-repo-orientation",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/100-vue-repo-orientation",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:vue-vxapp:100-vue-repo-orientation",
+        "slug": "100-vue-repo-orientation",
+        "localNumber": 100,
+        "name": "Vue Repo Orientation",
+        "type": "repo-orientation",
+        "repo": "vue-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Orient to vue-vxapp: vue conventions, code rules, best practices, frontend design, theme, enums.",
+        "allowedTaskClasses": [
+          "orientation",
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "specialist"
+        ],
+        "grants": ["read", "inspect", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "minimal", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:vue-vxapp:110-vue-plan-execution",
+      "slug": "110-vue-plan-execution",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/110-vue-plan-execution",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:vue-vxapp:110-vue-plan-execution",
+        "slug": "110-vue-plan-execution",
+        "localNumber": 110,
+        "name": "Vue Plan Execution",
+        "type": "implementation",
+        "repo": "vue-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Options-API, Pinia, state, services, routing, caching, ability/CASL, UI subsystems (dialog/drawer/forms/datatable/etc).",
+        "allowedTaskClasses": ["source-editing-implementation", "specialist"],
+        "grants": ["read", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [
+          "global:000-safety-kernel",
+          "global:001-t3-worker-basics",
+          "repo:vue-vxapp:100-vue-repo-orientation"
+        ],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:vue-vxapp:112-vue-edit-rules",
+      "slug": "112-vue-edit-rules",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/112-vue-edit-rules",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:vue-vxapp:112-vue-edit-rules",
+        "slug": "112-vue-edit-rules",
+        "localNumber": 112,
+        "name": "Vue Edit Rules",
+        "type": "implementation",
+        "repo": "vue-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Vue Edit Rules pack for vue-vxapp. Provenance: worker-instruction-stack-and-skill-pack-plan.md.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "inspect", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:vue-vxapp:113-vue-validation-selection",
+      "slug": "113-vue-validation-selection",
+      "link": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-r2/.claude/skills/113-vue-validation-selection",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:vue-vxapp:113-vue-validation-selection",
+        "slug": "113-vue-validation-selection",
+        "localNumber": 113,
+        "name": "Vue Validation Selection",
+        "type": "implementation",
+        "repo": "vue-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Vue Validation Selection pack for vue-vxapp. Provenance: worker-instruction-stack-and-skill-pack-plan.md.",
+        "allowedTaskClasses": ["source-editing-implementation"],
+        "grants": ["read", "inspect", "edit", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    }
+  ]
+}

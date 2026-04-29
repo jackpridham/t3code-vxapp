@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/stores-managed-target-scripts-i1",
+  "repo": "vortex-scripts",
+  "taskClass": "review-only",
+  "contextMode": "review-only",
+  "closeoutAuthority": "code_only",
+  "status": "warning",
+  "findings": [
+    {
+      "severity": "warning",
+      "code": "no_claude_md",
+      "detail": "CLAUDE.md not present in workspace root"
+    }
+  ],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/stores-managed-target-scripts-i1",
+    "runtimeDir": "/fixtures/worktrees/stores-managed-target-scripts-i1/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/stores-managed-target-scripts-i1/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/stores-managed-target-scripts-i1/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

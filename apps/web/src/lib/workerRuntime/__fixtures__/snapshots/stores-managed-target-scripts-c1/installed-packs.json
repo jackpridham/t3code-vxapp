@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/stores-managed-target-scripts-c1",
+  "runtimeDir": "/fixtures/worktrees/stores-managed-target-scripts-c1/.agents/runtime",
+  "skillsDir": "/fixtures/worktrees/stores-managed-target-scripts-c1/.claude/skills",
+  "agentsSkillsDir": "/fixtures/worktrees/stores-managed-target-scripts-c1/.agents/skills",
+  "repo": "vortex-scripts",
+  "taskClass": "review-only",
+  "contextMode": "review-only",
+  "closeoutAuthority": "code_only",
+  "packs": [
+    {
+      "id": "global:000-safety-kernel",
+      "slug": "000-safety-kernel",
+      "link": "/fixtures/worktrees/stores-managed-target-scripts-c1/.claude/skills/000-safety-kernel",
+      "manifest": {
+        "id": "global:000-safety-kernel",
+        "slug": "000-safety-kernel",
+        "scope": "global",
+        "grants": ["read"],
+        "forbids": ["deploy"],
+        "requires": [],
+        "conflictsWith": []
+      }
+    },
+    {
+      "id": "global:001-t3-worker-basics",
+      "slug": "001-t3-worker-basics",
+      "link": "/fixtures/worktrees/stores-managed-target-scripts-c1/.claude/skills/001-t3-worker-basics",
+      "manifest": {
+        "id": "global:001-t3-worker-basics",
+        "slug": "001-t3-worker-basics",
+        "scope": "global",
+        "grants": ["read", "inspect"],
+        "forbids": ["commit", "push", "deploy"],
+        "requires": [],
+        "conflictsWith": []
+      }
+    },
+    {
+      "id": "global:050-vx-git-read",
+      "slug": "050-vx-git-read",
+      "link": "/fixtures/worktrees/stores-managed-target-scripts-c1/.claude/skills/050-vx-git-read",
+      "manifest": {
+        "id": "global:050-vx-git-read",
+        "slug": "050-vx-git-read",
+        "scope": "global",
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "deploy"],
+        "requires": [],
+        "conflictsWith": []
+      }
+    },
+    {
+      "id": "repo:vortex-scripts:100-vortex-scripts-repo-orientation",
+      "slug": "100-vortex-scripts-repo-orientation",
+      "link": "/fixtures/worktrees/stores-managed-target-scripts-c1/.claude/skills/100-vortex-scripts-repo-orientation",
+      "manifest": {
+        "id": "repo:vortex-scripts:100-vortex-scripts-repo-orientation",
+        "slug": "100-vortex-scripts-repo-orientation",
+        "scope": "repo",
+        "grants": ["read", "inspect"],
+        "forbids": ["commit", "push", "deploy"],
+        "requires": [],
+        "conflictsWith": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "repo": "vue-vxapp",
+  "taskClass": "planning",
+  "contextMode": "isolated",
+  "closeoutAuthority": "plan_only",
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:006-worker-command-telemetry",
+    "global:008-terse-worker-reporting",
+    "global:015-vx-apps-plan-state",
+    "global:050-vx-git-read",
+    "global:063-generated-output-ownership",
+    "global:064-vx-quality-gate-awareness",
+    "repo:vue-vxapp:100-vue-repo-orientation"
+  ],
+  "allowedCapabilities": ["inspect", "plan-mutate", "read"],
+  "forbiddenCapabilities": [
+    "branch-delete",
+    "commit",
+    "deploy",
+    "edit",
+    "push",
+    "run-local-tests",
+    "stash"
+  ],
+  "conflicts": [],
+  "warnings": [],
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/slave-site-crud-foundation-vue-p1",
+  "repoClaude": "omitted",
+  "legacyGlobalSkills": false
+}

@@ -31,6 +31,8 @@ import type {
 } from "./project";
 import type {
   ServerConfig,
+  ServerGetWorkerRuntimeSnapshotInput,
+  ServerGetWorkerRuntimeSnapshotResult,
   ServerListVortexAppArtifactsInput,
   ServerListVortexAppArtifactsResult,
   ServerListVortexAppsResult,
@@ -216,6 +218,9 @@ export interface NativeApi {
     listVortexAppArtifacts: (
       input: ServerListVortexAppArtifactsInput,
     ) => Promise<ServerListVortexAppArtifactsResult>;
+    getWorkerRuntimeSnapshot: (
+      input: ServerGetWorkerRuntimeSnapshotInput,
+    ) => Promise<ServerGetWorkerRuntimeSnapshotResult>;
   };
   orchestration: {
     getBootstrapSummary: () => Promise<OrchestrationReadModel>;

@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "repo": "vue-vxapp",
+  "taskClass": "review-only",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "validationProfile": null,
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:006-worker-command-telemetry",
+    "global:026-vx-plan-review-refine",
+    "global:063-generated-output-ownership",
+    "repo:vue-vxapp:100-vue-repo-orientation",
+    "repo:vue-vxapp:130-vue-review"
+  ],
+  "allowedCapabilities": ["edit", "inspect", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "commit", "deploy", "push", "stash"]
+}

@@ -5,6 +5,7 @@ import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
 import { ProviderKind } from "./orchestration";
 import { ServerSettings } from "./settings";
+import { GetWorkerRuntimeSnapshotInput, GetWorkerRuntimeSnapshotResult } from "./workerRuntime";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal("keybindings.malformed-config"),
@@ -145,3 +146,9 @@ export const ServerListVortexAppArtifactsResult = Schema.Struct({
   artifacts: Schema.Array(VortexAppArtifact),
 });
 export type ServerListVortexAppArtifactsResult = typeof ServerListVortexAppArtifactsResult.Type;
+
+export const ServerGetWorkerRuntimeSnapshotInput = GetWorkerRuntimeSnapshotInput;
+export type ServerGetWorkerRuntimeSnapshotInput = typeof ServerGetWorkerRuntimeSnapshotInput.Type;
+
+export const ServerGetWorkerRuntimeSnapshotResult = GetWorkerRuntimeSnapshotResult;
+export type ServerGetWorkerRuntimeSnapshotResult = typeof ServerGetWorkerRuntimeSnapshotResult.Type;

@@ -1,0 +1,411 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1",
+  "runtimeDir": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.agents/runtime",
+  "skillsDir": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills",
+  "agentsSkillsDir": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.agents/skills",
+  "repo": "api-vxapp",
+  "taskClass": "planning",
+  "contextMode": "isolated",
+  "closeoutAuthority": "plan_only",
+  "packs": [
+    {
+      "id": "global:000-safety-kernel",
+      "slug": "000-safety-kernel",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/000-safety-kernel",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:000-safety-kernel",
+        "slug": "000-safety-kernel",
+        "localNumber": 0,
+        "name": "Safety Kernel",
+        "type": "safety",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Baseline worker safety rules: authority model, forbidden actions, destructive command ban, escalation classes.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning",
+          "orchestration",
+          "diagnostics"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": [],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:001-t3-worker-basics",
+      "slug": "001-t3-worker-basics",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/001-t3-worker-basics",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:001-t3-worker-basics",
+        "slug": "001-t3-worker-basics",
+        "localNumber": 1,
+        "name": "T3 Worker Basics",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Worker contract, context modes, status updates, allowed tooling by context.",
+        "allowedTaskClasses": [
+          "orientation",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "minimal",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "global:006-worker-command-telemetry",
+      "slug": "006-worker-command-telemetry",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/006-worker-command-telemetry",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:006-worker-command-telemetry",
+        "slug": "006-worker-command-telemetry",
+        "localNumber": 6,
+        "name": "Worker Command Telemetry",
+        "type": "diagnostics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Interpret worker-local command telemetry summaries and route friction signals without enforcing runtime behavior in prose.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["review-only", "closeout", "isolated", "pack-managed"]
+      }
+    },
+    {
+      "id": "global:008-terse-worker-reporting",
+      "slug": "008-terse-worker-reporting",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/008-terse-worker-reporting",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:008-terse-worker-reporting",
+        "slug": "008-terse-worker-reporting",
+        "localNumber": 8,
+        "name": "Terse Worker Reporting",
+        "type": "worker-basics",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Token-trimmed worker progress, blocker, and closeout reporting style.",
+        "allowedTaskClasses": [
+          "source-editing-implementation",
+          "test-authoring",
+          "plan-mutation",
+          "planning"
+        ],
+        "grants": [],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:015-vx-apps-plan-state",
+      "slug": "015-vx-apps-plan-state",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/015-vx-apps-plan-state",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:015-vx-apps-plan-state",
+        "slug": "015-vx-apps-plan-state",
+        "localNumber": 15,
+        "name": "vx-apps Plan State",
+        "type": "plan-lifecycle",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "JSON plan read/mutation commands, status/checklist consistency, phase/step selection.",
+        "allowedTaskClasses": ["plan-mutation", "planning", "source-editing-implementation"],
+        "grants": ["read", "inspect", "plan-mutate"],
+        "forbids": [
+          "edit",
+          "run-local-tests",
+          "commit",
+          "push",
+          "stash",
+          "deploy",
+          "branch-delete"
+        ],
+        "requires": ["global:000-safety-kernel", "global:010-vortex-cli-base"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided"]
+      }
+    },
+    {
+      "id": "global:063-generated-output-ownership",
+      "slug": "063-generated-output-ownership",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/063-generated-output-ownership",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "global:063-generated-output-ownership",
+        "slug": "063-generated-output-ownership",
+        "localNumber": 63,
+        "name": "Generated Output Ownership",
+        "type": "specialist",
+        "scope": "global",
+        "version": "1.0.0",
+        "description": "Generated output ownership, enum regeneration, consumer/submodule drift handling.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": [],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": [
+          "isolated",
+          "pack-managed",
+          "repo-guided",
+          "review-only",
+          "closeout"
+        ]
+      }
+    },
+    {
+      "id": "repo:api-vxapp:100-api-repo-orientation",
+      "slug": "100-api-repo-orientation",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/100-api-repo-orientation",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:api-vxapp:100-api-repo-orientation",
+        "slug": "100-api-repo-orientation",
+        "localNumber": 100,
+        "name": "API Repo Orientation",
+        "type": "repo-orientation",
+        "repo": "api-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Orient to api-vxapp: coding standards, abstract gateway, database management, route/service docs, response enums, UCv5 routes.",
+        "allowedTaskClasses": [
+          "orientation",
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "specialist"
+        ],
+        "grants": ["read", "inspect", "run-local-tests"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "pack-managed", "minimal", "repo-guided"]
+      }
+    },
+    {
+      "id": "repo:api-vxapp:103-api-coding-conventions",
+      "slug": "103-api-coding-conventions",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/103-api-coding-conventions",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:api-vxapp:103-api-coding-conventions",
+        "slug": "103-api-coding-conventions",
+        "localNumber": 103,
+        "name": "API Coding Conventions",
+        "type": "repo-orientation",
+        "repo": "api-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "API Coding Conventions pack for api-vxapp. Provenance: worker-instruction-stack-and-skill-pack-plan.md.",
+        "allowedTaskClasses": [
+          "orientation",
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided", "review-only", "closeout"]
+      }
+    },
+    {
+      "id": "repo:api-vxapp:108-api-risk-and-gotchas",
+      "slug": "108-api-risk-and-gotchas",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/108-api-risk-and-gotchas",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:api-vxapp:108-api-risk-and-gotchas",
+        "slug": "108-api-risk-and-gotchas",
+        "localNumber": 108,
+        "name": "API Risk and Gotchas",
+        "type": "repo-orientation",
+        "repo": "api-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "API Risk and Gotchas pack for api-vxapp. Provenance: worker-instruction-stack-and-skill-pack-plan.md.",
+        "allowedTaskClasses": [
+          "orientation",
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided", "review-only", "closeout"]
+      }
+    },
+    {
+      "id": "repo:api-vxapp:116-api-legacy-touch-gate",
+      "slug": "116-api-legacy-touch-gate",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/116-api-legacy-touch-gate",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:api-vxapp:116-api-legacy-touch-gate",
+        "slug": "116-api-legacy-touch-gate",
+        "localNumber": 116,
+        "name": "API Legacy Touch Gate",
+        "type": "repo-orientation",
+        "repo": "api-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "Single legacy-touch decision gate for api-vxapp planning, implementation, review, and closeout.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided", "review-only", "closeout"]
+      }
+    },
+    {
+      "id": "repo:api-vxapp:118-api-blocker-reporting",
+      "slug": "118-api-blocker-reporting",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/118-api-blocker-reporting",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:api-vxapp:118-api-blocker-reporting",
+        "slug": "118-api-blocker-reporting",
+        "localNumber": 118,
+        "name": "API Blocker Reporting",
+        "type": "implementation",
+        "repo": "api-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "API Blocker Reporting pack for api-vxapp. Provenance: worker-instruction-stack-and-skill-pack-plan.md.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "test-authoring",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided", "review-only", "closeout"]
+      }
+    },
+    {
+      "id": "repo:api-vxapp:151-api-oop-service-pattern",
+      "slug": "151-api-oop-service-pattern",
+      "link": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a1/.claude/skills/151-api-oop-service-pattern",
+      "manifest": {
+        "schema_version": "1.0.0",
+        "id": "repo:api-vxapp:151-api-oop-service-pattern",
+        "slug": "151-api-oop-service-pattern",
+        "localNumber": 151,
+        "name": "API OOP Service Pattern",
+        "type": "specialist",
+        "repo": "api-vxapp",
+        "scope": "repo",
+        "version": "1.0.0",
+        "description": "OOP implementation and refactor guidance for api-vxapp services using AbstractOOPRoutes, ServiceConfig, AbstractServiceOperations, and enum-driven contracts.",
+        "allowedTaskClasses": [
+          "plan-mutation",
+          "planning",
+          "source-editing-implementation",
+          "review-only",
+          "closeout",
+          "specialist"
+        ],
+        "grants": ["read", "inspect"],
+        "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+        "requires": ["global:000-safety-kernel", "global:001-t3-worker-basics"],
+        "conflictsWith": [],
+        "mountMode": "skill",
+        "defaultContextModes": ["isolated", "repo-guided", "review-only", "closeout"]
+      }
+    }
+  ]
+}

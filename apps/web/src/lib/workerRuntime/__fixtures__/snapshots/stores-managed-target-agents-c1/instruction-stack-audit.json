@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/stores-managed-target-agents-c1",
+  "repo": "agents-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit_push",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/stores-managed-target-agents-c1",
+    "runtimeDir": "/fixtures/worktrees/stores-managed-target-agents-c1/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/stores-managed-target-agents-c1/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/stores-managed-target-agents-c1/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "repo": "api-vxapp",
+  "taskClass": "review-only",
+  "contextMode": "review-only",
+  "closeoutAuthority": "code_tests",
+  "validationProfile": null,
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:006-worker-command-telemetry",
+    "global:026-vx-plan-review-refine",
+    "global:050-vx-git-read",
+    "global:063-generated-output-ownership",
+    "repo:api-vxapp:100-api-repo-orientation",
+    "repo:api-vxapp:130-api-review"
+  ],
+  "allowedCapabilities": ["edit", "inspect", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "commit", "deploy", "push", "stash"]
+}

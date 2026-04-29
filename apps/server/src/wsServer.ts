@@ -85,6 +85,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
 import { makeVxappWsRouteHandlers, type VxappWsRouteHandlerServices } from "./extensions/vxapp";
+import { WorkerRuntime } from "./workerRuntime/Services/WorkerRuntime.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -189,6 +190,7 @@ export type ServerRuntimeServices =
   | WorkspaceFileSystem
   | WorkspacePaths
   | ProjectHooksService
+  | WorkerRuntime
   | VxappWsRouteHandlerServices
   | Open
   | AnalyticsService;
@@ -305,6 +307,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const workspaceFileSystem = yield* WorkspaceFileSystem;
   const workspacePaths = yield* WorkspacePaths;
   const projectHooksService = yield* ProjectHooksService;
+  const workerRuntime = yield* WorkerRuntime;
   const vxappWsRouteHandlers = yield* makeVxappWsRouteHandlers;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -1114,6 +1117,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.serverUpdateSettings: {
         const body = stripRequestTag(request.body);
         return yield* serverSettingsManager.updateSettings(body.patch);
+      }
+
+      case WS_METHODS.serverGetWorkerRuntimeSnapshot: {
+        const body = stripRequestTag(request.body);
+        return yield* workerRuntime
+          .getSnapshot(body)
+          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message })));
       }
 
       default: {

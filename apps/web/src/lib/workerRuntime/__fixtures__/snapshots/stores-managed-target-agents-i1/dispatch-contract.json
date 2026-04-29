@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "repo": "agents-vxapp",
+  "taskClass": "closeout",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit_push",
+  "validationProfile": null,
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:006-worker-command-telemetry",
+    "global:050-vx-git-read",
+    "global:051-vx-git-closeout-authority",
+    "global:052-vx-github-pr",
+    "global:064-vx-quality-gate-awareness"
+  ],
+  "allowedCapabilities": [
+    "commit",
+    "inspect",
+    "pr-comment",
+    "pr-create",
+    "push",
+    "read",
+    "run-local-tests"
+  ],
+  "forbiddenCapabilities": ["branch-delete", "deploy", "stash"]
+}

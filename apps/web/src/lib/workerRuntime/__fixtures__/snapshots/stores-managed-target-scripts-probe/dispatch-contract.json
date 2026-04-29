@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "repo": "vortex-scripts",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "validationProfile": null,
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:008-terse-worker-reporting",
+    "global:024-vx-plan-implement",
+    "global:025-vx-plan-implement-phase",
+    "global:050-vx-git-read",
+    "global:064-vx-quality-gate-awareness",
+    "repo:vortex-scripts:100-vortex-scripts-repo-orientation",
+    "repo:vortex-scripts:110-vortex-scripts-plan-execution",
+    "repo:vortex-scripts:112-vortex-scripts-edit-rules",
+    "repo:vortex-scripts:113-vortex-scripts-validation-selection"
+  ],
+  "allowedCapabilities": ["edit", "inspect", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "commit", "deploy", "push", "stash"]
+}

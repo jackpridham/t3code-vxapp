@@ -219,6 +219,8 @@ export function createWsNativeApi(): NativeApi {
       listVortexApps: () => transport.request(WS_METHODS.serverListVortexApps),
       listVortexAppArtifacts: (input) =>
         transport.request(WS_METHODS.serverListVortexAppArtifacts, input),
+      getWorkerRuntimeSnapshot: (input) =>
+        transport.request(WS_METHODS.serverGetWorkerRuntimeSnapshot, input),
     },
     orchestration: {
       getBootstrapSummary: () => transport.request(ORCHESTRATION_WS_METHODS.getBootstrapSummary),

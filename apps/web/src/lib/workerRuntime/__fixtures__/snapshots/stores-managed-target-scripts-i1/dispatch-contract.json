@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0.0",
+  "repo": "vortex-scripts",
+  "taskClass": "review-only",
+  "contextMode": "review-only",
+  "closeoutAuthority": "code_only",
+  "validationProfile": null,
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:050-vx-git-read",
+    "repo:vortex-scripts:100-vortex-scripts-repo-orientation"
+  ],
+  "allowedCapabilities": ["inspect", "read"],
+  "forbiddenCapabilities": ["commit", "deploy", "edit", "push"]
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a2",
+  "repo": "api-vxapp",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests_commit",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a2",
+    "runtimeDir": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a2/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a2/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/partymore-runtime-snapshot-freshness-precursor-a2/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

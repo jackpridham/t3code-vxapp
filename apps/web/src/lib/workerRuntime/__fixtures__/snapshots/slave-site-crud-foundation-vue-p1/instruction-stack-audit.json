@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/slave-site-crud-foundation-vue-p1",
+  "repo": "vue-vxapp",
+  "taskClass": "planning",
+  "contextMode": "isolated",
+  "closeoutAuthority": "plan_only",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/slave-site-crud-foundation-vue-p1",
+    "runtimeDir": "/fixtures/worktrees/slave-site-crud-foundation-vue-p1/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/slave-site-crud-foundation-vue-p1/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/slave-site-crud-foundation-vue-p1/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

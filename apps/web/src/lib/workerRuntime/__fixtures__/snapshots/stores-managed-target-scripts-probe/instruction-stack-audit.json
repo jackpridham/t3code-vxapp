@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/stores-managed-target-scripts-probe",
+  "repo": "vortex-scripts",
+  "taskClass": "source-editing-implementation",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "status": "clean",
+  "findings": [],
+  "packAudit": {
+    "workspace": "/fixtures/worktrees/stores-managed-target-scripts-probe",
+    "runtimeDir": "/fixtures/worktrees/stores-managed-target-scripts-probe/.agents/runtime",
+    "skillsDir": "/fixtures/worktrees/stores-managed-target-scripts-probe/.claude/skills",
+    "agentsSkillsDir": "/fixtures/worktrees/stores-managed-target-scripts-probe/.agents/skills",
+    "status": "ok",
+    "issues": []
+  }
+}

@@ -1,8 +1,11 @@
 import { autoAnimate } from "@formkit/auto-animate";
 import { BotIcon, ChevronRightIcon, HardHatIcon, NetworkIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "~/lib/utils";
+import { vortexAppsListQueryOptions } from "~/lib/vortexAppsReactQuery";
 import { Badge } from "../../ui/badge";
+import type { SidebarThreadStatus } from "../SidebarThreadRow";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import {
   SidebarGroup,
@@ -17,19 +20,16 @@ import {
 type PreviewStatus = "working" | "attention" | "ready";
 
 type PreviewWorker = {
+  appTargetId: string;
+  fallbackAppLabel: string;
   id: string;
-  title: string;
   status: PreviewStatus;
 };
 
 type PreviewOrchestrator = {
   id: string;
   projectName: string;
-  modelLabel: string;
-  sessionTitle: string;
   status: PreviewStatus;
-  labels: readonly string[];
-  wakeSummary?: string;
   workers: readonly PreviewWorker[];
 };
 
@@ -64,20 +64,18 @@ const PREVIEW_EXECUTIVE: PreviewExecutive = {
       orchestrator: {
         id: "orch-jasper",
         projectName: "Jasper",
-        modelLabel: "codex",
-        sessionTitle: "Current session",
         status: "working",
-        labels: ["api-redesign", "active"],
-        wakeSummary: "1 waiting",
         workers: [
           {
+            appTargetId: "api",
+            fallbackAppLabel: "api",
             id: "worker-schema",
-            title: "Schema migration",
             status: "working",
           },
           {
+            appTargetId: "transport",
+            fallbackAppLabel: "transport",
             id: "worker-transport",
-            title: "Transport cleanup",
             status: "ready",
           },
         ],
@@ -90,15 +88,12 @@ const PREVIEW_EXECUTIVE: PreviewExecutive = {
       orchestrator: {
         id: "orch-athena",
         projectName: "Athena",
-        modelLabel: "claude",
-        sessionTitle: "Current session",
         status: "attention",
-        labels: ["observability", "decision"],
-        wakeSummary: "decision required",
         workers: [
           {
+            appTargetId: "vue",
+            fallbackAppLabel: "vue",
             id: "worker-notify",
-            title: "Notification lineage",
             status: "attention",
           },
         ],
@@ -111,10 +106,7 @@ const PREVIEW_EXECUTIVE: PreviewExecutive = {
       orchestrator: {
         id: "orch-mercury",
         projectName: "Mercury",
-        modelLabel: "codex",
-        sessionTitle: "Current session",
         status: "ready",
-        labels: ["web", "queued"],
         workers: [],
       },
     },
@@ -151,19 +143,6 @@ function statusClasses(status: PreviewStatus) {
   }
 }
 
-function PreviewStatusBadge({ status }: { status: PreviewStatus }) {
-  const resolved = statusClasses(status);
-
-  return (
-    <Badge
-      variant="outline"
-      className={cn("h-3.5 shrink-0 px-1 text-[8px] leading-none", resolved.badge)}
-    >
-      {resolved.label}
-    </Badge>
-  );
-}
-
 function PreviewStatusProgramIcon({ status }: { status: PreviewStatus }) {
   const resolved = statusClasses(status);
   return (
@@ -172,6 +151,48 @@ function PreviewStatusProgramIcon({ status }: { status: PreviewStatus }) {
       className={cn("inline-flex size-4 shrink-0 items-center justify-center", resolved.icon)}
     >
       <NetworkIcon className="size-3" />
+    </span>
+  );
+}
+
+function resolvePreviewWorkerThreadStatus(status: PreviewStatus): SidebarThreadStatus {
+  switch (status) {
+    case "working":
+      return {
+        label: "Working",
+        colorClass: "text-sky-600 dark:text-sky-300/80",
+        dotClass: "bg-sky-500 dark:bg-sky-300/80",
+        pulse: true,
+      };
+    case "attention":
+      return {
+        label: "Pending Approval",
+        colorClass: "text-amber-600 dark:text-amber-300/90",
+        dotClass: "bg-amber-500 dark:bg-amber-300/90",
+        pulse: false,
+      };
+    case "ready":
+      return {
+        label: "Completed",
+        colorClass: "text-emerald-600 dark:text-emerald-300/90",
+        dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
+        pulse: false,
+      };
+  }
+}
+
+function PreviewWorkerStatusDot({ status }: { status: PreviewStatus }) {
+  const resolved = resolvePreviewWorkerThreadStatus(status);
+
+  return (
+    <span aria-hidden="true" className="inline-flex size-1.5 shrink-0 items-center justify-center">
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          resolved.dotClass,
+          resolved.pulse ? "animate-pulse" : "",
+        )}
+      />
     </span>
   );
 }
@@ -207,6 +228,7 @@ function toggleItem(current: ReadonlySet<string>, itemId: string) {
 }
 
 export function SidebarOrchestrationPreview() {
+  const appsQuery = useQuery(vortexAppsListQueryOptions());
   const [openProgramIds, setOpenProgramIds] =
     useState<ReadonlySet<string>>(DEFAULT_OPEN_PROGRAM_IDS);
   const [openOrchestratorIds, setOpenOrchestratorIds] = useState<ReadonlySet<string>>(
@@ -220,6 +242,16 @@ export function SidebarOrchestrationPreview() {
     autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
     animatedListsRef.current.add(node);
   }, []);
+  const appDisplayNameByTargetId = useMemo(
+    () =>
+      new Map(
+        (appsQuery.data?.catalog.projects ?? []).map((project) => [
+          project.target_id,
+          project.display_name,
+        ]),
+      ),
+    [appsQuery.data?.catalog.projects],
+  );
 
   return (
     <SidebarGroup className="px-2 py-2" data-testid="sidebar-orchestration-preview">
@@ -320,32 +352,6 @@ export function SidebarOrchestrationPreview() {
                             <span className="truncate text-[11px] font-medium text-foreground/90">
                               {program.orchestrator.projectName}
                             </span>
-                            <Badge
-                              variant="outline"
-                              className="h-4 min-w-0 max-w-20 shrink-0 px-1 text-[9px] font-medium leading-none text-muted-foreground/80 lowercase"
-                            >
-                              <span className="truncate">{program.orchestrator.modelLabel}</span>
-                            </Badge>
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1">
-                            <span className="truncate text-[10px] text-muted-foreground/75">
-                              {program.orchestrator.sessionTitle}
-                            </span>
-                            {program.orchestrator.wakeSummary ? (
-                              <Badge className="h-3.5 shrink-0 border-0 bg-amber-500/12 px-1 text-[8px] font-medium leading-none text-amber-700 dark:text-amber-300">
-                                {program.orchestrator.wakeSummary}
-                              </Badge>
-                            ) : null}
-                            {program.orchestrator.labels.map((label) => (
-                              <Badge
-                                key={label}
-                                variant="outline"
-                                title={label}
-                                className="h-4 min-w-0 max-w-20 shrink-0 px-1 text-[9px] font-medium leading-none text-muted-foreground/80 lowercase"
-                              >
-                                <span className="truncate">{label}</span>
-                              </Badge>
-                            ))}
                           </div>
                         </div>
                       </button>
@@ -360,23 +366,31 @@ export function SidebarOrchestrationPreview() {
                               {program.orchestrator.workers.map((worker) => (
                                 <div
                                   key={worker.id}
-                                  className="relative flex items-start gap-2 px-2 py-1.5"
+                                  className="relative flex items-center gap-2 px-2 py-1.5"
                                 >
                                   <span
                                     aria-hidden="true"
                                     className="absolute top-3 left-0 h-px w-2 -translate-x-full bg-border/60"
                                   />
+                                  <PreviewWorkerStatusDot status={worker.status} />
                                   <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-300">
                                     <HardHatIcon className="size-3" />
                                   </span>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex min-w-0 items-center gap-1.5">
-                                      <span className="truncate text-[10px] font-medium text-foreground/85">
-                                        {worker.title}
-                                      </span>
-                                      <PreviewStatusBadge status={worker.status} />
-                                    </div>
-                                  </div>
+                                  <Badge
+                                    variant="outline"
+                                    title={
+                                      appDisplayNameByTargetId.get(worker.appTargetId) ??
+                                      worker.fallbackAppLabel
+                                    }
+                                    className="h-2.5 min-w-0 max-w-16 shrink-0 px-0.5 text-[7px] font-medium leading-none text-muted-foreground/80 lowercase"
+                                  >
+                                    <span className="truncate">
+                                      {(
+                                        appDisplayNameByTargetId.get(worker.appTargetId) ??
+                                        worker.fallbackAppLabel
+                                      ).toLowerCase()}
+                                    </span>
+                                  </Badge>
                                 </div>
                               ))}
                             </div>

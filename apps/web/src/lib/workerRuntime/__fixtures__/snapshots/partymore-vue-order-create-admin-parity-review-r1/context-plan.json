@@ -1,0 +1,23 @@
+{
+  "repo": "vue-vxapp",
+  "taskClass": "review-only",
+  "contextMode": "isolated",
+  "closeoutAuthority": "code_tests",
+  "selectedPacks": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:006-worker-command-telemetry",
+    "global:026-vx-plan-review-refine",
+    "global:063-generated-output-ownership",
+    "repo:vue-vxapp:100-vue-repo-orientation",
+    "repo:vue-vxapp:130-vue-review"
+  ],
+  "allowedCapabilities": ["edit", "inspect", "read", "run-local-tests"],
+  "forbiddenCapabilities": ["branch-delete", "commit", "deploy", "push", "stash"],
+  "conflicts": [],
+  "warnings": [],
+  "schema_version": "1.0.0",
+  "workspace": "/fixtures/worktrees/partymore-vue-order-create-admin-parity-review-r1",
+  "repoClaude": "omitted",
+  "legacyGlobalSkills": false
+}

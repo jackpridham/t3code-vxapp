@@ -58,6 +58,7 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
 import { ServerSettingsService } from "./serverSettings";
 import { VortexApps, type VortexAppsShape } from "./vortexApps/Services/VortexApps";
+import { WorkerRuntime, type WorkerRuntimeShape } from "./workerRuntime/Services/WorkerRuntime.ts";
 import {
   WorkspaceEntries,
   type WorkspaceEntriesShape,
@@ -146,6 +147,7 @@ const testLayer = Layer.mergeAll(
   Layer.succeed(TerminalManager, unusedRuntimeService<TerminalManagerShape>()),
   AnalyticsService.layerTest,
   Layer.succeed(VortexApps, unusedRuntimeService<VortexAppsShape>()),
+  Layer.succeed(WorkerRuntime, unusedRuntimeService<WorkerRuntimeShape>()),
   Layer.succeed(WorkspaceEntries, unusedRuntimeService<WorkspaceEntriesShape>()),
   Layer.succeed(WorkspaceFileSystem, unusedRuntimeService<WorkspaceFileSystemShape>()),
   Layer.succeed(WorkspacePaths, unusedRuntimeService<WorkspacePathsShape>()),

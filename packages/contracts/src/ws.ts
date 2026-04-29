@@ -54,6 +54,7 @@ import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput 
 import { OpenInEditorInput } from "./editor";
 import {
   ServerConfigUpdatedPayload,
+  ServerGetWorkerRuntimeSnapshotInput,
   ServerListVortexAppArtifactsInput,
   ServerProviderUpdatedPayload,
 } from "./server";
@@ -103,6 +104,7 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
   serverListVortexApps: "server.listVortexApps",
   serverListVortexAppArtifacts: "server.listVortexAppArtifacts",
+  serverGetWorkerRuntimeSnapshot: "server.getWorkerRuntimeSnapshot",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -206,6 +208,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverUpdateSettings, Schema.Struct({ patch: ServerSettingsPatch })),
   tagRequestBody(WS_METHODS.serverListVortexApps, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverListVortexAppArtifacts, ServerListVortexAppArtifactsInput),
+  tagRequestBody(WS_METHODS.serverGetWorkerRuntimeSnapshot, ServerGetWorkerRuntimeSnapshotInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({
