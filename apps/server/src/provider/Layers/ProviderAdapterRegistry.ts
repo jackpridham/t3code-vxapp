@@ -7,9 +7,14 @@
  *
  * @module ProviderAdapterRegistryLive
  */
+import { DEFAULT_PROVIDER_KIND } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 
-import { ProviderUnsupportedError, type ProviderAdapterError } from "../Errors.ts";
+import {
+  ProviderUnsupportedError,
+  ProviderValidationError,
+  type ProviderAdapterError,
+} from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import {
   ProviderAdapterRegistry,
@@ -41,9 +46,29 @@ const makeProviderAdapterRegistry = (options?: ProviderAdapterRegistryLiveOption
     const listProviders: ProviderAdapterRegistryShape["listProviders"] = () =>
       Effect.sync(() => Array.from(byProvider.keys()));
 
+    const resolveStartProvider: ProviderAdapterRegistryShape["resolveStartProvider"] = (input) => {
+      const modelProvider = input.modelSelection?.provider;
+      if (
+        input.provider !== undefined &&
+        modelProvider !== undefined &&
+        input.provider !== modelProvider
+      ) {
+        return Effect.fail(
+          new ProviderValidationError({
+            operation: input.operation,
+            issue: `Provider '${input.provider}' does not match modelSelection provider '${modelProvider}'.`,
+          }),
+        );
+      }
+
+      const provider = input.provider ?? modelProvider ?? DEFAULT_PROVIDER_KIND;
+      return getByProvider(provider).pipe(Effect.as(provider));
+    };
+
     return {
       getByProvider,
       listProviders,
+      resolveStartProvider,
     } satisfies ProviderAdapterRegistryShape;
   });
 

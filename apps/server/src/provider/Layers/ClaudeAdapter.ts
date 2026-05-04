@@ -1037,7 +1037,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }) => query({ prompt: input.prompt, options: input.options }) as ClaudeQueryRuntime);
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
-  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(1_024);
   const serverSettingsService = yield* ServerSettingsService;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -2515,7 +2515,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const runFork = Effect.runForkWith(services);
       const runPromise = Effect.runPromiseWith(services);
 
-      const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
+      const promptQueue = yield* Queue.bounded<PromptQueueItem>(8);
       const prompt = Stream.fromQueue(promptQueue).pipe(
         Stream.filter((item) => item.type === "message"),
         Stream.map((item) => item.message),

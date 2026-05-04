@@ -84,6 +84,10 @@ cd "$repo_root"
 
 parent_branch="$(git branch --show-current 2>/dev/null || true)"
 
+submodule_git() {
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$path" "$@"
+}
+
 should_enforce_branch="$enforce_branch"
 if [[ "$should_enforce_branch" -eq 0 && "${#enforce_branch_when_parent[@]}" -gt 0 ]]; then
     for branch in "${enforce_branch_when_parent[@]}"; do
@@ -97,12 +101,12 @@ fi
 declare -a lines=()
 declare -a recovery=()
 
-if ! current_head="$(git -C "$path" rev-parse HEAD 2>/dev/null)"; then
+if ! current_head="$(submodule_git rev-parse HEAD 2>/dev/null)"; then
     lines+=("- git access failed for $path")
     lines+=("- initialize the submodule and verify $path is a valid git worktree")
 else
-    current_branch="$(git -C "$path" branch --show-current 2>/dev/null || true)"
-    status_output="$(git -C "$path" status --short --untracked-files=normal 2>/dev/null || true)"
+    current_branch="$(submodule_git branch --show-current 2>/dev/null || true)"
+    status_output="$(submodule_git status --short --untracked-files=normal 2>/dev/null || true)"
 
     if [[ "$should_enforce_branch" -eq 1 ]]; then
         if [[ -z "$current_branch" ]]; then
@@ -144,14 +148,14 @@ else
         remote_head=""
         remote_ref="${remote}/${expected_branch:-$current_branch}"
         if [[ "$fetch_remote" -eq 1 && -n "$expected_branch" ]]; then
-            if ! git -C "$path" fetch --quiet "$remote" "$expected_branch" 2>/dev/null; then
+            if ! submodule_git fetch --quiet "$remote" "$expected_branch" 2>/dev/null; then
                 lines+=("- failed to fetch $remote/$expected_branch")
                 recovery+=("git -C $path fetch $remote $expected_branch")
             fi
         fi
 
         if [[ "$require_remote_match" -eq 1 ]]; then
-            if remote_head="$(git -C "$path" rev-parse "$remote_ref" 2>/dev/null)"; then
+            if remote_head="$(submodule_git rev-parse "$remote_ref" 2>/dev/null)"; then
                 if [[ "$current_head" != "$remote_head" ]]; then
                     lines+=("- $label commit ${current_head:0:7} must match $remote_ref ${remote_head:0:7}")
                     recovery+=("git -C $path pull --ff-only $remote ${expected_branch:-$current_branch}")

@@ -80,7 +80,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   let readModel = createEmptyReadModel(new Date().toISOString());
 
-  const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const commandQueue = yield* Queue.bounded<CommandEnvelope>(256);
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
 
   const processEnvelope = (envelope: CommandEnvelope): Effect.Effect<void> => {

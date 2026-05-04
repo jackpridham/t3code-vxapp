@@ -1,8 +1,12 @@
 import util from "node:util";
 
-type LogLevel = "info" | "warn" | "error" | "event";
+type LogLevel = "debug" | "info" | "warn" | "error";
 
 type LogContext = Record<string, unknown>;
+
+export interface LoggerOptions {
+  readonly minimumLevel?: LogLevel;
+}
 
 const ANSI = {
   reset: "\u001b[0m",
@@ -14,18 +18,27 @@ const ANSI = {
 } as const;
 
 const LEVEL_LABEL: Record<LogLevel, string> = {
+  debug: "DEBUG",
   info: "INFO",
   warn: "WARN",
   error: "ERROR",
-  event: "EVENT",
 };
 
 const LEVEL_COLOR: Record<LogLevel, string> = {
+  debug: ANSI.magenta,
   info: ANSI.cyan,
   warn: ANSI.yellow,
   error: ANSI.red,
-  event: ANSI.magenta,
 };
+
+const LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+};
+
+const EVENT_LEVEL: LogLevel = "debug";
 
 function useColors() {
   return Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined;
@@ -67,7 +80,21 @@ function formatContext(context: LogContext | undefined) {
   return entries.map(([key, value]) => `${key}=${formatValue(value)}`).join(" ");
 }
 
-function write(level: LogLevel, scope: string, message: string, context?: LogContext) {
+function shouldWrite(level: LogLevel, minimumLevel: LogLevel) {
+  return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[minimumLevel];
+}
+
+function write(
+  level: LogLevel,
+  scope: string,
+  message: string,
+  context?: LogContext,
+  options?: LoggerOptions,
+) {
+  const minimumLevel = options?.minimumLevel ?? "info";
+  if (!shouldWrite(level, minimumLevel)) {
+    return;
+  }
   const colorEnabled = useColors();
   const ts = colorize(timeStamp(), ANSI.dim, colorEnabled);
   const levelLabel = colorize(LEVEL_LABEL[level], LEVEL_COLOR[level], colorEnabled);
@@ -85,19 +112,19 @@ function write(level: LogLevel, scope: string, message: string, context?: LogCon
   console.log(line);
 }
 
-export function createLogger(scope: string) {
+export function createLogger(scope: string, options?: LoggerOptions) {
   return {
     info(message: string, context?: LogContext) {
-      write("info", scope, message, context);
+      write("info", scope, message, context, options);
     },
     warn(message: string, context?: LogContext) {
-      write("warn", scope, message, context);
+      write("warn", scope, message, context, options);
     },
     error(message: string, context?: LogContext) {
-      write("error", scope, message, context);
+      write("error", scope, message, context, options);
     },
     event(message: string, context?: LogContext) {
-      write("event", scope, message, context);
+      write(EVENT_LEVEL, scope, message, context, options);
     },
   };
 }

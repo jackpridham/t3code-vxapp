@@ -261,6 +261,24 @@ export const ProgramPostFlight = Schema.Struct({
 });
 export type ProgramPostFlight = typeof ProgramPostFlight.Type;
 
+export const ProgramDependencyGateMode = Schema.Literals(["wait", "align"]);
+export type ProgramDependencyGateMode = typeof ProgramDependencyGateMode.Type;
+
+export const ProgramDependencyGateState = Schema.Literals(["pending", "blocked", "ready"]);
+export type ProgramDependencyGateState = typeof ProgramDependencyGateState.Type;
+
+export const ProgramDependencyGate = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  surface: TrimmedNonEmptyString,
+  mode: ProgramDependencyGateMode,
+  state: ProgramDependencyGateState,
+  summary: TrimmedNonEmptyString,
+  evidence: Schema.optional(Schema.Array(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+});
+export type ProgramDependencyGate = typeof ProgramDependencyGate.Type;
+
 const ProgramDeliveryScopeReadModelFields = {
   declaredRepos: Schema.optional(ProgramDeclaredRepos).pipe(Schema.withDecodingDefault(() => [])),
   affectedAppTargets: Schema.optional(ProgramAffectedAppTargets).pipe(
@@ -270,6 +288,9 @@ const ProgramDeliveryScopeReadModelFields = {
     Schema.withDecodingDefault(() => []),
   ),
   requiredExternalE2ESuites: Schema.optional(Schema.Array(ProgramRequiredExternalE2ESuite)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  dependencyGates: Schema.optional(Schema.Array(ProgramDependencyGate)).pipe(
     Schema.withDecodingDefault(() => []),
   ),
   requireDevelopmentDeploy: Schema.optional(Schema.Boolean).pipe(
@@ -287,6 +308,7 @@ const ProgramDeliveryScopeCreateFields = {
   affectedAppTargets: ProgramAffectedAppTargets,
   requiredLocalSuites: Schema.Array(ProgramRequiredLocalSuite),
   requiredExternalE2ESuites: Schema.Array(ProgramRequiredExternalE2ESuite),
+  dependencyGates: Schema.Array(ProgramDependencyGate),
   requireDevelopmentDeploy: Schema.Boolean,
   requireExternalE2E: Schema.Boolean,
   requireCleanPostFlight: Schema.Boolean,
@@ -298,6 +320,7 @@ const ProgramDeliveryScopeUpdateFields = {
   affectedAppTargets: Schema.optional(ProgramAffectedAppTargets),
   requiredLocalSuites: Schema.optional(Schema.Array(ProgramRequiredLocalSuite)),
   requiredExternalE2ESuites: Schema.optional(Schema.Array(ProgramRequiredExternalE2ESuite)),
+  dependencyGates: Schema.optional(Schema.Array(ProgramDependencyGate)),
   requireDevelopmentDeploy: Schema.optional(Schema.Boolean),
   requireExternalE2E: Schema.optional(Schema.Boolean),
   requireCleanPostFlight: Schema.optional(Schema.Boolean),

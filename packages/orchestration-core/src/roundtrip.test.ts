@@ -147,8 +147,42 @@ describe("orchestration core command/projection roundtrips", () => {
       objective: "Coordinate the work.",
       declaredRepos: ["t3code-vxapp"],
       affectedAppTargets: ["web"],
-      requiredLocalSuites: [],
+      requiredLocalSuites: [
+        {
+          repo: "t3code-vxapp",
+          suiteId: "validate:ai-runtime",
+          description: "Run bun run validate:ai-runtime before runtime plan closeout.",
+        },
+        {
+          repo: "t3code-vxapp",
+          suiteId: "test:ai-runtime:audit",
+          description:
+            "Run bun run test:ai-runtime:audit to verify no T3 orchestration coupling, no Bash runtime path, no direct v1 DB mutation path, schema-first contracts, explicit auth/session handoff, and confirmation enforcement.",
+        },
+      ],
       requiredExternalE2ESuites: [],
+      dependencyGates: [
+        {
+          repo: "vue-vxapp",
+          surface: "command-capability",
+          mode: "align",
+          state: "ready",
+          summary: "Align runtime command wiring with the Vue capability manifest.",
+          evidence: ["Vue capability decisions"],
+        },
+        {
+          repo: "api-vxapp",
+          surface: "tool-permission-confirmation",
+          mode: "wait",
+          state: "ready",
+          summary: "Wait for API tool, permission, and confirmation contracts.",
+          evidence: [
+            "API tool contract decisions",
+            "API permission contract decisions",
+            "API confirmation contract decisions",
+          ],
+        },
+      ],
       requireDevelopmentDeploy: false,
       requireExternalE2E: false,
       requireCleanPostFlight: true,
@@ -188,6 +222,19 @@ describe("orchestration core command/projection roundtrips", () => {
           title: "Roundtrip Program",
           status: "active",
           declaredRepos: ["t3code-vxapp"],
+          requiredLocalSuites: [
+            {
+              repo: "t3code-vxapp",
+              suiteId: "validate:ai-runtime",
+              description: "Run bun run validate:ai-runtime before runtime plan closeout.",
+            },
+            {
+              repo: "t3code-vxapp",
+              suiteId: "test:ai-runtime:audit",
+              description:
+                "Run bun run test:ai-runtime:audit to verify no T3 orchestration coupling, no Bash runtime path, no direct v1 DB mutation path, schema-first contracts, explicit auth/session handoff, and confirmation enforcement.",
+            },
+          ],
           requireCleanPostFlight: true,
           requirePrPerRepo: true,
           executiveProjectId: projectId,

@@ -37,7 +37,7 @@ export const makeServerPushBus = (input: {
 }): Effect.Effect<ServerPushBus, never, Scope.Scope> =>
   Effect.gen(function* () {
     const nextSequence = yield* Ref.make(0);
-    const queue = yield* Queue.unbounded<PushJob>();
+    const queue = yield* Queue.bounded<PushJob>(512);
     const encodePush = Schema.encodeUnknownEffect(Schema.fromJsonString(WsPush));
 
     const settleDelivery = (job: PushJob, delivered: boolean) =>

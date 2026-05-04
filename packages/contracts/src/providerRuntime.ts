@@ -141,6 +141,98 @@ export const CanonicalRequestType = Schema.Literals([
 ]);
 export type CanonicalRequestType = typeof CanonicalRequestType.Type;
 
+export const UiCommandCapabilityName = Schema.Literals([
+  "navigate.toRoute",
+  "page.openDialog",
+  "table.applyFilter",
+  "table.selectRows",
+  "component.mountResult",
+  "form.populateDraft",
+  "form.submitWithConfirmation",
+  "store.readSnapshot",
+  "api.callApprovedEndpoint",
+]);
+export type UiCommandCapabilityName = typeof UiCommandCapabilityName.Type;
+
+const UiCommandRenderBlockStatusLevel = Schema.Literals(["info", "warning", "error", "success"]);
+export type UiCommandRenderBlockStatusLevel = typeof UiCommandRenderBlockStatusLevel.Type;
+
+const UiCommandRenderTableColumnSchema = Schema.Struct({
+  key: TrimmedNonEmptyStringSchema,
+  label: Schema.optional(TrimmedNonEmptyStringSchema),
+  type: Schema.optional(TrimmedNonEmptyStringSchema),
+  format: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type UiCommandRenderTableColumnSchema = typeof UiCommandRenderTableColumnSchema.Type;
+
+const UiCommandRenderTableRowAction = Schema.Struct({
+  label: TrimmedNonEmptyStringSchema,
+  command: UiCommandCapabilityName,
+  args: Schema.optional(UnknownRecordSchema),
+  deterministic: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  requiresConfirmation: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+});
+export type UiCommandRenderTableRowAction = typeof UiCommandRenderTableRowAction.Type;
+
+const UiCommandRenderStatusBlock = Schema.Struct({
+  type: Schema.Literal("status"),
+  title: TrimmedNonEmptyStringSchema,
+  level: UiCommandRenderBlockStatusLevel,
+  detail: TrimmedNonEmptyStringSchema,
+  pending: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+});
+export type UiCommandRenderStatusBlock = typeof UiCommandRenderStatusBlock.Type;
+
+const UiCommandRenderTableBlock = Schema.Struct({
+  type: Schema.Literal("table"),
+  title: TrimmedNonEmptyStringSchema,
+  columns: Schema.Array(UiCommandRenderTableColumnSchema),
+  rows: Schema.Array(UnknownRecordSchema),
+  rowActions: Schema.optional(Schema.Array(UiCommandRenderTableRowAction)),
+  summary: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type UiCommandRenderTableBlock = typeof UiCommandRenderTableBlock.Type;
+
+const UiCommandRenderNativeBlock = Schema.Struct({
+  type: Schema.Literal("native"),
+  title: TrimmedNonEmptyStringSchema,
+  componentId: TrimmedNonEmptyStringSchema,
+  props: UnknownRecordSchema,
+});
+export type UiCommandRenderNativeBlock = typeof UiCommandRenderNativeBlock.Type;
+
+const UiCommandRenderBlock = Schema.Union([
+  UiCommandRenderStatusBlock,
+  UiCommandRenderTableBlock,
+  UiCommandRenderNativeBlock,
+]);
+export type UiCommandRenderBlock = typeof UiCommandRenderBlock.Type;
+
+export const UiCommandCapability = Schema.Struct({
+  name: UiCommandCapabilityName,
+  deterministic: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  requiresConfirmation: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  timeoutMs: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 30_000)),
+  renderBlock: Schema.optional(UiCommandRenderBlock),
+});
+export type UiCommandCapability = typeof UiCommandCapability.Type;
+
+export const UiCommandCapabilityManifest = Schema.Struct({
+  manifestId: TrimmedNonEmptyStringSchema,
+  version: NonNegativeInt.pipe(Schema.withDecodingDefault(() => 1)),
+  registeredAt: IsoDateTime,
+  commands: Schema.Array(UiCommandCapability),
+});
+export type UiCommandCapabilityManifest = typeof UiCommandCapabilityManifest.Type;
+
+export const UiCommandAdvisoryContextSnapshot = Schema.Struct({
+  routeSnapshot: Schema.optional(Schema.Unknown),
+  pageSnapshot: Schema.optional(Schema.Unknown),
+  userSnapshot: Schema.optional(Schema.Unknown),
+  capabilitySnapshot: Schema.optional(Schema.Unknown),
+});
+export type UiCommandAdvisoryContextSnapshot = typeof UiCommandAdvisoryContextSnapshot.Type;
+
 const ProviderRuntimeEventType = Schema.Literals([
   "session.started",
   "session.configured",
@@ -168,6 +260,9 @@ const ProviderRuntimeEventType = Schema.Literals([
   "content.delta",
   "request.opened",
   "request.resolved",
+  "ui.command.requested",
+  "ui.command.result",
+  "agent.render_block",
   "user-input.requested",
   "user-input.resolved",
   "task.started",
@@ -218,6 +313,9 @@ const ItemCompletedType = Schema.Literal("item.completed");
 const ContentDeltaType = Schema.Literal("content.delta");
 const RequestOpenedType = Schema.Literal("request.opened");
 const RequestResolvedType = Schema.Literal("request.resolved");
+const UiCommandRequestedType = Schema.Literal("ui.command.requested");
+const UiCommandResultType = Schema.Literal("ui.command.result");
+const AgentRenderBlockType = Schema.Literal("agent.render_block");
 const UserInputRequestedType = Schema.Literal("user-input.requested");
 const UserInputResolvedType = Schema.Literal("user-input.resolved");
 const TaskStartedType = Schema.Literal("task.started");
@@ -422,6 +520,40 @@ const RequestResolvedPayload = Schema.Struct({
   resolution: Schema.optional(Schema.Unknown),
 });
 export type RequestResolvedPayload = typeof RequestResolvedPayload.Type;
+
+const UiCommandRequestedPayload = Schema.Struct({
+  requestId: TrimmedNonEmptyStringSchema,
+  correlationId: TrimmedNonEmptyStringSchema,
+  manifest: UiCommandCapabilityManifest,
+  command: UiCommandCapability,
+  args: UnknownRecordSchema,
+  advisoryContext: Schema.optional(UiCommandAdvisoryContextSnapshot),
+  allowlisted: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  requestedAt: IsoDateTime,
+});
+export type UiCommandRequestedPayload = typeof UiCommandRequestedPayload.Type;
+
+const UiCommandResultStatus = Schema.Literals(["completed", "failed", "rejected", "timed_out"]);
+export type UiCommandResultStatus = typeof UiCommandResultStatus.Type;
+
+const UiCommandResultPayload = Schema.Struct({
+  requestId: TrimmedNonEmptyStringSchema,
+  correlationId: TrimmedNonEmptyStringSchema,
+  manifestId: TrimmedNonEmptyStringSchema,
+  command: UiCommandCapabilityName,
+  status: UiCommandResultStatus,
+  result: Schema.optional(Schema.Unknown),
+  error: Schema.optional(TrimmedNonEmptyStringSchema),
+  timedOutAt: Schema.optional(IsoDateTime),
+  completedAt: IsoDateTime,
+});
+export type UiCommandResultPayload = typeof UiCommandResultPayload.Type;
+
+const AgentRenderBlockPayload = Schema.Struct({
+  requestId: TrimmedNonEmptyStringSchema,
+  block: UiCommandRenderBlock,
+});
+export type AgentRenderBlockPayload = typeof AgentRenderBlockPayload.Type;
 
 const UserInputQuestionOption = Schema.Struct({
   label: TrimmedNonEmptyStringSchema,
@@ -788,6 +920,28 @@ const ProviderRuntimeRequestResolvedEvent = Schema.Struct({
 });
 export type ProviderRuntimeRequestResolvedEvent = typeof ProviderRuntimeRequestResolvedEvent.Type;
 
+const ProviderRuntimeUiCommandRequestedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: UiCommandRequestedType,
+  payload: UiCommandRequestedPayload,
+});
+export type ProviderRuntimeUiCommandRequestedEvent =
+  typeof ProviderRuntimeUiCommandRequestedEvent.Type;
+
+const ProviderRuntimeUiCommandResultEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: UiCommandResultType,
+  payload: UiCommandResultPayload,
+});
+export type ProviderRuntimeUiCommandResultEvent = typeof ProviderRuntimeUiCommandResultEvent.Type;
+
+const ProviderRuntimeAgentRenderBlockEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: AgentRenderBlockType,
+  payload: AgentRenderBlockPayload,
+});
+export type ProviderRuntimeAgentRenderBlockEvent = typeof ProviderRuntimeAgentRenderBlockEvent.Type;
+
 const ProviderRuntimeUserInputRequestedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: UserInputRequestedType,
@@ -967,6 +1121,9 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeContentDeltaEvent,
   ProviderRuntimeRequestOpenedEvent,
   ProviderRuntimeRequestResolvedEvent,
+  ProviderRuntimeUiCommandRequestedEvent,
+  ProviderRuntimeUiCommandResultEvent,
+  ProviderRuntimeAgentRenderBlockEvent,
   ProviderRuntimeUserInputRequestedEvent,
   ProviderRuntimeUserInputResolvedEvent,
   ProviderRuntimeTaskStartedEvent,

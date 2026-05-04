@@ -273,6 +273,15 @@ class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("Ro
   message: Schema.String,
 }) {}
 
+const MAX_PENDING_WS_REQUESTS_PER_CLIENT = 8;
+const WS_OVERLOAD_CLOSE_CODE = 1013;
+
+interface SocketRequestState {
+  pending: number;
+  tail: Promise<void>;
+  closed: boolean;
+}
+
 export const createServer = Effect.fn(function* (): Effect.fn.Return<
   http.Server,
   ServerLifecycleError,
@@ -288,6 +297,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     authToken,
     host,
     logWebSocketEvents,
+    logLevel,
     autoBootstrapProjectFromCwd,
   } = serverConfig;
   const availableEditors = resolveAvailableEditors();
@@ -325,7 +335,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const providersRef = yield* Ref.make(yield* providerRegistry.getProviders);
 
   const clients = yield* Ref.make(new Set<WebSocket>());
-  const logger = createLogger("ws");
+  const socketRequestStates = new WeakMap<WebSocket, SocketRequestState>();
+  const logger = createLogger("ws", {
+    minimumLevel: logWebSocketEvents ? "debug" : logLevel,
+  });
   const readiness = yield* makeServerReadiness;
 
   function logOutgoingPush(push: WsPushEnvelopeBase, recipients: number) {
@@ -1171,6 +1184,48 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     });
   });
 
+  const closeWebSocketOverloaded = (ws: WebSocket) => {
+    if (ws.readyState === WebSocketClient.OPEN || ws.readyState === WebSocketClient.CONNECTING) {
+      try {
+        ws.close(WS_OVERLOAD_CLOSE_CODE, "Server overloaded");
+      } catch {
+        // Ignore close failures for overloaded sockets.
+      }
+    }
+  };
+
+  const scheduleMessage = (ws: WebSocket, raw: unknown) => {
+    const currentState: SocketRequestState = socketRequestStates.get(ws) ?? {
+      pending: 0,
+      tail: Promise.resolve(),
+      closed: false,
+    };
+
+    if (currentState.closed) {
+      return;
+    }
+
+    if (currentState.pending >= MAX_PENDING_WS_REQUESTS_PER_CLIENT) {
+      currentState.closed = true;
+      socketRequestStates.set(ws, currentState);
+      closeWebSocketOverloaded(ws);
+      return;
+    }
+
+    currentState.pending += 1;
+
+    const next = currentState.tail
+      .catch(() => undefined)
+      .then(() => runPromise(handleMessage(ws, raw).pipe(Effect.ignoreCause({ log: true }))))
+      .catch(() => undefined)
+      .finally(() => {
+        currentState.pending = Math.max(0, currentState.pending - 1);
+      });
+
+    currentState.tail = next;
+    socketRequestStates.set(ws, currentState);
+  };
+
   httpServer.on("upgrade", (request, socket, head) => {
     socket.on("error", () => {}); // Prevent unhandled `EPIPE`/`ECONNRESET` from crashing the process if the client disconnects mid-handshake
 
@@ -1217,10 +1272,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     );
 
     ws.on("message", (raw) => {
-      void runPromise(handleMessage(ws, raw).pipe(Effect.ignoreCause({ log: true })));
+      scheduleMessage(ws, raw);
     });
 
     ws.on("close", () => {
+      const state = socketRequestStates.get(ws);
+      if (state) {
+        state.closed = true;
+        socketRequestStates.set(ws, state);
+      }
       void runPromise(
         Ref.update(clients, (clients) => {
           clients.delete(ws);
@@ -1230,6 +1290,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     });
 
     ws.on("error", () => {
+      const state = socketRequestStates.get(ws);
+      if (state) {
+        state.closed = true;
+        socketRequestStates.set(ws, state);
+      }
       void runPromise(
         Ref.update(clients, (clients) => {
           clients.delete(ws);

@@ -1,11 +1,11 @@
-import type { ProviderRuntimeEvent } from "@t3tools/contracts";
+import type { ModelSelection, ProviderRuntimeEvent, ProviderKind } from "@t3tools/contracts";
 import { ThreadId } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts/settings";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, assert } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Queue, Stream } from "effect";
 
-import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
+import { ProviderUnsupportedError, ProviderValidationError } from "../src/provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
@@ -13,9 +13,11 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../src/provider/Services/ProviderService.ts";
+import { ProviderRuntimeEventLogRepository } from "../src/persistence/Services/ProviderRuntimeEventLog.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { SqlitePersistenceMemory } from "../src/persistence/Layers/Sqlite.ts";
+import { ProviderRuntimeEventLogRepositoryLive } from "../src/persistence/Layers/ProviderRuntimeEventLog.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
 
 import {
@@ -40,7 +42,34 @@ const makeWorkspaceDirectory = Effect.gen(function* () {
 interface IntegrationFixture {
   readonly cwd: string;
   readonly harness: TestProviderAdapterHarness;
-  readonly layer: Layer.Layer<ProviderService, unknown, never>;
+  readonly layer: Layer.Layer<ProviderService | ProviderRuntimeEventLogRepository, unknown, never>;
+}
+
+function resolveIntegrationStartProvider(input: {
+  readonly operation: string;
+  readonly provider?: ProviderKind | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly defaultProvider: ProviderKind;
+  readonly supportedProviders: ReadonlyArray<ProviderKind>;
+}) {
+  const modelProvider = input.modelSelection?.provider;
+  if (
+    input.provider !== undefined &&
+    modelProvider !== undefined &&
+    input.provider !== modelProvider
+  ) {
+    return Effect.fail(
+      new ProviderValidationError({
+        operation: input.operation,
+        issue: `Provider '${input.provider}' does not match modelSelection provider '${modelProvider}'.`,
+      }),
+    );
+  }
+
+  const resolvedProvider = input.provider ?? modelProvider ?? input.defaultProvider;
+  return input.supportedProviders.includes(resolvedProvider)
+    ? Effect.succeed(resolvedProvider)
+    : Effect.fail(new ProviderUnsupportedError({ provider: resolvedProvider }));
 }
 
 const makeIntegrationFixture = Effect.gen(function* () {
@@ -53,6 +82,14 @@ const makeIntegrationFixture = Effect.gen(function* () {
         ? Effect.succeed(harness.adapter)
         : Effect.fail(new ProviderUnsupportedError({ provider })),
     listProviders: () => Effect.succeed(["codex"]),
+    resolveStartProvider: ({ operation, provider, modelSelection }) =>
+      resolveIntegrationStartProvider({
+        operation,
+        provider,
+        modelSelection,
+        defaultProvider: "codex",
+        supportedProviders: ["codex"],
+      }),
   };
 
   const directoryLayer = ProviderSessionDirectoryLive.pipe(
@@ -61,12 +98,14 @@ const makeIntegrationFixture = Effect.gen(function* () {
 
   const shared = Layer.mergeAll(
     directoryLayer,
+    ProviderRuntimeEventLogRepositoryLive,
     Layer.succeed(ProviderAdapterRegistry, registry),
     ServerSettingsService.layerTest(DEFAULT_SERVER_SETTINGS),
     AnalyticsService.layerTest,
   ).pipe(Layer.provide(SqlitePersistenceMemory));
 
-  const layer = makeProviderServiceLive().pipe(Layer.provide(shared));
+  const providerLayer = makeProviderServiceLive().pipe(Layer.provide(shared));
+  const layer = Layer.mergeAll(shared, providerLayer);
 
   return {
     cwd,
@@ -145,6 +184,40 @@ it.effect("replays typed runtime fixture events", () =>
         observedEvents.map((event) => event.type),
         codexTurnTextFixture.map((event) => event.type),
       );
+    }).pipe(Effect.provide(fixture.layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("durably logs provider runtime events for replay", () =>
+  Effect.gen(function* () {
+    const fixture = yield* makeIntegrationFixture;
+
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const repository = yield* ProviderRuntimeEventLogRepository;
+      const session = yield* provider.startSession(ThreadId.makeUnsafe("thread-replay-log"), {
+        threadId: ThreadId.makeUnsafe("thread-replay-log"),
+        provider: "codex",
+        cwd: fixture.cwd,
+        runtimeMode: "full-access",
+      });
+      const observedEvents = yield* runTurn({
+        provider,
+        harness: fixture.harness,
+        threadId: session.threadId,
+        userText: "replay this turn",
+        response: { events: codexTurnTextFixture },
+      });
+
+      assert.equal(observedEvents[0]?.type, "turn.started");
+
+      const replayed = yield* Stream.runCollect(repository.readByThreadId(session.threadId)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      );
+      assert.ok(replayed.some((entry) => entry.type === "turn.started"));
+      assert.ok(replayed.some((entry) => entry.type === "turn.completed"));
+      const firstTurnEntry = replayed.find((entry) => entry.event.type === "turn.started");
+      assert.equal(firstTurnEntry?.event.type, "turn.started");
     }).pipe(Effect.provide(fixture.layer));
   }).pipe(Effect.provide(NodeServices.layer)),
 );

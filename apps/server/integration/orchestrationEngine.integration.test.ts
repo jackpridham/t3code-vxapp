@@ -528,6 +528,207 @@ it.live("runs multi-turn file edits and persists checkpoint diffs", () =>
   ),
 );
 
+it.live("projects tool-call lifecycle outcomes with tenant, user, and audit context", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
+        events: [
+          {
+            type: "turn.started",
+            ...runtimeBase("evt-tool-1", "2026-02-24T10:02:30.000Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+          },
+          {
+            type: "tool.started",
+            ...runtimeBase("evt-tool-2", "2026-02-24T10:02:30.100Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            toolKind: "command",
+            title: "Run approved PHP tool",
+            detail: "api/v1/tools/quotes:run",
+            raw: {
+              source: "claude.sdk.permission",
+              method: "canUseTool/request",
+              payload: {
+                tenantId: "tenant-7",
+                userId: "user-19",
+                auditReference: "audit-4f7e",
+                toolUseId: "tool-use-77",
+              },
+            },
+          },
+          {
+            type: "tool.progress",
+            ...runtimeBase("evt-tool-3", "2026-02-24T10:02:30.150Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            payload: {
+              toolUseId: "tool-use-77",
+              toolName: "quotes:run",
+              summary: "Queued with tenant context",
+              elapsedSeconds: 0.75,
+            },
+            raw: {
+              source: "claude.sdk.message",
+              method: "tool/progress",
+              payload: {
+                tenantId: "tenant-7",
+                userId: "user-19",
+                auditReference: "audit-4f7e",
+                toolUseId: "tool-use-77",
+              },
+            },
+          },
+          {
+            type: "tool.completed",
+            ...runtimeBase("evt-tool-4", "2026-02-24T10:02:30.200Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            toolKind: "command",
+            title: "Run approved PHP tool",
+            detail: "Audit ref: AUD-77",
+            raw: {
+              source: "claude.sdk.permission",
+              method: "canUseTool/result",
+              payload: {
+                tenantId: "tenant-7",
+                userId: "user-19",
+                auditReference: "audit-4f7e",
+                toolUseId: "tool-use-77",
+              },
+            },
+          },
+          {
+            type: "approval.requested",
+            ...runtimeBase("evt-tool-5", "2026-02-24T10:02:30.250Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            requestId: APPROVAL_REQUEST_ID,
+            requestKind: "command",
+            detail: "Approve tool execution",
+            raw: {
+              source: "claude.sdk.permission",
+              method: "canUseTool/request",
+              payload: {
+                tenantId: "tenant-7",
+                userId: "user-19",
+                auditReference: "audit-4f7e",
+              },
+            },
+          },
+          {
+            type: "approval.resolved",
+            ...runtimeBase("evt-tool-6", "2026-02-24T10:02:30.300Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            requestId: APPROVAL_REQUEST_ID,
+            requestKind: "command",
+            decision: "decline",
+            raw: {
+              source: "claude.sdk.permission",
+              method: "canUseTool/decision",
+              payload: {
+                tenantId: "tenant-7",
+                userId: "user-19",
+                auditReference: "audit-4f7e",
+              },
+            },
+          },
+          {
+            type: "turn.completed",
+            ...runtimeBase("evt-tool-7", "2026-02-24T10:02:30.400Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            status: "completed",
+          },
+        ],
+      });
+
+      yield* startTurn({
+        harness,
+        commandId: "cmd-turn-start-tool-context",
+        messageId: "msg-user-tool-context",
+        text: "Run the approved PHP tool",
+      });
+
+      const thread = yield* harness.waitForThread(
+        THREAD_ID,
+        (entry) =>
+          entry.activities.some(
+            (activity) =>
+              activity.kind === "tool_call_started" &&
+              typeof activity.payload === "object" &&
+              activity.payload !== null &&
+              (activity.payload as { readonly tenantId?: string }).tenantId === "tenant-7",
+          ) &&
+          entry.activities.some((activity) => activity.kind === "tool_call_progress") &&
+          entry.activities.some((activity) => activity.kind === "tool_call_result") &&
+          entry.activities.some((activity) => activity.kind === "permission_denied") &&
+          entry.activities.some((activity) => activity.kind === "approval.requested") &&
+          entry.activities.some((activity) => activity.kind === "approval.resolved"),
+      );
+
+      assert.equal(
+        thread.activities.some((activity) => activity.kind === "tool_call_started"),
+        true,
+      );
+      assert.equal(
+        thread.activities.some((activity) => activity.kind === "tool_call_progress"),
+        true,
+      );
+      assert.equal(
+        thread.activities.some((activity) => activity.kind === "tool_call_result"),
+        true,
+      );
+      assert.equal(
+        thread.activities.some((activity) => activity.kind === "permission_denied"),
+        true,
+      );
+
+      const approvalRequested = thread.activities.find(
+        (activity) => activity.kind === "approval.requested",
+      );
+      const approvalRequestedPayload =
+        approvalRequested?.payload && typeof approvalRequested.payload === "object"
+          ? (approvalRequested.payload as Record<string, unknown>)
+          : undefined;
+      assert.deepEqual(approvalRequestedPayload, {
+        requestId: "req-approval-1",
+        requestKind: "command",
+        requestType: "command_execution_approval",
+        operationId: "req-approval-1",
+        preview: "Approve tool execution",
+        confirmationRequired: true,
+        detail: "Approve tool execution",
+        tenantId: "tenant-7",
+        userId: "user-19",
+        auditReference: "audit-4f7e",
+      });
+
+      const approvalResolved = thread.activities.find(
+        (activity) => activity.kind === "approval.resolved",
+      );
+      const approvalResolvedPayload =
+        approvalResolved?.payload && typeof approvalResolved.payload === "object"
+          ? (approvalResolved.payload as Record<string, unknown>)
+          : undefined;
+      assert.deepEqual(approvalResolvedPayload, {
+        requestId: "req-approval-1",
+        requestKind: "command",
+        requestType: "command_execution_approval",
+        operationId: "req-approval-1",
+        decision: "decline",
+        tenantId: "tenant-7",
+        userId: "user-19",
+        auditReference: "audit-4f7e",
+      });
+    }),
+  ),
+);
+
 it.live("tracks approval requests and resolves pending approvals on user response", () =>
   withHarness((harness) =>
     Effect.gen(function* () {
@@ -1005,7 +1206,12 @@ it.live("recovers claudeAgent sessions after provider stopAll using persisted re
         yield* harness.waitForThread(
           THREAD_ID,
           (entry) =>
-            entry.latestTurn?.turnId === "turn-1" && entry.session?.threadId === "thread-1",
+            entry.session?.threadId === "thread-1" &&
+            entry.session.status === "ready" &&
+            entry.messages.some(
+              (message) =>
+                message.role === "assistant" && message.text === "Turn before restart.\n",
+            ),
         );
 
         yield* harness.adapterHarness!.adapter.stopAll();
@@ -1260,7 +1466,11 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
         yield* harness.waitForThread(
           THREAD_ID,
           (entry) =>
-            entry.latestTurn?.turnId === "turn-1" && entry.session?.threadId === "thread-1",
+            entry.session?.threadId === "thread-1" &&
+            entry.session.status === "ready" &&
+            entry.messages.some(
+              (message) => message.role === "assistant" && message.text === "README -> v2\n",
+            ),
         );
 
         yield* harness.adapterHarness!.queueTurnResponse(THREAD_ID, {
