@@ -219,6 +219,26 @@ export function createWsNativeApi(): NativeApi {
       listVortexApps: () => transport.request(WS_METHODS.serverListVortexApps),
       listVortexAppArtifacts: (input) =>
         transport.request(WS_METHODS.serverListVortexAppArtifacts, input),
+      getAgentsVxappSidebarGraph: (input) =>
+        transport.request(WS_METHODS.serverGetAgentsVxappSidebarGraph, input),
+      getAgentsVxappControlPlaneSnapshot: (input) =>
+        transport.request(WS_METHODS.serverGetAgentsVxappControlPlaneSnapshot, input, {
+          timeoutMs: 180_000,
+        }),
+      createAgentsVxappProgram: (input) =>
+        transport.request(WS_METHODS.serverCreateAgentsVxappProgram, input),
+      updateAgentsVxappProgram: (input) =>
+        transport.request(WS_METHODS.serverUpdateAgentsVxappProgram, input),
+      deleteAgentsVxappProgram: (input) =>
+        transport.request(WS_METHODS.serverDeleteAgentsVxappProgram, input),
+      setAgentsVxappProgramLifecycle: (input) =>
+        transport.request(WS_METHODS.serverSetAgentsVxappProgramLifecycle, input),
+      createAgentsVxappTodo: (input) =>
+        transport.request(WS_METHODS.serverCreateAgentsVxappTodo, input),
+      updateAgentsVxappTodo: (input) =>
+        transport.request(WS_METHODS.serverUpdateAgentsVxappTodo, input),
+      deleteAgentsVxappTodo: (input) =>
+        transport.request(WS_METHODS.serverDeleteAgentsVxappTodo, input),
       getWorkerRuntimeSnapshot: (input) =>
         transport.request(WS_METHODS.serverGetWorkerRuntimeSnapshot, input),
     },

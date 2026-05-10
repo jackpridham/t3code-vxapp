@@ -1,6 +1,9 @@
 import { type NativeApi, type OrchestrationReadModel, type ThreadId } from "@t3tools/contracts";
 
-import { loadCurrentStateWithThreadDetail } from "./orchestrationCurrentStateHydration";
+import {
+  loadCurrentStateWithOrchestratorSessionDetail,
+  loadCurrentStateWithThreadDetail,
+} from "./orchestrationCurrentStateHydration";
 import type { Thread } from "../types";
 
 export function threadNeedsRouteHistoryHydration(thread: Thread | null | undefined): boolean {
@@ -37,7 +40,10 @@ export async function hydrateRouteThreadHistory(input: {
     return false;
   }
 
-  const readModel = await loadCurrentStateWithThreadDetail(input.api, input.threadId);
+  const readModel =
+    input.thread?.spawnRole === "orchestrator"
+      ? await loadCurrentStateWithOrchestratorSessionDetail(input.api, input.threadId)
+      : await loadCurrentStateWithThreadDetail(input.api, input.threadId);
   input.syncServerReadModel(readModel);
   return true;
 }

@@ -10,7 +10,10 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
-import { addThreadDetailToReadModel } from "./orchestrationCurrentStateHydration";
+import {
+  addOrchestratorSessionWorkerDetailsToReadModel,
+  addThreadDetailToReadModel,
+} from "./orchestrationCurrentStateHydration";
 
 const projectId = ProjectId.makeUnsafe("project-1");
 const rootThreadId = ThreadId.makeUnsafe("root-thread");
@@ -172,6 +175,46 @@ describe("orchestration current-state hydration", () => {
         parentThreadId: rootThreadId,
         orchestratorThreadId: rootThreadId,
         workflowId: "wf-root-thread",
+        messages: [expect.objectContaining({ text: "loaded history" })],
+        activities: [expect.objectContaining({ summary: "history activity" })],
+      }),
+    );
+  });
+
+  it("hydrates worker histories for an orchestrator session in one background pass", async () => {
+    const orchestratorSummary = makeThreadSummary(rootThreadId, {
+      spawnRole: "orchestrator",
+    });
+    const workerSummary = makeThreadSummary(workerThreadId, {
+      parentThreadId: rootThreadId,
+      orchestratorThreadId: rootThreadId,
+      spawnRole: "worker",
+      workflowId: "wf-root-thread",
+    });
+    const api = makeApi({
+      listSessionThreads: vi.fn().mockResolvedValue([orchestratorSummary, workerSummary]),
+    });
+    const readModel = makeReadModel([makeThread(rootThreadId, { spawnRole: "orchestrator" })]);
+
+    const next = await addOrchestratorSessionWorkerDetailsToReadModel(api, readModel, rootThreadId);
+
+    const worker = next.threads.find((entry) => entry.id === workerThreadId);
+    expect(api.orchestration.listSessionThreads).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.listSessionThreads).toHaveBeenCalledWith({
+      rootThreadId,
+      includeArchived: true,
+      includeDeleted: false,
+    });
+    expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
+      threadId: workerThreadId,
+      limit: 1000,
+    });
+    expect(api.orchestration.listOrchestratorWakes).not.toHaveBeenCalled();
+    expect(worker).toEqual(
+      expect.objectContaining({
+        id: workerThreadId,
+        parentThreadId: rootThreadId,
+        orchestratorThreadId: rootThreadId,
         messages: [expect.objectContaining({ text: "loaded history" })],
         activities: [expect.objectContaining({ summary: "history activity" })],
       }),

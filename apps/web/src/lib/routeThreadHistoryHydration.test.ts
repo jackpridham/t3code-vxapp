@@ -5,6 +5,7 @@ import {
   TurnId,
   type NativeApi,
   type OrchestrationReadModel,
+  type OrchestrationThreadSummary,
 } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
 
@@ -189,6 +190,84 @@ describe("route thread history hydration", () => {
             }),
           }),
         ],
+      }),
+    );
+  });
+
+  it("hydrates worker session history when navigating to an orchestrator thread", async () => {
+    const workerThreadId = ThreadId.makeUnsafe("worker-1");
+    const api = makeApi();
+    vi.mocked(api.orchestration.listSessionThreads).mockResolvedValue([
+      {
+        id: threadId,
+        projectId,
+        title: "Orchestrator",
+        labels: [],
+        modelSelection: { provider: "codex", model: "gpt-5.4" },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+        latestTurn: null,
+        createdAt: "2026-04-14T00:00:00.000Z",
+        updatedAt: "2026-04-14T00:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        session: null,
+        spawnRole: "orchestrator",
+      },
+      {
+        id: workerThreadId,
+        projectId: ProjectId.makeUnsafe("project-worker"),
+        title: "Worker",
+        labels: [],
+        modelSelection: { provider: "codex", model: "gpt-5.4" },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        branch: null,
+        worktreePath: "/home/gizmo/worktrees/api-vxapp-1",
+        latestTurn: null,
+        createdAt: "2026-04-14T00:00:00.000Z",
+        updatedAt: "2026-04-14T00:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        session: null,
+        parentThreadId: threadId,
+        orchestratorThreadId: threadId,
+        spawnRole: "worker",
+      },
+    ] satisfies OrchestrationThreadSummary[]);
+    const syncServerReadModel = vi.fn();
+
+    await expect(
+      hydrateRouteThreadHistory({
+        api,
+        threadId,
+        thread: makeThread({
+          latestTurn: makeStartedSummaryThread().latestTurn,
+          spawnRole: "orchestrator",
+        }),
+        syncServerReadModel,
+      }),
+    ).resolves.toBe(true);
+
+    expect(api.orchestration.listSessionThreads).toHaveBeenCalledWith({
+      rootThreadId: threadId,
+      includeArchived: true,
+      includeDeleted: false,
+    });
+    expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
+      threadId: workerThreadId,
+      limit: 1000,
+    });
+    expect(syncServerReadModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threads: expect.arrayContaining([
+          expect.objectContaining({
+            id: workerThreadId,
+            messages: [expect.objectContaining({ text: "loaded after navigation" })],
+          }),
+        ]),
       }),
     );
   });

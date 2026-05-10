@@ -3,6 +3,7 @@
 import { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
 import { SearchIcon } from "lucide-react";
 import type * as React from "react";
+import { DialogCloseButton } from "~/components/ui/dialog-close-button";
 import { cn } from "~/lib/utils";
 import {
   Autocomplete,
@@ -52,7 +53,12 @@ function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.V
   );
 }
 
-function CommandDialogPopup({ className, children, ...props }: CommandDialogPrimitive.Popup.Props) {
+function CommandDialogPopup({
+  className,
+  children,
+  showCloseButton = true,
+  ...props
+}: CommandDialogPrimitive.Popup.Props & { showCloseButton?: boolean }) {
   return (
     <CommandDialogPortal>
       <CommandDialogBackdrop />
@@ -66,6 +72,13 @@ function CommandDialogPopup({ className, children, ...props }: CommandDialogPrim
           {...props}
         >
           {children}
+          {showCloseButton && (
+            <CommandDialogPrimitive.Close
+              aria-label="Close"
+              className="absolute end-2 top-2 z-10"
+              render={<DialogCloseButton />}
+            />
+          )}
         </CommandDialogPrimitive.Popup>
       </CommandDialogViewport>
     </CommandDialogPortal>

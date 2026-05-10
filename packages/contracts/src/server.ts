@@ -3,9 +3,16 @@ import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchema
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
-import { ProviderKind } from "./orchestration";
+import {
+  OrchestrationLatestTurn,
+  OrchestrationProgramNotificationSeverity,
+  OrchestrationProgramStatus,
+  OrchestrationSession,
+  ProviderKind,
+} from "./orchestration";
 import { ServerSettings } from "./settings";
 import { GetWorkerRuntimeSnapshotInput, GetWorkerRuntimeSnapshotResult } from "./workerRuntime";
+import { ProgramId, ProjectId, ThreadId } from "./baseSchemas";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal("keybindings.malformed-config"),
@@ -152,3 +159,318 @@ export type ServerGetWorkerRuntimeSnapshotInput = typeof ServerGetWorkerRuntimeS
 
 export const ServerGetWorkerRuntimeSnapshotResult = GetWorkerRuntimeSnapshotResult;
 export type ServerGetWorkerRuntimeSnapshotResult = typeof ServerGetWorkerRuntimeSnapshotResult.Type;
+
+export const ServerGetAgentsVxappSidebarGraphInput = Schema.Struct({});
+export type ServerGetAgentsVxappSidebarGraphInput =
+  typeof ServerGetAgentsVxappSidebarGraphInput.Type;
+
+export const ServerAgentsVxappSidebarGraphSource = Schema.Literals(["sqlite", "unavailable"]);
+export type ServerAgentsVxappSidebarGraphSource = typeof ServerAgentsVxappSidebarGraphSource.Type;
+
+const JsonValue: Schema.Schema<unknown> = Schema.suspend(() =>
+  Schema.Union([
+    Schema.Null,
+    Schema.String,
+    Schema.Number,
+    Schema.Boolean,
+    Schema.Array(JsonValue),
+    Schema.Record(Schema.String, JsonValue),
+  ]),
+);
+
+const JsonRecord = Schema.Record(Schema.String, JsonValue);
+
+export const ServerAgentsVxappSidebarProgram = Schema.Struct({
+  id: ProgramId,
+  title: TrimmedNonEmptyString,
+  objective: Schema.NullOr(Schema.String),
+  status: OrchestrationProgramStatus,
+  executiveProjectId: Schema.NullOr(ProjectId),
+  executiveThreadId: Schema.NullOr(ThreadId),
+  currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  metadata: Schema.NullOr(JsonRecord),
+  closeout: Schema.NullOr(JsonRecord),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerAgentsVxappSidebarProgram = typeof ServerAgentsVxappSidebarProgram.Type;
+
+export const ServerAgentsVxappSidebarThreadLink = Schema.Struct({
+  threadId: ThreadId,
+  projectId: Schema.NullOr(ProjectId),
+  workspaceRoot: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  title: Schema.NullOr(Schema.String),
+  spawnRole: Schema.NullOr(TrimmedNonEmptyString),
+  spawnedBy: Schema.NullOr(TrimmedNonEmptyString),
+  parentThreadId: Schema.NullOr(ThreadId),
+  workflowId: Schema.NullOr(TrimmedNonEmptyString),
+  programId: Schema.NullOr(ProgramId),
+  executiveProjectId: Schema.NullOr(ProjectId),
+  executiveThreadId: Schema.NullOr(ThreadId),
+  orchestratorThreadId: Schema.NullOr(ThreadId),
+  labels: Schema.Array(TrimmedNonEmptyString),
+  session: Schema.NullOr(OrchestrationSession),
+  latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  metadata: Schema.NullOr(JsonRecord),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerAgentsVxappSidebarThreadLink = typeof ServerAgentsVxappSidebarThreadLink.Type;
+
+export const ServerAgentsVxappSidebarWake = Schema.Struct({
+  wakeId: TrimmedNonEmptyString,
+  orchestratorThreadId: ThreadId,
+  programId: Schema.NullOr(ProgramId),
+  state: TrimmedNonEmptyString,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+  payload: Schema.NullOr(JsonRecord),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  settledAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerAgentsVxappSidebarWake = typeof ServerAgentsVxappSidebarWake.Type;
+
+export const ServerAgentsVxappSidebarWatchProjection = Schema.Struct({
+  programId: ProgramId,
+  enabled: Schema.Boolean,
+  classification: Schema.NullOr(TrimmedNonEmptyString),
+  reason: Schema.NullOr(Schema.String),
+  signature: Schema.NullOr(TrimmedNonEmptyString),
+  suppression: Schema.NullOr(JsonRecord),
+  metadata: Schema.NullOr(JsonRecord),
+  lastEvaluatedAt: Schema.NullOr(IsoDateTime),
+  updatedAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerAgentsVxappSidebarWatchProjection =
+  typeof ServerAgentsVxappSidebarWatchProjection.Type;
+
+export const ServerAgentsVxappSidebarProgramNotification = Schema.Struct({
+  notificationId: TrimmedNonEmptyString,
+  programId: Schema.NullOr(ProgramId),
+  executiveProjectId: Schema.NullOr(ProjectId),
+  executiveThreadId: Schema.NullOr(ThreadId),
+  orchestratorThreadId: Schema.NullOr(ThreadId),
+  kind: TrimmedNonEmptyString,
+  severity: OrchestrationProgramNotificationSeverity,
+  summary: TrimmedNonEmptyString,
+  evidence: Schema.NullOr(JsonRecord),
+  state: TrimmedNonEmptyString,
+  queuedAt: Schema.NullOr(IsoDateTime),
+  deliveredAt: Schema.NullOr(IsoDateTime),
+  consumedAt: Schema.NullOr(IsoDateTime),
+  droppedAt: Schema.NullOr(IsoDateTime),
+  consumeReason: Schema.NullOr(Schema.String),
+  dropReason: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ServerAgentsVxappSidebarProgramNotification =
+  typeof ServerAgentsVxappSidebarProgramNotification.Type;
+
+export const ServerAgentsVxappSidebarAttentionItem = Schema.Struct({
+  attentionId: TrimmedNonEmptyString,
+  attentionKey: Schema.NullOr(TrimmedNonEmptyString),
+  notificationId: Schema.NullOr(TrimmedNonEmptyString),
+  programId: Schema.NullOr(ProgramId),
+  executiveProjectId: Schema.NullOr(ProjectId),
+  executiveThreadId: Schema.NullOr(ThreadId),
+  sourceThreadId: Schema.NullOr(ThreadId),
+  sourceRole: Schema.NullOr(TrimmedNonEmptyString),
+  kind: TrimmedNonEmptyString,
+  severity: OrchestrationProgramNotificationSeverity,
+  summary: TrimmedNonEmptyString,
+  evidence: Schema.NullOr(JsonRecord),
+  state: TrimmedNonEmptyString,
+  queuedAt: Schema.NullOr(IsoDateTime),
+  acknowledgedAt: Schema.NullOr(IsoDateTime),
+  resolvedAt: Schema.NullOr(IsoDateTime),
+  droppedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ServerAgentsVxappSidebarAttentionItem =
+  typeof ServerAgentsVxappSidebarAttentionItem.Type;
+
+export const ServerAgentsVxappSidebarMirrorDiagnostics = Schema.Struct({
+  missingProgramIds: Schema.Array(ProgramId),
+  divergentProgramIds: Schema.Array(ProgramId),
+  missingProjectIds: Schema.Array(ProjectId),
+  missingThreadIds: Schema.Array(ThreadId),
+  staleMirror: Schema.Boolean,
+});
+export type ServerAgentsVxappSidebarMirrorDiagnostics =
+  typeof ServerAgentsVxappSidebarMirrorDiagnostics.Type;
+
+export const ServerGetAgentsVxappSidebarGraphResult = Schema.Struct({
+  source: ServerAgentsVxappSidebarGraphSource,
+  dbPath: Schema.NullOr(TrimmedNonEmptyString),
+  fallbackReason: Schema.NullOr(Schema.String),
+  programs: Schema.Array(ServerAgentsVxappSidebarProgram),
+  threadLinks: Schema.Array(ServerAgentsVxappSidebarThreadLink),
+  openWakes: Schema.Array(ServerAgentsVxappSidebarWake),
+  watchProjections: Schema.Array(ServerAgentsVxappSidebarWatchProjection),
+  notifications: Schema.Array(ServerAgentsVxappSidebarProgramNotification),
+  attentionItems: Schema.Array(ServerAgentsVxappSidebarAttentionItem),
+  mirrorDiagnostics: ServerAgentsVxappSidebarMirrorDiagnostics,
+});
+export type ServerGetAgentsVxappSidebarGraphResult =
+  typeof ServerGetAgentsVxappSidebarGraphResult.Type;
+
+export const ServerAgentsVxappProgramSnapshot = Schema.Struct({
+  id: ProgramId,
+  title: TrimmedNonEmptyString,
+  objective: Schema.NullOr(Schema.String),
+  status: OrchestrationProgramStatus,
+  baseStatus: Schema.NullOr(TrimmedNonEmptyString),
+  currentStatus: Schema.NullOr(TrimmedNonEmptyString),
+  executiveProjectId: Schema.NullOr(ProjectId),
+  executiveThreadId: Schema.NullOr(ThreadId),
+  currentOrchestratorThreadId: Schema.NullOr(ThreadId),
+  metadata: Schema.NullOr(JsonRecord),
+  closeout: Schema.NullOr(JsonRecord),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+  deletedAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerAgentsVxappProgramSnapshot = typeof ServerAgentsVxappProgramSnapshot.Type;
+
+export const ServerAgentsVxappTodoPlanLink = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  planKey: TrimmedNonEmptyString,
+  phase: Schema.NullOr(Schema.String),
+  step: Schema.NullOr(Schema.String),
+  linkedAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerAgentsVxappTodoPlanLink = typeof ServerAgentsVxappTodoPlanLink.Type;
+
+export const ServerAgentsVxappTodoSnapshot = Schema.Struct({
+  todoId: TrimmedNonEmptyString,
+  agent: TrimmedNonEmptyString,
+  programId: Schema.NullOr(ProgramId),
+  title: TrimmedNonEmptyString,
+  summary: Schema.NullOr(Schema.String),
+  nextAction: Schema.NullOr(Schema.String),
+  status: TrimmedNonEmptyString,
+  priority: TrimmedNonEmptyString,
+  filePath: Schema.NullOr(TrimmedNonEmptyString),
+  owner: Schema.NullOr(JsonRecord),
+  planLinks: Schema.Array(ServerAgentsVxappTodoPlanLink),
+  notes: Schema.Array(JsonValue),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ServerAgentsVxappTodoSnapshot = typeof ServerAgentsVxappTodoSnapshot.Type;
+
+export const ServerAgentsVxappCurrentTodoProjection = Schema.Struct({
+  agent: TrimmedNonEmptyString,
+  programId: ProgramId,
+  todoId: TrimmedNonEmptyString,
+  ambiguity: Schema.NullOr(JsonRecord),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ServerAgentsVxappCurrentTodoProjection =
+  typeof ServerAgentsVxappCurrentTodoProjection.Type;
+
+export const ServerGetAgentsVxappControlPlaneSnapshotInput = Schema.Struct({});
+export type ServerGetAgentsVxappControlPlaneSnapshotInput =
+  typeof ServerGetAgentsVxappControlPlaneSnapshotInput.Type;
+
+export const ServerGetAgentsVxappControlPlaneSnapshotResult = Schema.Struct({
+  fetchedAt: IsoDateTime,
+  dbPath: TrimmedNonEmptyString,
+  todoRootPath: TrimmedNonEmptyString,
+  agents: Schema.Array(TrimmedNonEmptyString),
+  programs: Schema.Array(ServerAgentsVxappProgramSnapshot),
+  todos: Schema.Array(ServerAgentsVxappTodoSnapshot),
+  currentTodos: Schema.Array(ServerAgentsVxappCurrentTodoProjection),
+});
+export type ServerGetAgentsVxappControlPlaneSnapshotResult =
+  typeof ServerGetAgentsVxappControlPlaneSnapshotResult.Type;
+
+export const ServerAgentsVxappTodoPlanLinkInput = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  planKey: TrimmedNonEmptyString,
+  phase: Schema.optional(Schema.NullOr(Schema.String)),
+  step: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type ServerAgentsVxappTodoPlanLinkInput = typeof ServerAgentsVxappTodoPlanLinkInput.Type;
+
+export const ServerCreateAgentsVxappProgramInput = Schema.Struct({
+  title: TrimmedNonEmptyString,
+  objective: Schema.optional(Schema.String),
+  executiveProjectId: ProjectId,
+  executiveThreadId: ThreadId,
+  currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  status: Schema.optional(OrchestrationProgramStatus),
+  scope: Schema.optional(JsonRecord),
+});
+export type ServerCreateAgentsVxappProgramInput = typeof ServerCreateAgentsVxappProgramInput.Type;
+
+export const ServerUpdateAgentsVxappProgramInput = Schema.Struct({
+  programId: ProgramId,
+  title: Schema.optional(Schema.String),
+  objective: Schema.optional(Schema.String),
+  executiveProjectId: Schema.optional(Schema.NullOr(ProjectId)),
+  executiveThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  currentOrchestratorThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  clearCurrentOrchestratorThreadId: Schema.optional(Schema.Boolean),
+  scope: Schema.optional(JsonRecord),
+});
+export type ServerUpdateAgentsVxappProgramInput = typeof ServerUpdateAgentsVxappProgramInput.Type;
+
+export const ServerDeleteAgentsVxappProgramInput = Schema.Struct({
+  programId: ProgramId,
+});
+export type ServerDeleteAgentsVxappProgramInput = typeof ServerDeleteAgentsVxappProgramInput.Type;
+
+export const ServerSetAgentsVxappProgramLifecycleInput = Schema.Struct({
+  programId: ProgramId,
+  action: Schema.Literals(["set-status", "founder-review-ready", "complete", "cancel"]),
+  nextStatus: Schema.optional(OrchestrationProgramStatus),
+  reason: Schema.optional(Schema.String),
+  supersededByProgramId: Schema.optional(Schema.NullOr(ProgramId)),
+});
+export type ServerSetAgentsVxappProgramLifecycleInput =
+  typeof ServerSetAgentsVxappProgramLifecycleInput.Type;
+
+export const ServerCreateAgentsVxappTodoInput = Schema.Struct({
+  agent: TrimmedNonEmptyString,
+  todoId: Schema.optional(TrimmedNonEmptyString),
+  title: TrimmedNonEmptyString,
+  programId: Schema.optional(Schema.NullOr(ProgramId)),
+  summary: Schema.optional(Schema.String),
+  nextAction: Schema.optional(Schema.String),
+  status: Schema.optional(TrimmedNonEmptyString),
+  priority: Schema.optional(TrimmedNonEmptyString),
+  planLinks: Schema.optional(Schema.Array(ServerAgentsVxappTodoPlanLinkInput)),
+});
+export type ServerCreateAgentsVxappTodoInput = typeof ServerCreateAgentsVxappTodoInput.Type;
+
+export const ServerUpdateAgentsVxappTodoInput = Schema.Struct({
+  agent: TrimmedNonEmptyString,
+  todoId: TrimmedNonEmptyString,
+  title: Schema.optional(Schema.String),
+  programId: Schema.optional(Schema.NullOr(ProgramId)),
+  summary: Schema.optional(Schema.String),
+  nextAction: Schema.optional(Schema.String),
+  status: Schema.optional(TrimmedNonEmptyString),
+  priority: Schema.optional(TrimmedNonEmptyString),
+  planLinks: Schema.optional(Schema.Array(ServerAgentsVxappTodoPlanLinkInput)),
+});
+export type ServerUpdateAgentsVxappTodoInput = typeof ServerUpdateAgentsVxappTodoInput.Type;
+
+export const ServerDeleteAgentsVxappTodoInput = Schema.Struct({
+  agent: TrimmedNonEmptyString,
+  todoId: TrimmedNonEmptyString,
+});
+export type ServerDeleteAgentsVxappTodoInput = typeof ServerDeleteAgentsVxappTodoInput.Type;
+
+export const ServerAgentsVxappOwnerMutationResult = JsonRecord;
+export type ServerAgentsVxappOwnerMutationResult = typeof ServerAgentsVxappOwnerMutationResult.Type;

@@ -31,6 +31,18 @@ import type {
 } from "./project";
 import type {
   ServerConfig,
+  ServerCreateAgentsVxappProgramInput,
+  ServerCreateAgentsVxappTodoInput,
+  ServerDeleteAgentsVxappProgramInput,
+  ServerDeleteAgentsVxappTodoInput,
+  ServerGetAgentsVxappControlPlaneSnapshotInput,
+  ServerGetAgentsVxappControlPlaneSnapshotResult,
+  ServerGetAgentsVxappSidebarGraphInput,
+  ServerGetAgentsVxappSidebarGraphResult,
+  ServerAgentsVxappOwnerMutationResult,
+  ServerSetAgentsVxappProgramLifecycleInput,
+  ServerUpdateAgentsVxappProgramInput,
+  ServerUpdateAgentsVxappTodoInput,
   ServerGetWorkerRuntimeSnapshotInput,
   ServerGetWorkerRuntimeSnapshotResult,
   ServerListVortexAppArtifactsInput,
@@ -218,6 +230,33 @@ export interface NativeApi {
     listVortexAppArtifacts: (
       input: ServerListVortexAppArtifactsInput,
     ) => Promise<ServerListVortexAppArtifactsResult>;
+    getAgentsVxappSidebarGraph: (
+      input: ServerGetAgentsVxappSidebarGraphInput,
+    ) => Promise<ServerGetAgentsVxappSidebarGraphResult>;
+    getAgentsVxappControlPlaneSnapshot: (
+      input: ServerGetAgentsVxappControlPlaneSnapshotInput,
+    ) => Promise<ServerGetAgentsVxappControlPlaneSnapshotResult>;
+    createAgentsVxappProgram: (
+      input: ServerCreateAgentsVxappProgramInput,
+    ) => Promise<ServerAgentsVxappOwnerMutationResult>;
+    updateAgentsVxappProgram: (
+      input: ServerUpdateAgentsVxappProgramInput,
+    ) => Promise<ServerAgentsVxappOwnerMutationResult>;
+    deleteAgentsVxappProgram: (
+      input: ServerDeleteAgentsVxappProgramInput,
+    ) => Promise<ServerAgentsVxappOwnerMutationResult>;
+    setAgentsVxappProgramLifecycle: (
+      input: ServerSetAgentsVxappProgramLifecycleInput,
+    ) => Promise<ServerAgentsVxappOwnerMutationResult>;
+    createAgentsVxappTodo: (
+      input: ServerCreateAgentsVxappTodoInput,
+    ) => Promise<ServerAgentsVxappOwnerMutationResult>;
+    updateAgentsVxappTodo: (
+      input: ServerUpdateAgentsVxappTodoInput,
+    ) => Promise<ServerAgentsVxappOwnerMutationResult>;
+    deleteAgentsVxappTodo: (
+      input: ServerDeleteAgentsVxappTodoInput,
+    ) => Promise<ServerAgentsVxappOwnerMutationResult>;
     getWorkerRuntimeSnapshot: (
       input: ServerGetWorkerRuntimeSnapshotInput,
     ) => Promise<ServerGetWorkerRuntimeSnapshotResult>;

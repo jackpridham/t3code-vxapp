@@ -326,6 +326,7 @@ export function resolveRouteThreadId(pathname: string): ThreadId | null {
     routeThreadId === "artifact" ||
     routeThreadId === "artifacts" ||
     routeThreadId === "changes" ||
+    routeThreadId === "programs" ||
     routeThreadId === "settings" ||
     routeThreadId === "sidebar"
   ) {

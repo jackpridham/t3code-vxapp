@@ -1005,7 +1005,14 @@ it.live("recovers claudeAgent sessions after provider stopAll using persisted re
         yield* harness.waitForThread(
           THREAD_ID,
           (entry) =>
-            entry.latestTurn?.turnId === "turn-1" && entry.session?.threadId === "thread-1",
+            entry.latestTurn?.turnId === "turn-1" &&
+            entry.session?.providerName === "claudeAgent" &&
+            entry.session.status === "ready" &&
+            entry.session.activeTurnId === null &&
+            entry.messages.some(
+              (message) =>
+                message.role === "assistant" && message.text === "Turn before restart.\n",
+            ),
         );
 
         yield* harness.adapterHarness!.adapter.stopAll();
@@ -1260,7 +1267,13 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
         yield* harness.waitForThread(
           THREAD_ID,
           (entry) =>
-            entry.latestTurn?.turnId === "turn-1" && entry.session?.threadId === "thread-1",
+            entry.latestTurn?.turnId === "turn-1" &&
+            entry.session?.providerName === "claudeAgent" &&
+            entry.session.status === "ready" &&
+            entry.session.activeTurnId === null &&
+            entry.messages.some(
+              (message) => message.role === "assistant" && message.text === "README -> v2\n",
+            ),
         );
 
         yield* harness.adapterHarness!.queueTurnResponse(THREAD_ID, {
@@ -1304,7 +1317,12 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
           (entry) =>
             entry.latestTurn?.turnId === "turn-2" &&
             entry.checkpoints.length === 2 &&
-            entry.session?.providerName === "claudeAgent",
+            entry.session?.providerName === "claudeAgent" &&
+            entry.session.status === "ready" &&
+            entry.session.activeTurnId === null &&
+            entry.messages.some(
+              (message) => message.role === "assistant" && message.text === "README -> v3\n",
+            ),
         );
 
         yield* harness.engine.dispatch({

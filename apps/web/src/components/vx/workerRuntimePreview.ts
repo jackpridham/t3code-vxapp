@@ -343,8 +343,8 @@ function buildPreviewWorkerRuntimeSnapshot(
     packCount: catalogFixture.packCount,
     packs: installedPacks.packs.map(normalizePackSummary),
     repo:
-      normalizeNullableString(contextPlan.repo) ??
       normalizeNullableString(dispatchContract.repo) ??
+      normalizeNullableString(contextPlan.repo) ??
       normalizeNullableString(installedPacks.repo),
     selectedPacks: preferStringList(dispatchContract.selectedPacks, contextPlan.selectedPacks),
     sourceFiles: {

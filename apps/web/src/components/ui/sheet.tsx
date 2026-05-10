@@ -1,9 +1,8 @@
 "use client";
 
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
-import { XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
-import { Button } from "~/components/ui/button";
+import { DialogCloseButton } from "~/components/ui/dialog-close-button";
 import { ScrollArea } from "~/components/ui/scroll-area";
 
 const Sheet = SheetPrimitive.Root;
@@ -98,10 +97,8 @@ function SheetPopup({
             <SheetPrimitive.Close
               aria-label="Close"
               className="absolute end-2 top-2"
-              render={<Button size="icon" variant="ghost" />}
-            >
-              <XIcon />
-            </SheetPrimitive.Close>
+              render={<DialogCloseButton />}
+            />
           )}
         </SheetPrimitive.Popup>
       </SheetViewport>
@@ -170,7 +167,7 @@ function SheetPanel({
   ...props
 }: React.ComponentProps<"div"> & { scrollFade?: boolean }) {
   return (
-    <ScrollArea scrollFade={scrollFade}>
+    <ScrollArea className="min-h-0 flex-1" scrollFade={scrollFade}>
       <div
         className={cn(
           "p-6 in-[[data-slot=sheet-popup]:has([data-slot=sheet-header])]:pt-1 in-[[data-slot=sheet-popup]:has([data-slot=sheet-footer]:not(.border-t))]:pb-1",

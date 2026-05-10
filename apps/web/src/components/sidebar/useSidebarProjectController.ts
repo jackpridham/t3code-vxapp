@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
-import { DEFAULT_MODEL_BY_PROVIDER, type ProjectId, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL_BY_PROVIDER, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   normalizeOrchestratorDisplayName,
@@ -37,6 +37,56 @@ type ThreadLike = Pick<
   Thread,
   "id" | "projectId" | "archivedAt" | "createdAt" | "updatedAt" | "session"
 >;
+
+function buildProjectDescendantIds(
+  projects: readonly Project[],
+  projectId: ProjectId,
+): Set<ProjectId> {
+  const childIdsByParentId = new Map<ProjectId, ProjectId[]>();
+  for (const project of projects) {
+    const parentId = project.sidebarParentProjectId;
+    if (!parentId || parentId === project.id) {
+      continue;
+    }
+    const existing = childIdsByParentId.get(parentId);
+    if (existing) {
+      existing.push(project.id);
+    } else {
+      childIdsByParentId.set(parentId, [project.id]);
+    }
+  }
+
+  const descendants = new Set<ProjectId>();
+  const queue = [...(childIdsByParentId.get(projectId) ?? [])];
+  while (queue.length > 0) {
+    const nextProjectId = queue.shift();
+    if (!nextProjectId || descendants.has(nextProjectId)) {
+      continue;
+    }
+    descendants.add(nextProjectId);
+    queue.push(...(childIdsByParentId.get(nextProjectId) ?? []));
+  }
+  return descendants;
+}
+
+function resolveAssignableParentCandidates(input: {
+  orchestratorProjectCwds: ReadonlySet<string>;
+  projectId: ProjectId;
+  projects: readonly Project[];
+}): Project[] {
+  const descendantIds = buildProjectDescendantIds(input.projects, input.projectId);
+  return input.projects
+    .filter(
+      (project) =>
+        resolveSidebarProjectKind({
+          project,
+          orchestratorProjectCwds: input.orchestratorProjectCwds,
+        }) === "project",
+    )
+    .filter((project) => project.id !== input.projectId)
+    .filter((project) => !descendantIds.has(project.id))
+    .toSorted((left, right) => left.name.localeCompare(right.name));
+}
 
 export interface UseSidebarProjectControllerInput<TThread extends ThreadLike> {
   projects: readonly Project[];
@@ -499,11 +549,64 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
         return;
       }
       if (clicked === "assign-parent") {
-        toastManager.add({
-          type: "info",
-          title: "Assign parent project",
-          description: `TODO: parent project picker for "${project.name}" is not wired yet.`,
+        const orchestratorProjectCwds = new Set(input.orchestratorProjectCwds);
+        if (
+          resolveSidebarProjectKind({
+            project,
+            orchestratorProjectCwds,
+          }) !== "project"
+        ) {
+          toastManager.add({
+            type: "warning",
+            title: "Parent assignment unavailable",
+            description: "Only regular projects can be assigned to a sidebar parent project.",
+          });
+          return;
+        }
+
+        const candidates = resolveAssignableParentCandidates({
+          orchestratorProjectCwds,
+          projectId,
+          projects: input.projects,
         });
+        const parentOptions: Array<{ id: string; label: string }> = [
+          {
+            id: "__none__",
+            label: project.sidebarParentProjectId === null ? "No parent (Current)" : "No parent",
+          },
+          ...candidates.map((candidate) => ({
+            id: candidate.id,
+            label:
+              candidate.id === project.sidebarParentProjectId
+                ? `${candidate.name} (Current)`
+                : candidate.name,
+          })),
+        ];
+        const parentClicked = await api.contextMenu.show(parentOptions, position);
+        if (parentClicked === null) {
+          return;
+        }
+
+        const nextParentProjectId =
+          parentClicked === "__none__" ? null : ProjectId.makeUnsafe(parentClicked);
+        if (nextParentProjectId === (project.sidebarParentProjectId ?? null)) {
+          return;
+        }
+
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "project.meta.update",
+            commandId: newCommandId(),
+            projectId,
+            sidebarParentProjectId: nextParentProjectId,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Failed to assign parent project",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          });
+        }
         return;
       }
       if (clicked !== "delete") return;

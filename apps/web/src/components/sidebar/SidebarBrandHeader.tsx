@@ -3,6 +3,7 @@ import {
   ArrowLeftIcon,
   ChevronDownIcon,
   HomeIcon,
+  Layers3Icon,
   MenuIcon,
   PackageIcon,
   Settings2Icon,
@@ -72,6 +73,10 @@ function isArtifactsNavigationPath(pathname: string): boolean {
   return pathname === "/artifacts" || pathname.startsWith("/artifacts/");
 }
 
+function isProgramsNavigationPath(pathname: string): boolean {
+  return pathname === "/programs" || pathname.startsWith("/programs/");
+}
+
 function isUtilityWindowPath(pathname: string): boolean {
   return (
     pathname.startsWith("/artifact") ||
@@ -94,8 +99,17 @@ const APP_NAVIGATION_ITEMS: readonly AppNavigationNode[] = [
   {
     icon: HomeIcon,
     label: "Chat",
-    match: (pathname) => !isSettingsNavigationPath(pathname) && !isUtilityWindowPath(pathname),
+    match: (pathname) =>
+      !isSettingsNavigationPath(pathname) &&
+      !isProgramsNavigationPath(pathname) &&
+      !isUtilityWindowPath(pathname),
     to: "/",
+  },
+  {
+    icon: Layers3Icon,
+    label: "Programs",
+    match: isProgramsNavigationPath,
+    to: "/programs",
   },
 ];
 

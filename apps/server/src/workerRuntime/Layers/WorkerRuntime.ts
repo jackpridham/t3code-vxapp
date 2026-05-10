@@ -1,5 +1,6 @@
 import { Cause, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import type {
+  GetWorkerRuntimeSnapshotInput,
   GetWorkerRuntimeSnapshotResult,
   WorkerRuntimeAuditFinding,
   WorkerRuntimeInstructionStackAudit,
@@ -42,6 +43,17 @@ const decodeInstructionStackAudit = Schema.decodeUnknownEffect(
   WorkerRuntimeInstructionStackAuditSchema,
 );
 const decodeSnapshot = Schema.decodeUnknownEffect(GetWorkerRuntimeSnapshotResultSchema);
+
+function decodeSnapshotResult(snapshot: GetWorkerRuntimeSnapshotResult) {
+  return decodeSnapshot(snapshot).pipe(
+    Effect.mapError(
+      () =>
+        new WorkerRuntimeError({
+          message: "Worker runtime snapshot normalization failed.",
+        }),
+    ),
+  );
+}
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
@@ -130,6 +142,86 @@ function fileState(input: {
   };
 }
 
+function missingSourceFile(input: {
+  detail: string;
+  fileName: string;
+  runtimeDir: string | null;
+}): WorkerRuntimeSourceFile {
+  return fileState({
+    absolutePath: input.runtimeDir
+      ? `${input.runtimeDir}/${input.fileName}`
+      : `runtime-unavailable/${input.fileName}`,
+    detail: input.detail,
+    fileName: input.fileName,
+    status: "missing",
+  });
+}
+
+function buildUnavailableSnapshot(input: {
+  threadId: GetWorkerRuntimeSnapshotInput["threadId"];
+  reason: string;
+  runtimeDir: string | null;
+  worktreePath: string | null;
+}): GetWorkerRuntimeSnapshotResult {
+  return {
+    threadId: input.threadId,
+    worktreePath: input.worktreePath,
+    runtimeDir: input.runtimeDir,
+    sourceFiles: {
+      contextPlan: missingSourceFile({
+        detail: input.reason,
+        fileName: RUNTIME_FILE_NAMES.contextPlan,
+        runtimeDir: input.runtimeDir,
+      }),
+      dispatchContract: missingSourceFile({
+        detail: input.reason,
+        fileName: RUNTIME_FILE_NAMES.dispatchContract,
+        runtimeDir: input.runtimeDir,
+      }),
+      installedPacks: missingSourceFile({
+        detail: input.reason,
+        fileName: RUNTIME_FILE_NAMES.installedPacks,
+        runtimeDir: input.runtimeDir,
+      }),
+      instructionStackAudit: missingSourceFile({
+        detail: input.reason,
+        fileName: RUNTIME_FILE_NAMES.instructionStackAudit,
+        runtimeDir: input.runtimeDir,
+      }),
+    },
+    summary: {
+      repo: null,
+      taskClass: null,
+      contextMode: null,
+      closeoutAuthority: null,
+      validationProfile: null,
+      selectedPacks: [],
+      allowedCapabilities: [],
+      forbiddenCapabilities: [],
+      conflicts: [],
+      warnings: [],
+      repoClaude: null,
+      legacyGlobalSkills: null,
+      workspace: input.worktreePath,
+      runtimeDir: input.runtimeDir,
+      skillsDir: null,
+      agentsSkillsDir: null,
+      auditStatus: "missing",
+      auditFindings: [],
+      packAuditStatus: null,
+      packAuditIssueCount: 0,
+      packCount: 0,
+    },
+    packs: [],
+    raw: {
+      contextPlan: null,
+      dispatchContract: null,
+      installedPacks: null,
+      instructionStackAudit: null,
+    },
+  };
+}
+
 function parseJsonFile<T>({
   absolutePath,
   decode,
@@ -205,22 +297,38 @@ export const makeWorkerRuntime = Effect.gen(function* () {
     function* (input) {
       const thread = yield* projectionOperationalQuery.getThreadById(input);
       if (thread === null) {
-        return yield* new WorkerRuntimeError({
-          message: `Thread '${input.threadId}' was not found.`,
-        });
+        return yield* decodeSnapshotResult(
+          buildUnavailableSnapshot({
+            threadId: input.threadId,
+            reason: `Thread '${input.threadId}' was not found in the current T3 projection.`,
+            runtimeDir: null,
+            worktreePath: input.worktreePath ?? null,
+          }),
+        );
       }
       if (thread.spawnRole !== "worker") {
-        return yield* new WorkerRuntimeError({
-          message: `Thread '${input.threadId}' is not a worker thread.`,
-        });
+        return yield* decodeSnapshotResult(
+          buildUnavailableSnapshot({
+            threadId: thread.id,
+            reason: `Thread '${input.threadId}' is not marked as a worker thread.`,
+            runtimeDir: null,
+            worktreePath: thread.worktreePath ?? input.worktreePath ?? null,
+          }),
+        );
       }
-      if (!thread.worktreePath) {
-        return yield* new WorkerRuntimeError({
-          message: `Worker thread '${input.threadId}' has no worktree path.`,
-        });
+      const worktreePath = thread.worktreePath ?? input.worktreePath ?? null;
+      if (!worktreePath) {
+        return yield* decodeSnapshotResult(
+          buildUnavailableSnapshot({
+            threadId: thread.id,
+            reason: `Worker thread '${input.threadId}' has no worktree path yet.`,
+            runtimeDir: null,
+            worktreePath: null,
+          }),
+        );
       }
 
-      const runtimeDir = path.join(thread.worktreePath, ".agents", "runtime");
+      const runtimeDir = path.join(worktreePath, ".agents", "runtime");
       const contextPlanPath = path.join(runtimeDir, RUNTIME_FILE_NAMES.contextPlan);
       const dispatchContractPath = path.join(runtimeDir, RUNTIME_FILE_NAMES.dispatchContract);
       const installedPacksPath = path.join(runtimeDir, RUNTIME_FILE_NAMES.installedPacks);
@@ -272,9 +380,9 @@ export const makeWorkerRuntime = Effect.gen(function* () {
       const packAudit = instructionStackAudit?.packAudit ?? null;
       const packAuditIssues = packAudit ? recordField(packAudit, "issues") : undefined;
 
-      return yield* decodeSnapshot({
+      return yield* decodeSnapshotResult({
         threadId: thread.id,
-        worktreePath: thread.worktreePath,
+        worktreePath,
         runtimeDir,
         sourceFiles: {
           contextPlan: contextPlanResult.sourceFile,
@@ -284,8 +392,8 @@ export const makeWorkerRuntime = Effect.gen(function* () {
         },
         summary: {
           repo:
-            contextPlan?.repo ??
             dispatchContract?.repo ??
+            contextPlan?.repo ??
             installedPacks?.repo ??
             instructionStackAudit?.repo ??
             null,

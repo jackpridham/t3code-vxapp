@@ -20,3 +20,15 @@ export function resolveThreadRouteTarget(pathname: string, threadId: ThreadId) {
     params: { threadId },
   } as const;
 }
+
+export function resolveNoThreadRouteTarget(pathname: string) {
+  if (isSidebarWindowPath(pathname)) {
+    return {
+      to: SIDEBAR_WINDOW_ROUTE,
+    } as const;
+  }
+
+  return {
+    to: "/",
+  } as const;
+}

@@ -9,6 +9,14 @@ import * as Command from "effect/unstable/cli/Command";
 import { FetchHttpClient } from "effect/unstable/http";
 import { beforeEach } from "vitest";
 import { NetService } from "@t3tools/shared/Net";
+import {
+  AgentsVxappControlPlane,
+  type AgentsVxappControlPlaneShape,
+} from "./extensions/vxapp/Services/AgentsVxappControlPlane.ts";
+import {
+  AgentsVxappSidebar,
+  type AgentsVxappSidebarShape,
+} from "./extensions/vxapp/Services/AgentsVxappSidebar.ts";
 
 import {
   CheckpointDiffQuery,
@@ -146,6 +154,8 @@ const testLayer = Layer.mergeAll(
   Layer.succeed(ProviderService, unusedRuntimeService<ProviderServiceShape>()),
   Layer.succeed(TerminalManager, unusedRuntimeService<TerminalManagerShape>()),
   AnalyticsService.layerTest,
+  Layer.succeed(AgentsVxappControlPlane, unusedRuntimeService<AgentsVxappControlPlaneShape>()),
+  Layer.succeed(AgentsVxappSidebar, unusedRuntimeService<AgentsVxappSidebarShape>()),
   Layer.succeed(VortexApps, unusedRuntimeService<VortexAppsShape>()),
   Layer.succeed(WorkerRuntime, unusedRuntimeService<WorkerRuntimeShape>()),
   Layer.succeed(WorkspaceEntries, unusedRuntimeService<WorkspaceEntriesShape>()),

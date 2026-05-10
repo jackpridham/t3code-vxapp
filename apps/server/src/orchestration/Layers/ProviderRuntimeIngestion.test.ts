@@ -1386,23 +1386,6 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     harness.emit({
-      type: "turn.started",
-      eventId: asEventId("evt-turn-started-already-running"),
-      provider: "codex",
-      createdAt,
-      threadId: targetThreadId,
-      turnId: activeTurnId,
-    });
-
-    await waitForThread(
-      harness.engine,
-      (thread) =>
-        thread.session?.status === "running" && thread.session?.activeTurnId === activeTurnId,
-      2_000,
-      targetThreadId,
-    );
-
-    harness.emit({
       type: "turn.proposed.completed",
       eventId: asEventId("evt-plan-source-completed-guarded"),
       provider: "codex",
@@ -1454,6 +1437,33 @@ describe("ProviderRuntimeIngestion", () => {
         createdAt: new Date().toISOString(),
       }),
     );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-plan-target-guarded"),
+        threadId: targetThreadId,
+        session: {
+          threadId: targetThreadId,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId,
+          updatedAt: createdAt,
+          lastError: null,
+        },
+        createdAt,
+      }),
+    );
+    harness.setProviderSession({
+      provider: "codex",
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId: targetThreadId,
+      createdAt,
+      updatedAt: createdAt,
+      activeTurnId,
+    });
 
     harness.emit({
       type: "turn.started",

@@ -167,7 +167,9 @@ function stripRequestTag<T extends { _tag: string }>(body: T) {
 }
 
 const encodeWsResponse = Schema.encodeEffect(Schema.fromJsonString(WsResponse));
-const decodeWebSocketRequest = decodeJsonResult(WebSocketRequest);
+const decodeWebSocketRequest = decodeJsonResult(WebSocketRequest as never) as (
+  input: string,
+) => Result.Result<Schema.Schema.Type<typeof WebSocketRequest>, Cause.Cause<Schema.SchemaError>>;
 
 export type ServerCoreRuntimeServices =
   | ProjectionBootstrapSummaryQuery

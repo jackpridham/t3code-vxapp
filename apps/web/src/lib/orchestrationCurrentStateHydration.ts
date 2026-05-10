@@ -27,6 +27,23 @@ function threadSummaryToReadModelThread(
   };
 }
 
+function mergeSessionThreadsIntoReadModel(
+  readModel: OrchestrationReadModel,
+  sessionThreads: readonly OrchestrationThreadSummary[],
+): OrchestrationReadModel {
+  const existingThreadIds = new Set(readModel.threads.map((thread) => thread.id));
+  const missingSessionThreads = sessionThreads
+    .filter((thread) => !existingThreadIds.has(thread.id))
+    .map(threadSummaryToReadModelThread);
+  if (missingSessionThreads.length === 0) {
+    return readModel;
+  }
+  return {
+    ...readModel,
+    threads: [...readModel.threads, ...missingSessionThreads],
+  };
+}
+
 async function listAllThreadMessages(
   api: NativeApi,
   threadId: ThreadId,
@@ -121,35 +138,29 @@ async function ensureThreadInReadModel(
   if (sessionThreads.length === 0) {
     return readModel;
   }
-
-  const existingThreadIds = new Set(readModel.threads.map((thread) => thread.id));
-  const missingSessionThreads = sessionThreads
-    .filter((thread) => !existingThreadIds.has(thread.id))
-    .map(threadSummaryToReadModelThread);
-  if (missingSessionThreads.length === 0) {
-    return readModel;
-  }
-
-  return {
-    ...readModel,
-    threads: [...readModel.threads, ...missingSessionThreads],
-  };
+  return mergeSessionThreadsIntoReadModel(readModel, sessionThreads);
 }
 
 export async function addThreadDetailToReadModel(
   api: NativeApi,
   readModel: OrchestrationReadModel,
   threadId: ThreadId,
+  options: {
+    includeOrchestratorWakes?: boolean;
+  } = {},
 ): Promise<OrchestrationReadModel> {
+  const includeOrchestratorWakes = options.includeOrchestratorWakes ?? true;
   const detailReadModel = await ensureThreadInReadModel(api, readModel, threadId);
   const [messages, activities, sessions, orchestratorWakeItems] = await Promise.all([
     listAllThreadMessages(api, threadId),
     listAllThreadActivities(api, threadId),
     api.orchestration.listThreadSessions({ threadId }),
-    api.orchestration.listOrchestratorWakes({
-      orchestratorThreadId: threadId,
-      limit: CURRENT_THREAD_WAKE_LIMIT,
-    }),
+    includeOrchestratorWakes
+      ? api.orchestration.listOrchestratorWakes({
+          orchestratorThreadId: threadId,
+          limit: CURRENT_THREAD_WAKE_LIMIT,
+        })
+      : Promise.resolve(detailReadModel.orchestratorWakeItems),
   ]);
 
   const threads = [...detailReadModel.threads];
@@ -181,8 +192,34 @@ export async function addThreadDetailToReadModel(
   return {
     ...detailReadModel,
     threads,
-    orchestratorWakeItems,
+    orchestratorWakeItems: includeOrchestratorWakes
+      ? orchestratorWakeItems
+      : detailReadModel.orchestratorWakeItems,
   };
+}
+
+export async function addOrchestratorSessionWorkerDetailsToReadModel(
+  api: NativeApi,
+  readModel: OrchestrationReadModel,
+  rootThreadId: ThreadId,
+): Promise<OrchestrationReadModel> {
+  const sessionThreads = await api.orchestration.listSessionThreads({
+    rootThreadId,
+    includeArchived: true,
+    includeDeleted: false,
+  });
+  const workerThreadIds = sessionThreads
+    .filter((thread) => thread.id !== rootThreadId && thread.spawnRole === "worker")
+    .map((thread) => thread.id);
+  let nextReadModel = mergeSessionThreadsIntoReadModel(readModel, sessionThreads);
+
+  for (const workerThreadId of workerThreadIds) {
+    nextReadModel = await addThreadDetailToReadModel(api, nextReadModel, workerThreadId, {
+      includeOrchestratorWakes: false,
+    });
+  }
+
+  return nextReadModel;
 }
 
 export async function loadCurrentStateWithThreadDetail(
@@ -191,4 +228,13 @@ export async function loadCurrentStateWithThreadDetail(
 ): Promise<OrchestrationReadModel> {
   const currentState = await api.orchestration.getCurrentState();
   return addThreadDetailToReadModel(api, currentState, threadId);
+}
+
+export async function loadCurrentStateWithOrchestratorSessionDetail(
+  api: NativeApi,
+  threadId: ThreadId,
+): Promise<OrchestrationReadModel> {
+  const currentState = await api.orchestration.getCurrentState();
+  const rootReadModel = await addThreadDetailToReadModel(api, currentState, threadId);
+  return addOrchestratorSessionWorkerDetailsToReadModel(api, rootReadModel, threadId);
 }

@@ -54,6 +54,15 @@ import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput 
 import { OpenInEditorInput } from "./editor";
 import {
   ServerConfigUpdatedPayload,
+  ServerCreateAgentsVxappProgramInput,
+  ServerCreateAgentsVxappTodoInput,
+  ServerDeleteAgentsVxappProgramInput,
+  ServerDeleteAgentsVxappTodoInput,
+  ServerGetAgentsVxappControlPlaneSnapshotInput,
+  ServerGetAgentsVxappSidebarGraphInput,
+  ServerSetAgentsVxappProgramLifecycleInput,
+  ServerUpdateAgentsVxappProgramInput,
+  ServerUpdateAgentsVxappTodoInput,
   ServerGetWorkerRuntimeSnapshotInput,
   ServerListVortexAppArtifactsInput,
   ServerProviderUpdatedPayload,
@@ -104,6 +113,15 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
   serverListVortexApps: "server.listVortexApps",
   serverListVortexAppArtifacts: "server.listVortexAppArtifacts",
+  serverGetAgentsVxappSidebarGraph: "server.getAgentsVxappSidebarGraph",
+  serverGetAgentsVxappControlPlaneSnapshot: "server.getAgentsVxappControlPlaneSnapshot",
+  serverCreateAgentsVxappProgram: "server.createAgentsVxappProgram",
+  serverUpdateAgentsVxappProgram: "server.updateAgentsVxappProgram",
+  serverDeleteAgentsVxappProgram: "server.deleteAgentsVxappProgram",
+  serverSetAgentsVxappProgramLifecycle: "server.setAgentsVxappProgramLifecycle",
+  serverCreateAgentsVxappTodo: "server.createAgentsVxappTodo",
+  serverUpdateAgentsVxappTodo: "server.updateAgentsVxappTodo",
+  serverDeleteAgentsVxappTodo: "server.deleteAgentsVxappTodo",
   serverGetWorkerRuntimeSnapshot: "server.getWorkerRuntimeSnapshot",
 } as const;
 
@@ -208,6 +226,24 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverUpdateSettings, Schema.Struct({ patch: ServerSettingsPatch })),
   tagRequestBody(WS_METHODS.serverListVortexApps, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverListVortexAppArtifacts, ServerListVortexAppArtifactsInput),
+  tagRequestBody(
+    WS_METHODS.serverGetAgentsVxappSidebarGraph,
+    ServerGetAgentsVxappSidebarGraphInput,
+  ),
+  tagRequestBody(
+    WS_METHODS.serverGetAgentsVxappControlPlaneSnapshot,
+    ServerGetAgentsVxappControlPlaneSnapshotInput,
+  ),
+  tagRequestBody(WS_METHODS.serverCreateAgentsVxappProgram, ServerCreateAgentsVxappProgramInput),
+  tagRequestBody(WS_METHODS.serverUpdateAgentsVxappProgram, ServerUpdateAgentsVxappProgramInput),
+  tagRequestBody(WS_METHODS.serverDeleteAgentsVxappProgram, ServerDeleteAgentsVxappProgramInput),
+  tagRequestBody(
+    WS_METHODS.serverSetAgentsVxappProgramLifecycle,
+    ServerSetAgentsVxappProgramLifecycleInput,
+  ),
+  tagRequestBody(WS_METHODS.serverCreateAgentsVxappTodo, ServerCreateAgentsVxappTodoInput),
+  tagRequestBody(WS_METHODS.serverUpdateAgentsVxappTodo, ServerUpdateAgentsVxappTodoInput),
+  tagRequestBody(WS_METHODS.serverDeleteAgentsVxappTodo, ServerDeleteAgentsVxappTodoInput),
   tagRequestBody(WS_METHODS.serverGetWorkerRuntimeSnapshot, ServerGetWorkerRuntimeSnapshotInput),
 ]);
 

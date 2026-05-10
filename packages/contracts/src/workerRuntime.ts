@@ -200,8 +200,8 @@ export type WorkerRuntimeRawFiles = typeof WorkerRuntimeRawFiles.Type;
 
 export const WorkerRuntimeSnapshot = Schema.Struct({
   threadId: ThreadId,
-  worktreePath: TrimmedNonEmptyString,
-  runtimeDir: TrimmedNonEmptyString,
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
+  runtimeDir: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
   sourceFiles: WorkerRuntimeSourceFiles,
   summary: WorkerRuntimeSummary,
   packs: Schema.Array(WorkerRuntimePackSummary).pipe(Schema.withDecodingDefault(() => [])),
@@ -211,6 +211,9 @@ export type WorkerRuntimeSnapshot = typeof WorkerRuntimeSnapshot.Type;
 
 export const GetWorkerRuntimeSnapshotInput = Schema.Struct({
   threadId: ThreadId,
+  worktreePath: Schema.optional(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
 });
 export type GetWorkerRuntimeSnapshotInput = typeof GetWorkerRuntimeSnapshotInput.Type;
 

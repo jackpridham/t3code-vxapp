@@ -1,22 +1,49 @@
 import { autoAnimate } from "@formkit/auto-animate";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { type OrchestrationThreadSummary, type ThreadId } from "@t3tools/contracts";
 import {
   BellIcon,
   BotIcon,
   ChevronRightIcon,
   HardHatIcon,
+  InfoIcon,
   LightbulbIcon,
+  ListTodoIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isElectron } from "~/env";
-import { cn } from "~/lib/utils";
-import { vortexAppsListQueryOptions } from "~/lib/vortexAppsReactQuery";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useSettings } from "~/hooks/useSettings";
+import { useThreadActions } from "~/hooks/useThreadActions";
+import { agentsVxappSidebarGraphQueryOptions } from "~/lib/agentsVxappSidebarReactQuery";
+import { orchestrationSessionThreadsQueryOptions } from "~/lib/orchestrationReactQuery";
+import { resolveNoThreadRouteTarget, resolveThreadRouteTarget } from "~/lib/sidebarWindow";
+import { cn, newCommandId } from "~/lib/utils";
+import {
+  workerRuntimeRepoQueryOptions,
+  workerRuntimeSnapshotQueryOptions,
+} from "~/lib/workerRuntimeReactQuery";
+import { readNativeApi } from "~/nativeApi";
+import { derivePendingApprovals, derivePendingUserInputs } from "~/session-logic";
+import { useStore } from "~/store";
+import { formatRelativeTimeLabel } from "~/timestampFormat";
+import { useThreadSelectionStore } from "~/threadSelectionStore";
+import { useUiStateStore } from "~/uiStateStore";
+import {
+  buildCopyThreadIdErrorDescription,
+  getSidebarCtoAttentionKindLabel,
+  getSidebarProgramNotificationKindLabel,
+  resolveThreadStatusPill,
+} from "../Sidebar.logic";
 import { SidebarBrandHeader } from "../sidebar/SidebarBrandHeader";
-import type { SidebarThreadStatus } from "../sidebar/SidebarThreadRow";
+import { ThreadStatusLabel } from "../sidebar/SidebarThreadRow";
 import { Badge } from "../ui/badge";
+import { DialogCloseButton } from "../ui/dialog-close-button";
 import {
   Popover,
+  PopoverClose,
   PopoverDescription,
   PopoverPopup,
   PopoverTitle,
@@ -33,364 +60,26 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { toastManager } from "../ui/toast";
 import {
-  type PreviewWorkerRuntimeAuditStatus,
-  type PreviewWorkerRuntimeFixtureId,
-  type PreviewWorkerRuntimeSnapshot,
-  resolvePreviewWorkerRuntimeSnapshot,
-} from "./workerRuntimePreview";
-
-type PreviewStatus = "working" | "attention" | "ready";
-type PreviewNotificationSeverity = "critical" | "warning" | "info";
-type PreviewWakeState = "active" | "queued" | "waiting" | "waking";
-
-type PreviewWorker = {
-  appTargetId: string;
-  fallbackAppLabel: string;
-  id: string;
-  runtimeFixtureId?: PreviewWorkerRuntimeFixtureId | null;
-  wakeState?: PreviewWakeState;
-  status: PreviewStatus;
-};
-
-type PreviewOrchestrator = {
-  id: string;
-  label: string;
-  projectName: string;
-  status: PreviewStatus;
-  workers: readonly PreviewWorker[];
-};
-
-type PreviewProgram = {
-  id: string;
-  title: string;
-  status: PreviewStatus;
-  orchestrator: PreviewOrchestrator;
-};
-
-type PreviewExecutiveNotification = {
-  id: string;
-  kindLabel: string;
-  programTitle: string;
-  relativeTime: string;
-  severity: PreviewNotificationSeverity;
-  sourceLabel: string;
-  summary: string;
-};
-
-type PreviewExecutive = {
-  id: string;
-  name: string;
-  notifications: readonly PreviewExecutiveNotification[];
-  role: string;
-  programs: readonly PreviewProgram[];
-};
-
-type ExecutiveNotificationSummary = {
-  criticalCount: number;
-  highestSeverity: PreviewNotificationSeverity | null;
-  infoCount: number;
-  totalCount: number;
-  warningCount: number;
-};
+  buildOrchestrationSidebarModel,
+  resolveSidebarRootThreadIds,
+  type SidebarNotificationItem,
+  type SidebarWorkerRuntimeState,
+} from "./orchestrationSidebarModel";
+import { ProgramInfoDialog } from "./ProgramInfoDialog";
+import { ProgramTodosDialog } from "./ProgramTodosDialog";
+import { deriveWorkerRuntimeDialogState } from "./workerRuntimeDialogState";
 
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
 
-const VX_SIDEBAR_CHIP_CLASSNAME =
-  "h-2.5 shrink-0 px-1 text-[7px] font-medium leading-none text-muted-foreground/80 lowercase";
-const VX_SIDEBAR_STATUS_CHIP_CLASSNAME =
-  "h-3 shrink-0 px-1 text-[6px] font-medium leading-none text-muted-foreground/80 lowercase border-0";
-const VX_SIDEBAR_ORCHESTRATOR_CHIP_CLASSNAME = `${VX_SIDEBAR_CHIP_CLASSNAME} bg-secondary/80`;
-const VX_SIDEBAR_WORKER_LIST_CLASSNAME = "space-y-0.5";
-const VX_SIDEBAR_WORKER_ROW_CLASSNAME = "relative flex items-center gap-1 px-1.5 py-1";
-const VX_SIDEBAR_WORKER_REPO_CHIP_CLASSNAME = `${VX_SIDEBAR_STATUS_CHIP_CLASSNAME} min-w-0 bg-secondary/80`;
-const VX_SIDEBAR_WORKER_STATE_CHIP_CLASSNAME = VX_SIDEBAR_STATUS_CHIP_CLASSNAME;
-const VX_WORKER_RUNTIME_PANEL_CHIP_CLASSNAME =
-  "h-5 shrink-0 px-1.5 text-[10px] font-medium leading-none border-0";
+const CHIP_CLASSNAME =
+  "h-4 shrink-0 px-1 text-[8px] font-medium leading-none text-muted-foreground/80";
 
-const PREVIEW_EXECUTIVE: PreviewExecutive = {
-  id: "exec-cto",
-  name: "CTOv2",
-  notifications: [
-    {
-      id: "exec-notification-closeout-approval",
-      kindLabel: "approval",
-      programTitle: "stores external closeout dependency cleanup",
-      relativeTime: "2m",
-      severity: "critical",
-      sourceLabel: "Jasper / agents",
-      summary: "Worker approval is blocking the external dependency closeout lane.",
-    },
-    {
-      id: "exec-notification-runtime-gate-drift",
-      kindLabel: "drift",
-      programTitle: "preserved lane runtime gate drift repair",
-      relativeTime: "7m",
-      severity: "warning",
-      sourceLabel: "Jasper / scripts",
-      summary: "Runtime gate expectations drifted from the preserved lane baseline again.",
-    },
-    {
-      id: "exec-notification-managed-target-handoff",
-      kindLabel: "handoff",
-      programTitle: "stores-vxapp managed target enablement",
-      relativeTime: "11m",
-      severity: "info",
-      sourceLabel: "Jasper / t3",
-      summary: "Managed target enablement is ready for executive review and next-lane assignment.",
-    },
-    {
-      id: "exec-notification-slave-shared-repo",
-      kindLabel: "unblock",
-      programTitle: "Slave site CRUD shared repo unblock",
-      relativeTime: "18m",
-      severity: "warning",
-      sourceLabel: "Jasper / vue",
-      summary: "Shared repo integration is waiting on a frontend-side decision before merge.",
-    },
-  ],
-  role: "Executive",
-  programs: [
-    {
-      id: "program-stores-closeout-dependency-cleanup",
-      title: "stores external closeout dependency cleanup",
-      status: "working",
-      orchestrator: {
-        id: "orch-jasper-stores-closeout",
-        label: "closeout",
-        projectName: "Jasper",
-        status: "working",
-        workers: [
-          {
-            appTargetId: "scripts",
-            fallbackAppLabel: "scripts",
-            id: "worker-stores-closeout-scripts",
-            runtimeFixtureId: "stores-managed-target-scripts-c1",
-            status: "working",
-            wakeState: "waking",
-          },
-          {
-            appTargetId: "agents",
-            fallbackAppLabel: "agents",
-            id: "worker-stores-closeout-agents",
-            runtimeFixtureId: "stores-managed-target-agents-i1",
-            status: "attention",
-            wakeState: "queued",
-          },
-          {
-            appTargetId: "t3",
-            fallbackAppLabel: "t3",
-            id: "worker-stores-closeout-t3",
-            runtimeFixtureId: null,
-            status: "ready",
-          },
-        ],
-      },
-    },
-    {
-      id: "program-preserved-lane-runtime-gate-drift-repair",
-      title: "preserved lane runtime gate drift repair",
-      status: "attention",
-      orchestrator: {
-        id: "orch-jasper-runtime-gate-drift",
-        label: "runtime",
-        projectName: "Jasper",
-        status: "attention",
-        workers: [
-          {
-            appTargetId: "scripts",
-            fallbackAppLabel: "scripts",
-            id: "worker-runtime-gate-scripts",
-            runtimeFixtureId: "stores-managed-target-scripts-i1",
-            status: "working",
-            wakeState: "waking",
-          },
-          {
-            appTargetId: "agents",
-            fallbackAppLabel: "agents",
-            id: "worker-runtime-gate-agents",
-            runtimeFixtureId: "stores-managed-target-agents-c1",
-            status: "attention",
-            wakeState: "queued",
-          },
-        ],
-      },
-    },
-    {
-      id: "program-stores-gate-generated-output-alignment",
-      title: "stores-vxapp gate and generated-output alignment",
-      status: "working",
-      orchestrator: {
-        id: "orch-jasper-stores-generated-output",
-        label: "alignment",
-        projectName: "Jasper",
-        status: "working",
-        workers: [
-          {
-            appTargetId: "scripts",
-            fallbackAppLabel: "scripts",
-            id: "worker-generated-output-scripts",
-            runtimeFixtureId: "stores-managed-target-scripts-probe",
-            status: "working",
-            wakeState: "waking",
-          },
-          {
-            appTargetId: "agents",
-            fallbackAppLabel: "agents",
-            id: "worker-generated-output-agents",
-            runtimeFixtureId: "stores-managed-target-agents-c1",
-            status: "ready",
-          },
-          {
-            appTargetId: "t3",
-            fallbackAppLabel: "t3",
-            id: "worker-generated-output-t3",
-            runtimeFixtureId: null,
-            status: "ready",
-          },
-        ],
-      },
-    },
-    {
-      id: "program-stores-managed-target-enablement",
-      title: "stores-vxapp managed target enablement",
-      status: "attention",
-      orchestrator: {
-        id: "orch-jasper-managed-target-enablement",
-        label: "enablement",
-        projectName: "Jasper",
-        status: "attention",
-        workers: [
-          {
-            appTargetId: "scripts",
-            fallbackAppLabel: "scripts",
-            id: "worker-managed-target-scripts",
-            runtimeFixtureId: "stores-managed-target-scripts-c1",
-            status: "working",
-            wakeState: "waking",
-          },
-          {
-            appTargetId: "agents",
-            fallbackAppLabel: "agents",
-            id: "worker-managed-target-agents",
-            runtimeFixtureId: "stores-managed-target-agents-c1",
-            status: "attention",
-            wakeState: "queued",
-          },
-          {
-            appTargetId: "t3",
-            fallbackAppLabel: "t3",
-            id: "worker-managed-target-t3",
-            runtimeFixtureId: null,
-            status: "ready",
-          },
-        ],
-      },
-    },
-    {
-      id: "program-slave-site-crud-shared-repo-unblock",
-      title: "Slave site CRUD shared repo unblock",
-      status: "working",
-      orchestrator: {
-        id: "orch-jasper-slave-shared-repo-unblock",
-        label: "unblock",
-        projectName: "Jasper",
-        status: "working",
-        workers: [
-          {
-            appTargetId: "slave",
-            fallbackAppLabel: "slave",
-            id: "worker-slave-shared-repo-slave",
-            runtimeFixtureId: "partymore-slave-mobile-runtime-booking-followthrough-a1",
-            status: "working",
-            wakeState: "waking",
-          },
-          {
-            appTargetId: "vue",
-            fallbackAppLabel: "vue",
-            id: "worker-slave-shared-repo-vue",
-            runtimeFixtureId: "partymore-vue-order-create-admin-parity-r2",
-            status: "attention",
-            wakeState: "queued",
-          },
-          {
-            appTargetId: "api",
-            fallbackAppLabel: "api",
-            id: "worker-slave-shared-repo-api",
-            runtimeFixtureId: "api-services-ledger-hardening-r1",
-            status: "ready",
-          },
-        ],
-      },
-    },
-    {
-      id: "program-slave-site-crud-foundation-repair",
-      title: "Slave site CRUD foundation repair",
-      status: "ready",
-      orchestrator: {
-        id: "orch-jasper-slave-foundation-repair",
-        label: "foundation",
-        projectName: "Jasper",
-        status: "ready",
-        workers: [
-          {
-            appTargetId: "slave",
-            fallbackAppLabel: "slave",
-            id: "worker-slave-foundation-slave",
-            runtimeFixtureId: "partymore-slave-mobile-runtime-booking-followthrough-a1",
-            status: "ready",
-          },
-          {
-            appTargetId: "vue",
-            fallbackAppLabel: "vue",
-            id: "worker-slave-foundation-vue",
-            runtimeFixtureId: "slave-site-crud-foundation-vue-i1",
-            status: "ready",
-          },
-        ],
-      },
-    },
-  ],
-};
-
-const DEFAULT_OPEN_PROGRAM_IDS = new Set<string>([
-  "program-stores-closeout-dependency-cleanup",
-  "program-preserved-lane-runtime-gate-drift-repair",
-  "program-stores-managed-target-enablement",
-  "program-slave-site-crud-shared-repo-unblock",
-]);
-
-const DEFAULT_OPEN_ORCHESTRATOR_IDS = new Set<string>([
-  "orch-jasper-stores-closeout",
-  "orch-jasper-managed-target-enablement",
-  "orch-jasper-slave-shared-repo-unblock",
-]);
-
-function statusClasses(status: PreviewStatus) {
-  switch (status) {
-    case "working":
-      return {
-        icon: "text-sky-600 dark:text-sky-300",
-        label: "Working",
-      };
-    case "attention":
-      return {
-        icon: "text-amber-600 dark:text-amber-300",
-        label: "Attention",
-      };
-    case "ready":
-      return {
-        icon: "text-emerald-600 dark:text-emerald-300",
-        label: "Ready",
-      };
-  }
-}
-
-function severityOrder(severity: PreviewNotificationSeverity) {
+function severityOrder(severity: SidebarNotificationItem["severity"]) {
   switch (severity) {
     case "critical":
       return 0;
@@ -401,238 +90,392 @@ function severityOrder(severity: PreviewNotificationSeverity) {
   }
 }
 
-function buildExecutiveNotificationSummary(
-  notifications: readonly PreviewExecutiveNotification[],
-): ExecutiveNotificationSummary {
-  return notifications.reduce<ExecutiveNotificationSummary>(
-    (summary, notification) => {
-      if (notification.severity === "critical") {
-        summary.criticalCount += 1;
-      } else if (notification.severity === "warning") {
-        summary.warningCount += 1;
-      } else {
-        summary.infoCount += 1;
-      }
-      summary.totalCount += 1;
-
-      if (
-        summary.highestSeverity === null ||
-        severityOrder(notification.severity) < severityOrder(summary.highestSeverity)
-      ) {
-        summary.highestSeverity = notification.severity;
-      }
-
-      return summary;
-    },
-    {
-      criticalCount: 0,
-      highestSeverity: null,
-      infoCount: 0,
-      totalCount: 0,
-      warningCount: 0,
-    },
-  );
-}
-
-function notificationBellClasses(summary: ExecutiveNotificationSummary) {
-  if (summary.highestSeverity === "critical") {
-    return {
-      badge: "bg-red-500 text-white dark:bg-red-400 dark:text-red-950",
-      button:
-        "text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-400/10 dark:hover:text-red-200",
-      ring: "ring-1 ring-red-500/20 dark:ring-red-400/20",
-    };
-  }
-  if (summary.highestSeverity === "warning") {
-    return {
-      badge: "bg-amber-500 text-amber-950 dark:bg-amber-400 dark:text-amber-950",
-      button:
-        "text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-300 dark:hover:bg-amber-400/10 dark:hover:text-amber-200",
-      ring: "ring-1 ring-amber-500/20 dark:ring-amber-400/20",
-    };
-  }
-  if (summary.highestSeverity === "info") {
-    return {
-      badge: "bg-sky-500 text-white dark:bg-sky-400 dark:text-sky-950",
-      button:
-        "text-sky-600 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-300 dark:hover:bg-sky-400/10 dark:hover:text-sky-200",
-      ring: "ring-1 ring-sky-500/20 dark:ring-sky-400/20",
-    };
-  }
-  return {
-    badge: "bg-muted text-muted-foreground",
-    button:
-      "text-muted-foreground/80 hover:bg-accent hover:text-foreground dark:text-muted-foreground/80",
-    ring: "ring-1 ring-border/70",
-  };
-}
-
-function notificationSeverityClasses(severity: PreviewNotificationSeverity) {
+function notificationSeverityClasses(severity: SidebarNotificationItem["severity"]) {
   switch (severity) {
     case "critical":
       return {
         badge: "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300",
-        dot: "bg-red-500 dark:bg-red-300",
         icon: "text-red-600 dark:text-red-300",
         surface: "border-red-500/20 bg-red-500/5",
       };
     case "warning":
       return {
         badge: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        dot: "bg-amber-500 dark:bg-amber-300",
         icon: "text-amber-600 dark:text-amber-300",
         surface: "border-amber-500/20 bg-amber-500/5",
       };
     case "info":
       return {
         badge: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
-        dot: "bg-sky-500 dark:bg-sky-300",
         icon: "text-sky-600 dark:text-sky-300",
         surface: "border-sky-500/20 bg-sky-500/5",
       };
   }
 }
 
-function runtimeAuditBadgeClasses(status: PreviewWorkerRuntimeAuditStatus) {
+function notificationBellClasses(notifications: readonly SidebarNotificationItem[]) {
+  const highestSeverity = notifications
+    .map((notification) => notification.severity)
+    .toSorted((left, right) => severityOrder(left) - severityOrder(right))[0];
+  if (highestSeverity === "critical") {
+    return {
+      badge: "bg-red-500 text-white dark:bg-red-400 dark:text-red-950",
+      button:
+        "text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-400/10 dark:hover:text-red-200",
+    };
+  }
+  if (highestSeverity === "warning") {
+    return {
+      badge: "bg-amber-500 text-amber-950 dark:bg-amber-400 dark:text-amber-950",
+      button:
+        "text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-300 dark:hover:bg-amber-400/10 dark:hover:text-amber-200",
+    };
+  }
+  if (highestSeverity === "info") {
+    return {
+      badge: "bg-sky-500 text-white dark:bg-sky-400 dark:text-sky-950",
+      button:
+        "text-sky-600 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-300 dark:hover:bg-sky-400/10 dark:hover:text-sky-200",
+    };
+  }
+  return {
+    badge: "bg-muted text-muted-foreground",
+    button: "text-muted-foreground hover:bg-accent hover:text-foreground",
+  };
+}
+
+function formatProgramStatus(status: string) {
   switch (status) {
-    case "clean":
-      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-    case "warning":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-    case "error":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "missing":
-      return "bg-muted text-muted-foreground";
-  }
-}
-
-function runtimeSourceFileBadgeClasses(
-  status: PreviewWorkerRuntimeSnapshot["sourceFiles"]["contextPlan"]["status"],
-) {
-  switch (status) {
-    case "loaded":
-      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-    case "missing":
-      return "bg-muted text-muted-foreground";
-    case "invalid-json":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "schema-error":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-  }
-}
-
-function runtimeFindingSeverityClasses(severity: string | null) {
-  switch (severity) {
-    case "error":
-    case "critical":
-      return "border-red-500/20 bg-red-500/5 text-red-700 dark:text-red-300";
-    case "warning":
-      return "border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300";
-    default:
-      return "border-border/70 bg-secondary/20 text-foreground/85";
-  }
-}
-
-function formatRuntimeListLabel(value: string) {
-  const segments = value.split(":");
-  return segments[segments.length - 1] ?? value;
-}
-
-function wakeBadgeClasses(state: PreviewWakeState) {
-  switch (state) {
     case "active":
-      return "bg-sky-500/12 text-sky-700 dark:text-sky-300";
-    case "waking":
-      return "bg-sky-500/12 text-sky-700 dark:text-sky-300";
-    case "queued":
-      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-    case "waiting":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
+      return { label: "Active", tone: "bg-sky-500/12 text-sky-700 dark:text-sky-300" };
+    case "founder_review_ready":
+      return { label: "Review", tone: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" };
+    case "closeout_in_progress":
+      return { label: "Closeout", tone: "bg-indigo-500/12 text-indigo-700 dark:text-indigo-300" };
+    case "completed":
+      return { label: "Done", tone: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" };
+    default:
+      return {
+        label: status.replaceAll("_", " "),
+        tone: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
+      };
   }
 }
 
-function WakeBadge({
-  className,
-  count,
-  state,
+function WakeBadge({ state }: { state: "pending" | "delivering" | null }) {
+  if (state === null) {
+    return null;
+  }
+  const className =
+    state === "delivering"
+      ? "bg-sky-500/12 text-sky-700 dark:text-sky-300"
+      : "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
+  return <Badge className={cn(CHIP_CLASSNAME, "border-0", className)}>{state}</Badge>;
+}
+
+function RuntimeSourceBadge({
+  label,
+  status,
 }: {
-  className?: string;
-  count?: number;
-  state: PreviewWakeState;
+  label: string;
+  status: "loaded" | "missing" | "invalid-json" | "schema-error";
 }) {
+  const className =
+    status === "loaded"
+      ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
+      : status === "missing"
+        ? "bg-muted text-muted-foreground"
+        : status === "invalid-json"
+          ? "bg-red-500/12 text-red-700 dark:text-red-300"
+          : "bg-amber-500/12 text-amber-700 dark:text-amber-300";
   return (
-    <Badge className={cn(VX_SIDEBAR_STATUS_CHIP_CLASSNAME, wakeBadgeClasses(state), className)}>
-      {count === undefined ? state : `${count} ${state}`}
+    <Badge className={cn("h-5 border-0 px-1.5 text-[10px] font-medium", className)}>{label}</Badge>
+  );
+}
+
+function workerRuntimeStateBadgeClasses(state: SidebarWorkerRuntimeState) {
+  switch (state) {
+    case "inspectable":
+      return {
+        badge: "text-muted-foreground/80",
+        label: "runtime",
+        title: "Worker runtime can be inspected.",
+      };
+    case "pending-worktree":
+      return {
+        badge: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        label: "pending",
+        title: "Worker runtime is pending worktree creation.",
+      };
+    case "transient":
+      return {
+        badge: "border-muted bg-muted text-muted-foreground",
+        label: "transient",
+        title: "Transient worker row without a prepared runtime bundle.",
+      };
+    case "stale-lineage":
+      return {
+        badge: "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300",
+        label: "stale",
+        title: "Fallback lineage row is unavailable in the current T3 projection.",
+      };
+  }
+}
+
+function WorkerRuntimePopover({
+  runtimeState,
+  runtimeStateMessage,
+  threadId,
+  worktreePath,
+  workerLabel,
+}: {
+  runtimeState: SidebarWorkerRuntimeState;
+  runtimeStateMessage: string | null;
+  threadId: ThreadId | null;
+  worktreePath: string | null;
+  workerLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const runtimeLookupEnabled = open && runtimeState === "inspectable";
+  const runtimeQuery = useQuery(
+    workerRuntimeSnapshotQueryOptions({
+      threadId: runtimeLookupEnabled ? threadId : null,
+      worktreePath: runtimeLookupEnabled ? worktreePath : null,
+    }),
+  );
+
+  const content = useMemo(() => {
+    return deriveWorkerRuntimeDialogState({
+      data: runtimeQuery.data,
+      error: runtimeQuery.error instanceof Error ? runtimeQuery.error : null,
+      isError: runtimeQuery.isError,
+      isLoading: runtimeQuery.isLoading,
+      unavailableHint:
+        runtimeState === "inspectable"
+          ? null
+          : {
+              kind: runtimeState,
+              message: runtimeStateMessage,
+            },
+      threadId,
+    });
+  }, [
+    runtimeQuery.data,
+    runtimeQuery.error,
+    runtimeQuery.isError,
+    runtimeQuery.isLoading,
+    runtimeState,
+    runtimeStateMessage,
+    threadId,
+  ]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+            aria-label={`Open runtime details for ${workerLabel}`}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          />
+        }
+      >
+        <LightbulbIcon className="size-3" />
+      </PopoverTrigger>
+      <PopoverPopup side="right" align="start" sideOffset={10} className="[--popup-width:22rem]">
+        <div className="space-y-3">
+          <PopoverHeaderWithClose
+            badge={
+              <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                {content.mode}
+              </Badge>
+            }
+            description="Live worker runtime contract details loaded on demand."
+            icon={<HardHatIcon className="size-4" />}
+            title={`${workerLabel} runtime`}
+          />
+
+          {content.mode !== "ready" || !runtimeQuery.data ? (
+            <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 px-3 py-4">
+              <p className="text-xs font-medium text-foreground/90">{content.mode}</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/70">
+                {content.message}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1">
+                <RuntimeSourceBadge
+                  label="context-plan"
+                  status={runtimeQuery.data.sourceFiles.contextPlan.status}
+                />
+                <RuntimeSourceBadge
+                  label="dispatch"
+                  status={runtimeQuery.data.sourceFiles.dispatchContract.status}
+                />
+                <RuntimeSourceBadge
+                  label="packs"
+                  status={runtimeQuery.data.sourceFiles.installedPacks.status}
+                />
+                <RuntimeSourceBadge
+                  label="audit"
+                  status={runtimeQuery.data.sourceFiles.instructionStackAudit.status}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                    Repo
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-foreground/90">
+                    {runtimeQuery.data.summary.repo ?? "unknown"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                    Task
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-foreground/90">
+                    {runtimeQuery.data.summary.taskClass ?? "unknown"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                    Context
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-foreground/90">
+                    {runtimeQuery.data.summary.contextMode ?? "unknown"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                    Closeout
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-foreground/90">
+                    {runtimeQuery.data.summary.closeoutAuthority ?? "unknown"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                    Selected Packs
+                  </p>
+                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                    {runtimeQuery.data.summary.selectedPacks.length}
+                  </Badge>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {runtimeQuery.data.summary.selectedPacks.length > 0 ? (
+                    runtimeQuery.data.summary.selectedPacks.slice(0, 6).map((pack) => (
+                      <Badge
+                        key={pack}
+                        variant="outline"
+                        className="h-5 px-1.5 text-[10px] font-medium leading-none text-muted-foreground/80"
+                      >
+                        {pack}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground/70">No packs selected.</span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+function WorkerRepoBadge({
+  runtimeState,
+  runtimeStateMessage,
+  threadId,
+  worktreePath,
+}: {
+  runtimeState: SidebarWorkerRuntimeState;
+  runtimeStateMessage: string | null;
+  threadId: ThreadId;
+  worktreePath: string | null;
+}) {
+  const runtimeStateBadge = workerRuntimeStateBadgeClasses(runtimeState);
+  const repoQuery = useQuery(
+    workerRuntimeRepoQueryOptions({
+      threadId: runtimeState === "inspectable" ? threadId : null,
+      worktreePath: runtimeState === "inspectable" ? worktreePath : null,
+    }),
+  );
+  const label =
+    runtimeState === "inspectable"
+      ? (repoQuery.data ??
+        (repoQuery.isLoading ? "loading" : repoQuery.isError ? "error" : "unknown"))
+      : runtimeStateBadge.label;
+  const title =
+    runtimeState === "inspectable"
+      ? (repoQuery.data ??
+        (repoQuery.isLoading
+          ? "Loading worker runtime repo."
+          : repoQuery.isError
+            ? repoQuery.error instanceof Error
+              ? repoQuery.error.message
+              : "Worker runtime repo could not be loaded."
+            : "Worker runtime loaded, but no authoritative repo was declared."))
+      : (runtimeStateMessage ?? runtimeStateBadge.title);
+
+  return (
+    <Badge
+      variant="outline"
+      title={title}
+      className={cn(
+        "h-4 max-w-24 shrink-0 px-1 text-[8px]",
+        runtimeState === "inspectable" ? "text-muted-foreground/80" : runtimeStateBadge.badge,
+      )}
+    >
+      <span className="truncate">{label}</span>
     </Badge>
   );
 }
 
-function resolvePreviewWorkerThreadStatus(status: PreviewStatus): SidebarThreadStatus {
-  switch (status) {
-    case "working":
-      return {
-        colorClass: "text-sky-600 dark:text-sky-300/80",
-        dotClass: "bg-sky-500 dark:bg-sky-300/80",
-        label: "Working",
-        pulse: true,
-      };
-    case "attention":
-      return {
-        colorClass: "text-amber-600 dark:text-amber-300/90",
-        dotClass: "bg-amber-500 dark:bg-amber-300/90",
-        label: "Pending Approval",
-        pulse: false,
-      };
-    case "ready":
-      return {
-        colorClass: "text-emerald-600 dark:text-emerald-300/90",
-        dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
-        label: "Completed",
-        pulse: false,
-      };
-  }
-}
-
-function workerIconClasses(status: PreviewStatus) {
-  const resolved = resolvePreviewWorkerThreadStatus(status);
-  return cn(
-    "inline-flex size-4 shrink-0 items-center justify-center rounded-md",
-    status === "working"
-      ? "bg-sky-500/10 text-sky-600 dark:text-sky-300"
-      : status === "attention"
-        ? "bg-amber-500/10 text-amber-600 dark:text-amber-300"
-        : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
-    resolved.pulse ? "animate-pulse" : status === "attention" ? "animate-pulse" : "",
-  );
-}
-
-function PreviewStatusTooltip({ icon, status }: { icon: ReactNode; status: PreviewStatus }) {
-  const resolved = statusClasses(status);
-
+function PopoverHeaderWithClose(props: {
+  badge?: ReactNode;
+  description: string;
+  icon: ReactNode;
+  title: string;
+}) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            aria-label={resolved.label}
-            className="inline-flex size-4 shrink-0 items-center justify-center"
-          >
-            {icon}
-          </span>
-        }
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground/80">
+        {props.icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <PopoverTitle className="text-sm font-medium">{props.title}</PopoverTitle>
+        <PopoverDescription className="mt-0.5 text-xs leading-relaxed">
+          {props.description}
+        </PopoverDescription>
+      </div>
+      {props.badge ? <div className="shrink-0">{props.badge}</div> : null}
+      <PopoverClose
+        render={<DialogCloseButton className="size-6 shrink-0 text-muted-foreground/70" />}
       />
-      <TooltipPopup side="top">{resolved.label}</TooltipPopup>
-    </Tooltip>
+    </div>
   );
 }
 
 function ExecutiveNotificationsPopover({
   notifications,
 }: {
-  notifications: readonly PreviewExecutiveNotification[];
+  notifications: readonly SidebarNotificationItem[];
 }) {
-  const summary = useMemo(() => buildExecutiveNotificationSummary(notifications), [notifications]);
-  const bellClasses = notificationBellClasses(summary);
+  const bellClasses = notificationBellClasses(notifications);
+  const attention = notifications.filter((notification) => notification.section === "attention");
+  const updates = notifications.filter((notification) => notification.section === "program-update");
 
   return (
     <Popover>
@@ -640,16 +483,8 @@ function ExecutiveNotificationsPopover({
         render={
           <SidebarMenuAction
             type="button"
-            aria-label={
-              summary.totalCount > 0
-                ? `Open executive notifications (${summary.totalCount})`
-                : "Open executive notifications"
-            }
-            className={cn(
-              "right-1 top-1 size-6 rounded-md",
-              bellClasses.button,
-              summary.totalCount > 0 ? bellClasses.ring : undefined,
-            )}
+            aria-label="Open executive notifications"
+            className={cn("right-1 top-1 size-6 cursor-pointer rounded-md", bellClasses.button)}
             onClick={(event) => {
               event.stopPropagation();
             }}
@@ -658,512 +493,92 @@ function ExecutiveNotificationsPopover({
       >
         <span className="relative inline-flex size-4 items-center justify-center">
           <BellIcon className="size-3.5" />
-          {summary.totalCount > 0 ? (
+          {notifications.length > 0 ? (
             <span
               className={cn(
                 "absolute left-full top-0 inline-flex h-3 min-w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full px-0.5 text-[7px] font-semibold leading-none shadow-sm",
                 bellClasses.badge,
               )}
             >
-              {summary.totalCount > 9 ? "9+" : summary.totalCount}
+              {notifications.length > 9 ? "9+" : notifications.length}
             </span>
           ) : null}
         </span>
       </PopoverTrigger>
       <PopoverPopup side="right" align="start" sideOffset={10} className="[--popup-width:22rem]">
         <div className="space-y-3">
-          <div className="flex items-start gap-2">
-            <span
-              className={cn(
-                "mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md",
-                summary.highestSeverity === "critical"
-                  ? "bg-red-500/10 text-red-600 dark:text-red-300"
-                  : summary.highestSeverity === "warning"
-                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-300"
-                    : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
-              )}
-            >
-              {summary.highestSeverity === "critical" ? (
+          <PopoverHeaderWithClose
+            description="CTO attention first, then program updates for this executive."
+            icon={
+              attention.length > 0 ? (
                 <TriangleAlertIcon className="size-4" />
               ) : (
                 <BellIcon className="size-4" />
-              )}
-            </span>
-            <div className="min-w-0 flex-1">
-              <PopoverTitle className="text-sm font-medium">Executive notifications</PopoverTitle>
-              <PopoverDescription className="mt-0.5 text-xs leading-relaxed">
-                Unified inbox for CTO attention and program updates without taking over the sidebar.
-              </PopoverDescription>
-            </div>
-            <Badge className="h-5 shrink-0 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-              {summary.totalCount}
-            </Badge>
-          </div>
-
-          {summary.totalCount > 0 ? (
-            <>
-              <div className="flex flex-wrap items-center gap-1">
-                {summary.criticalCount > 0 ? (
-                  <Badge className="h-5 border-0 bg-red-500/12 px-1.5 text-[10px] font-medium leading-none text-red-600 dark:text-red-300">
-                    {summary.criticalCount} critical
-                  </Badge>
-                ) : null}
-                {summary.warningCount > 0 ? (
-                  <Badge className="h-5 border-0 bg-amber-500/12 px-1.5 text-[10px] font-medium leading-none text-amber-700 dark:text-amber-300">
-                    {summary.warningCount} warning
-                  </Badge>
-                ) : null}
-                {summary.infoCount > 0 ? (
-                  <Badge className="h-5 border-0 bg-sky-500/12 px-1.5 text-[10px] font-medium leading-none text-sky-700 dark:text-sky-300">
-                    {summary.infoCount} info
-                  </Badge>
-                ) : null}
-              </div>
-
-              <div className="max-h-80 space-y-1 overflow-y-auto pr-1">
-                {notifications.map((notification) => {
-                  const severityClasses = notificationSeverityClasses(notification.severity);
-
-                  return (
-                    <div
-                      key={notification.id}
-                      className={cn(
-                        "rounded-lg border px-2.5 py-2 transition-colors hover:bg-accent/40",
-                        severityClasses.surface,
-                      )}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            "mt-1 inline-flex size-2 shrink-0 rounded-full",
-                            severityClasses.dot,
-                          )}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "h-4 shrink-0 px-1 text-[9px] font-medium leading-none",
-                                severityClasses.badge,
-                              )}
-                            >
-                              {notification.severity}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className="h-4 shrink-0 px-1 text-[9px] font-medium leading-none text-muted-foreground/80"
-                            >
-                              {notification.kindLabel}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              title={notification.programTitle}
-                              className="h-4 min-w-0 max-w-40 px-1 text-[9px] font-medium leading-none text-muted-foreground/80"
-                            >
-                              <span className="truncate">{notification.programTitle}</span>
-                            </Badge>
-                            <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/60">
-                              {notification.relativeTime}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-xs leading-relaxed text-foreground/90">
-                            {notification.summary}
-                          </p>
-                          <p className="mt-1 text-[10px] text-muted-foreground/70">
-                            {notification.sourceLabel}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 px-3 py-4 text-center">
-              <p className="text-xs font-medium text-foreground/85">No executive notifications</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/70">
-                The CTO lane is clear. New executive attention items will appear here.
-              </p>
-            </div>
-          )}
-        </div>
-      </PopoverPopup>
-    </Popover>
-  );
-}
-
-function WorkerRuntimePopover({
-  runtime,
-  workerLabel,
-}: {
-  runtime: PreviewWorkerRuntimeSnapshot | null;
-  workerLabel: string;
-}) {
-  return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-            aria-label={`Open runtime details for ${workerLabel}`}
+              )
+            }
+            title="Executive notifications"
           />
-        }
-      >
-        <LightbulbIcon className="size-3" />
-      </PopoverTrigger>
-      <PopoverPopup side="right" align="start" sideOffset={10} className="[--popup-width:22rem]">
-        <div className="space-y-3">
-          <div className="flex items-start gap-2">
-            <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground/80">
-              <HardHatIcon className="size-4" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <PopoverTitle className="text-sm font-medium">{workerLabel} runtime</PopoverTitle>
-              <PopoverDescription className="mt-0.5 text-xs leading-relaxed">
-                Fixture-backed worker runtime contract summary for this mock sidebar.
-              </PopoverDescription>
-            </div>
-            <Badge
-              className={cn(
-                VX_WORKER_RUNTIME_PANEL_CHIP_CLASSNAME,
-                runtimeAuditBadgeClasses(runtime?.auditStatus ?? "missing"),
-              )}
-            >
-              {runtime?.auditStatus ?? "missing"}
-            </Badge>
-          </div>
 
-          {runtime ? (
-            <>
-              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Runtime Files
-                  </p>
-                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                    4 files
-                  </Badge>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {Object.values(runtime.sourceFiles).map((sourceFile) => (
-                    <Badge
-                      key={sourceFile.fileName}
-                      title={sourceFile.detail ?? sourceFile.fileName}
-                      className={cn(
-                        VX_WORKER_RUNTIME_PANEL_CHIP_CLASSNAME,
-                        runtimeSourceFileBadgeClasses(sourceFile.status),
-                      )}
-                    >
-                      {sourceFile.fileName.replace(".json", "")}
-                    </Badge>
-                  ))}
-                </div>
+          {[
+            { items: attention, label: "CTO Attention" },
+            { items: updates, label: "Program Updates" },
+          ].map(({ items, label }) => (
+            <div key={label} className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                  {label}
+                </p>
+                <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                  {items.length}
+                </Badge>
               </div>
+              {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 px-3 py-3 text-[11px] text-muted-foreground/70">
+                  No items.
+                </div>
+              ) : (
+                <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
+                  {items.map((notification) => {
+                    const classes = notificationSeverityClasses(notification.severity);
+                    const kindLabel =
+                      notification.section === "attention"
+                        ? getSidebarCtoAttentionKindLabel(notification.kind as never)
+                        : getSidebarProgramNotificationKindLabel(notification.kind as never);
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Repo
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">{runtime.repo}</p>
-                </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Task Class
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">{runtime.taskClass}</p>
-                </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Context
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">
-                    {runtime.contextMode}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Closeout
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">
-                    {runtime.closeoutAuthority}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Validation
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">
-                    {runtime.validationProfile ?? "default"}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Pack Audit
-                  </p>
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <Badge
-                      className={cn(
-                        VX_WORKER_RUNTIME_PANEL_CHIP_CLASSNAME,
-                        runtimeAuditBadgeClasses(
-                          runtime.packAuditIssueCount > 0 ? "warning" : "clean",
-                        ),
-                      )}
-                    >
-                      {runtime.packAuditStatus ?? "n/a"}
-                    </Badge>
-                    <span className="text-xs font-medium text-foreground/90">
-                      {runtime.packAuditIssueCount} issue
-                      {runtime.packAuditIssueCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {runtime.warnings.length > 0 || runtime.conflicts.length > 0 ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-amber-700/75 dark:text-amber-300/80">
-                        Warnings
-                      </p>
-                      <Badge className="h-5 border-0 bg-amber-500/12 px-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
-                        {runtime.warnings.length}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {runtime.warnings.length > 0 ? (
-                        runtime.warnings.map((warning) => (
-                          <Badge
-                            key={warning}
-                            variant="outline"
-                            className="h-5 border-amber-500/25 bg-transparent px-1.5 text-[10px] font-medium leading-none text-amber-700 dark:text-amber-300"
-                          >
-                            {warning}
-                          </Badge>
-                        ))
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground/65">None</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-red-700/75 dark:text-red-300/80">
-                        Conflicts
-                      </p>
-                      <Badge className="h-5 border-0 bg-red-500/12 px-1.5 text-[10px] font-medium text-red-700 dark:text-red-300">
-                        {runtime.conflicts.length}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {runtime.conflicts.length > 0 ? (
-                        runtime.conflicts.map((conflict) => (
-                          <Badge
-                            key={conflict}
-                            variant="outline"
-                            className="h-5 border-red-500/25 bg-transparent px-1.5 text-[10px] font-medium leading-none text-red-700 dark:text-red-300"
-                          >
-                            {conflict}
-                          </Badge>
-                        ))
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground/65">None</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Selected Packs
-                  </p>
-                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                    {runtime.packCount}
-                  </Badge>
-                </div>
-                <div className="mt-2 flex gap-1 overflow-x-auto whitespace-nowrap pb-1">
-                  {runtime.selectedPacks.slice(0, 4).map((pack) => (
-                    <Badge
-                      key={pack}
-                      variant="outline"
-                      title={pack}
-                      className="h-5 shrink-0 px-1.5 text-[10px] font-medium leading-none text-muted-foreground/80 whitespace-nowrap"
-                    >
-                      <span>{formatRuntimeListLabel(pack)}</span>
-                    </Badge>
-                  ))}
-                  {runtime.selectedPacks.length > 4 ? (
-                    <Badge
-                      variant="outline"
-                      className="h-5 shrink-0 px-1.5 text-[10px] font-medium leading-none text-muted-foreground/70 whitespace-nowrap"
-                    >
-                      +{runtime.selectedPacks.length - 4} more
-                    </Badge>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Audit Findings
-                  </p>
-                  <Badge
-                    className={cn(
-                      VX_WORKER_RUNTIME_PANEL_CHIP_CLASSNAME,
-                      runtimeAuditBadgeClasses(runtime.auditStatus),
-                    )}
-                  >
-                    {runtime.auditFindings.length}
-                  </Badge>
-                </div>
-                <div className="mt-2 space-y-1">
-                  {runtime.auditFindings.length > 0 ? (
-                    runtime.auditFindings.slice(0, 3).map((finding) => (
+                    return (
                       <div
-                        key={`${finding.code ?? "no-code"}:${finding.kind ?? "no-kind"}:${finding.detail ?? "no-detail"}`}
-                        className={cn(
-                          "rounded-md border px-2 py-1.5",
-                          runtimeFindingSeverityClasses(finding.severity),
-                        )}
+                        key={notification.id}
+                        className={cn("rounded-lg border px-2.5 py-2", classes.surface)}
                       >
                         <div className="flex items-center gap-1.5">
                           <Badge
                             variant="outline"
-                            className="h-4 px-1 text-[9px] font-medium leading-none text-current"
+                            className={cn("h-4 px-1 text-[9px]", classes.badge)}
                           >
-                            {finding.severity ?? "info"}
+                            {notification.severity}
                           </Badge>
-                          <span className="truncate text-[11px] font-medium">
-                            {finding.code ?? finding.kind ?? "runtime finding"}
+                          <Badge
+                            variant="outline"
+                            className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                          >
+                            {kindLabel}
+                          </Badge>
+                          <span className="ml-auto text-[10px] text-muted-foreground/60">
+                            {notification.queuedAt
+                              ? formatRelativeTimeLabel(notification.queuedAt)
+                              : "now"}
                           </span>
                         </div>
-                        {finding.detail ? (
-                          <p className="mt-1 text-[11px] leading-relaxed text-current/85">
-                            {finding.detail}
-                          </p>
-                        ) : null}
+                        <p className="mt-1 text-xs leading-relaxed text-foreground/90">
+                          {notification.summary}
+                        </p>
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground/65">No audit findings.</p>
-                  )}
+                    );
+                  })}
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-700/75 dark:text-emerald-300/80">
-                      Allowed
-                    </p>
-                    <Badge className="h-5 border-0 bg-emerald-500/12 px-1.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
-                      {runtime.allowedCapabilities.length}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {runtime.allowedCapabilities.map((capability) => (
-                      <Badge
-                        key={capability}
-                        variant="outline"
-                        className="h-5 border-emerald-500/25 bg-transparent px-1.5 text-[10px] font-medium leading-none text-emerald-700 dark:text-emerald-300"
-                      >
-                        {capability}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-red-700/75 dark:text-red-300/80">
-                      Forbidden
-                    </p>
-                    <Badge className="h-5 border-0 bg-red-500/12 px-1.5 text-[10px] font-medium text-red-700 dark:text-red-300">
-                      {runtime.forbiddenCapabilities.length}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {runtime.forbiddenCapabilities.map((capability) => (
-                      <Badge
-                        key={capability}
-                        variant="outline"
-                        className="h-5 border-red-500/25 bg-transparent px-1.5 text-[10px] font-medium leading-none text-red-700 dark:text-red-300"
-                      >
-                        {capability}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Installed Pack Profiles
-                  </p>
-                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                    {runtime.packs.length}
-                  </Badge>
-                </div>
-                <div className="mt-2 space-y-1">
-                  {runtime.packs.slice(0, 3).map((pack) => (
-                    <div
-                      key={pack.id}
-                      className="rounded-md border border-border/70 bg-background/40 px-2 py-1.5"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate text-[11px] font-medium text-foreground/90">
-                          {pack.name ?? formatRuntimeListLabel(pack.slug)}
-                        </span>
-                        {pack.scope ? (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1 text-[9px] font-medium leading-none text-muted-foreground/80"
-                          >
-                            {pack.scope}
-                          </Badge>
-                        ) : null}
-                        {pack.type ? (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1 text-[9px] font-medium leading-none text-muted-foreground/80"
-                          >
-                            {pack.type}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground/70">
-                        {pack.version ? <span>v{pack.version}</span> : null}
-                        {pack.mountMode ? <span>{pack.mountMode}</span> : null}
-                        <span>{pack.grants.length} grants</span>
-                        <span>{pack.forbids.length} forbids</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <p className="text-[10px] text-muted-foreground/60">
-                Source fixture: <span className="text-foreground/75">{runtime.sourceWorktree}</span>
-              </p>
-            </>
-          ) : (
-            <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 px-3 py-4 text-center">
-              <p className="text-xs font-medium text-foreground/85">Runtime unavailable</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/70">
-                No worker runtime fixture is mapped for this mock worker yet.
-              </p>
+              )}
             </div>
-          )}
+          ))}
         </div>
       </PopoverPopup>
     </Popover>
@@ -1180,13 +595,83 @@ function toggleItem(current: ReadonlySet<string>, itemId: string) {
   return next;
 }
 
+function mergeItems(current: ReadonlySet<string>, itemIds: Iterable<string>) {
+  let next: Set<string> | null = null;
+  for (const itemId of itemIds) {
+    if (current.has(itemId) || next?.has(itemId)) {
+      continue;
+    }
+    if (next === null) {
+      next = new Set(current);
+    }
+    next.add(itemId);
+  }
+  return next ?? current;
+}
+
+function resolveAutoExpandedSidebarItems(input: {
+  executives: ReturnType<typeof buildOrchestrationSidebarModel>["executives"];
+  routeThreadId: ThreadId | null;
+}) {
+  const openProgramIds = new Set<string>();
+  const openOrchestratorIds = new Set<string>();
+  if (!input.routeThreadId) {
+    return { openOrchestratorIds, openProgramIds };
+  }
+
+  for (const executive of input.executives) {
+    for (const program of executive.programs) {
+      const workerRouteActive =
+        program.orchestrator?.workers.some((worker) => worker.id === input.routeThreadId) ?? false;
+      if (
+        input.routeThreadId === program.executiveThreadId ||
+        input.routeThreadId === program.orchestrator?.id ||
+        workerRouteActive
+      ) {
+        openProgramIds.add(program.id);
+      }
+      if (workerRouteActive && program.orchestrator?.id) {
+        openOrchestratorIds.add(program.orchestrator.id);
+      }
+    }
+  }
+
+  return { openOrchestratorIds, openProgramIds };
+}
+
 export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
-  const appsQuery = useQuery(vortexAppsListQueryOptions());
-  const [openProgramIds, setOpenProgramIds] =
-    useState<ReadonlySet<string>>(DEFAULT_OPEN_PROGRAM_IDS);
-  const [openOrchestratorIds, setOpenOrchestratorIds] = useState<ReadonlySet<string>>(
-    DEFAULT_OPEN_ORCHESTRATOR_IDS,
-  );
+  const settings = useSettings();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const routeThreadId = useParams({
+    strict: false,
+    select: (params) => (params.threadId ? (params.threadId as ThreadId) : null),
+  });
+  const sqliteGraphQuery = useQuery(agentsVxappSidebarGraphQueryOptions());
+  const projects = useStore((store) => store.projects);
+  const programs = useStore((store) => store.programs ?? []);
+  const threads = useStore((store) => store.threads);
+  const programNotifications = useStore((store) => store.programNotifications ?? []);
+  const ctoAttentionItems = useStore((store) => store.ctoAttentionItems ?? []);
+  const wakeItems = useStore((store) => store.orchestratorWakeItems);
+  const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
+  const markThreadUnread = useUiStateStore((store) => store.markThreadUnread);
+  const selectedThreadIds = useThreadSelectionStore((store) => store.selectedThreadIds);
+  const toggleThread = useThreadSelectionStore((store) => store.toggleThread);
+  const rangeSelectTo = useThreadSelectionStore((store) => store.rangeSelectTo);
+  const clearSelection = useThreadSelectionStore((store) => store.clearSelection);
+  const setAnchor = useThreadSelectionStore((store) => store.setAnchor);
+  const { archiveThread, deleteThread } = useThreadActions();
+  const [openProgramIds, setOpenProgramIds] = useState<ReadonlySet<string>>(new Set());
+  const [openOrchestratorIds, setOpenOrchestratorIds] = useState<ReadonlySet<string>>(new Set());
+  const [programTodosDialog, setProgramTodosDialog] = useState<{
+    programId: string;
+    programTitle: string;
+  } | null>(null);
+  const [programInfoDialogProgramId, setProgramInfoDialogProgramId] = useState<string | null>(null);
+  const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
+  const [renamingTitle, setRenamingTitle] = useState("");
+  const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const animatedListsRef = useRef(new WeakSet<HTMLElement>());
   const attachAnimatedListRef = useCallback((node: HTMLElement | null) => {
     if (!node || animatedListsRef.current.has(node)) {
@@ -1195,16 +680,299 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     autoAnimate(node, SIDEBAR_LIST_ANIMATION_OPTIONS);
     animatedListsRef.current.add(node);
   }, []);
-  const appDisplayNameByTargetId = useMemo(
+
+  const rootThreadIds = useMemo(
     () =>
-      new Map(
-        (appsQuery.data?.catalog.projects ?? []).map((project) => [
-          project.target_id,
-          project.display_name,
-        ]),
-      ),
-    [appsQuery.data?.catalog.projects],
+      resolveSidebarRootThreadIds({
+        programs,
+        sqliteGraph: sqliteGraphQuery.data ?? null,
+      }),
+    [programs, sqliteGraphQuery.data],
   );
+  const sessionQueries = useQueries({
+    queries: rootThreadIds.map((rootThreadId) =>
+      orchestrationSessionThreadsQueryOptions({
+        includeArchived: true,
+        rootThreadId,
+      }),
+    ),
+  });
+  const sessionWorkerThreadsByRootId = useMemo(() => {
+    const next = new Map<string, readonly OrchestrationThreadSummary[]>();
+    rootThreadIds.forEach((rootThreadId, index) => {
+      const query = sessionQueries[index];
+      next.set(
+        rootThreadId,
+        (query?.data ?? []).filter(
+          (thread: OrchestrationThreadSummary) => thread.id !== rootThreadId,
+        ),
+      );
+    });
+    return next;
+  }, [rootThreadIds, sessionQueries]);
+
+  const model = useMemo(
+    () =>
+      buildOrchestrationSidebarModel({
+        ctoAttentionItems,
+        programNotifications,
+        programs,
+        projects,
+        sessionWorkerThreadsByRootId,
+        sqliteGraph: sqliteGraphQuery.data ?? null,
+        threads,
+        wakeItems,
+      }),
+    [
+      ctoAttentionItems,
+      programNotifications,
+      programs,
+      projects,
+      sessionWorkerThreadsByRootId,
+      sqliteGraphQuery.data,
+      threads,
+      wakeItems,
+    ],
+  );
+
+  const orderedWorkerThreadIds = useMemo(
+    () =>
+      model.executives.flatMap((executive) =>
+        executive.programs.flatMap(
+          (program) => program.orchestrator?.workers.map((worker) => worker.id) ?? [],
+        ),
+      ),
+    [model.executives],
+  );
+  const staleMirrorDescription = useMemo(() => {
+    if (!model.diagnostics.staleMirror) {
+      return null;
+    }
+    const parts: string[] = [];
+    if (model.diagnostics.divergentProgramIds.length > 0) {
+      parts.push(`${model.diagnostics.divergentProgramIds.length} divergent programs`);
+    }
+    if (model.diagnostics.missingProjectIds.length > 0) {
+      parts.push(`${model.diagnostics.missingProjectIds.length} projects`);
+    }
+    if (model.diagnostics.missingProgramIds.length > 0) {
+      parts.push(`${model.diagnostics.missingProgramIds.length} programs`);
+    }
+    if (model.diagnostics.missingThreadIds.length > 0) {
+      parts.push(`${model.diagnostics.missingThreadIds.length} threads`);
+    }
+    const suffix = parts.length > 0 ? parts.join(", ") : "referenced rows";
+    return `Dev DB mirror is stale: ${suffix} from agents-vxapp SQLite disagree with local T3 state. Rerun python3 scripts/seed-dev-db.py.`;
+  }, [model.diagnostics]);
+
+  useEffect(() => {
+    const nextAutoOpenState = resolveAutoExpandedSidebarItems({
+      executives: model.executives,
+      routeThreadId,
+    });
+    if (nextAutoOpenState.openProgramIds.size > 0) {
+      setOpenProgramIds((current) => mergeItems(current, nextAutoOpenState.openProgramIds));
+    }
+    if (nextAutoOpenState.openOrchestratorIds.size > 0) {
+      setOpenOrchestratorIds((current) =>
+        mergeItems(current, nextAutoOpenState.openOrchestratorIds),
+      );
+    }
+  }, [model.executives, routeThreadId]);
+
+  useEffect(() => {
+    if (renamingThreadId && renamingInputRef.current) {
+      renamingInputRef.current.focus();
+      renamingInputRef.current.select();
+    }
+  }, [renamingThreadId]);
+
+  const navigateToThread = useCallback(
+    async (threadId: ThreadId) => {
+      await navigate(resolveThreadRouteTarget(location.pathname, threadId));
+    },
+    [location.pathname, navigate],
+  );
+  const navigateToNoThread = useCallback(async () => {
+    await navigate(resolveNoThreadRouteTarget(location.pathname));
+  }, [location.pathname, navigate]);
+
+  const handleProgramToggle = useCallback(
+    async (program: (typeof model.executives)[number]["programs"][number]) => {
+      const isOpen = openProgramIds.has(program.id);
+      if (
+        isOpen &&
+        routeThreadId &&
+        (routeThreadId === program.executiveThreadId ||
+          routeThreadId === program.orchestrator?.id ||
+          program.orchestrator?.workers.some((worker) => worker.id === routeThreadId))
+      ) {
+        await navigateToNoThread();
+      }
+      setOpenProgramIds((current) => toggleItem(current, program.id));
+    },
+    [navigateToNoThread, openProgramIds, routeThreadId],
+  );
+
+  const handleOrchestratorToggle = useCallback(
+    async (program: (typeof model.executives)[number]["programs"][number]) => {
+      if (!program.orchestrator?.id) {
+        return;
+      }
+      const orchestratorId = program.orchestrator.id;
+      const isOpen = openOrchestratorIds.has(orchestratorId);
+      if (
+        isOpen &&
+        routeThreadId &&
+        (routeThreadId === orchestratorId ||
+          program.orchestrator.workers.some((worker) => worker.id === routeThreadId))
+      ) {
+        await navigateToNoThread();
+      }
+      setOpenOrchestratorIds((current) => toggleItem(current, orchestratorId));
+    },
+    [navigateToNoThread, openOrchestratorIds, routeThreadId],
+  );
+
+  const handleOrchestratorNavigate = useCallback(
+    async (program: (typeof model.executives)[number]["programs"][number]) => {
+      if (!program.orchestrator?.id) {
+        return;
+      }
+      await navigateToThread(program.orchestrator.id as ThreadId);
+    },
+    [navigateToThread],
+  );
+
+  const commitRename = useCallback(async () => {
+    if (!renamingThreadId) {
+      return;
+    }
+    const trimmed = renamingTitle.trim();
+    const original = threads.find((thread) => thread.id === renamingThreadId)?.title ?? "";
+    if (!trimmed || trimmed === original) {
+      setRenamingThreadId(null);
+      return;
+    }
+    const api = readNativeApi();
+    if (!api) {
+      setRenamingThreadId(null);
+      return;
+    }
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.meta.update",
+        commandId: newCommandId(),
+        threadId: renamingThreadId,
+        title: trimmed,
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Failed to rename thread",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    }
+    setRenamingThreadId(null);
+  }, [renamingThreadId, renamingTitle, threads]);
+
+  const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{ threadId: ThreadId }>({
+    onCopy: (ctx) => {
+      toastManager.add({ type: "success", title: "Thread ID copied", description: ctx.threadId });
+    },
+    onError: (error, ctx) => {
+      toastManager.add({
+        type: "error",
+        title: "Failed to copy thread ID",
+        description: buildCopyThreadIdErrorDescription({
+          threadId: ctx.threadId,
+          errorMessage: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      });
+    },
+  });
+  const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path?: string }>({
+    onCopy: (ctx) => {
+      toastManager.add({ type: "success", title: "Path copied", description: ctx.path });
+    },
+    onError: (error) => {
+      toastManager.add({
+        type: "error",
+        title: "Failed to copy path",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    },
+  });
+
+  const handleWorkerContextMenu = useCallback(
+    async (threadId: ThreadId) => {
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+      const thread = threads.find((entry) => entry.id === threadId);
+      if (!thread) {
+        return;
+      }
+      const clicked = await api.contextMenu.show([
+        { id: "rename", label: "Rename thread" },
+        { id: "archive", label: "Archive thread" },
+        { id: "mark-unread", label: "Mark unread" },
+        { id: "copy-path", label: "Copy Path" },
+        { id: "copy-thread-id", label: "Copy Thread ID" },
+        { id: "delete", label: "Delete", destructive: true },
+      ]);
+
+      if (clicked === "rename") {
+        setRenamingThreadId(threadId);
+        setRenamingTitle(thread.title);
+        return;
+      }
+      if (clicked === "archive") {
+        if (settings.confirmThreadArchive) {
+          const confirmed = await api.dialogs.confirm(`Archive thread "${thread.title}"?`);
+          if (!confirmed) {
+            return;
+          }
+        }
+        await archiveThread(threadId);
+        return;
+      }
+      if (clicked === "mark-unread") {
+        markThreadUnread(threadId, thread.latestTurn?.completedAt);
+        return;
+      }
+      if (clicked === "copy-path") {
+        if (!thread.worktreePath) {
+          toastManager.add({
+            type: "warning",
+            title: "Path unavailable",
+            description: "This worker does not have a worktree path to copy.",
+          });
+          return;
+        }
+        copyPathToClipboard(thread.worktreePath, { path: thread.worktreePath });
+        return;
+      }
+      if (clicked === "copy-thread-id") {
+        copyThreadIdToClipboard(threadId, { threadId });
+        return;
+      }
+      if (clicked === "delete") {
+        await deleteThread(threadId);
+      }
+    },
+    [
+      archiveThread,
+      copyPathToClipboard,
+      copyThreadIdToClipboard,
+      deleteThread,
+      markThreadUnread,
+      settings.confirmThreadArchive,
+      threads,
+    ],
+  );
+
   const isStandaloneWindow = mode === "standalone";
 
   return (
@@ -1212,13 +980,37 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       <SidebarBrandHeader isElectron={isElectron} isStandaloneWindow={isStandaloneWindow} />
       <SidebarContent className="gap-0">
         <SidebarGroup className="px-2 py-2" data-testid="vx-orchestration-sidebar">
-          <div>
-            <SidebarMenu>
-              <SidebarMenuItem className="rounded-md">
+          {staleMirrorDescription ? (
+            <div className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+              <div className="flex items-start gap-2">
+                <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+                <div>
+                  <p className="font-medium">Stale dev mirror</p>
+                  <p className="mt-0.5 text-amber-700/90 dark:text-amber-200/80">
+                    {staleMirrorDescription}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <SidebarMenu>
+            {model.executives.map((executive) => (
+              <SidebarMenuItem key={executive.id} className="rounded-md">
                 <SidebarMenuButton
                   size="sm"
-                  className="h-auto min-h-7 gap-2 px-2 py-1.5 pr-9"
-                  render={<div />}
+                  className={cn(
+                    "h-auto min-h-7 gap-2 px-2 py-1.5 pr-9",
+                    executive.threadId ? "cursor-pointer" : "",
+                  )}
+                  render={executive.threadId ? <button type="button" /> : <div />}
+                  isActive={routeThreadId === executive.threadId}
+                  onClick={
+                    executive.threadId
+                      ? () => {
+                          void navigateToThread(executive.threadId as ThreadId);
+                        }
+                      : undefined
+                  }
                 >
                   <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-500 dark:text-fuchsia-300">
                     <BotIcon className="size-3" />
@@ -1226,176 +1018,326 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate text-[11px] font-medium text-foreground/90">
-                        {PREVIEW_EXECUTIVE.name}
+                        {executive.label}
                       </span>
-                      <Badge variant="outline" className={VX_SIDEBAR_CHIP_CLASSNAME}>
-                        {PREVIEW_EXECUTIVE.role}
+                      <Badge variant="outline" className={CHIP_CLASSNAME}>
+                        Executive
                       </Badge>
                     </div>
                   </div>
                 </SidebarMenuButton>
-                <ExecutiveNotificationsPopover notifications={PREVIEW_EXECUTIVE.notifications} />
-              </SidebarMenuItem>
-            </SidebarMenu>
+                <ExecutiveNotificationsPopover notifications={executive.notifications} />
 
-            <SidebarMenuSub ref={attachAnimatedListRef} className="mx-1 mt-1 gap-1 px-1.5">
-              {PREVIEW_EXECUTIVE.programs.map((program) => {
-                const programOpen = openProgramIds.has(program.id);
-                const orchestratorOpen = openOrchestratorIds.has(program.orchestrator.id);
+                <SidebarMenuSub ref={attachAnimatedListRef} className="mx-1 mt-1 gap-1 px-1.5">
+                  {executive.programs.map((program) => {
+                    const programOpen = openProgramIds.has(program.id);
+                    const orchestratorOpen = program.orchestrator?.id
+                      ? openOrchestratorIds.has(program.orchestrator.id)
+                      : false;
+                    const status = formatProgramStatus(program.status);
 
-                return (
-                  <SidebarMenuSubItem key={program.id} className="w-full">
-                    <SidebarMenuSubButton
-                      render={<button type="button" />}
-                      size="sm"
-                      className="h-auto min-h-7 w-full items-start px-2 py-1.5"
-                      onClick={() => {
-                        setOpenProgramIds((current) => toggleItem(current, program.id));
-                      }}
-                    >
-                      <ChevronRightIcon
-                        className={cn(
-                          "mt-0.5 size-3 shrink-0 text-muted-foreground/70 transition-transform",
-                          programOpen ? "rotate-90" : "",
-                        )}
-                      />
-                      <div className="min-w-0 flex-1 text-left">
-                        <span className="truncate text-[11px] font-medium text-foreground/90">
-                          {program.title}
-                        </span>
-                      </div>
-                    </SidebarMenuSubButton>
-
-                    {programOpen ? (
-                      <div
-                        ref={attachAnimatedListRef}
-                        className="ml-3 border-l border-border/50 pl-2"
-                      >
-                        <div className="relative">
-                          <span
-                            aria-hidden="true"
-                            className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
-                          />
-                          <button
-                            type="button"
-                            className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent/40"
+                    return (
+                      <SidebarMenuSubItem key={program.id} className="w-full">
+                        <div className="flex items-start gap-1 rounded-lg">
+                          <SidebarMenuSubButton
+                            render={<button type="button" />}
+                            size="sm"
+                            className="h-auto min-h-7 flex-1 cursor-pointer items-start px-2 py-1.5"
                             onClick={() => {
-                              setOpenOrchestratorIds((current) =>
-                                toggleItem(current, program.orchestrator.id),
-                              );
+                              void handleProgramToggle(program);
                             }}
                           >
                             <ChevronRightIcon
                               className={cn(
                                 "mt-0.5 size-3 shrink-0 text-muted-foreground/70 transition-transform",
-                                orchestratorOpen ? "rotate-90" : "",
+                                programOpen ? "rotate-90" : "",
                               )}
                             />
-                            <PreviewStatusTooltip
-                              status={program.orchestrator.status}
-                              icon={
-                                <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
-                                  <BotIcon className="size-3" />
-                                </span>
-                              }
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <div className="min-w-0 flex-1 text-left">
+                              <div className="flex min-w-0 items-center gap-1.5">
                                 <span className="truncate text-[11px] font-medium text-foreground/90">
-                                  {program.orchestrator.projectName}
+                                  {program.title}
                                 </span>
-                                <Badge
-                                  variant="outline"
-                                  className={cn(VX_SIDEBAR_ORCHESTRATOR_CHIP_CLASSNAME, "max-w-16")}
-                                >
-                                  <span className="truncate">{program.orchestrator.label}</span>
+                                <Badge className={cn(CHIP_CLASSNAME, "border-0", status.tone)}>
+                                  {status.label}
                                 </Badge>
+                                {program.attentionCount > 0 ? (
+                                  <Badge className="h-4 border-0 bg-red-500/12 px-1 text-[8px] text-red-700 dark:text-red-300">
+                                    {program.attentionCount} attention
+                                  </Badge>
+                                ) : null}
                               </div>
                             </div>
+                          </SidebarMenuSubButton>
+                          <button
+                            type="button"
+                            aria-label={`Open Program info for ${program.title}`}
+                            className="mr-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setProgramInfoDialogProgramId(program.id);
+                            }}
+                          >
+                            <InfoIcon className="size-3.5" />
                           </button>
+                        </div>
 
-                          {orchestratorOpen ? (
-                            <div
-                              ref={attachAnimatedListRef}
-                              className="ml-3 border-l border-border/50 pl-2"
-                            >
-                              {program.orchestrator.workers.length > 0 ? (
+                        {programOpen ? (
+                          <div
+                            ref={attachAnimatedListRef}
+                            className="ml-3 border-l border-border/50 pl-2"
+                          >
+                            {program.orchestrator ? (
+                              <div className="relative">
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+                                />
                                 <div
-                                  ref={attachAnimatedListRef}
-                                  className={VX_SIDEBAR_WORKER_LIST_CLASSNAME}
+                                  className={cn(
+                                    "flex items-start gap-1 rounded-lg hover:bg-accent/40",
+                                    routeThreadId === program.orchestrator.id ? "bg-accent/60" : "",
+                                  )}
                                 >
-                                  {program.orchestrator.workers.map((worker) => {
-                                    const workerLabel =
-                                      appDisplayNameByTargetId.get(worker.appTargetId) ??
-                                      worker.fallbackAppLabel;
-                                    const runtimeSnapshot = resolvePreviewWorkerRuntimeSnapshot(
-                                      worker.runtimeFixtureId,
-                                    );
+                                  <button
+                                    type="button"
+                                    aria-label={
+                                      orchestratorOpen
+                                        ? `Collapse workers for ${program.orchestrator.title}`
+                                        : `Expand workers for ${program.orchestrator.title}`
+                                    }
+                                    className="ml-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                                    onClick={() => {
+                                      void handleOrchestratorToggle(program);
+                                    }}
+                                  >
+                                    <ChevronRightIcon
+                                      className={cn(
+                                        "size-3 shrink-0 transition-transform",
+                                        orchestratorOpen ? "rotate-90" : "",
+                                      )}
+                                    />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-lg py-1.5 pr-2 text-left"
+                                    onClick={() => {
+                                      void handleOrchestratorNavigate(program);
+                                    }}
+                                  >
+                                    <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
+                                      <BotIcon className="size-3" />
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="truncate text-[11px] font-medium text-foreground/90">
+                                          {program.orchestrator.title}
+                                        </span>
+                                        <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                          {program.orchestrator.workerCount} workers
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label={`Open TODOs for ${program.title}`}
+                                    className="mr-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setProgramTodosDialog({
+                                        programId: program.id,
+                                        programTitle: program.title,
+                                      });
+                                    }}
+                                  >
+                                    <ListTodoIcon className="size-3.5" />
+                                  </button>
+                                </div>
 
-                                    return (
-                                      <div
-                                        key={worker.id}
-                                        className={VX_SIDEBAR_WORKER_ROW_CLASSNAME}
-                                      >
+                                {orchestratorOpen ? (
+                                  <div
+                                    ref={attachAnimatedListRef}
+                                    className="ml-3 border-l border-border/50 pl-2"
+                                  >
+                                    {program.orchestrator.workers.length > 0 ? (
+                                      <div ref={attachAnimatedListRef} className="space-y-0.5">
+                                        {program.orchestrator.workers.map((worker) => {
+                                          const thread = worker.thread;
+                                          const isActive = routeThreadId === worker.id;
+                                          const isSelected = selectedThreadIds.has(
+                                            worker.id as ThreadId,
+                                          );
+                                          const lastVisitedAt =
+                                            threadLastVisitedAtById[worker.id] ?? undefined;
+                                          const threadStatus =
+                                            thread === null
+                                              ? null
+                                              : resolveThreadStatusPill({
+                                                  thread: {
+                                                    ...thread,
+                                                    lastVisitedAt,
+                                                  },
+                                                  hasPendingApprovals:
+                                                    derivePendingApprovals(thread.activities)
+                                                      .length > 0,
+                                                  hasPendingUserInput:
+                                                    derivePendingUserInputs(thread.activities)
+                                                      .length > 0,
+                                                });
+
+                                          return (
+                                            <div
+                                              key={worker.id}
+                                              className={cn(
+                                                "relative flex items-center gap-1 rounded-md px-1.5 py-1 text-left",
+                                                isActive || isSelected
+                                                  ? "bg-accent/60"
+                                                  : "hover:bg-accent/40",
+                                              )}
+                                              onContextMenu={(event) => {
+                                                event.preventDefault();
+                                                if (thread) {
+                                                  void handleWorkerContextMenu(thread.id);
+                                                }
+                                              }}
+                                            >
+                                              <span
+                                                aria-hidden="true"
+                                                className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+                                              />
+                                              <button
+                                                type="button"
+                                                className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
+                                                onClick={(event) => {
+                                                  if (!thread) {
+                                                    return;
+                                                  }
+                                                  if (event.shiftKey) {
+                                                    rangeSelectTo(
+                                                      thread.id,
+                                                      orderedWorkerThreadIds as ThreadId[],
+                                                    );
+                                                    return;
+                                                  }
+                                                  if (event.metaKey || event.ctrlKey) {
+                                                    toggleThread(thread.id);
+                                                    return;
+                                                  }
+                                                  clearSelection();
+                                                  setAnchor(thread.id);
+                                                  void navigateToThread(thread.id);
+                                                }}
+                                              >
+                                                <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-amber-500/12 text-amber-600 dark:text-amber-300">
+                                                  <HardHatIcon className="size-3" />
+                                                </span>
+                                                {threadStatus ? (
+                                                  <ThreadStatusLabel
+                                                    status={threadStatus}
+                                                    compact
+                                                  />
+                                                ) : null}
+                                                <WorkerRepoBadge
+                                                  runtimeState={worker.runtimeState}
+                                                  runtimeStateMessage={worker.runtimeStateMessage}
+                                                  threadId={worker.id as ThreadId}
+                                                  worktreePath={worker.worktreePathHint}
+                                                />
+                                                <WakeBadge state={worker.wakeState} />
+                                                {renamingThreadId === worker.id && thread ? (
+                                                  <input
+                                                    ref={renamingInputRef}
+                                                    value={renamingTitle}
+                                                    onChange={(event) => {
+                                                      setRenamingTitle(event.target.value);
+                                                    }}
+                                                    onBlur={() => {
+                                                      void commitRename();
+                                                    }}
+                                                    onKeyDown={(event) => {
+                                                      if (event.key === "Enter") {
+                                                        event.preventDefault();
+                                                        void commitRename();
+                                                      }
+                                                      if (event.key === "Escape") {
+                                                        setRenamingThreadId(null);
+                                                      }
+                                                    }}
+                                                    className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 py-0.5 text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                                                  />
+                                                ) : (
+                                                  <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">
+                                                    {worker.title}
+                                                  </span>
+                                                )}
+                                              </button>
+                                              <WorkerRuntimePopover
+                                                runtimeState={worker.runtimeState}
+                                                runtimeStateMessage={worker.runtimeStateMessage}
+                                                threadId={worker.id as ThreadId}
+                                                worktreePath={worker.worktreePathHint}
+                                                workerLabel={worker.title}
+                                              />
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div className="relative px-2 py-1.5 text-[10px] text-muted-foreground/70">
                                         <span
                                           aria-hidden="true"
                                           className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
                                         />
-                                        <PreviewStatusTooltip
-                                          status={worker.status}
-                                          icon={
-                                            <span className={workerIconClasses(worker.status)}>
-                                              <HardHatIcon className="size-3" />
-                                            </span>
-                                          }
-                                        />
-                                        <Badge
-                                          variant="outline"
-                                          title={workerLabel}
-                                          className={cn(
-                                            VX_SIDEBAR_WORKER_REPO_CHIP_CLASSNAME,
-                                            "max-w-16",
-                                          )}
-                                        >
-                                          <span className="truncate">
-                                            {workerLabel.toLowerCase()}
-                                          </span>
-                                        </Badge>
-                                        {worker.wakeState ? (
-                                          <WakeBadge
-                                            state={worker.wakeState}
-                                            className={VX_SIDEBAR_WORKER_STATE_CHIP_CLASSNAME}
-                                          />
-                                        ) : null}
-                                        <WorkerRuntimePopover
-                                          workerLabel={workerLabel}
-                                          runtime={runtimeSnapshot}
-                                        />
+                                        No workers
                                       </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="relative px-2 py-1.5 text-[10px] text-muted-foreground/70">
-                                  <span
-                                    aria-hidden="true"
-                                    className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
-                                  />
-                                  No workers
-                                </div>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                  </SidebarMenuSubItem>
-                );
-              })}
-            </SidebarMenuSub>
-          </div>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <div className="relative px-2 py-1.5 text-[10px] text-muted-foreground/70">
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+                                />
+                                No active orchestrator thread
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </SidebarMenuSubItem>
+                    );
+                  })}
+                </SidebarMenuSub>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
+      {programTodosDialog ? (
+        <ProgramTodosDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setProgramTodosDialog(null);
+            }
+          }}
+          programId={programTodosDialog.programId}
+          programTitle={programTodosDialog.programTitle}
+        />
+      ) : null}
+      {programInfoDialogProgramId ? (
+        <ProgramInfoDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setProgramInfoDialogProgramId(null);
+            }
+          }}
+          programId={programInfoDialogProgramId}
+        />
+      ) : null}
     </>
   );
 }

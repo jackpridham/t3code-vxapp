@@ -673,6 +673,19 @@ describe("WebSocket Server", () => {
     );
     expect(createOlderThreadResponse.error).toBeUndefined();
 
+    if (input.kind === "orchestrator") {
+      const archiveOlderThreadResponse = await sendRequest(
+        input.ws,
+        ORCHESTRATION_WS_METHODS.dispatchCommand,
+        {
+          type: "thread.archive",
+          commandId: `cmd-${input.olderThreadId}-archive`,
+          threadId: input.olderThreadId,
+        },
+      );
+      expect(archiveOlderThreadResponse.error).toBeUndefined();
+    }
+
     const createActiveThreadResponse = await sendRequest(
       input.ws,
       ORCHESTRATION_WS_METHODS.dispatchCommand,
@@ -2124,7 +2137,7 @@ describe("WebSocket Server", () => {
     );
   });
 
-  it("rejects runtime snapshot requests for non-worker threads", async () => {
+  it("returns an unavailable runtime snapshot for non-worker threads", async () => {
     const projectRoot = makeTempDir("t3code-worker-runtime-project-");
     server = await createTestServer({ cwd: projectRoot, autoBootstrapProjectFromCwd: true });
     const addr = server.address();
@@ -2157,7 +2170,96 @@ describe("WebSocket Server", () => {
     const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
       threadId: "thread-non-worker-runtime",
     });
-    expect(runtimeResponse.error?.message).toContain("is not a worker thread");
+    expect(runtimeResponse.error).toBeUndefined();
+    expect(runtimeResponse.result).toEqual(
+      expect.objectContaining({
+        threadId: "thread-non-worker-runtime",
+        worktreePath: null,
+        runtimeDir: null,
+        summary: expect.objectContaining({
+          repo: null,
+          auditStatus: "missing",
+        }),
+        sourceFiles: expect.objectContaining({
+          contextPlan: expect.objectContaining({
+            status: "missing",
+            detail: "Thread 'thread-non-worker-runtime' is not marked as a worker thread.",
+          }),
+          dispatchContract: expect.objectContaining({
+            status: "missing",
+          }),
+          installedPacks: expect.objectContaining({
+            status: "missing",
+          }),
+          instructionStackAudit: expect.objectContaining({
+            status: "missing",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("returns an unavailable runtime snapshot when a worker thread has no worktree path", async () => {
+    const projectRoot = makeTempDir("t3code-worker-runtime-no-worktree-");
+    server = await createTestServer({ cwd: projectRoot, autoBootstrapProjectFromCwd: true });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws, welcome] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.create",
+      commandId: "cmd-worker-runtime-no-worktree-thread-create",
+      threadId: "thread-worker-runtime-no-worktree",
+      projectId: bootstrapProjectId,
+      title: "Worker Runtime No Worktree Thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      spawnRole: "worker",
+      createdAt: new Date().toISOString(),
+    });
+    expect(createThreadResponse.error).toBeUndefined();
+
+    const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
+      threadId: "thread-worker-runtime-no-worktree",
+    });
+    expect(runtimeResponse.error).toBeUndefined();
+    expect(runtimeResponse.result).toEqual(
+      expect.objectContaining({
+        threadId: "thread-worker-runtime-no-worktree",
+        worktreePath: null,
+        runtimeDir: null,
+        summary: expect.objectContaining({
+          repo: null,
+          auditStatus: "missing",
+        }),
+        sourceFiles: expect.objectContaining({
+          contextPlan: expect.objectContaining({
+            status: "missing",
+            detail: "Worker thread 'thread-worker-runtime-no-worktree' has no worktree path yet.",
+          }),
+          dispatchContract: expect.objectContaining({
+            status: "missing",
+          }),
+          installedPacks: expect.objectContaining({
+            status: "missing",
+          }),
+          instructionStackAudit: expect.objectContaining({
+            status: "missing",
+          }),
+        }),
+      }),
+    );
   });
 
   it("returns error for unknown methods", async () => {

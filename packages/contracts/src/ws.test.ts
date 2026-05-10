@@ -4,8 +4,12 @@ import { Effect, Schema } from "effect";
 import { ORCHESTRATION_WS_CHANNELS, ORCHESTRATION_WS_METHODS } from "./orchestration";
 import { WebSocketRequest, WsResponse, WS_CHANNELS, WS_METHODS } from "./ws";
 
-const decodeWebSocketRequest = Schema.decodeUnknownEffect(WebSocketRequest);
-const decodeWsResponse = Schema.decodeUnknownEffect(WsResponse);
+const decodeWebSocketRequest = Schema.decodeUnknownEffect(WebSocketRequest as never) as (
+  input: unknown,
+) => Effect.Effect<Schema.Schema.Type<typeof WebSocketRequest>, Schema.SchemaError, never>;
+const decodeWsResponse = Schema.decodeUnknownEffect(WsResponse as never) as (
+  input: unknown,
+) => Effect.Effect<Schema.Schema.Type<typeof WsResponse>, Schema.SchemaError, never>;
 
 it.effect("accepts getTurnDiff requests when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {

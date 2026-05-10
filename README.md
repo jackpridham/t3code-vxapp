@@ -613,6 +613,14 @@ Per-repo command wrapper that knows the target's capabilities. Every target reso
 
 **T3 dev-server** — `vx apps t3 --dev-server start|logs --follow|stop|status` replaced the old `dev.sh` entrypoint. It runs both server and web processes under a managed supervisor with combined logs.
 
+**T3 dev DB mirror** — if the orchestration sidebar shows `Unassigned Executive` or worker/orchestrator rows do not open ChatView, reseed the dev DB from the live local mirror first:
+
+```bash
+python3 scripts/seed-dev-db.py
+```
+
+The reseed copies a bounded snapshot from `~/.t3/userdata/state.sqlite`, then biases retention toward the current `~/agents-vxapp/.agents/state/vx_agents.sqlite3` control-plane graph so the sidebar and local thread/chat state stay aligned.
+
 ---
 
 ## T3 Native Control Plane — `vx t3`
