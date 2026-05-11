@@ -622,16 +622,20 @@ function resolveAutoExpandedSidebarItems(input: {
   for (const executive of input.executives) {
     for (const program of executive.programs) {
       const workerRouteActive =
-        program.orchestrator?.workers.some((worker) => worker.id === input.routeThreadId) ?? false;
+        program.currentLane?.workers.some((worker) => worker.id === input.routeThreadId) ?? false;
+      const historicalRouteActive =
+        program.historicalOrchestratorThreadIds.includes(input.routeThreadId) ||
+        program.historicalWorkerThreadIds.includes(input.routeThreadId);
       if (
         input.routeThreadId === program.executiveThreadId ||
-        input.routeThreadId === program.orchestrator?.id ||
-        workerRouteActive
+        input.routeThreadId === program.currentLane?.id ||
+        workerRouteActive ||
+        historicalRouteActive
       ) {
         openProgramIds.add(program.id);
       }
-      if (workerRouteActive && program.orchestrator?.id) {
-        openOrchestratorIds.add(program.orchestrator.id);
+      if (workerRouteActive && program.currentLane?.id) {
+        openOrchestratorIds.add(program.currentLane.id);
       }
     }
   }
@@ -739,7 +743,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     () =>
       model.executives.flatMap((executive) =>
         executive.programs.flatMap(
-          (program) => program.orchestrator?.workers.map((worker) => worker.id) ?? [],
+          (program) => program.currentLane?.workers.map((worker) => worker.id) ?? [],
         ),
       ),
     [model.executives],
@@ -804,8 +808,8 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
         isOpen &&
         routeThreadId &&
         (routeThreadId === program.executiveThreadId ||
-          routeThreadId === program.orchestrator?.id ||
-          program.orchestrator?.workers.some((worker) => worker.id === routeThreadId))
+          routeThreadId === program.currentLane?.id ||
+          program.currentLane?.workers.some((worker) => worker.id === routeThreadId))
       ) {
         await navigateToNoThread();
       }
@@ -816,16 +820,16 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
 
   const handleOrchestratorToggle = useCallback(
     async (program: (typeof model.executives)[number]["programs"][number]) => {
-      if (!program.orchestrator?.id) {
+      if (!program.currentLane?.id) {
         return;
       }
-      const orchestratorId = program.orchestrator.id;
+      const orchestratorId = program.currentLane.id;
       const isOpen = openOrchestratorIds.has(orchestratorId);
       if (
         isOpen &&
         routeThreadId &&
         (routeThreadId === orchestratorId ||
-          program.orchestrator.workers.some((worker) => worker.id === routeThreadId))
+          program.currentLane.workers.some((worker) => worker.id === routeThreadId))
       ) {
         await navigateToNoThread();
       }
@@ -836,10 +840,10 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
 
   const handleOrchestratorNavigate = useCallback(
     async (program: (typeof model.executives)[number]["programs"][number]) => {
-      if (!program.orchestrator?.id) {
+      if (!program.currentLane?.id) {
         return;
       }
-      await navigateToThread(program.orchestrator.id as ThreadId);
+      await navigateToThread(program.currentLane.id as ThreadId);
     },
     [navigateToThread],
   );
@@ -1031,8 +1035,8 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                 <SidebarMenuSub ref={attachAnimatedListRef} className="mx-1 mt-1 gap-1 px-1.5">
                   {executive.programs.map((program) => {
                     const programOpen = openProgramIds.has(program.id);
-                    const orchestratorOpen = program.orchestrator?.id
-                      ? openOrchestratorIds.has(program.orchestrator.id)
+                    const orchestratorOpen = program.currentLane?.id
+                      ? openOrchestratorIds.has(program.currentLane.id)
                       : false;
                     const status = formatProgramStatus(program.status);
 
@@ -1087,7 +1091,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                             ref={attachAnimatedListRef}
                             className="ml-3 border-l border-border/50 pl-2"
                           >
-                            {program.orchestrator ? (
+                            {program.currentLane ? (
                               <div className="relative">
                                 <span
                                   aria-hidden="true"
@@ -1096,15 +1100,15 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                                 <div
                                   className={cn(
                                     "flex items-start gap-1 rounded-lg hover:bg-accent/40",
-                                    routeThreadId === program.orchestrator.id ? "bg-accent/60" : "",
+                                    routeThreadId === program.currentLane.id ? "bg-accent/60" : "",
                                   )}
                                 >
                                   <button
                                     type="button"
                                     aria-label={
                                       orchestratorOpen
-                                        ? `Collapse workers for ${program.orchestrator.title}`
-                                        : `Expand workers for ${program.orchestrator.title}`
+                                        ? `Collapse workers for ${program.currentLane.title}`
+                                        : `Expand workers for ${program.currentLane.title}`
                                     }
                                     className="ml-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
                                     onClick={() => {
@@ -1131,10 +1135,10 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                                     <div className="min-w-0 flex-1">
                                       <div className="flex min-w-0 items-center gap-1.5">
                                         <span className="truncate text-[11px] font-medium text-foreground/90">
-                                          {program.orchestrator.title}
+                                          {program.currentLane.title}
                                         </span>
                                         <Badge variant="outline" className={CHIP_CLASSNAME}>
-                                          {program.orchestrator.workerCount} workers
+                                          {program.currentLane.workerCount} workers
                                         </Badge>
                                       </div>
                                     </div>
@@ -1160,9 +1164,9 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                                     ref={attachAnimatedListRef}
                                     className="ml-3 border-l border-border/50 pl-2"
                                   >
-                                    {program.orchestrator.workers.length > 0 ? (
+                                    {program.currentLane.workers.length > 0 ? (
                                       <div ref={attachAnimatedListRef} className="space-y-0.5">
-                                        {program.orchestrator.workers.map((worker) => {
+                                        {program.currentLane.workers.map((worker) => {
                                           const thread = worker.thread;
                                           const isActive = routeThreadId === worker.id;
                                           const isSelected = selectedThreadIds.has(
@@ -1296,12 +1300,52 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                                 ) : null}
                               </div>
                             ) : (
-                              <div className="relative px-2 py-1.5 text-[10px] text-muted-foreground/70">
+                              <div className="relative">
                                 <span
                                   aria-hidden="true"
                                   className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
                                 />
-                                No active orchestrator thread
+                                <div className="flex items-start gap-2 rounded-lg border border-dashed border-border/60 bg-muted/20 px-2 py-1.5">
+                                  <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
+                                    <BotIcon className="size-3" />
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                      <span className="text-[11px] font-medium text-foreground/90">
+                                        No active orchestrator lane
+                                      </span>
+                                      {program.historicalOrchestratorCount > 0 ? (
+                                        <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                          {program.historicalOrchestratorCount} historical lanes
+                                        </Badge>
+                                      ) : null}
+                                      {program.historicalWorkerCount > 0 ? (
+                                        <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                          {program.historicalWorkerCount} historical workers
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
+                                      {program.lastHistoricalLane
+                                        ? `Most recent archived lane: ${program.lastHistoricalLane.title}.`
+                                        : "This Program currently has no active lane and no recorded historical lineage."}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    aria-label={`Open TODOs for ${program.title}`}
+                                    className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setProgramTodosDialog({
+                                        programId: program.id,
+                                        programTitle: program.title,
+                                      });
+                                    }}
+                                  >
+                                    <ListTodoIcon className="size-3.5" />
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>

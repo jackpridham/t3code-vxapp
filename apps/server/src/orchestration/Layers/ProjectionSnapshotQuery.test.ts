@@ -860,6 +860,114 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("excludes deleted programs from snapshot program rows", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_programs`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_programs (
+          program_id,
+          title,
+          objective,
+          status,
+          declared_repos_json,
+          affected_app_targets_json,
+          required_local_suites_json,
+          required_external_e2e_suites_json,
+          require_development_deploy,
+          require_external_e2e,
+          require_clean_post_flight,
+          require_pr_per_repo,
+          executive_project_id,
+          executive_thread_id,
+          current_orchestrator_thread_id,
+          repo_prs_json,
+          local_validation_json,
+          app_validations_json,
+          observed_repos_json,
+          post_flight_json,
+          created_at,
+          updated_at,
+          completed_at,
+          cancel_reason,
+          cancelled_at,
+          superseded_by_program_id,
+          deleted_at
+        )
+        VALUES
+          (
+            'program-active',
+            'Visible program',
+            NULL,
+            'active',
+            '[]',
+            '[]',
+            '[]',
+            '[]',
+            0,
+            0,
+            0,
+            0,
+            'project-exec',
+            'thread-exec',
+            NULL,
+            '[]',
+            '[]',
+            '[]',
+            '[]',
+            NULL,
+            '2026-05-10T00:00:00.000Z',
+            '2026-05-10T00:00:00.000Z',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL
+          ),
+          (
+            'program-deleted',
+            'Deleted program',
+            NULL,
+            'cancelled',
+            '[]',
+            '[]',
+            '[]',
+            '[]',
+            0,
+            0,
+            0,
+            0,
+            'project-exec',
+            'thread-exec',
+            NULL,
+            '[]',
+            '[]',
+            '[]',
+            '[]',
+            NULL,
+            '2026-05-10T00:00:01.000Z',
+            '2026-05-10T00:00:01.000Z',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            '2026-05-10T00:00:02.000Z'
+          )
+      `;
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+
+      assert.deepEqual(
+        (snapshot.programs ?? []).map((program) => program.id),
+        [asProgramId("program-active")],
+      );
+    }),
+  );
+
   it.effect(
     "bounds heavy collections in operational snapshots and preserves full debug exports",
     () =>

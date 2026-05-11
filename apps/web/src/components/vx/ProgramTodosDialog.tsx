@@ -61,7 +61,7 @@ export function ProgramTodosDialog(props: {
         <DialogHeader>
           <DialogTitle>{props.programTitle} TODOs</DialogTitle>
           <DialogDescription>
-            TODO items assigned to this Program’s orchestrator lane.
+            TODO items recorded for this Program and its orchestration lanes.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">

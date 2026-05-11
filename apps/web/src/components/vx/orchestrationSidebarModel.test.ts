@@ -223,13 +223,13 @@ describe("buildOrchestrationSidebarModel", () => {
 
     expect(model.source).toBe("sqlite");
     expect(model.executives).toHaveLength(1);
-    expect(model.executives[0]?.programs[0]?.orchestrator?.workers[0]?.thread?.title).toBe(
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.thread?.title).toBe(
       "worker/ket Repair the OAuth callback flow",
     );
-    expect(model.executives[0]?.programs[0]?.orchestrator?.workers[0]?.title).toBe(
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.title).toBe(
       "Repair the OAuth callback flow",
     );
-    expect(model.executives[0]?.programs[0]?.orchestrator?.workers[0]?.provenanceLabel).toBe(
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.provenanceLabel).toBe(
       "api-vxapp",
     );
     expect(model.executives[0]?.notifications).toHaveLength(1);
@@ -285,7 +285,331 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.executives[0]?.programs[0]?.orchestrator).toBeNull();
+    expect(model.executives[0]?.programs[0]?.currentLane).toBeNull();
+    expect(model.executives[0]?.programs[0]?.laneState).toBe("no-active-lane");
+    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(0);
+    expect(model.executives[0]?.programs[0]?.historicalWorkerCount).toBe(0);
+  });
+
+  it("keeps historical lineage visible when a program has no current lane", () => {
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: null,
+          id: ProgramId.makeUnsafe("program-party"),
+          title: "PartyMore.ai launch plan and first delivery wave",
+          status: "awaiting_founder",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: makeSqliteGraph({
+        programs: [
+          {
+            closeout: null,
+            completedAt: null,
+            createdAt: "2026-05-10T00:00:00.000Z",
+            currentOrchestratorThreadId: null,
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            id: ProgramId.makeUnsafe("program-party"),
+            metadata: null,
+            objective: null,
+            status: "awaiting_founder",
+            title: "PartyMore.ai launch plan and first delivery wave",
+            updatedAt: "2026-05-10T00:00:00.000Z",
+          },
+        ],
+        threadLinks: [
+          {
+            archivedAt: "2026-05-09T00:00:00.000Z",
+            createdAt: "2026-05-08T00:00:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: null,
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-party"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "orchestrator",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("orch-older"),
+            title: "PartyMore.ai launch plan and first delivery wave",
+            updatedAt: "2026-05-09T00:00:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/orch-older",
+            worktreePath: "/orch-older",
+          },
+          {
+            archivedAt: "2026-05-10T00:00:00.000Z",
+            createdAt: "2026-05-09T00:00:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: null,
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-party"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "orchestrator",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("orch-latest"),
+            title: "PartyMore.ai launch plan and first delivery wave",
+            updatedAt: "2026-05-10T00:00:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/orch-latest",
+            worktreePath: "/orch-latest",
+          },
+          {
+            archivedAt: "2026-05-10T01:00:00.000Z",
+            createdAt: "2026-05-10T00:30:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: ThreadId.makeUnsafe("orch-latest"),
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-party"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "worker",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("worker-1"),
+            title: "worker/ket Historical worker one",
+            updatedAt: "2026-05-10T01:00:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/worker-1",
+            worktreePath: "/worker-1",
+          },
+          {
+            archivedAt: "2026-05-10T01:30:00.000Z",
+            createdAt: "2026-05-10T01:00:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: ThreadId.makeUnsafe("orch-latest"),
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-party"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "worker",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("worker-2"),
+            title: "worker/jono Historical worker two",
+            updatedAt: "2026-05-10T01:30:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/worker-2",
+            worktreePath: "/worker-2",
+          },
+        ],
+      }),
+      threads: [],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.programs[0]?.currentLane).toBeNull();
+    expect(model.executives[0]?.programs[0]?.laneState).toBe("no-active-lane");
+    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(2);
+    expect(model.executives[0]?.programs[0]?.historicalWorkerCount).toBe(2);
+    expect(model.executives[0]?.programs[0]?.lastHistoricalLane?.id).toBe("orch-latest");
+  });
+
+  it("keeps current and historical lanes distinct", () => {
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-live"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Program A",
+          status: "active",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map([
+        [
+          ThreadId.makeUnsafe("orch-live"),
+          [
+            {
+              id: ThreadId.makeUnsafe("worker-live"),
+              latestTurn: null,
+              orchestratorProjectId: ProjectId.makeUnsafe("exec-project"),
+              projectId: ProjectId.makeUnsafe("exec-project"),
+              session: null,
+              spawnRole: "worker",
+              title: "worker/ket Live worker",
+              worktreePath: "/worker-live",
+            },
+          ],
+        ],
+      ]),
+      sqliteGraph: makeSqliteGraph({
+        programs: [
+          {
+            closeout: null,
+            completedAt: null,
+            createdAt: "2026-05-10T00:00:00.000Z",
+            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-live"),
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            id: ProgramId.makeUnsafe("program-1"),
+            metadata: null,
+            objective: null,
+            status: "active",
+            title: "Program A",
+            updatedAt: "2026-05-10T00:00:00.000Z",
+          },
+        ],
+        threadLinks: [
+          {
+            archivedAt: null,
+            createdAt: "2026-05-10T00:00:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: null,
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-1"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "orchestrator",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("orch-live"),
+            title: "Live orchestrator",
+            updatedAt: "2026-05-10T00:00:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/orch-live",
+            worktreePath: "/orch-live",
+          },
+          {
+            archivedAt: null,
+            createdAt: "2026-05-10T00:10:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: ThreadId.makeUnsafe("orch-live"),
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-1"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "worker",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("worker-live"),
+            title: "worker/ket Live worker",
+            updatedAt: "2026-05-10T00:10:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/worker-live",
+            worktreePath: "/worker-live",
+          },
+          {
+            archivedAt: "2026-05-09T00:00:00.000Z",
+            createdAt: "2026-05-08T00:00:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: null,
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-1"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "orchestrator",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("orch-archived"),
+            title: "Archived orchestrator",
+            updatedAt: "2026-05-09T00:00:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/orch-archived",
+            worktreePath: "/orch-archived",
+          },
+          {
+            archivedAt: "2026-05-09T01:00:00.000Z",
+            createdAt: "2026-05-09T00:30:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: null,
+            metadata: null,
+            orchestratorThreadId: ThreadId.makeUnsafe("orch-archived"),
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-1"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: null,
+            spawnRole: "worker",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("worker-archived"),
+            title: "worker/jono Archived worker",
+            updatedAt: "2026-05-09T01:00:00.000Z",
+            workflowId: null,
+            workspaceRoot: "/worker-archived",
+            worktreePath: "/worker-archived",
+          },
+        ],
+      }),
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("orch-live"),
+          projectId: ProjectId.makeUnsafe("exec-project"),
+          title: "Live Orchestrator",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-live"),
+          projectId: ProjectId.makeUnsafe("exec-project"),
+          title: "worker/ket Live worker",
+          orchestratorThreadId: ThreadId.makeUnsafe("orch-live"),
+          spawnRole: "worker",
+          worktreePath: "/worker-live",
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.programs[0]?.laneState).toBe("active");
+    expect(model.executives[0]?.programs[0]?.currentLane?.id).toBe("orch-live");
+    expect(
+      model.executives[0]?.programs[0]?.currentLane?.workers.map((worker) => worker.id),
+    ).toEqual(["worker-live"]);
+    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(1);
+    expect(model.executives[0]?.programs[0]?.historicalWorkerCount).toBe(1);
+    expect(model.executives[0]?.programs[0]?.lastHistoricalLane?.id).toBe("orch-archived");
   });
 
   it("derives the orchestrator name from generated role-session workspaces instead of 'workspace'", () => {
@@ -359,7 +683,7 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.executives[0]?.programs[0]?.orchestrator?.title).toBe("Jasper");
+    expect(model.executives[0]?.programs[0]?.currentLane?.title).toBe("Jasper");
   });
 
   it("flags a stale mirrored dev DB when sqlite graph rows do not exist in live T3 state", () => {
@@ -530,7 +854,7 @@ describe("buildOrchestrationSidebarModel", () => {
 
     expect(model.source).toBe("t3");
     expect(model.executives[0]?.programs[0]?.title).toBe("Live Program");
-    expect(model.executives[0]?.programs[0]?.orchestrator?.id).toBe("orch-live");
+    expect(model.executives[0]?.programs[0]?.currentLane?.id).toBe("orch-live");
     expect(model.diagnostics.divergentProgramIds).toEqual(["program-live"]);
   });
 
@@ -670,7 +994,7 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.executives[0]?.programs[0]?.orchestrator?.workers).toEqual([]);
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers).toEqual([]);
   });
 
   it("classifies dormant no-worktree workers as transient runtime rows", () => {
@@ -720,7 +1044,7 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.executives[0]?.programs[0]?.orchestrator?.workers[0]?.runtimeState).toBe(
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState).toBe(
       "transient",
     );
   });
@@ -843,10 +1167,10 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.executives[0]?.programs[0]?.orchestrator?.workers[0]?.runtimeState).toBe(
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState).toBe(
       "inspectable",
     );
-    expect(model.executives[0]?.programs[0]?.orchestrator?.workers[0]?.worktreePathHint).toBe(
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.worktreePathHint).toBe(
       "/api",
     );
   });

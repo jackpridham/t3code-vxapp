@@ -352,6 +352,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           superseded_by_program_id AS "supersededByProgramId",
           deleted_at AS "deletedAt"
         FROM projection_programs
+        WHERE deleted_at IS NULL
         ORDER BY created_at ASC, program_id ASC
       `,
   });

@@ -44,7 +44,9 @@ export interface SidebarWorkerNode {
   worktreePathHint: string | null;
 }
 
-export interface SidebarOrchestratorNode {
+export type SidebarProgramLaneState = "active" | "no-active-lane";
+
+export interface SidebarProgramLaneNode {
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   id: string | null;
   thread: Thread | null;
@@ -53,12 +55,26 @@ export interface SidebarOrchestratorNode {
   workers: SidebarWorkerNode[];
 }
 
+export interface SidebarHistoricalLaneNode {
+  archivedAt: string | null;
+  fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+  id: string;
+  thread: Thread | null;
+  title: string;
+}
+
 export interface SidebarProgramNode {
   attentionCount: number;
+  currentLane: SidebarProgramLaneNode | null;
   executiveProjectId: string | null;
   executiveThreadId: string | null;
+  historicalOrchestratorCount: number;
+  historicalOrchestratorThreadIds: string[];
+  historicalWorkerCount: number;
+  historicalWorkerThreadIds: string[];
   id: string;
-  orchestrator: SidebarOrchestratorNode | null;
+  laneState: SidebarProgramLaneState;
+  lastHistoricalLane: SidebarHistoricalLaneNode | null;
   status: string;
   title: string;
 }
@@ -107,6 +123,21 @@ type SidebarWorkerAuthoritySummary = Pick<
   SessionWorkerThreadSummary,
   "id" | "latestTurn" | "session" | "spawnRole" | "worktreePath"
 >;
+
+type SidebarLineageSpawnRole = "orchestrator" | "worker" | null;
+
+type SidebarProgramLineageEntry = {
+  archivedAt: string | null;
+  createdAt: string | null;
+  fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+  id: string;
+  orchestratorThreadId: string | null;
+  projectId: string | null;
+  spawnRole: SidebarLineageSpawnRole;
+  thread: Thread | null;
+  title: string | null;
+  updatedAt: string | null;
+};
 
 type MirrorDiagnosticsLike = {
   divergentProgramIds?: readonly string[];
@@ -376,14 +407,133 @@ function buildLiveThreadById(input: { threads: readonly Thread[] }): Map<string,
   return threadById;
 }
 
+function normalizeLineageSpawnRole(value: string | null | undefined): SidebarLineageSpawnRole {
+  return value === "orchestrator" || value === "worker" ? value : null;
+}
+
+function buildProgramLineageEntries(input: {
+  programId: string;
+  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
+  threads: readonly Thread[];
+}): SidebarProgramLineageEntry[] {
+  const entriesById = new Map<string, SidebarProgramLineageEntry>();
+
+  const mergeEntry = (entry: SidebarProgramLineageEntry) => {
+    const existing = entriesById.get(entry.id);
+    if (!existing) {
+      entriesById.set(entry.id, entry);
+      return;
+    }
+    entriesById.set(entry.id, {
+      archivedAt: entry.archivedAt ?? existing.archivedAt,
+      createdAt: entry.createdAt ?? existing.createdAt,
+      fallbackThreadLink: entry.fallbackThreadLink ?? existing.fallbackThreadLink,
+      id: entry.id,
+      orchestratorThreadId: entry.orchestratorThreadId ?? existing.orchestratorThreadId,
+      projectId: entry.projectId ?? existing.projectId,
+      spawnRole: entry.spawnRole ?? existing.spawnRole,
+      thread: entry.thread ?? existing.thread,
+      title: entry.title ?? existing.title,
+      updatedAt: entry.updatedAt ?? existing.updatedAt,
+    });
+  };
+
+  if (shouldUseSqliteGraph(input.sqliteGraph)) {
+    for (const threadLink of input.sqliteGraph.threadLinks) {
+      if (threadLink.deletedAt !== null || threadLink.programId !== input.programId) {
+        continue;
+      }
+      mergeEntry({
+        archivedAt: threadLink.archivedAt,
+        createdAt: threadLink.createdAt,
+        fallbackThreadLink: threadLink,
+        id: threadLink.threadId,
+        orchestratorThreadId: threadLink.orchestratorThreadId,
+        projectId: threadLink.projectId,
+        spawnRole: normalizeLineageSpawnRole(threadLink.spawnRole),
+        thread: null,
+        title: threadLink.title,
+        updatedAt: threadLink.updatedAt,
+      });
+    }
+  }
+
+  for (const thread of input.threads) {
+    if (thread.programId !== input.programId) {
+      continue;
+    }
+    mergeEntry({
+      archivedAt: thread.archivedAt,
+      createdAt: thread.createdAt,
+      fallbackThreadLink: null,
+      id: thread.id,
+      orchestratorThreadId: thread.orchestratorThreadId ?? null,
+      projectId: thread.projectId,
+      spawnRole: normalizeLineageSpawnRole(thread.spawnRole),
+      thread,
+      title: thread.title,
+      updatedAt: thread.updatedAt ?? thread.createdAt,
+    });
+  }
+
+  return [...entriesById.values()];
+}
+
 function getProgramList(input: {
   programs: readonly Program[];
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
 }): ReadonlyArray<Program | ServerAgentsVxappSidebarProgram> {
-  if (shouldUseSqliteGraph(input.sqliteGraph) && input.sqliteGraph.programs.length > 0) {
-    return input.sqliteGraph.programs;
+  const visiblePrograms = shouldUseSqliteGraph(input.sqliteGraph)
+    ? input.sqliteGraph.programs
+    : input.programs;
+  return visiblePrograms.filter((program) => program.deletedAt === null);
+}
+
+function resolveLineageRecency(entry: SidebarProgramLineageEntry): string {
+  return entry.archivedAt ?? entry.updatedAt ?? entry.createdAt ?? "";
+}
+
+function resolveLineageTitle(input: {
+  fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+  programTitle: string;
+  projectById: ReadonlyMap<string, Project>;
+  thread: Thread | null;
+}): string {
+  const currentProjectName = input.thread
+    ? (input.projectById.get(input.thread.projectId)?.name ?? null)
+    : null;
+  const fallbackProjectName = input.fallbackThreadLink?.projectId
+    ? (input.projectById.get(input.fallbackThreadLink.projectId)?.name ?? null)
+    : null;
+  const roleSessionName =
+    resolveRoleSessionName(input.thread?.worktreePath) ??
+    resolveRoleSessionName(input.fallbackThreadLink?.worktreePath) ??
+    resolveRoleSessionName(input.fallbackThreadLink?.workspaceRoot);
+  const cleanedCurrentTitle = stripAgentPrefix(input.thread?.title);
+  const cleanedFallbackTitle = stripAgentPrefix(input.fallbackThreadLink?.title);
+
+  if (roleSessionName) {
+    return roleSessionName;
   }
-  return input.programs;
+  if (currentProjectName && currentProjectName.trim().toLowerCase() !== "workspace") {
+    return currentProjectName;
+  }
+  if (fallbackProjectName && fallbackProjectName.trim().toLowerCase() !== "workspace") {
+    return fallbackProjectName;
+  }
+  if (cleanedCurrentTitle && cleanedCurrentTitle !== input.programTitle) {
+    return cleanedCurrentTitle;
+  }
+  if (cleanedFallbackTitle && cleanedFallbackTitle !== input.programTitle) {
+    return cleanedFallbackTitle;
+  }
+  return (
+    cleanedCurrentTitle ??
+    cleanedFallbackTitle ??
+    currentProjectName ??
+    fallbackProjectName ??
+    "Orchestrator"
+  );
 }
 
 export function resolveSidebarRootThreadIds(input: {
@@ -485,49 +635,6 @@ function sortNotifications(items: SidebarNotificationItem[]): SidebarNotificatio
   });
 }
 
-function resolveOrchestratorTitle(input: {
-  currentRootThread: Thread | null;
-  fallbackRootThreadLink: ServerAgentsVxappSidebarThreadLink | null;
-  programTitle: string;
-  projectById: ReadonlyMap<string, Project>;
-}): string {
-  const currentProjectName = input.currentRootThread
-    ? (input.projectById.get(input.currentRootThread.projectId)?.name ?? null)
-    : null;
-  const fallbackProjectName = input.fallbackRootThreadLink?.projectId
-    ? (input.projectById.get(input.fallbackRootThreadLink.projectId)?.name ?? null)
-    : null;
-  const roleSessionName =
-    resolveRoleSessionName(input.currentRootThread?.worktreePath) ??
-    resolveRoleSessionName(input.fallbackRootThreadLink?.worktreePath) ??
-    resolveRoleSessionName(input.fallbackRootThreadLink?.workspaceRoot);
-  const cleanedCurrentTitle = stripAgentPrefix(input.currentRootThread?.title);
-  const cleanedFallbackTitle = stripAgentPrefix(input.fallbackRootThreadLink?.title);
-
-  if (roleSessionName) {
-    return roleSessionName;
-  }
-  if (currentProjectName && currentProjectName.trim().toLowerCase() !== "workspace") {
-    return currentProjectName;
-  }
-  if (fallbackProjectName && fallbackProjectName.trim().toLowerCase() !== "workspace") {
-    return fallbackProjectName;
-  }
-  if (cleanedCurrentTitle && cleanedCurrentTitle !== input.programTitle) {
-    return cleanedCurrentTitle;
-  }
-  if (cleanedFallbackTitle && cleanedFallbackTitle !== input.programTitle) {
-    return cleanedFallbackTitle;
-  }
-  return (
-    cleanedCurrentTitle ??
-    cleanedFallbackTitle ??
-    currentProjectName ??
-    fallbackProjectName ??
-    "Orchestrator"
-  );
-}
-
 export function buildOrchestrationSidebarModel(input: {
   ctoAttentionItems: readonly CtoAttentionItem[];
   programNotifications: readonly ProgramNotification[];
@@ -607,6 +714,31 @@ export function buildOrchestrationSidebarModel(input: {
     const sessionWorkerThreadById = new Map(
       sessionWorkerThreads.map((thread) => [thread.id, thread] as const),
     );
+    const lineageEntries = buildProgramLineageEntries({
+      programId: program.id,
+      sqliteGraph: input.sqliteGraph,
+      threads: input.threads,
+    });
+    const historicalOrchestratorEntries = lineageEntries
+      .filter((entry) => entry.spawnRole === "orchestrator" && entry.id !== currentRootThreadId)
+      .toSorted(
+        (left, right) =>
+          resolveLineageRecency(right).localeCompare(resolveLineageRecency(left)) ||
+          right.id.localeCompare(left.id),
+      );
+    const historicalWorkerThreadIds = [
+      ...new Set(
+        lineageEntries
+          .filter(
+            (entry) =>
+              entry.spawnRole === "worker" &&
+              (currentRootThreadId === null || entry.orchestratorThreadId !== currentRootThreadId),
+          )
+          .map((entry) => entry.id),
+      ),
+    ];
+    const historicalOrchestratorThreadIds = historicalOrchestratorEntries.map((entry) => entry.id);
+    const latestHistoricalLaneEntry = historicalOrchestratorEntries[0] ?? null;
 
     const workers = workerIds.map<SidebarWorkerNode>((workerId) => {
       const thread = liveThreadById.get(workerId) ?? null;
@@ -649,24 +781,44 @@ export function buildOrchestrationSidebarModel(input: {
     const programItems = notificationsByProgramId.get(program.id) ?? [];
     const programNode: SidebarProgramNode = {
       attentionCount: programItems.filter((item) => item.section === "attention").length,
-      executiveProjectId,
-      executiveThreadId,
-      id: program.id,
-      orchestrator:
+      currentLane:
         currentRootThreadId === null
           ? null
           : {
               fallbackThreadLink: fallbackRootThreadLink,
               id: currentRootThreadId,
               thread: currentRootThread,
-              title: resolveOrchestratorTitle({
-                currentRootThread,
-                fallbackRootThreadLink,
+              title: resolveLineageTitle({
+                fallbackThreadLink: fallbackRootThreadLink,
                 programTitle: program.title,
                 projectById,
+                thread: currentRootThread,
               }),
               workerCount: workers.length,
               workers,
+            },
+      executiveProjectId,
+      executiveThreadId,
+      historicalOrchestratorCount: historicalOrchestratorThreadIds.length,
+      historicalOrchestratorThreadIds,
+      historicalWorkerCount: historicalWorkerThreadIds.length,
+      historicalWorkerThreadIds,
+      id: program.id,
+      laneState: currentRootThreadId === null ? "no-active-lane" : "active",
+      lastHistoricalLane:
+        latestHistoricalLaneEntry === null
+          ? null
+          : {
+              archivedAt: latestHistoricalLaneEntry.archivedAt,
+              fallbackThreadLink: latestHistoricalLaneEntry.fallbackThreadLink,
+              id: latestHistoricalLaneEntry.id,
+              thread: latestHistoricalLaneEntry.thread,
+              title: resolveLineageTitle({
+                fallbackThreadLink: latestHistoricalLaneEntry.fallbackThreadLink,
+                programTitle: program.title,
+                projectById,
+                thread: latestHistoricalLaneEntry.thread,
+              }),
             },
       status: program.status,
       title: program.title,
