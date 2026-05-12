@@ -47,3 +47,16 @@ export async function hydrateRouteThreadHistory(input: {
   input.syncServerReadModel(readModel);
   return true;
 }
+
+export async function hydrateMissingRouteThread(input: {
+  api: NativeApi;
+  threadId: ThreadId;
+  syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+}): Promise<boolean> {
+  const readModel = await loadCurrentStateWithThreadDetail(input.api, input.threadId);
+  const hydrated = readModel.threads.some((thread) => thread.id === input.threadId);
+  if (hydrated) {
+    input.syncServerReadModel(readModel);
+  }
+  return hydrated;
+}

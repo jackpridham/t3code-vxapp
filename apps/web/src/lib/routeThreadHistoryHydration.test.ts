@@ -10,6 +10,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  hydrateMissingRouteThread,
   hydrateRouteThreadHistory,
   threadNeedsRouteHistoryHydration,
 } from "./routeThreadHistoryHydration";
@@ -192,6 +193,58 @@ describe("route thread history hydration", () => {
         ],
       }),
     );
+  });
+
+  it("hydrates a missing route thread into the store when detail lookup can resolve it", async () => {
+    const api = makeApi();
+    const missingThreadId = ThreadId.makeUnsafe("thread-missing");
+    const resolvedThread = {
+      ...makeReadModel().threads[0],
+      id: missingThreadId,
+      title: "Resolved thread",
+    };
+    vi.mocked(api.orchestration.listSessionThreads).mockResolvedValue([
+      resolvedThread,
+    ] as OrchestrationThreadSummary[]);
+    const syncServerReadModel = vi.fn();
+
+    await expect(
+      hydrateMissingRouteThread({
+        api,
+        threadId: missingThreadId,
+        syncServerReadModel,
+      }),
+    ).resolves.toBe(true);
+
+    expect(api.orchestration.getCurrentState).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.listSessionThreads).toHaveBeenCalledWith({
+      rootThreadId: missingThreadId,
+      includeArchived: true,
+      includeDeleted: false,
+    });
+    expect(syncServerReadModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threads: expect.arrayContaining([expect.objectContaining({ id: missingThreadId })]),
+      }),
+    );
+  });
+
+  it("does not sync state when a missing route thread still cannot be resolved", async () => {
+    const api = makeApi();
+    const missingThreadId = ThreadId.makeUnsafe("thread-missing");
+    vi.mocked(api.orchestration.listSessionThreads).mockResolvedValue([]);
+    const syncServerReadModel = vi.fn();
+
+    await expect(
+      hydrateMissingRouteThread({
+        api,
+        threadId: missingThreadId,
+        syncServerReadModel,
+      }),
+    ).resolves.toBe(false);
+
+    expect(api.orchestration.getCurrentState).toHaveBeenCalledTimes(1);
+    expect(syncServerReadModel).not.toHaveBeenCalled();
   });
 
   it("hydrates worker session history when navigating to an orchestrator thread", async () => {

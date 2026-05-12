@@ -34,6 +34,7 @@ import {
 } from "../lib/chatChangesPanelLayout";
 import { buildChangesWindowTarget, useChangesWindowTarget } from "../lib/changesWindowSync";
 import {
+  hydrateMissingRouteThread,
   hydrateRouteThreadHistory,
   threadNeedsRouteHistoryHydration,
 } from "../lib/routeThreadHistoryHydration";
@@ -190,6 +191,7 @@ function ChatThreadRouteView() {
   );
   const routeThreadExists = threadExists || draftThreadExists;
   const routeHistoryHydrationInFlightRef = useRef(new Set<ThreadId>());
+  const missingRouteThreadHydrationInFlightRef = useRef(new Set<ThreadId>());
 
   const settings = useSettings();
   const ideModeEnabled = settings.ideModeEnabled;
@@ -236,10 +238,44 @@ function ChatThreadRouteView() {
       return;
     }
 
-    if (!routeThreadExists) {
+    if (routeThreadExists) {
+      return;
+    }
+
+    const api = readNativeApi();
+    if (!api || missingRouteThreadHydrationInFlightRef.current.has(threadId)) {
       void navigate({ to: "/", replace: true });
       return;
     }
+
+    let cancelled = false;
+    missingRouteThreadHydrationInFlightRef.current.add(threadId);
+    void hydrateMissingRouteThread({
+      api,
+      threadId,
+      syncServerReadModel: (readModel) => {
+        if (!cancelled) {
+          useStore.getState().syncServerReadModel(readModel);
+        }
+      },
+    })
+      .then((hydrated) => {
+        if (!cancelled && !hydrated) {
+          void navigate({ to: "/", replace: true });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          void navigate({ to: "/", replace: true });
+        }
+      })
+      .finally(() => {
+        missingRouteThreadHydrationInFlightRef.current.delete(threadId);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [bootstrapComplete, navigate, routeThreadExists, threadId]);
 
   useEffect(() => {
