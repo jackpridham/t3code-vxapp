@@ -8,16 +8,23 @@ import type {
   ServerGetAgentsVxappSidebarGraphResult,
   ThreadId,
 } from "@t3tools/contracts";
+import { isThreadRuntimeActive } from "../Sidebar.logic";
 import { collapseThreadToCanonicalProject } from "~/lib/orchestrationMode";
 import type { CtoAttentionItem, Program, ProgramNotification, Project, Thread } from "~/types";
 
 export type SidebarNotificationSection = "attention" | "program-update";
 export type SidebarWorkerWakeState = "pending" | "delivering" | null;
-export type SidebarWorkerRuntimeState =
+export type SidebarAgentRuntimeState =
   | "inspectable"
   | "pending-worktree"
   | "transient"
   | "stale-lineage";
+
+type SidebarRuntimeMetadata = {
+  runtimeState: SidebarAgentRuntimeState;
+  runtimeStateMessage: string | null;
+  worktreePathHint: string | null;
+};
 
 export interface SidebarNotificationItem {
   id: string;
@@ -32,23 +39,28 @@ export interface SidebarNotificationItem {
   summary: string;
 }
 
-export interface SidebarWorkerNode {
+export interface SidebarWorkerNode extends SidebarRuntimeMetadata {
+  activityAt: string | null;
+  archivedAt: string | null;
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   id: string;
+  isActiveNow: boolean;
+  isHistorical: boolean;
   provenanceLabel: string;
-  runtimeState: SidebarWorkerRuntimeState;
-  runtimeStateMessage: string | null;
   thread: Thread | null;
   title: string;
   wakeState: SidebarWorkerWakeState;
-  worktreePathHint: string | null;
 }
 
 export type SidebarProgramLaneState = "active" | "no-active-lane";
 
-export interface SidebarProgramLaneNode {
+export interface SidebarProgramLaneNode extends SidebarRuntimeMetadata {
+  activityAt: string | null;
+  archivedAt: string | null;
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   id: string | null;
+  isActiveNow: boolean;
+  isHistorical: boolean;
   thread: Thread | null;
   title: string;
   workerCount: number;
@@ -64,27 +76,34 @@ export interface SidebarHistoricalLaneNode {
 }
 
 export interface SidebarProgramNode {
+  activityAt: string | null;
   attentionCount: number;
   currentLane: SidebarProgramLaneNode | null;
   executiveProjectId: string | null;
   executiveThreadId: string | null;
   historicalOrchestratorCount: number;
+  historicalLanes: SidebarProgramLaneNode[];
   historicalOrchestratorThreadIds: string[];
   historicalWorkerCount: number;
   historicalWorkerThreadIds: string[];
   id: string;
+  isActiveNow: boolean;
   laneState: SidebarProgramLaneState;
   lastHistoricalLane: SidebarHistoricalLaneNode | null;
   status: string;
   title: string;
 }
 
-export interface SidebarExecutiveNode {
+export interface SidebarExecutiveNode extends SidebarRuntimeMetadata {
+  activityAt: string | null;
+  fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   id: string;
+  isActiveNow: boolean;
   label: string;
   projectId: string | null;
   programs: SidebarProgramNode[];
   threadId: string | null;
+  thread: Thread | null;
   notifications: SidebarNotificationItem[];
 }
 
@@ -124,6 +143,13 @@ type SidebarWorkerAuthoritySummary = Pick<
   "id" | "latestTurn" | "session" | "spawnRole" | "worktreePath"
 >;
 
+type SidebarAgentAuthorityThread = Pick<Thread, "id" | "latestTurn" | "session" | "worktreePath">;
+
+type SidebarAgentAuthoritySummary = Pick<
+  SessionWorkerThreadSummary,
+  "id" | "latestTurn" | "session" | "worktreePath"
+>;
+
 type SidebarLineageSpawnRole = "orchestrator" | "worker" | null;
 
 type SidebarProgramLineageEntry = {
@@ -145,6 +171,27 @@ type MirrorDiagnosticsLike = {
   missingProjectIds?: readonly string[];
   missingThreadIds?: readonly string[];
   staleMirror?: boolean;
+};
+
+type SidebarThreadActivitySource = {
+  archivedAt?: string | null | undefined;
+  createdAt?: string | null | undefined;
+  latestTurn?:
+    | {
+        completedAt?: string | null | undefined;
+        requestedAt?: string | null | undefined;
+        startedAt?: string | null | undefined;
+      }
+    | null
+    | undefined;
+  session?:
+    | {
+        status?: string | undefined;
+        updatedAt?: string | null | undefined;
+      }
+    | null
+    | undefined;
+  updatedAt?: string | null | undefined;
 };
 
 function normalizeStringIdList(value: readonly string[] | undefined): string[] {
@@ -171,6 +218,33 @@ function normalizeMirrorDiagnostics(
     missingThreadIds: normalizeStringIdList(mirrorDiagnostics.missingThreadIds).toSorted(),
     staleMirror: mirrorDiagnostics.staleMirror === true,
   };
+}
+
+function toSortableTimestamp(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function maxIsoTimestamp(values: readonly (string | null | undefined)[]): string | null {
+  let bestValue: string | null = null;
+  let bestTimestamp = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    const timestamp = toSortableTimestamp(value);
+    if (timestamp === null) {
+      continue;
+    }
+    if (
+      timestamp > bestTimestamp ||
+      (timestamp === bestTimestamp && value !== null && value !== undefined)
+    ) {
+      bestTimestamp = timestamp;
+      bestValue = value ?? null;
+    }
+  }
+  return bestValue;
 }
 
 function stripAgentPrefix(title: string | null | undefined): string | null {
@@ -203,6 +277,35 @@ function basename(value: string | null | undefined): string | null {
   }
   const segments = value.split(/[/\\]/).filter(Boolean);
   return segments[segments.length - 1] ?? null;
+}
+
+function resolveThreadActivityAt(
+  thread: SidebarThreadActivitySource | null | undefined,
+): string | null {
+  if (!thread) {
+    return null;
+  }
+  return maxIsoTimestamp([
+    thread.session?.updatedAt,
+    thread.latestTurn?.completedAt,
+    thread.latestTurn?.startedAt,
+    thread.latestTurn?.requestedAt,
+    thread.archivedAt,
+    thread.updatedAt,
+    thread.createdAt,
+  ]);
+}
+
+function isThreadLikeActive(
+  thread: Pick<SidebarThreadActivitySource, "latestTurn" | "session"> | null | undefined,
+): boolean {
+  if (!thread) {
+    return false;
+  }
+  return isThreadRuntimeActive({
+    latestTurn: thread.latestTurn ?? null,
+    session: thread.session ?? null,
+  } as Parameters<typeof isThreadRuntimeActive>[0]);
 }
 
 function normalizeStoreNotification(
@@ -352,41 +455,10 @@ function shouldUseSqliteGraph(
   );
 }
 
-function buildExecutiveThreadIdByProjectId(
+function hasSqliteGraphSource(
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null,
-): Map<string, string> {
-  if (sqliteGraph?.source !== "sqlite") {
-    return new Map();
-  }
-
-  const threadIdsByProjectId = new Map<string, Set<string>>();
-  for (const program of sqliteGraph.programs) {
-    if (
-      program.deletedAt !== null ||
-      program.executiveProjectId === null ||
-      program.executiveThreadId === null
-    ) {
-      continue;
-    }
-    const existing = threadIdsByProjectId.get(program.executiveProjectId);
-    if (existing) {
-      existing.add(program.executiveThreadId);
-      continue;
-    }
-    threadIdsByProjectId.set(program.executiveProjectId, new Set([program.executiveThreadId]));
-  }
-
-  const threadIdByProjectId = new Map<string, string>();
-  for (const [projectId, threadIds] of threadIdsByProjectId) {
-    if (threadIds.size !== 1) {
-      continue;
-    }
-    const threadId = [...threadIds][0];
-    if (threadId) {
-      threadIdByProjectId.set(projectId, threadId);
-    }
-  }
-  return threadIdByProjectId;
+): sqliteGraph is ServerGetAgentsVxappSidebarGraphResult & { source: "sqlite" } {
+  return sqliteGraph?.source === "sqlite";
 }
 
 function resolveProvenanceLabel(input: {
@@ -437,6 +509,108 @@ function buildThreadLinkById(
       (thread) => [thread.threadId, thread] as const,
     ),
   );
+}
+
+function buildSqliteThreadLinkById(
+  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null,
+): Map<string, ServerAgentsVxappSidebarThreadLink> {
+  return new Map(
+    (hasSqliteGraphSource(sqliteGraph) ? sqliteGraph.threadLinks : [])
+      .filter((thread) => thread.deletedAt === null)
+      .map((thread) => [thread.threadId, thread] as const),
+  );
+}
+
+function buildExecutiveAuthorityByProjectId(input: {
+  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
+}): Map<
+  string,
+  {
+    fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+    threadId: string;
+  }
+> {
+  if (!hasSqliteGraphSource(input.sqliteGraph)) {
+    return new Map();
+  }
+
+  const sqliteThreadLinkById = buildSqliteThreadLinkById(input.sqliteGraph);
+  const threadIdsByProjectId = new Map<string, Set<string>>();
+
+  for (const program of input.sqliteGraph.programs) {
+    if (
+      program.deletedAt !== null ||
+      program.executiveProjectId === null ||
+      program.executiveThreadId === null
+    ) {
+      continue;
+    }
+    const existing = threadIdsByProjectId.get(program.executiveProjectId);
+    if (existing) {
+      existing.add(program.executiveThreadId);
+      continue;
+    }
+    threadIdsByProjectId.set(program.executiveProjectId, new Set([program.executiveThreadId]));
+  }
+
+  const authorityByProjectId = new Map<
+    string,
+    {
+      fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+      threadId: string;
+    }
+  >();
+  for (const [projectId, threadIds] of threadIdsByProjectId) {
+    if (threadIds.size !== 1) {
+      continue;
+    }
+    const threadId = [...threadIds][0];
+    if (!threadId) {
+      continue;
+    }
+    authorityByProjectId.set(projectId, {
+      fallbackThreadLink: sqliteThreadLinkById.get(threadId) ?? null,
+      threadId,
+    });
+  }
+  return authorityByProjectId;
+}
+
+function resolveExecutiveAuthority(input: {
+  executiveAuthority: {
+    fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+    threadId: string;
+  } | null;
+  executiveProjectId: string | null;
+  executiveThreadId: string | null;
+  projectById: ReadonlyMap<string, Project>;
+  threadLinkById: ReadonlyMap<string, ServerAgentsVxappSidebarThreadLink>;
+}): {
+  fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+  threadId: string | null;
+} {
+  const projectRootThreadId =
+    input.executiveProjectId !== null
+      ? (input.projectById.get(input.executiveProjectId)?.currentSessionRootThreadId ?? null)
+      : null;
+  const resolvedThreadId =
+    projectRootThreadId ?? input.executiveAuthority?.threadId ?? input.executiveThreadId;
+  if (!resolvedThreadId) {
+    return {
+      fallbackThreadLink: null,
+      threadId: null,
+    };
+  }
+  const fallbackThreadLink =
+    input.threadLinkById.get(resolvedThreadId) ??
+    (input.executiveAuthority?.threadId === resolvedThreadId
+      ? input.executiveAuthority.fallbackThreadLink
+      : null) ??
+    null;
+  return {
+    fallbackThreadLink,
+    threadId: resolvedThreadId,
+  };
 }
 
 function buildLiveThreadById(input: { threads: readonly Thread[] }): Map<string, Thread> {
@@ -527,7 +701,15 @@ function getProgramList(input: {
 }
 
 function resolveLineageRecency(entry: SidebarProgramLineageEntry): string {
-  return entry.archivedAt ?? entry.updatedAt ?? entry.createdAt ?? "";
+  return (
+    maxIsoTimestamp([
+      resolveThreadActivityAt(entry.thread),
+      resolveThreadActivityAt(entry.fallbackThreadLink),
+      entry.archivedAt,
+      entry.updatedAt,
+      entry.createdAt,
+    ]) ?? ""
+  );
 }
 
 function resolveLineageTitle(input: {
@@ -603,58 +785,172 @@ function isTransientWorkerThread(
   return sessionLooksDormant && latestTurnState === null;
 }
 
+function isTransientAgentThread(
+  thread: SidebarAgentAuthorityThread | SidebarAgentAuthoritySummary,
+): boolean {
+  return isTransientWorkerThread(thread);
+}
+
 function classifyWorkerRuntime(input: {
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
-  sessionThread: SessionWorkerThreadSummary | null;
-  thread: Thread | null;
-}): Pick<SidebarWorkerNode, "runtimeState" | "runtimeStateMessage"> {
-  const authoritativeThread = input.thread ?? input.sessionThread;
+  label: string;
+  sessionThread?: SidebarAgentAuthoritySummary | null;
+  thread: SidebarAgentAuthorityThread | null;
+}): SidebarRuntimeMetadata {
+  const authoritativeThread = input.thread ?? input.sessionThread ?? null;
   const worktreePath =
     authoritativeThread?.worktreePath ?? input.fallbackThreadLink?.worktreePath ?? null;
   if (worktreePath) {
     return {
       runtimeState: "inspectable",
       runtimeStateMessage: null,
+      worktreePathHint: worktreePath,
     };
   }
   if (authoritativeThread) {
-    if (isTransientWorkerThread(authoritativeThread)) {
+    if (isTransientAgentThread(authoritativeThread)) {
       return {
         runtimeState: "transient",
-        runtimeStateMessage:
-          "This worker row appears to be a transient dispatch/runtime entry with no prepared worktree or runtime bundle.",
+        runtimeStateMessage: `This ${input.label} appears to be a transient dispatch/runtime entry with no prepared worktree or runtime bundle.`,
+        worktreePathHint: null,
       };
     }
     return {
       runtimeState: "pending-worktree",
-      runtimeStateMessage: `Worker thread '${authoritativeThread.id}' has no worktree path yet.`,
+      runtimeStateMessage: `Thread '${authoritativeThread.id}' has no worktree path yet.`,
+      worktreePathHint: null,
     };
   }
   if (input.fallbackThreadLink) {
     return {
       runtimeState: "stale-lineage",
-      runtimeStateMessage:
-        "This worker row is only present in fallback sqlite lineage data and is unavailable in the current T3 projection.",
+      runtimeStateMessage: `This ${input.label} is only present in fallback sqlite lineage data and is unavailable in the current T3 projection.`,
+      worktreePathHint: input.fallbackThreadLink.worktreePath ?? null,
     };
   }
   return {
     runtimeState: "stale-lineage",
-    runtimeStateMessage: "This worker is unavailable in the current T3 projection.",
+    runtimeStateMessage: `This ${input.label} is unavailable in the current T3 projection.`,
+    worktreePathHint: null,
   };
 }
 
+function classifyRoleRuntime(input: {
+  fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+  label: string;
+  sessionThread?: SidebarAgentAuthoritySummary | null;
+  thread: SidebarAgentAuthorityThread | null;
+}): SidebarRuntimeMetadata {
+  const authoritativeThread = input.thread ?? input.sessionThread ?? null;
+  if (authoritativeThread) {
+    return {
+      runtimeState: "inspectable",
+      runtimeStateMessage: null,
+      worktreePathHint:
+        authoritativeThread.worktreePath ?? input.fallbackThreadLink?.worktreePath ?? null,
+    };
+  }
+  if (input.fallbackThreadLink) {
+    return {
+      runtimeState: "stale-lineage",
+      runtimeStateMessage: `This ${input.label} is only present in fallback sqlite lineage data and is unavailable in the current T3 projection.`,
+      worktreePathHint: input.fallbackThreadLink.worktreePath ?? null,
+    };
+  }
+  return {
+    runtimeState: "stale-lineage",
+    runtimeStateMessage: `This ${input.label} is unavailable in the current T3 projection.`,
+    worktreePathHint: null,
+  };
+}
+
+function compareByRecentActivity(input: {
+  leftActivityAt: string | null;
+  leftActive: boolean;
+  leftTieBreaker: string;
+  rightActivityAt: string | null;
+  rightActive: boolean;
+  rightTieBreaker: string;
+}): number {
+  if (input.leftActive !== input.rightActive) {
+    return input.leftActive ? -1 : 1;
+  }
+
+  const leftTimestamp = toSortableTimestamp(input.leftActivityAt) ?? Number.NEGATIVE_INFINITY;
+  const rightTimestamp = toSortableTimestamp(input.rightActivityAt) ?? Number.NEGATIVE_INFINITY;
+  if (leftTimestamp !== rightTimestamp) {
+    return rightTimestamp - leftTimestamp;
+  }
+
+  return input.leftTieBreaker.localeCompare(input.rightTieBreaker);
+}
+
 function sortExecutives(executives: SidebarExecutiveNode[]): SidebarExecutiveNode[] {
-  const assigned = executives
-    .filter((executive) => executive.projectId !== null)
-    .toSorted((left, right) => left.label.localeCompare(right.label));
-  const unassigned = executives
-    .filter((executive) => executive.projectId === null)
-    .toSorted((left, right) => left.label.localeCompare(right.label));
-  return [...assigned, ...unassigned];
+  return [...executives].toSorted((left, right) => {
+    if ((left.projectId === null) !== (right.projectId === null)) {
+      return left.projectId === null ? 1 : -1;
+    }
+    return (
+      compareByRecentActivity({
+        leftActive: left.isActiveNow,
+        leftActivityAt: left.activityAt,
+        leftTieBreaker: `${left.label}:${left.id}`,
+        rightActive: right.isActiveNow,
+        rightActivityAt: right.activityAt,
+        rightTieBreaker: `${right.label}:${right.id}`,
+      }) ||
+      left.label.localeCompare(right.label) ||
+      left.id.localeCompare(right.id)
+    );
+  });
 }
 
 function sortPrograms(programs: SidebarProgramNode[]): SidebarProgramNode[] {
-  return [...programs].toSorted((left, right) => left.title.localeCompare(right.title));
+  return [...programs].toSorted(
+    (left, right) =>
+      compareByRecentActivity({
+        leftActive: left.isActiveNow,
+        leftActivityAt: left.activityAt,
+        leftTieBreaker: `${left.title}:${left.id}`,
+        rightActive: right.isActiveNow,
+        rightActivityAt: right.activityAt,
+        rightTieBreaker: `${right.title}:${right.id}`,
+      }) ||
+      left.title.localeCompare(right.title) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
+function sortProgramLanes(lanes: SidebarProgramLaneNode[]): SidebarProgramLaneNode[] {
+  return [...lanes].toSorted(
+    (left, right) =>
+      compareByRecentActivity({
+        leftActive: left.isActiveNow,
+        leftActivityAt: left.activityAt,
+        leftTieBreaker: `${left.title}:${left.id ?? "unknown"}`,
+        rightActive: right.isActiveNow,
+        rightActivityAt: right.activityAt,
+        rightTieBreaker: `${right.title}:${right.id ?? "unknown"}`,
+      }) ||
+      left.title.localeCompare(right.title) ||
+      (left.id ?? "").localeCompare(right.id ?? ""),
+  );
+}
+
+function sortWorkers(workers: SidebarWorkerNode[]): SidebarWorkerNode[] {
+  return [...workers].toSorted(
+    (left, right) =>
+      compareByRecentActivity({
+        leftActive: left.isActiveNow,
+        leftActivityAt: left.activityAt,
+        leftTieBreaker: `${left.title}:${left.id}`,
+        rightActive: right.isActiveNow,
+        rightActivityAt: right.activityAt,
+        rightTieBreaker: `${right.title}:${right.id}`,
+      }) ||
+      left.title.localeCompare(right.title) ||
+      left.id.localeCompare(right.id),
+  );
 }
 
 function sortNotifications(items: SidebarNotificationItem[]): SidebarNotificationItem[] {
@@ -702,17 +998,27 @@ export function buildOrchestrationSidebarModel(input: {
     wakeItems: input.wakeItems,
   });
   const usableSqliteGraph = shouldUseSqliteGraph(input.sqliteGraph) ? input.sqliteGraph : null;
+  const executiveAuthorityByProjectId = buildExecutiveAuthorityByProjectId({
+    sqliteGraph: input.sqliteGraph,
+  });
   const projectById = new Map(input.projects.map((project) => [project.id, project] as const));
   const executivesById = new Map<string, SidebarExecutiveNode>();
-  const executiveThreadIdByProjectId = buildExecutiveThreadIdByProjectId(input.sqliteGraph);
 
   for (const program of getProgramList(input)) {
     const executiveProjectId = program.executiveProjectId ?? null;
     const executiveThreadId = program.executiveThreadId ?? null;
-    const resolvedExecutiveThreadId =
+    const executiveAuthority =
       executiveProjectId !== null
-        ? (executiveThreadIdByProjectId.get(executiveProjectId) ?? executiveThreadId)
-        : executiveThreadId;
+        ? (executiveAuthorityByProjectId.get(executiveProjectId) ?? null)
+        : null;
+    const resolvedExecutiveAuthority = resolveExecutiveAuthority({
+      executiveAuthority,
+      executiveProjectId,
+      executiveThreadId,
+      projectById,
+      threadLinkById,
+    });
+    const resolvedExecutiveThreadId = resolvedExecutiveAuthority.threadId;
     const executiveKey = executiveProjectId ?? "unassigned-executive";
     const executiveLabel =
       (executiveProjectId ? projectById.get(executiveProjectId)?.name : null) ??
@@ -720,17 +1026,46 @@ export function buildOrchestrationSidebarModel(input: {
 
     let executive = executivesById.get(executiveKey);
     if (!executive) {
+      const executiveThread = resolvedExecutiveThreadId
+        ? (liveThreadById.get(resolvedExecutiveThreadId) ?? null)
+        : null;
+      const executiveFallbackThreadLink = resolvedExecutiveAuthority.fallbackThreadLink;
+      const runtime = classifyRoleRuntime({
+        fallbackThreadLink: executiveFallbackThreadLink,
+        label: "executive thread",
+        thread: executiveThread,
+      });
       executive = {
+        activityAt: null,
+        fallbackThreadLink: executiveFallbackThreadLink,
         id: executiveKey,
+        isActiveNow: false,
         label: executiveLabel,
         projectId: executiveProjectId,
         programs: [],
+        runtimeState: runtime.runtimeState,
+        runtimeStateMessage: runtime.runtimeStateMessage,
         threadId: resolvedExecutiveThreadId,
+        thread: executiveThread,
         notifications: [],
+        worktreePathHint: runtime.worktreePathHint,
       };
       executivesById.set(executiveKey, executive);
-    } else if (executive.threadId === null && resolvedExecutiveThreadId !== null) {
+    } else if (
+      resolvedExecutiveThreadId !== null &&
+      executive.threadId !== resolvedExecutiveThreadId
+    ) {
       executive.threadId = resolvedExecutiveThreadId;
+      executive.thread = liveThreadById.get(resolvedExecutiveThreadId) ?? null;
+      executive.fallbackThreadLink = resolvedExecutiveAuthority.fallbackThreadLink;
+      const runtime = classifyRoleRuntime({
+        fallbackThreadLink: executive.fallbackThreadLink,
+        label: "executive thread",
+        thread: executive.thread,
+      });
+      executive.runtimeState = runtime.runtimeState;
+      executive.runtimeStateMessage = runtime.runtimeStateMessage;
+      executive.worktreePathHint = runtime.worktreePathHint;
     }
 
     const currentRootThreadId = program.currentOrchestratorThreadId ?? null;
@@ -768,67 +1103,196 @@ export function buildOrchestrationSidebarModel(input: {
           resolveLineageRecency(right).localeCompare(resolveLineageRecency(left)) ||
           right.id.localeCompare(left.id),
       );
-    const historicalWorkerThreadIds = [
-      ...new Set(
-        lineageEntries
-          .filter(
-            (entry) =>
-              entry.spawnRole === "worker" &&
-              (currentRootThreadId === null || entry.orchestratorThreadId !== currentRootThreadId),
-          )
-          .map((entry) => entry.id),
-      ),
-    ];
-    const historicalOrchestratorThreadIds = historicalOrchestratorEntries.map((entry) => entry.id);
-    const latestHistoricalLaneEntry = historicalOrchestratorEntries[0] ?? null;
 
-    const workers = workerIds.map<SidebarWorkerNode>((workerId) => {
-      const thread = liveThreadById.get(workerId) ?? null;
-      const sessionThread = sessionWorkerThreadById.get(workerId) ?? null;
-      const fallbackThreadLink = threadLinkById.get(workerId) ?? null;
+    const buildWorkerNode = (inputWorker: {
+      archivedAt: string | null;
+      fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
+      id: string;
+      isHistorical: boolean;
+      sessionThread: SessionWorkerThreadSummary | null;
+      thread: Thread | null;
+    }): SidebarWorkerNode => {
       const runtime = classifyWorkerRuntime({
-        fallbackThreadLink,
-        sessionThread,
-        thread,
+        fallbackThreadLink: inputWorker.fallbackThreadLink,
+        label: "worker row",
+        sessionThread: inputWorker.sessionThread,
+        thread: inputWorker.thread,
       });
+      const authoritativeThread = inputWorker.thread ?? inputWorker.sessionThread;
+      const activityAt =
+        resolveThreadActivityAt(authoritativeThread) ??
+        resolveThreadActivityAt(inputWorker.fallbackThreadLink) ??
+        inputWorker.archivedAt;
       return {
-        fallbackThreadLink,
-        id: workerId,
+        activityAt,
+        archivedAt: inputWorker.archivedAt,
+        fallbackThreadLink: inputWorker.fallbackThreadLink,
+        id: inputWorker.id,
+        isActiveNow:
+          !inputWorker.isHistorical &&
+          inputWorker.archivedAt === null &&
+          isThreadLikeActive(authoritativeThread ?? inputWorker.fallbackThreadLink),
+        isHistorical: inputWorker.isHistorical,
         provenanceLabel: resolveProvenanceLabel({
-          fallbackThreadLink,
+          fallbackThreadLink: inputWorker.fallbackThreadLink,
           projects: input.projects,
-          sessionThread,
-          thread,
+          sessionThread: inputWorker.sessionThread,
+          thread: inputWorker.thread,
         }),
         runtimeState: runtime.runtimeState,
         runtimeStateMessage: runtime.runtimeStateMessage,
-        thread,
+        thread: inputWorker.thread,
         title:
-          stripAgentPrefix(thread?.title) ??
-          stripAgentPrefix(sessionThread?.title) ??
-          stripAgentPrefix(fallbackThreadLink?.title) ??
-          thread?.title ??
-          sessionThread?.title ??
-          fallbackThreadLink?.title ??
+          stripAgentPrefix(inputWorker.thread?.title) ??
+          stripAgentPrefix(inputWorker.sessionThread?.title) ??
+          stripAgentPrefix(inputWorker.fallbackThreadLink?.title) ??
+          inputWorker.thread?.title ??
+          inputWorker.sessionThread?.title ??
+          inputWorker.fallbackThreadLink?.title ??
           "Worker",
-        wakeState: wakeStateByThreadId.get(workerId) ?? null,
-        worktreePathHint:
-          thread?.worktreePath ??
-          sessionThread?.worktreePath ??
-          fallbackThreadLink?.worktreePath ??
-          null,
+        wakeState: wakeStateByThreadId.get(inputWorker.id) ?? null,
+        worktreePathHint: runtime.worktreePathHint,
       };
-    });
+    };
+
+    const workers = sortWorkers(
+      workerIds.map<SidebarWorkerNode>((workerId) => {
+        const thread = liveThreadById.get(workerId) ?? null;
+        const sessionThread = sessionWorkerThreadById.get(workerId) ?? null;
+        const fallbackThreadLink = threadLinkById.get(workerId) ?? null;
+        return buildWorkerNode({
+          archivedAt: thread?.archivedAt ?? fallbackThreadLink?.archivedAt ?? null,
+          fallbackThreadLink,
+          id: workerId,
+          isHistorical: false,
+          sessionThread,
+          thread,
+        });
+      }),
+    );
+
+    const historicalWorkerEntries = lineageEntries.filter(
+      (entry) =>
+        entry.spawnRole === "worker" &&
+        (currentRootThreadId === null || entry.orchestratorThreadId !== currentRootThreadId),
+    );
+    const historicalWorkersByLaneId = new Map<string, SidebarProgramLineageEntry[]>();
+    for (const workerEntry of historicalWorkerEntries) {
+      const laneId = workerEntry.orchestratorThreadId ?? `historical-lane:${workerEntry.id}`;
+      const existing = historicalWorkersByLaneId.get(laneId);
+      if (existing) {
+        existing.push(workerEntry);
+      } else {
+        historicalWorkersByLaneId.set(laneId, [workerEntry]);
+      }
+    }
+
+    const historicalLaneEntryById = new Map(
+      historicalOrchestratorEntries.map((entry) => [entry.id, entry] as const),
+    );
+    const historicalLaneIds = [
+      ...new Set([
+        ...historicalOrchestratorEntries.map((entry) => entry.id),
+        ...historicalWorkersByLaneId.keys(),
+      ]),
+    ];
+    const historicalLanes = sortProgramLanes(
+      historicalLaneIds.flatMap<SidebarProgramLaneNode>((laneId) => {
+        const laneEntry = historicalLaneEntryById.get(laneId) ?? null;
+        const laneThread = laneEntry?.thread ?? liveThreadById.get(laneId) ?? null;
+        const laneFallbackThreadLink =
+          laneEntry?.fallbackThreadLink ?? threadLinkById.get(laneId) ?? null;
+        const runtime = classifyRoleRuntime({
+          fallbackThreadLink: laneFallbackThreadLink,
+          label: "orchestrator lane",
+          thread: laneThread,
+        });
+        const historicalLaneWorkers = sortWorkers(
+          (historicalWorkersByLaneId.get(laneId) ?? []).map((workerEntry) =>
+            buildWorkerNode({
+              archivedAt: workerEntry.archivedAt ?? workerEntry.thread?.archivedAt ?? null,
+              fallbackThreadLink:
+                workerEntry.fallbackThreadLink ?? threadLinkById.get(workerEntry.id) ?? null,
+              id: workerEntry.id,
+              isHistorical: true,
+              sessionThread: null,
+              thread: workerEntry.thread ?? liveThreadById.get(workerEntry.id) ?? null,
+            }),
+          ),
+        );
+        if (historicalLaneWorkers.length === 0) {
+          return [];
+        }
+        return [
+          {
+            activityAt:
+              maxIsoTimestamp([
+                resolveThreadActivityAt(laneThread),
+                resolveThreadActivityAt(laneFallbackThreadLink),
+                laneEntry?.archivedAt,
+                laneEntry?.updatedAt,
+                ...historicalLaneWorkers.map((worker) => worker.activityAt),
+              ]) ?? null,
+            archivedAt:
+              laneEntry?.archivedAt ??
+              laneThread?.archivedAt ??
+              laneFallbackThreadLink?.archivedAt ??
+              null,
+            fallbackThreadLink: laneFallbackThreadLink,
+            id: laneId,
+            isActiveNow: false,
+            isHistorical: true,
+            runtimeState: runtime.runtimeState,
+            runtimeStateMessage: runtime.runtimeStateMessage,
+            thread: laneThread,
+            title:
+              laneEntry !== null || laneFallbackThreadLink !== null || laneThread !== null
+                ? resolveLineageTitle({
+                    fallbackThreadLink: laneFallbackThreadLink,
+                    programTitle: program.title,
+                    projectById,
+                    thread: laneThread,
+                  })
+                : "Historical lane",
+            workerCount: historicalLaneWorkers.length,
+            workers: historicalLaneWorkers,
+            worktreePathHint: runtime.worktreePathHint,
+          },
+        ];
+      }),
+    );
+    const historicalWorkerThreadIds = historicalLanes.flatMap((lane) =>
+      lane.workers.map((worker) => worker.id),
+    );
+    const historicalOrchestratorThreadIds = historicalLanes
+      .map((lane) => lane.id)
+      .filter((laneId): laneId is string => laneId !== null);
+    const latestHistoricalLaneEntry = historicalLanes[0] ?? null;
 
     const programItems = notificationsByProgramId.get(program.id) ?? [];
-    const programNode: SidebarProgramNode = {
-      attentionCount: programItems.filter((item) => item.section === "attention").length,
-      currentLane:
-        currentRootThreadId === null
-          ? null
-          : {
+    const currentLane =
+      currentRootThreadId === null
+        ? null
+        : (() => {
+            const runtime = classifyRoleRuntime({
+              fallbackThreadLink: fallbackRootThreadLink,
+              label: "orchestrator lane",
+              thread: currentRootThread,
+            });
+            return {
+              activityAt:
+                maxIsoTimestamp([
+                  resolveThreadActivityAt(currentRootThread),
+                  resolveThreadActivityAt(fallbackRootThreadLink),
+                ]) ?? null,
+              archivedAt:
+                currentRootThread?.archivedAt ?? fallbackRootThreadLink?.archivedAt ?? null,
               fallbackThreadLink: fallbackRootThreadLink,
               id: currentRootThreadId,
+              isActiveNow: isThreadLikeActive(currentRootThread ?? fallbackRootThreadLink),
+              isHistorical: false,
+              runtimeState: runtime.runtimeState,
+              runtimeStateMessage: runtime.runtimeStateMessage,
               thread: currentRootThread,
               title: resolveLineageTitle({
                 fallbackThreadLink: fallbackRootThreadLink,
@@ -838,14 +1302,34 @@ export function buildOrchestrationSidebarModel(input: {
               }),
               workerCount: workers.length,
               workers,
-            },
+              worktreePathHint: runtime.worktreePathHint,
+            };
+          })();
+    const programActivityAt =
+      maxIsoTimestamp([
+        program.updatedAt,
+        currentLane?.activityAt,
+        ...workers.map((worker) => worker.activityAt),
+        ...historicalLanes.map((lane) => lane.activityAt),
+      ]) ?? null;
+    const programNode: SidebarProgramNode = {
+      activityAt: programActivityAt,
+      attentionCount: programItems.filter((item) => item.section === "attention").length,
+      currentLane,
       executiveProjectId,
       executiveThreadId,
-      historicalOrchestratorCount: historicalOrchestratorThreadIds.length,
+      historicalLanes,
+      historicalOrchestratorCount: historicalLanes.length,
       historicalOrchestratorThreadIds,
       historicalWorkerCount: historicalWorkerThreadIds.length,
       historicalWorkerThreadIds,
       id: program.id,
+      isActiveNow:
+        currentLane?.isActiveNow === true ||
+        currentLane?.workers.some((worker) => worker.isActiveNow) === true ||
+        historicalLanes.some(
+          (lane) => lane.isActiveNow || lane.workers.some((worker) => worker.isActiveNow),
+        ),
       laneState: currentRootThreadId === null ? "no-active-lane" : "active",
       lastHistoricalLane:
         latestHistoricalLaneEntry === null
@@ -853,14 +1337,9 @@ export function buildOrchestrationSidebarModel(input: {
           : {
               archivedAt: latestHistoricalLaneEntry.archivedAt,
               fallbackThreadLink: latestHistoricalLaneEntry.fallbackThreadLink,
-              id: latestHistoricalLaneEntry.id,
+              id: latestHistoricalLaneEntry.id ?? "",
               thread: latestHistoricalLaneEntry.thread,
-              title: resolveLineageTitle({
-                fallbackThreadLink: latestHistoricalLaneEntry.fallbackThreadLink,
-                programTitle: program.title,
-                projectById,
-                thread: latestHistoricalLaneEntry.thread,
-              }),
+              title: latestHistoricalLaneEntry.title,
             },
       status: program.status,
       title: program.title,
@@ -870,8 +1349,19 @@ export function buildOrchestrationSidebarModel(input: {
 
   const executives = sortExecutives(
     [...executivesById.values()].map((executive) => {
+      const activityAt =
+        maxIsoTimestamp([
+          resolveThreadActivityAt(executive.thread),
+          resolveThreadActivityAt(executive.fallbackThreadLink),
+          ...executive.programs.map((program) => program.activityAt),
+        ]) ?? null;
       const nextExecutive: SidebarExecutiveNode = {
+        activityAt,
+        fallbackThreadLink: executive.fallbackThreadLink,
         id: executive.id,
+        isActiveNow:
+          isThreadLikeActive(executive.thread ?? executive.fallbackThreadLink) ||
+          executive.programs.some((program) => program.isActiveNow),
         label: executive.label,
         notifications: sortNotifications(
           notifications.filter((item) => {
@@ -883,7 +1373,11 @@ export function buildOrchestrationSidebarModel(input: {
         ),
         programs: sortPrograms(executive.programs),
         projectId: executive.projectId,
+        runtimeState: executive.runtimeState,
+        runtimeStateMessage: executive.runtimeStateMessage,
         threadId: executive.threadId,
+        thread: executive.thread,
+        worktreePathHint: executive.worktreePathHint,
       };
       return nextExecutive;
     }),
