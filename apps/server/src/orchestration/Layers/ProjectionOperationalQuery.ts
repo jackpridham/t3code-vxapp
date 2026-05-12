@@ -58,6 +58,11 @@ import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionT
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+import {
+  AgentsVxappExternalRoleAuthority,
+  buildExternalRoleAuthorityIndex,
+  type AgentsVxappExternalRoleAuthoritySnapshot,
+} from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { selectOperationalCtoAttentionItems } from "../projectionCtoAttention.ts";
 import {
@@ -202,6 +207,81 @@ function mapProjectRowToSummary(
       ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
       : undefined,
   );
+}
+
+function mapProjectToSummary(
+  project: OrchestrationReadModel["projects"][number],
+): OrchestrationListProjectsResult[number] {
+  return Object.assign(
+    {
+      id: project.id,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      kind: project.kind ?? null,
+      defaultModelSelection: project.defaultModelSelection ?? null,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      deletedAt: project.deletedAt ?? null,
+    },
+    project.sidebarParentProjectId !== undefined
+      ? { sidebarParentProjectId: project.sidebarParentProjectId }
+      : undefined,
+    project.currentSessionRootThreadId !== undefined
+      ? { currentSessionRootThreadId: project.currentSessionRootThreadId }
+      : undefined,
+  );
+}
+
+function mergeProjectRowsWithExternal(
+  localRows: ReadonlyArray<ProjectionProjectSummaryDbRow>,
+  externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
+): OrchestrationReadModel["projects"] {
+  const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
+  const filteredLocalRows = localRows.filter(
+    (row) =>
+      !externalIndex.projectIds.has(row.projectId) &&
+      !externalIndex.workspaceRoots.has(row.workspaceRoot),
+  );
+  return [
+    ...filteredLocalRows.map(mapProjectRowToReadModelProject),
+    ...externalSnapshot.projects,
+  ].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+}
+
+function mergeThreadSummariesWithExternal(input: {
+  localThreadSummaries: ReadonlyArray<OrchestrationThreadSummary>;
+  localProjectRows: ReadonlyArray<ProjectionProjectSummaryDbRow>;
+  externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot;
+}): OrchestrationThreadSummary[] {
+  const externalIndex = buildExternalRoleAuthorityIndex(input.externalSnapshot);
+  const strippedLocalProjectIds = new Set(
+    input.localProjectRows
+      .filter((row) => externalIndex.workspaceRoots.has(row.workspaceRoot))
+      .map((row) => row.projectId),
+  );
+  return [
+    ...input.localThreadSummaries.filter(
+      (thread) =>
+        !externalIndex.threadIds.has(thread.id) &&
+        !externalIndex.projectIds.has(thread.projectId) &&
+        !strippedLocalProjectIds.has(thread.projectId) &&
+        !(thread.worktreePath !== null && externalIndex.worktreePaths.has(thread.worktreePath)),
+    ),
+    ...input.externalSnapshot.threadSummaries,
+  ].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+}
+
+function mergeProjectSummariesWithExternal(
+  localRows: ReadonlyArray<ProjectionProjectSummaryDbRow>,
+  externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
+): OrchestrationListProjectsResult {
+  return mergeProjectRowsWithExternal(localRows, externalSnapshot).map(mapProjectToSummary);
 }
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
@@ -1581,6 +1661,29 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       `,
   });
 
+  const getExternalSnapshot = () =>
+    Effect.serviceOption(AgentsVxappExternalRoleAuthority).pipe(
+      Effect.flatMap((externalRoleAuthorityOption) =>
+        Option.match(externalRoleAuthorityOption, {
+          onNone: () =>
+            Effect.succeed({
+              projects: [],
+              threadSummaries: [],
+            } satisfies AgentsVxappExternalRoleAuthoritySnapshot),
+          onSome: (externalRoleAuthority) =>
+            externalRoleAuthority
+              .getSnapshot()
+              .pipe(
+                Effect.mapError((error) =>
+                  toPersistenceSqlError("ProjectionOperationalQuery.externalRoleAuthority:query")(
+                    error,
+                  ),
+                ),
+              ),
+        }),
+      ),
+    );
+
   const getReadiness: ProjectionOperationalQueryShape["getReadiness"] = () =>
     Effect.all({
       stateRows: listProjectionStateRows(undefined).pipe(
@@ -1637,6 +1740,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               ),
             ),
           );
+          const externalSnapshot = yield* getExternalSnapshot();
           const programRows = yield* listProgramRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1692,13 +1796,34 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             sessions: sessionRows,
             latestTurns: latestTurnRows,
           });
+          const mergedProjects = mergeProjectRowsWithExternal(projectRows, externalSnapshot);
+          const mergedThreadSummaries = mergeThreadSummariesWithExternal({
+            localThreadSummaries: threadSummaries,
+            localProjectRows: projectRows,
+            externalSnapshot,
+          });
           const updatedAt =
             [
-              ...projectRows.map((row) => row.updatedAt),
+              ...mergedProjects.map((project) => project.updatedAt),
               ...programRows.map((row) => row.updatedAt),
               ...programNotificationRows.map((row) => row.updatedAt),
               ...ctoAttentionRows.map((row) => row.updatedAt),
               ...stateRows.map((row) => row.updatedAt),
+              ...mergedThreadSummaries.map((thread) => thread.updatedAt),
+              ...mergedThreadSummaries.flatMap((thread) =>
+                thread.session ? [thread.session.updatedAt] : [],
+              ),
+              ...mergedThreadSummaries.flatMap((thread) => {
+                const latestTurn = thread.latestTurn;
+                if (!latestTurn) {
+                  return [];
+                }
+                return [
+                  latestTurn.requestedAt,
+                  ...(latestTurn.startedAt ? [latestTurn.startedAt] : []),
+                  ...(latestTurn.completedAt ? [latestTurn.completedAt] : []),
+                ];
+              }),
             ]
               .toSorted()
               .at(-1) ?? new Date(0).toISOString();
@@ -1740,11 +1865,11 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               wakeItemLimit: 0,
               wakeItemsTruncated: false,
             },
-            projects: projectRows.map(mapProjectRowToReadModelProject),
+            projects: mergedProjects,
             programs,
             programNotifications,
             ctoAttentionItems,
-            threads: threadSummaries.map(mapSummaryToThread),
+            threads: mergedThreadSummaries.map(mapSummaryToThread),
             orchestratorWakeItems: [],
             updatedAt,
           };
@@ -1768,47 +1893,73 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       );
 
   const listProjects: ProjectionOperationalQueryShape["listProjects"] = () =>
-    listProjectRows(undefined).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "ProjectionOperationalQuery.listProjects:query",
-          "ProjectionOperationalQuery.listProjects:decodeRows",
+    Effect.all({
+      projectRows: listProjectRows(undefined).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionOperationalQuery.listProjects:query",
+            "ProjectionOperationalQuery.listProjects:decodeRows",
+          ),
         ),
       ),
-      Effect.map((rows): OrchestrationListProjectsResult => rows.map(mapProjectRowToSummary)),
+      externalSnapshot: getExternalSnapshot(),
+    }).pipe(
+      Effect.map(
+        ({ projectRows, externalSnapshot }): OrchestrationListProjectsResult =>
+          mergeProjectSummariesWithExternal(projectRows, externalSnapshot),
+      ),
     );
 
   const getProjectById: ProjectionOperationalQueryShape["getProjectById"] = (input) =>
-    getProjectByIdRow({ projectId: input.projectId }).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "ProjectionOperationalQuery.getProjectById:query",
-          "ProjectionOperationalQuery.getProjectById:decodeRow",
+    Effect.all({
+      projectRow: getProjectByIdRow({ projectId: input.projectId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionOperationalQuery.getProjectById:query",
+            "ProjectionOperationalQuery.getProjectById:decodeRow",
+          ),
         ),
       ),
-      Effect.map((row) =>
-        Option.match(row, {
+      externalSnapshot: getExternalSnapshot(),
+    }).pipe(
+      Effect.map(({ projectRow, externalSnapshot }) => {
+        const externalProject =
+          externalSnapshot.projects.find((project) => project.id === input.projectId) ?? null;
+        if (externalProject) {
+          return mapProjectToSummary(externalProject);
+        }
+        return Option.match(projectRow, {
           onNone: (): null => null,
           onSome: mapProjectRowToSummary,
-        }),
-      ),
+        });
+      }),
     );
 
   const getProjectByWorkspace: ProjectionOperationalQueryShape["getProjectByWorkspace"] = (input) =>
-    getProjectByWorkspaceRow({ workspaceRoot: input.workspaceRoot }).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "ProjectionOperationalQuery.getProjectByWorkspace:query",
-          "ProjectionOperationalQuery.getProjectByWorkspace:decodeRow",
+    Effect.all({
+      projectRow: getProjectByWorkspaceRow({ workspaceRoot: input.workspaceRoot }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionOperationalQuery.getProjectByWorkspace:query",
+            "ProjectionOperationalQuery.getProjectByWorkspace:decodeRow",
+          ),
         ),
       ),
-      Effect.map(
-        (row): OrchestrationGetProjectByWorkspaceResult =>
-          Option.match(row, {
-            onNone: () => null,
-            onSome: mapProjectRowToSummary,
-          }),
-      ),
+      externalSnapshot: getExternalSnapshot(),
+    }).pipe(
+      Effect.map(({ projectRow, externalSnapshot }): OrchestrationGetProjectByWorkspaceResult => {
+        const externalProject =
+          externalSnapshot.projects.find(
+            (project) => project.workspaceRoot === input.workspaceRoot,
+          ) ?? null;
+        if (externalProject) {
+          return mapProjectToSummary(externalProject);
+        }
+        return Option.match(projectRow, {
+          onNone: () => null,
+          onSome: mapProjectRowToSummary,
+        });
+      }),
     );
 
   const getThreadById: ProjectionOperationalQueryShape["getThreadById"] = (input) =>
@@ -1837,9 +1988,15 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           ),
         ),
       ),
+      externalSnapshot: getExternalSnapshot(),
     }).pipe(
-      Effect.map(({ thread, session, latestTurn }) =>
-        Option.match(thread, {
+      Effect.map(({ thread, session, latestTurn, externalSnapshot }) => {
+        const externalThread =
+          externalSnapshot.threadSummaries.find((row) => row.id === input.threadId) ?? null;
+        if (externalThread) {
+          return externalThread;
+        }
+        return Option.match(thread, {
           onNone: (): null => null,
           onSome: (threadRow) =>
             mapThreadSummaryRows({
@@ -1853,8 +2010,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
                 onSome: (latestTurnRow) => [latestTurnRow],
               }),
             })[0] ?? null,
-        }),
-      ),
+        });
+      }),
     );
 
   const listProjectThreads: ProjectionOperationalQueryShape["listProjectThreads"] = (input) => {
@@ -1901,6 +2058,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           ),
         ),
       ),
+      externalSnapshot: getExternalSnapshot(),
     }).pipe(
       Effect.map(
         ({
@@ -1908,7 +2066,17 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           sessions,
           latestTurns,
           sessionWorkerCounts,
+          externalSnapshot,
         }): OrchestrationListProjectThreadsResult => {
+          const externalProjectIds = buildExternalRoleAuthorityIndex(externalSnapshot).projectIds;
+          if (externalProjectIds.has(input.projectId)) {
+            return [...externalSnapshot.threadSummaries]
+              .filter((thread) => thread.projectId === input.projectId)
+              .toSorted(
+                (left, right) =>
+                  left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+              );
+          }
           const sessionWorkerCountByRootId = new Map(
             sessionWorkerCounts.map((row) => [row.rootThreadId, row.workerThreadCount] as const),
           );

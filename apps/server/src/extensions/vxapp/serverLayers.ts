@@ -1,6 +1,7 @@
 import { AgentsVxappControlPlaneLive } from "./Layers/AgentsVxappControlPlane.ts";
 import { Layer } from "effect";
 
+import { AgentsVxappExternalRoleAuthorityLive } from "./Layers/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappSidebarLive } from "./Layers/AgentsVxappSidebar.ts";
 import { OrchestratorWakeReactorLive } from "../../orchestration/Layers/OrchestratorWakeReactor";
 import { ProjectHooksLive } from "../../projectHooks/Layers/ProjectHooks.ts";
@@ -11,6 +12,7 @@ export const makeVxappRuntimeServicesLayer = <A, E, R>(
 ) =>
   Layer.mergeAll(
     AgentsVxappControlPlaneLive,
+    AgentsVxappExternalRoleAuthorityLive,
     AgentsVxappSidebarLive,
     ProjectHooksLive.pipe(Layer.provideMerge(runtimeServicesBaseLayer)),
     VortexAppsLive,

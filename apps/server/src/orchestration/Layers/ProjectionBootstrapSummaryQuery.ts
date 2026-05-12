@@ -19,7 +19,7 @@ import {
   type OrchestrationThread,
   type OrchestratorWakeItem,
 } from "@t3tools/contracts";
-import { Effect, Layer, Schema, Struct } from "effect";
+import { Effect, Layer, Option, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
@@ -40,6 +40,11 @@ import { ProjectionProject } from "../../persistence/Services/ProjectionProjects
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+import {
+  AgentsVxappExternalRoleAuthority,
+  buildExternalRoleAuthorityIndex,
+  type AgentsVxappExternalRoleAuthoritySnapshot,
+} from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionBootstrapSummaryQuery,
@@ -140,6 +145,89 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
       : toPersistenceSqlError(sqlOperation)(cause);
+}
+
+function mergeProjectsWithExternal(
+  localProjects: ReadonlyArray<OrchestrationProject>,
+  externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
+): OrchestrationProject[] {
+  const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
+  return [
+    ...localProjects.filter(
+      (project) =>
+        !externalIndex.projectIds.has(project.id) &&
+        !externalIndex.workspaceRoots.has(project.workspaceRoot),
+    ),
+    ...externalSnapshot.projects,
+  ].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+}
+
+function mergeThreadsWithExternal(input: {
+  localThreads: ReadonlyArray<OrchestrationThread>;
+  externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot;
+}): OrchestrationThread[] {
+  const externalIndex = buildExternalRoleAuthorityIndex(input.externalSnapshot);
+  const strippedLocalProjectIds = new Set(
+    input.localThreads
+      .filter(
+        (thread) =>
+          thread.worktreePath !== null && externalIndex.worktreePaths.has(thread.worktreePath),
+      )
+      .map((thread) => thread.projectId),
+  );
+  return [
+    ...input.localThreads.filter(
+      (thread) =>
+        !externalIndex.threadIds.has(thread.id) &&
+        !externalIndex.projectIds.has(thread.projectId) &&
+        !strippedLocalProjectIds.has(thread.projectId) &&
+        !(thread.worktreePath !== null && externalIndex.worktreePaths.has(thread.worktreePath)),
+    ),
+    ...input.externalSnapshot.threadSummaries.map((thread) => ({
+      id: thread.id,
+      projectId: thread.projectId,
+      title: thread.title,
+      labels: thread.labels,
+      modelSelection: thread.modelSelection,
+      runtimeMode: thread.runtimeMode,
+      interactionMode: thread.interactionMode,
+      branch: thread.branch,
+      worktreePath: thread.worktreePath,
+      latestTurn: thread.latestTurn,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      archivedAt: thread.archivedAt,
+      deletedAt: thread.deletedAt,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+      session: thread.session,
+      ...(thread.orchestratorProjectId !== undefined
+        ? { orchestratorProjectId: thread.orchestratorProjectId }
+        : {}),
+      ...(thread.orchestratorThreadId !== undefined
+        ? { orchestratorThreadId: thread.orchestratorThreadId }
+        : {}),
+      ...(thread.parentThreadId !== undefined ? { parentThreadId: thread.parentThreadId } : {}),
+      ...(thread.spawnRole !== undefined ? { spawnRole: thread.spawnRole } : {}),
+      ...(thread.spawnedBy !== undefined ? { spawnedBy: thread.spawnedBy } : {}),
+      ...(thread.workflowId !== undefined ? { workflowId: thread.workflowId } : {}),
+      ...(thread.programId !== undefined ? { programId: thread.programId } : {}),
+      ...(thread.executiveProjectId !== undefined
+        ? { executiveProjectId: thread.executiveProjectId }
+        : {}),
+      ...(thread.executiveThreadId !== undefined
+        ? { executiveThreadId: thread.executiveThreadId }
+        : {}),
+    })),
+  ].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
 }
 
 const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
@@ -356,6 +444,29 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
       `,
   });
 
+  const getExternalSnapshot = () =>
+    Effect.serviceOption(AgentsVxappExternalRoleAuthority).pipe(
+      Effect.flatMap((externalRoleAuthorityOption) =>
+        Option.match(externalRoleAuthorityOption, {
+          onNone: () =>
+            Effect.succeed({
+              projects: [],
+              threadSummaries: [],
+            } satisfies AgentsVxappExternalRoleAuthoritySnapshot),
+          onSome: (externalRoleAuthority) =>
+            externalRoleAuthority
+              .getSnapshot()
+              .pipe(
+                Effect.mapError((error) =>
+                  toPersistenceSqlError(
+                    "ProjectionBootstrapSummaryQuery.externalRoleAuthority:query",
+                  )(error),
+                ),
+              ),
+        }),
+      ),
+    );
+
   const getBootstrapSummary: ProjectionBootstrapSummaryQueryShape["getBootstrapSummary"] = () =>
     sql
       .withTransaction(
@@ -369,6 +480,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             latestTurnRows,
             wakeRows,
             stateRows,
+            externalSnapshot,
           ] = yield* Effect.all([
             listProjectRows(undefined).pipe(
               Effect.mapError(
@@ -434,6 +546,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 ),
               ),
             ),
+            getExternalSnapshot(),
           ]);
 
           const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
@@ -498,7 +611,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
 
-          const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) =>
+          const localProjects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) =>
             Object.assign(
               {
                 id: row.projectId,
@@ -520,6 +633,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 : undefined,
             ),
           );
+          const projects = mergeProjectsWithExternal(localProjects, externalSnapshot);
 
           const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) =>
             toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
@@ -547,7 +661,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
               updatedAt: row.updatedAt,
             }));
 
-          const threads: ReadonlyArray<OrchestrationThread> = threadRows.map(
+          const localThreads: ReadonlyArray<OrchestrationThread> = threadRows.map(
             (row) =>
               Object.assign(
                 {
@@ -590,6 +704,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                   : undefined,
               ) satisfies OrchestrationThread,
           );
+          const threads = mergeThreadsWithExternal({ localThreads, externalSnapshot });
 
           const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> = wakeRows.map((row) =>
             Object.assign(
@@ -624,7 +739,18 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             programNotifications,
             threads,
             orchestratorWakeItems,
-            updatedAt: updatedAt ?? new Date(0).toISOString(),
+            updatedAt:
+              [
+                updatedAt,
+                ...externalSnapshot.projects.map((project) => project.updatedAt),
+                ...externalSnapshot.threadSummaries.map((thread) => thread.updatedAt),
+                ...externalSnapshot.threadSummaries.flatMap((thread) =>
+                  thread.session ? [thread.session.updatedAt] : [],
+                ),
+              ]
+                .filter((value): value is string => value !== null)
+                .toSorted()
+                .at(-1) ?? new Date(0).toISOString(),
           }).pipe(
             Effect.mapError(
               toPersistenceDecodeError(

@@ -13,7 +13,7 @@ import type {
   ServerAgentsVxappSidebarWatchProjection,
   ServerGetAgentsVxappSidebarGraphResult,
 } from "@t3tools/contracts";
-import { Effect, FileSystem, Layer, Schema } from "effect";
+import { Effect, FileSystem, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import {
@@ -21,6 +21,10 @@ import {
   AgentsVxappSidebarError,
   type AgentsVxappSidebarShape,
 } from "../Services/AgentsVxappSidebar.ts";
+import {
+  AgentsVxappExternalRoleAuthority,
+  buildExternalRoleAuthorityIndex,
+} from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import {
   AGENTS_VXAPP_DB_PATH,
   type AgentsVxappSqliteRow,
@@ -312,6 +316,8 @@ function buildMirrorDiagnostics(input: {
   projectionPrograms: readonly Schema.Schema.Type<typeof ProjectionProgramMirrorRow>[];
   projectionProjectIds: readonly ProjectId[];
   projectionThreadIds: readonly ThreadId[];
+  ignoredProjectIds?: ReadonlySet<ProjectId>;
+  ignoredThreadIds?: ReadonlySet<ThreadId>;
 }): ServerAgentsVxappSidebarMirrorDiagnostics {
   const projectionProgramIds = new Set(input.projectionPrograms.map((row) => row.programId));
   const projectionProgramById = new Map(
@@ -319,6 +325,8 @@ function buildMirrorDiagnostics(input: {
   );
   const projectionProjectIds = new Set(input.projectionProjectIds);
   const projectionThreadIds = new Set(input.projectionThreadIds);
+  const ignoredProjectIds = input.ignoredProjectIds ?? new Set<ProjectId>();
+  const ignoredThreadIds = input.ignoredThreadIds ?? new Set<ThreadId>();
   const missingProgramIds = new Set<ProgramId>();
   const divergentProgramIds = new Set<ProgramId>();
   const missingProjectIds = new Set<ProjectId>();
@@ -338,14 +346,23 @@ function buildMirrorDiagnostics(input: {
         divergentProgramIds.add(program.id);
       }
     }
-    if (program.executiveProjectId && !projectionProjectIds.has(program.executiveProjectId)) {
+    if (
+      program.executiveProjectId &&
+      !ignoredProjectIds.has(program.executiveProjectId) &&
+      !projectionProjectIds.has(program.executiveProjectId)
+    ) {
       missingProjectIds.add(program.executiveProjectId);
     }
-    if (program.executiveThreadId && !projectionThreadIds.has(program.executiveThreadId)) {
+    if (
+      program.executiveThreadId &&
+      !ignoredThreadIds.has(program.executiveThreadId) &&
+      !projectionThreadIds.has(program.executiveThreadId)
+    ) {
       missingThreadIds.add(program.executiveThreadId);
     }
     if (
       program.currentOrchestratorThreadId &&
+      !ignoredThreadIds.has(program.currentOrchestratorThreadId) &&
       !projectionThreadIds.has(program.currentOrchestratorThreadId)
     ) {
       missingThreadIds.add(program.currentOrchestratorThreadId);
@@ -353,25 +370,45 @@ function buildMirrorDiagnostics(input: {
   }
 
   for (const threadLink of input.graph.threadLinks) {
-    if (threadLink.projectId && !projectionProjectIds.has(threadLink.projectId)) {
+    if (
+      threadLink.projectId &&
+      !ignoredProjectIds.has(threadLink.projectId) &&
+      !projectionProjectIds.has(threadLink.projectId)
+    ) {
       missingProjectIds.add(threadLink.projectId);
     }
-    if (!projectionThreadIds.has(threadLink.threadId)) {
+    if (
+      !ignoredThreadIds.has(threadLink.threadId) &&
+      !projectionThreadIds.has(threadLink.threadId)
+    ) {
       missingThreadIds.add(threadLink.threadId);
     }
-    if (threadLink.executiveProjectId && !projectionProjectIds.has(threadLink.executiveProjectId)) {
+    if (
+      threadLink.executiveProjectId &&
+      !ignoredProjectIds.has(threadLink.executiveProjectId) &&
+      !projectionProjectIds.has(threadLink.executiveProjectId)
+    ) {
       missingProjectIds.add(threadLink.executiveProjectId);
     }
-    if (threadLink.executiveThreadId && !projectionThreadIds.has(threadLink.executiveThreadId)) {
+    if (
+      threadLink.executiveThreadId &&
+      !ignoredThreadIds.has(threadLink.executiveThreadId) &&
+      !projectionThreadIds.has(threadLink.executiveThreadId)
+    ) {
       missingThreadIds.add(threadLink.executiveThreadId);
     }
     if (
       threadLink.orchestratorThreadId &&
+      !ignoredThreadIds.has(threadLink.orchestratorThreadId) &&
       !projectionThreadIds.has(threadLink.orchestratorThreadId)
     ) {
       missingThreadIds.add(threadLink.orchestratorThreadId);
     }
-    if (threadLink.parentThreadId && !projectionThreadIds.has(threadLink.parentThreadId)) {
+    if (
+      threadLink.parentThreadId &&
+      !ignoredThreadIds.has(threadLink.parentThreadId) &&
+      !projectionThreadIds.has(threadLink.parentThreadId)
+    ) {
       missingThreadIds.add(threadLink.parentThreadId);
     }
   }
@@ -512,14 +549,42 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
           ),
         );
 
+      const externalRoleIndex = yield* Effect.serviceOption(AgentsVxappExternalRoleAuthority).pipe(
+        Effect.flatMap((externalRoleAuthorityOption) =>
+          Option.match(externalRoleAuthorityOption, {
+            onNone: () => Effect.succeed(null),
+            onSome: (externalRoleAuthority) =>
+              externalRoleAuthority.getSnapshot().pipe(
+                Effect.map(buildExternalRoleAuthorityIndex),
+                Effect.mapError(
+                  (error) =>
+                    new AgentsVxappSidebarError({
+                      message: error.detail,
+                    }),
+                ),
+              ),
+          }),
+        ),
+      );
+
       return {
         ...graph,
-        mirrorDiagnostics: buildMirrorDiagnostics({
-          graph,
-          projectionPrograms: projectionProgramRows,
-          projectionProjectIds: projectionProjectRows.map((row) => row.projectId),
-          projectionThreadIds: projectionThreadRows.map((row) => row.threadId),
-        }),
+        mirrorDiagnostics: buildMirrorDiagnostics(
+          Object.assign(
+            {
+              graph,
+              projectionPrograms: projectionProgramRows,
+              projectionProjectIds: projectionProjectRows.map((row) => row.projectId),
+              projectionThreadIds: projectionThreadRows.map((row) => row.threadId),
+            },
+            externalRoleIndex
+              ? {
+                  ignoredProjectIds: externalRoleIndex.projectIds,
+                  ignoredThreadIds: externalRoleIndex.threadIds,
+                }
+              : undefined,
+          ),
+        ),
       } satisfies ServerGetAgentsVxappSidebarGraphResult;
     });
 

@@ -4,6 +4,7 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./ProjectionBootstrapSummaryQuery.ts";
 import { ProjectionBootstrapSummaryQuery } from "../Services/ProjectionBootstrapSummaryQuery.ts";
@@ -15,6 +16,56 @@ const projectionBootstrapSummaryLayer = it.layer(
 );
 
 projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
+  const externalRoleAuthoritySnapshot = {
+    projects: [
+      {
+        id: ProjectId.makeUnsafe("external-cto-project"),
+        title: "CTOv2",
+        workspaceRoot: "/home/gizmo/agents-vxapp/CTOv2",
+        kind: "executive" as const,
+        sidebarParentProjectId: null,
+        currentSessionRootThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+        defaultModelSelection: { provider: "codex" as const, model: "gpt-5.4" },
+        scripts: [],
+        hooks: [],
+        createdAt: "2026-05-12T00:00:00.000Z",
+        updatedAt: "2026-05-12T00:00:01.000Z",
+        deletedAt: null,
+      },
+    ],
+    threadSummaries: [
+      {
+        id: ThreadId.makeUnsafe("external-cto-thread"),
+        projectId: ProjectId.makeUnsafe("external-cto-project"),
+        title: "Review Jasper blocker and yacht watch",
+        labels: ["cto-autonomous"],
+        modelSelection: { provider: "codex" as const, model: "gpt-5.4" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: "/home/gizmo/agents-vxapp/CTOv2",
+        latestTurn: null,
+        createdAt: "2026-05-12T00:00:02.000Z",
+        updatedAt: "2026-05-12T00:00:03.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        session: {
+          threadId: ThreadId.makeUnsafe("external-cto-thread"),
+          status: "ready" as const,
+          providerName: "codex",
+          runtimeMode: "full-access" as const,
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-05-12T00:00:03.000Z",
+        },
+        spawnRole: "supervisor" as const,
+        spawnedBy: "founder",
+        executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
+        executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+      },
+    ],
+  } as const;
+
   it.effect("returns a bounded bootstrap read model without archived threads", () =>
     Effect.gen(function* () {
       const query = yield* ProjectionBootstrapSummaryQuery;
@@ -354,5 +405,111 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       assert.equal(summary.threads[0]?.latestTurn?.turnId, "turn-active");
       assert.equal(summary.orchestratorWakeItems.length, 1);
     }),
+  );
+
+  it.effect("includes external special roots and suppresses stale mirrored local CTO rows", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionBootstrapSummaryQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_program_notifications`;
+      yield* sql`DELETE FROM projection_programs`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_orchestrator_wakes`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          kind,
+          current_session_root_thread_id,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'local-stale-cto-project',
+          'CTOv2',
+          '/home/gizmo/agents-vxapp/CTOv2',
+          'executive',
+          'local-stale-cto-thread',
+          '{"provider":"codex","model":"gpt-5.4"}',
+          '[]',
+          '[]',
+          '2026-05-11T23:00:00.000Z',
+          '2026-05-11T23:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          labels_json,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at,
+          spawn_role,
+          spawned_by
+        )
+        VALUES (
+          'local-stale-cto-thread',
+          'local-stale-cto-project',
+          'Stale CTO Root',
+          '[]',
+          '{"provider":"codex","model":"gpt-5.4"}',
+          'full-access',
+          'default',
+          NULL,
+          '/home/gizmo/agents-vxapp/CTOv2',
+          NULL,
+          '2026-05-11T23:00:02.000Z',
+          '2026-05-11T23:00:03.000Z',
+          NULL,
+          NULL,
+          'supervisor',
+          'founder'
+        )
+      `;
+
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
+          VALUES (${projector}, 1, '2026-05-12T00:00:04.000Z')
+        `;
+      }
+
+      const readModel = yield* query.getBootstrapSummary();
+
+      assert.deepEqual(
+        readModel.projects.map((project) => project.id),
+        ["external-cto-project"],
+      );
+      assert.deepEqual(
+        readModel.threads.map((thread) => thread.id),
+        ["external-cto-thread"],
+      );
+    }).pipe(
+      Effect.provideService(AgentsVxappExternalRoleAuthority, {
+        getSnapshot: () => Effect.succeed(externalRoleAuthoritySnapshot),
+      }),
+    ),
   );
 });
