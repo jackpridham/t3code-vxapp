@@ -858,6 +858,78 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.diagnostics.divergentProgramIds).toEqual(["program-live"]);
   });
 
+  it("still uses sqlite executive thread authority when the program mirror is stale", () => {
+    const liveProgramId = ProgramId.makeUnsafe("program-live");
+    const executiveProjectId = ProjectId.makeUnsafe("exec-project");
+    const executiveThreadId = ThreadId.makeUnsafe("exec-thread");
+
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-live"),
+          executiveProjectId,
+          executiveThreadId: null as never,
+          id: liveProgramId,
+          title: "Live Program",
+          status: "active",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: executiveProjectId,
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: makeSqliteGraph({
+        mirrorDiagnostics: {
+          divergentProgramIds: [liveProgramId],
+          missingProgramIds: [],
+          missingProjectIds: [],
+          missingThreadIds: [],
+          staleMirror: true,
+        },
+        programs: [
+          {
+            closeout: null,
+            completedAt: null,
+            createdAt: "2026-05-10T00:00:00.000Z",
+            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-stale"),
+            deletedAt: null,
+            executiveProjectId,
+            executiveThreadId,
+            id: liveProgramId,
+            metadata: null,
+            objective: null,
+            status: "active",
+            title: "Stale Sqlite Program",
+            updatedAt: "2026-05-10T00:00:00.000Z",
+          },
+        ],
+      }),
+      threads: [
+        makeThread({
+          id: executiveThreadId,
+          projectId: executiveProjectId,
+          title: "Executive live",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("orch-live"),
+          projectId: executiveProjectId,
+          title: "Live Orchestrator",
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.source).toBe("t3");
+    expect(model.executives[0]?.threadId).toBe("exec-thread");
+    expect(model.executives[0]?.programs[0]?.currentLane?.id).toBe("orch-live");
+  });
+
   it("resolves sidebar root thread ids from live programs when sqlite mirror is stale", () => {
     expect(
       resolveSidebarRootThreadIds({

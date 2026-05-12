@@ -352,6 +352,43 @@ function shouldUseSqliteGraph(
   );
 }
 
+function buildExecutiveThreadIdByProjectId(
+  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null,
+): Map<string, string> {
+  if (sqliteGraph?.source !== "sqlite") {
+    return new Map();
+  }
+
+  const threadIdsByProjectId = new Map<string, Set<string>>();
+  for (const program of sqliteGraph.programs) {
+    if (
+      program.deletedAt !== null ||
+      program.executiveProjectId === null ||
+      program.executiveThreadId === null
+    ) {
+      continue;
+    }
+    const existing = threadIdsByProjectId.get(program.executiveProjectId);
+    if (existing) {
+      existing.add(program.executiveThreadId);
+      continue;
+    }
+    threadIdsByProjectId.set(program.executiveProjectId, new Set([program.executiveThreadId]));
+  }
+
+  const threadIdByProjectId = new Map<string, string>();
+  for (const [projectId, threadIds] of threadIdsByProjectId) {
+    if (threadIds.size !== 1) {
+      continue;
+    }
+    const threadId = [...threadIds][0];
+    if (threadId) {
+      threadIdByProjectId.set(projectId, threadId);
+    }
+  }
+  return threadIdByProjectId;
+}
+
 function resolveProvenanceLabel(input: {
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   projects: readonly Project[];
@@ -667,10 +704,15 @@ export function buildOrchestrationSidebarModel(input: {
   const usableSqliteGraph = shouldUseSqliteGraph(input.sqliteGraph) ? input.sqliteGraph : null;
   const projectById = new Map(input.projects.map((project) => [project.id, project] as const));
   const executivesById = new Map<string, SidebarExecutiveNode>();
+  const executiveThreadIdByProjectId = buildExecutiveThreadIdByProjectId(input.sqliteGraph);
 
   for (const program of getProgramList(input)) {
     const executiveProjectId = program.executiveProjectId ?? null;
     const executiveThreadId = program.executiveThreadId ?? null;
+    const resolvedExecutiveThreadId =
+      executiveProjectId !== null
+        ? (executiveThreadIdByProjectId.get(executiveProjectId) ?? executiveThreadId)
+        : executiveThreadId;
     const executiveKey = executiveProjectId ?? "unassigned-executive";
     const executiveLabel =
       (executiveProjectId ? projectById.get(executiveProjectId)?.name : null) ??
@@ -683,12 +725,12 @@ export function buildOrchestrationSidebarModel(input: {
         label: executiveLabel,
         projectId: executiveProjectId,
         programs: [],
-        threadId: executiveThreadId,
+        threadId: resolvedExecutiveThreadId,
         notifications: [],
       };
       executivesById.set(executiveKey, executive);
-    } else if (executive.threadId === null && executiveThreadId !== null) {
-      executive.threadId = executiveThreadId;
+    } else if (executive.threadId === null && resolvedExecutiveThreadId !== null) {
+      executive.threadId = resolvedExecutiveThreadId;
     }
 
     const currentRootThreadId = program.currentOrchestratorThreadId ?? null;
