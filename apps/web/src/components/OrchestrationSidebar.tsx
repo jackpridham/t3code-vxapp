@@ -115,6 +115,7 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveSidebarProjectKind,
   resolveCurrentOrchestrationSessionRootId,
+  isSidebarSessionRootProjectKind,
   resolveThreadStatusPill,
   getSidebarThreadLabels,
   orderItemsByPreferredIds,
@@ -452,8 +453,9 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     () =>
       sidebarProjects
         .filter((project) => {
-          const isOrchestratorProject =
-            resolveSidebarProjectKind({ project, orchestratorProjectCwds }) === "orchestrator";
+          const isSessionRootProject = isSidebarSessionRootProjectKind(
+            resolveSidebarProjectKind({ project, orchestratorProjectCwds }),
+          );
           const isActiveProject =
             routeThreadId !== null &&
             (serverThreads.some(
@@ -462,7 +464,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
               projectDraftThreadIdByProjectId[project.id] === routeThreadId);
           return (
             appSettings.sidebarOrchestrationModeEnabled &&
-            isOrchestratorProject &&
+            isSessionRootProject &&
             (project.expanded || isActiveProject)
           );
         })
@@ -554,7 +556,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     for (const project of sidebarProjects) {
       const projectKind = resolveSidebarProjectKind({ project, orchestratorProjectCwds });
       const rootThreads = orchestrationRootThreadsByProjectId.get(project.id) ?? [];
-      if (projectKind !== "orchestrator" || rootThreads.length === 0) {
+      if (!isSidebarSessionRootProjectKind(projectKind) || rootThreads.length === 0) {
         selectedRootByProjectId.set(project.id, null);
         continue;
       }
@@ -585,7 +587,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
             derivedSelectedOrchestrationRootByProjectId.get(project.id) ?? null;
           const shouldLoadSession =
             appSettings.sidebarOrchestrationModeEnabled &&
-            projectKind === "orchestrator" &&
+            isSidebarSessionRootProjectKind(projectKind) &&
             selectedRootThreadId !== null;
           return shouldLoadSession && selectedRootThreadId
             ? { projectId: project.id, rootThreadId: selectedRootThreadId }
@@ -1362,7 +1364,11 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
   const currentOrchestrationSessionRootIds = useMemo(() => {
     const rootIds = new Set<ThreadId>();
     for (const project of sidebarProjects) {
-      if (resolveSidebarProjectKind({ project, orchestratorProjectCwds }) !== "orchestrator") {
+      if (
+        !isSidebarSessionRootProjectKind(
+          resolveSidebarProjectKind({ project, orchestratorProjectCwds }),
+        )
+      ) {
         continue;
       }
       const rootThreads = orchestrationRootThreadsByProjectId.get(project.id) ?? [];
@@ -1428,9 +1434,10 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       sortedProjects.map((project) => {
         const projectKind = resolveSidebarProjectKind({ project, orchestratorProjectCwds });
         const isOrchestratorProject = projectKind === "orchestrator";
+        const isSessionRootProject = isSidebarSessionRootProjectKind(projectKind);
         const projectThreads = sortThreadsForSidebar(
           visibleThreadsWithSelectedSessions.filter((thread) =>
-            isOrchestratorProject
+            isSessionRootProject
               ? thread.projectId === project.id
               : (bucketProjectIdByProjectId.get(thread.projectId) ?? thread.projectId) ===
                 project.id,
@@ -1461,7 +1468,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
             selectedSessionRootId: selectedOrchestrationSessionRootId,
           });
         const usesProjectBucketMode =
-          !isOrchestratorProject && appSettings.sidebarOrchestrationModeEnabled;
+          !isSessionRootProject && appSettings.sidebarOrchestrationModeEnabled;
         const projectThreadsForDisplay = usesProjectBucketMode
           ? filterProjectThreadsForOrchestrationMode({
               threads: projectThreads,
@@ -1794,10 +1801,11 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       usesOrchestrationMode,
     } = renderedProject;
     const isOrchestratorProject = projectKind === "orchestrator";
+    const isSessionRootProject = isSidebarSessionRootProjectKind(projectKind);
     const isExecutiveProject = projectKind === "executive";
     const projectDraftThreadId = projectDraftThreadIdByProjectId[project.id] ?? null;
     const showInlineOrchestrationSelector =
-      isOrchestratorProject && appSettings.sidebarOrchestrationModeEnabled;
+      projectKind === "orchestrator" && appSettings.sidebarOrchestrationModeEnabled;
     // FIXME(orchestration-sidebar): the orchestrator header active styling still does not
     // reliably light up when the URL threadId matches the Jasper/orchestrator root thread.
     // The intended behavior is: if the current route thread is the orchestrator session root,
@@ -1808,7 +1816,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
         routeThreadId === (project.currentSessionRootThreadId ?? null));
     const isProjectActive =
       routeThreadId !== null &&
-      (isOrchestratorProject
+      (isSessionRootProject
         ? isOrchestratorHeaderActive
         : routeThreadId === projectDraftThreadId ||
           projectThreads.some((thread) => thread.id === routeThreadId));
@@ -2341,12 +2349,11 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
     async (projectId: ProjectId) => {
       const project = projects.find((candidate) => candidate.id === projectId);
       const projectRootThreads = orchestrationRootThreadsByProjectId.get(projectId) ?? [];
+      const persistedRootThreadId = project?.currentSessionRootThreadId ?? null;
       const storedRootThread =
-        project?.currentSessionRootThreadId === undefined
+        persistedRootThreadId === null
           ? null
-          : (projectRootThreads.find(
-              (thread) => thread.id === project.currentSessionRootThreadId,
-            ) ?? null);
+          : (projectRootThreads.find((thread) => thread.id === persistedRootThreadId) ?? null);
       const activeRootThread =
         [...projectRootThreads]
           .filter((thread) => thread.archivedAt === null)
@@ -2357,9 +2364,11 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
               ) || right.createdAt.localeCompare(left.createdAt),
           )[0] ?? null;
       const currentRootThreadId =
-        storedRootThread?.archivedAt === null
-          ? storedRootThread.id
-          : (activeRootThread?.id ?? storedRootThread?.id ?? null);
+        storedRootThread === null
+          ? (persistedRootThreadId ?? activeRootThread?.id ?? null)
+          : storedRootThread.archivedAt === null
+            ? storedRootThread.id
+            : (activeRootThread?.id ?? storedRootThread.id);
 
       if (currentRootThreadId !== null) {
         if (project?.currentSessionRootThreadId !== currentRootThreadId) {
@@ -2407,7 +2416,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       if (selectedThreadIds.size > 0) {
         clearSelection();
       }
-      if (projectKind === "orchestrator") {
+      if (isSidebarSessionRootProjectKind(projectKind)) {
         void openCurrentOrchestratorSession(projectId);
         return;
       }
@@ -2427,7 +2436,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       if (dragInProgressRef.current) {
         return;
       }
-      if (projectKind === "orchestrator") {
+      if (isSidebarSessionRootProjectKind(projectKind)) {
         void openCurrentOrchestratorSession(projectId);
         return;
       }

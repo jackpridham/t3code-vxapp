@@ -22,12 +22,14 @@ import {
   getSidebarCtoAttentionKindLabel,
   getSidebarProgramNotificationKindLabel,
   getUniqueLabelsFromThreads,
+  isSidebarSessionRootProjectKind,
   resolveSidebarProjectKind,
   resolveSidebarNewThreadEnvMode,
   resolveLatestActiveThreadForProject,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   resolveSelectedOrchestrationSessionRootId,
+  shouldUseSidebarOrchestrationMode,
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
@@ -419,6 +421,36 @@ describe("resolveSidebarProjectKind", () => {
         }),
       }),
     ).toBe("executive");
+  });
+});
+
+describe("isSidebarSessionRootProjectKind", () => {
+  it("treats both executive and orchestrator roots as session-root projects", () => {
+    expect(isSidebarSessionRootProjectKind("executive")).toBe(true);
+    expect(isSidebarSessionRootProjectKind("orchestrator")).toBe(true);
+    expect(isSidebarSessionRootProjectKind("project")).toBe(false);
+  });
+});
+
+describe("shouldUseSidebarOrchestrationMode", () => {
+  it("allows executive roots to use orchestration mode when a current root exists", () => {
+    expect(
+      shouldUseSidebarOrchestrationMode({
+        projectKind: "executive",
+        settingEnabled: true,
+        selectedSessionRootId: ThreadId.makeUnsafe("cto-root"),
+      }),
+    ).toBe(true);
+  });
+
+  it("still requires a selected session root", () => {
+    expect(
+      shouldUseSidebarOrchestrationMode({
+        projectKind: "executive",
+        settingEnabled: true,
+        selectedSessionRootId: null,
+      }),
+    ).toBe(false);
   });
 });
 

@@ -358,6 +358,10 @@ export function resolveSidebarProjectKind(input: {
   return "project";
 }
 
+export function isSidebarSessionRootProjectKind(projectKind: SidebarProjectKind): boolean {
+  return projectKind === "orchestrator" || projectKind === "executive";
+}
+
 export function partitionProjectsForSidebar<TProject extends SidebarProject>(input: {
   projects: readonly TProject[];
   orchestratorProjectCwds?: ReadonlySet<string> | readonly string[];
@@ -656,7 +660,7 @@ export function shouldUseSidebarOrchestrationMode(input: {
 }): boolean {
   return (
     input.settingEnabled &&
-    input.projectKind === "orchestrator" &&
+    isSidebarSessionRootProjectKind(input.projectKind) &&
     input.selectedSessionRootId !== null
   );
 }
