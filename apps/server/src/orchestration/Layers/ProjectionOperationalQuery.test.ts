@@ -59,9 +59,13 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
           providerName: "codex",
           runtimeMode: "full-access" as const,
           activeTurnId: null,
-          lastError: null,
+          lastError: "raw external session error must not be re-derived",
           updatedAt: "2026-05-12T00:00:03.000Z",
         },
+        hasActiveError: true,
+        activeError: "Upstream authoritative active error",
+        historicalError: null,
+        errorPresentationSource: "active_runtime_failure" as const,
         spawnRole: "supervisor" as const,
         spawnedBy: "founder",
         executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
@@ -436,6 +440,15 @@ projectionOperationalQueryLayer("ProjectionOperationalQuery", (it) => {
       assert.deepEqual(
         currentState.threads.map((entry) => entry.id),
         ["external-cto-thread"],
+      );
+      assert.equal(thread?.hasActiveError, true);
+      assert.equal(thread?.activeError, "Upstream authoritative active error");
+      assert.equal(thread?.historicalError, null);
+      assert.equal(thread?.errorPresentationSource, "active_runtime_failure");
+      assert.equal(currentState.threads[0]?.activeError, "Upstream authoritative active error");
+      assert.equal(
+        currentState.threads[0]?.session?.lastError,
+        "raw external session error must not be re-derived",
       );
     }).pipe(
       Effect.provideService(AgentsVxappExternalRoleAuthority, {

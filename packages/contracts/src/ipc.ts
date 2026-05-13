@@ -35,6 +35,8 @@ import type {
   ServerCreateAgentsVxappTodoInput,
   ServerDeleteAgentsVxappProgramInput,
   ServerDeleteAgentsVxappTodoInput,
+  ServerGetAgentRuntimeSnapshotInput,
+  ServerGetAgentRuntimeSnapshotResult,
   ServerGetAgentsVxappControlPlaneSnapshotInput,
   ServerGetAgentsVxappControlPlaneSnapshotResult,
   ServerGetAgentsVxappSidebarGraphInput,
@@ -257,6 +259,9 @@ export interface NativeApi {
     deleteAgentsVxappTodo: (
       input: ServerDeleteAgentsVxappTodoInput,
     ) => Promise<ServerAgentsVxappOwnerMutationResult>;
+    getAgentRuntimeSnapshot: (
+      input: ServerGetAgentRuntimeSnapshotInput,
+    ) => Promise<ServerGetAgentRuntimeSnapshotResult>;
     getWorkerRuntimeSnapshot: (
       input: ServerGetWorkerRuntimeSnapshotInput,
     ) => Promise<ServerGetWorkerRuntimeSnapshotResult>;

@@ -41,6 +41,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
+import { AgentRuntimeLive } from "./agentRuntime/Layers/AgentRuntime.ts";
 import { WorkerRuntimeLive } from "./workerRuntime/Layers/WorkerRuntime.ts";
 import {
   makeVxappOrchestratorWakeReactorLayer,
@@ -142,6 +143,10 @@ export function makeServerRuntimeServicesLayer() {
   );
   const orchestratorWakeReactorLayer = makeVxappOrchestratorWakeReactorLayer(runtimeServicesLayer);
   const workerRuntimeLayer = WorkerRuntimeLive.pipe(Layer.provideMerge(runtimeServicesBaseLayer));
+  const agentRuntimeLayer = AgentRuntimeLive.pipe(
+    Layer.provideMerge(workerRuntimeLayer),
+    Layer.provideMerge(runtimeServicesBaseLayer),
+  );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
@@ -170,6 +175,7 @@ export function makeServerRuntimeServicesLayer() {
     workspaceEntriesLayer,
     workspaceFileSystemLayer,
     projectFaviconResolverLayer,
+    agentRuntimeLayer,
     workerRuntimeLayer,
     vxappRuntimeServicesLayer,
     gitManagerLayer,

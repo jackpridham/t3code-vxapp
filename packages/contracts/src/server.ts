@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
+import { GetAgentRuntimeSnapshotInput, GetAgentRuntimeSnapshotResult } from "./agentRuntime";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ModelCapabilities } from "./model";
@@ -160,6 +161,12 @@ export type ServerGetWorkerRuntimeSnapshotInput = typeof ServerGetWorkerRuntimeS
 export const ServerGetWorkerRuntimeSnapshotResult = GetWorkerRuntimeSnapshotResult;
 export type ServerGetWorkerRuntimeSnapshotResult = typeof ServerGetWorkerRuntimeSnapshotResult.Type;
 
+export const ServerGetAgentRuntimeSnapshotInput = GetAgentRuntimeSnapshotInput;
+export type ServerGetAgentRuntimeSnapshotInput = typeof ServerGetAgentRuntimeSnapshotInput.Type;
+
+export const ServerGetAgentRuntimeSnapshotResult = GetAgentRuntimeSnapshotResult;
+export type ServerGetAgentRuntimeSnapshotResult = typeof ServerGetAgentRuntimeSnapshotResult.Type;
+
 export const ServerGetAgentsVxappSidebarGraphInput = Schema.Struct({});
 export type ServerGetAgentsVxappSidebarGraphInput =
   typeof ServerGetAgentsVxappSidebarGraphInput.Type;
@@ -179,23 +186,6 @@ const JsonValue: Schema.Schema<unknown> = Schema.suspend(() =>
 );
 
 const JsonRecord = Schema.Record(Schema.String, JsonValue);
-
-export const ServerAgentsVxappSidebarProgram = Schema.Struct({
-  id: ProgramId,
-  title: TrimmedNonEmptyString,
-  objective: Schema.NullOr(Schema.String),
-  status: OrchestrationProgramStatus,
-  executiveProjectId: Schema.NullOr(ProjectId),
-  executiveThreadId: Schema.NullOr(ThreadId),
-  currentOrchestratorThreadId: Schema.NullOr(ThreadId),
-  metadata: Schema.NullOr(JsonRecord),
-  closeout: Schema.NullOr(JsonRecord),
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-  completedAt: Schema.NullOr(IsoDateTime),
-  deletedAt: Schema.NullOr(IsoDateTime),
-});
-export type ServerAgentsVxappSidebarProgram = typeof ServerAgentsVxappSidebarProgram.Type;
 
 export const ServerAgentsVxappSidebarThreadLink = Schema.Struct({
   threadId: ThreadId,
@@ -297,8 +287,6 @@ export type ServerAgentsVxappSidebarAttentionItem =
   typeof ServerAgentsVxappSidebarAttentionItem.Type;
 
 export const ServerAgentsVxappSidebarMirrorDiagnostics = Schema.Struct({
-  missingProgramIds: Schema.Array(ProgramId),
-  divergentProgramIds: Schema.Array(ProgramId),
   missingProjectIds: Schema.Array(ProjectId),
   missingThreadIds: Schema.Array(ThreadId),
   staleMirror: Schema.Boolean,
@@ -310,7 +298,6 @@ export const ServerGetAgentsVxappSidebarGraphResult = Schema.Struct({
   source: ServerAgentsVxappSidebarGraphSource,
   dbPath: Schema.NullOr(TrimmedNonEmptyString),
   fallbackReason: Schema.NullOr(Schema.String),
-  programs: Schema.Array(ServerAgentsVxappSidebarProgram),
   threadLinks: Schema.Array(ServerAgentsVxappSidebarThreadLink),
   openWakes: Schema.Array(ServerAgentsVxappSidebarWake),
   watchProjections: Schema.Array(ServerAgentsVxappSidebarWatchProjection),

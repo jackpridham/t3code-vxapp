@@ -1266,10 +1266,10 @@ describe("OrchestratorWakeReactor", () => {
             message.text.startsWith("wake-up-buttercup\n\n") &&
             message.text.includes("Worker updates are ready for review.") &&
             message.text.includes(
-              "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+              "vx t3 lanes review-worker --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
             ) &&
             message.text.includes(
-              "vx t3 lanes finalize-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+              "vx t3 lanes finalize-worker-wake --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
             ) &&
             message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
             message.text.includes("--json") &&
@@ -1297,10 +1297,10 @@ describe("OrchestratorWakeReactor", () => {
           message.text.startsWith("wake-up-buttercup\n\n") &&
           message.text.includes("Worker updates are ready for review.") &&
           message.text.includes(
-            "vx t3 lanes settle-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+            "vx t3 lanes review-worker --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
           ) &&
           message.text.includes(
-            "vx t3 lanes finalize-observer --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
+            "vx t3 lanes finalize-worker-wake --orchestrator-thread 'thread-orch' --worker-thread 'thread-worker'",
           ) &&
           message.text.includes(`--workspace '${harness.workspaceRoot}'`) &&
           message.text.includes("--json") &&

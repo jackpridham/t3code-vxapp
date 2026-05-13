@@ -58,6 +58,7 @@ import {
   ServerCreateAgentsVxappTodoInput,
   ServerDeleteAgentsVxappProgramInput,
   ServerDeleteAgentsVxappTodoInput,
+  ServerGetAgentRuntimeSnapshotInput,
   ServerGetAgentsVxappControlPlaneSnapshotInput,
   ServerGetAgentsVxappSidebarGraphInput,
   ServerSetAgentsVxappProgramLifecycleInput,
@@ -122,6 +123,7 @@ export const WS_METHODS = {
   serverCreateAgentsVxappTodo: "server.createAgentsVxappTodo",
   serverUpdateAgentsVxappTodo: "server.updateAgentsVxappTodo",
   serverDeleteAgentsVxappTodo: "server.deleteAgentsVxappTodo",
+  serverGetAgentRuntimeSnapshot: "server.getAgentRuntimeSnapshot",
   serverGetWorkerRuntimeSnapshot: "server.getWorkerRuntimeSnapshot",
 } as const;
 
@@ -244,6 +246,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverCreateAgentsVxappTodo, ServerCreateAgentsVxappTodoInput),
   tagRequestBody(WS_METHODS.serverUpdateAgentsVxappTodo, ServerUpdateAgentsVxappTodoInput),
   tagRequestBody(WS_METHODS.serverDeleteAgentsVxappTodo, ServerDeleteAgentsVxappTodoInput),
+  tagRequestBody(WS_METHODS.serverGetAgentRuntimeSnapshot, ServerGetAgentRuntimeSnapshotInput),
   tagRequestBody(WS_METHODS.serverGetWorkerRuntimeSnapshot, ServerGetWorkerRuntimeSnapshotInput),
 ]);
 

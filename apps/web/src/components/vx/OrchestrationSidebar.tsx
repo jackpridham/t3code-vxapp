@@ -1,7 +1,11 @@
 import { autoAnimate } from "@formkit/auto-animate";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { type OrchestrationThreadSummary, type ThreadId } from "@t3tools/contracts";
+import {
+  type AgentRuntimeAgentKind,
+  type OrchestrationThreadSummary,
+  type ThreadId,
+} from "@t3tools/contracts";
 import {
   BellIcon,
   BotIcon,
@@ -17,20 +21,19 @@ import { isElectron } from "~/env";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings } from "~/hooks/useSettings";
 import { useThreadActions } from "~/hooks/useThreadActions";
+import { agentsVxappControlPlaneSnapshotQueryOptions } from "~/lib/agentsVxappControlPlaneReactQuery";
 import { agentsVxappSidebarGraphQueryOptions } from "~/lib/agentsVxappSidebarReactQuery";
+import { agentRuntimeSnapshotQueryOptions } from "~/lib/agentRuntimeReactQuery";
 import { orchestrationSessionThreadsQueryOptions } from "~/lib/orchestrationReactQuery";
 import { resolveNoThreadRouteTarget, resolveThreadRouteTarget } from "~/lib/sidebarWindow";
 import { cn, newCommandId } from "~/lib/utils";
-import {
-  workerRuntimeRepoQueryOptions,
-  workerRuntimeSnapshotQueryOptions,
-} from "~/lib/workerRuntimeReactQuery";
 import { readNativeApi } from "~/nativeApi";
 import { derivePendingApprovals, derivePendingUserInputs } from "~/session-logic";
 import { useStore } from "~/store";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { useThreadSelectionStore } from "~/threadSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
+import type { Thread } from "~/types";
 import {
   buildCopyThreadIdErrorDescription,
   getSidebarCtoAttentionKindLabel,
@@ -38,7 +41,7 @@ import {
   resolveThreadStatusPill,
 } from "../Sidebar.logic";
 import { SidebarBrandHeader } from "../sidebar/SidebarBrandHeader";
-import { ThreadStatusLabel } from "../sidebar/SidebarThreadRow";
+import { ThreadStatusLabel, type SidebarThreadStatus } from "../sidebar/SidebarThreadRow";
 import { Badge } from "../ui/badge";
 import { DialogCloseButton } from "../ui/dialog-close-button";
 import {
@@ -64,12 +67,15 @@ import { toastManager } from "../ui/toast";
 import {
   buildOrchestrationSidebarModel,
   resolveSidebarRootThreadIds,
+  type SidebarAgentRuntimeState,
   type SidebarNotificationItem,
-  type SidebarWorkerRuntimeState,
+  type SidebarProgramLaneNode,
+  type SidebarProgramNode,
 } from "./orchestrationSidebarModel";
+import { formatProgramStatusLabel, programStatusTone } from "./programDisplay";
 import { ProgramInfoDialog } from "./ProgramInfoDialog";
 import { ProgramTodosDialog } from "./ProgramTodosDialog";
-import { deriveWorkerRuntimeDialogState } from "./workerRuntimeDialogState";
+import { deriveAgentRuntimeDialogState } from "./agentRuntimeDialogState";
 
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -144,22 +150,8 @@ function notificationBellClasses(notifications: readonly SidebarNotificationItem
   };
 }
 
-function formatProgramStatus(status: string) {
-  switch (status) {
-    case "active":
-      return { label: "Active", tone: "bg-sky-500/12 text-sky-700 dark:text-sky-300" };
-    case "founder_review_ready":
-      return { label: "Review", tone: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" };
-    case "closeout_in_progress":
-      return { label: "Closeout", tone: "bg-indigo-500/12 text-indigo-700 dark:text-indigo-300" };
-    case "completed":
-      return { label: "Done", tone: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" };
-    default:
-      return {
-        label: status.replaceAll("_", " "),
-        tone: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
-      };
-  }
+function compactStatusLabel(value: string) {
+  return formatProgramStatusLabel(value).replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
 function WakeBadge({ state }: { state: "pending" | "delivering" | null }) {
@@ -173,6 +165,16 @@ function WakeBadge({ state }: { state: "pending" | "delivering" | null }) {
   return <Badge className={cn(CHIP_CLASSNAME, "border-0", className)}>{state}</Badge>;
 }
 
+function runtimeSourceBadgeClasses(status: "loaded" | "missing" | "invalid-json" | "schema-error") {
+  return status === "loaded"
+    ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
+    : status === "missing"
+      ? "bg-muted text-muted-foreground"
+      : status === "invalid-json"
+        ? "bg-red-500/12 text-red-700 dark:text-red-300"
+        : "bg-amber-500/12 text-amber-700 dark:text-amber-300";
+}
+
 function RuntimeSourceBadge({
   label,
   status,
@@ -180,26 +182,76 @@ function RuntimeSourceBadge({
   label: string;
   status: "loaded" | "missing" | "invalid-json" | "schema-error";
 }) {
-  const className =
-    status === "loaded"
-      ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
-      : status === "missing"
-        ? "bg-muted text-muted-foreground"
-        : status === "invalid-json"
-          ? "bg-red-500/12 text-red-700 dark:text-red-300"
-          : "bg-amber-500/12 text-amber-700 dark:text-amber-300";
   return (
-    <Badge className={cn("h-5 border-0 px-1.5 text-[10px] font-medium", className)}>{label}</Badge>
+    <Badge
+      className={cn(
+        "h-5 border-0 px-1.5 text-[10px] font-medium",
+        runtimeSourceBadgeClasses(status),
+      )}
+    >
+      {label}
+    </Badge>
   );
 }
 
-function workerRuntimeStateBadgeClasses(state: SidebarWorkerRuntimeState) {
+function runtimeAuditBadgeClasses(status: "clean" | "warning" | "error" | "missing") {
+  switch (status) {
+    case "clean":
+      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
+    case "warning":
+      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
+    case "error":
+      return "bg-red-500/12 text-red-700 dark:text-red-300";
+    case "missing":
+      return "bg-muted text-muted-foreground";
+  }
+}
+
+function formatRuntimeSourceStatus(status: "loaded" | "missing" | "invalid-json" | "schema-error") {
+  switch (status) {
+    case "loaded":
+      return "Loaded";
+    case "missing":
+      return "Missing";
+    case "invalid-json":
+      return "Invalid JSON";
+    case "schema-error":
+      return "Schema error";
+  }
+}
+
+function formatRuntimeResolutionKind(kind: string) {
+  switch (kind) {
+    case "thread-worktree":
+      return "Thread worktree";
+    case "project-workspace-root":
+      return "Project workspace";
+    case "input-worktree-fallback":
+      return "Input fallback";
+    case "canonical-role-root":
+      return "Canonical role root";
+    case "latest-role-session":
+      return "Latest role session";
+    case "role-session-thread-worktree":
+      return "Role-session worktree";
+    case "repo-role-root":
+      return "Repo role root";
+    default:
+      return compactStatusLabel(kind);
+  }
+}
+
+function formatGeneratedAge(value: string | null) {
+  return value ? formatRelativeTimeLabel(value) : null;
+}
+
+function agentRuntimeStateBadgeClasses(state: SidebarAgentRuntimeState) {
   switch (state) {
     case "inspectable":
       return {
         badge: "text-muted-foreground/80",
         label: "runtime",
-        title: "Worker runtime can be inspected.",
+        title: "Agent runtime can be inspected.",
       };
     case "pending-worktree":
       return {
@@ -222,30 +274,184 @@ function workerRuntimeStateBadgeClasses(state: SidebarWorkerRuntimeState) {
   }
 }
 
-function WorkerRuntimePopover({
+function RuntimeStateBadge({
+  state,
+  message,
+}: {
+  state: SidebarAgentRuntimeState;
+  message: string | null;
+}) {
+  const badge = agentRuntimeStateBadgeClasses(state);
+  return (
+    <Badge
+      variant="outline"
+      title={message ?? badge.title}
+      className={cn("h-4 shrink-0 px-1 text-[8px]", badge.badge)}
+    >
+      {badge.label}
+    </Badge>
+  );
+}
+
+function RuntimeValueCard({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">{label}</p>
+      <p className="mt-1 text-xs font-medium text-foreground/90">{value ?? "unknown"}</p>
+    </div>
+  );
+}
+
+function RuntimeBadgeList({ emptyLabel, items }: { emptyLabel: string; items: readonly string[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1">
+      {items.length > 0 ? (
+        items.map((item) => (
+          <Badge
+            key={item}
+            variant="outline"
+            className="h-5 px-1.5 text-[10px] font-medium leading-none text-muted-foreground/80"
+          >
+            {item}
+          </Badge>
+        ))
+      ) : (
+        <span className="text-[11px] text-muted-foreground/70">{emptyLabel}</span>
+      )}
+    </div>
+  );
+}
+
+function AgentRuntimeInlineBadges({
+  agentKind,
   runtimeState,
   runtimeStateMessage,
   threadId,
-  worktreePath,
-  workerLabel,
 }: {
-  runtimeState: SidebarWorkerRuntimeState;
+  agentKind: AgentRuntimeAgentKind;
+  runtimeState: SidebarAgentRuntimeState;
   runtimeStateMessage: string | null;
   threadId: ThreadId | null;
-  worktreePath: string | null;
-  workerLabel: string;
+}) {
+  const runtimeQuery = useQuery(
+    agentRuntimeSnapshotQueryOptions({
+      agentKind,
+      threadId: runtimeState === "inspectable" ? threadId : null,
+    }),
+  );
+
+  if (runtimeState !== "inspectable") {
+    return <RuntimeStateBadge state={runtimeState} message={runtimeStateMessage} />;
+  }
+
+  if (runtimeQuery.isLoading) {
+    return (
+      <Badge variant="outline" className="h-4 shrink-0 px-1 text-[8px] text-muted-foreground/80">
+        loading
+      </Badge>
+    );
+  }
+
+  if (runtimeQuery.isError || !runtimeQuery.data) {
+    return (
+      <Badge
+        variant="outline"
+        className="h-4 shrink-0 border-red-500/25 bg-red-500/10 px-1 text-[8px] text-red-700 dark:text-red-300"
+      >
+        runtime error
+      </Badge>
+    );
+  }
+
+  const snapshot = runtimeQuery.data;
+  const generatedAge = formatGeneratedAge(snapshot.summary.generatedAt);
+
+  if (agentKind === "worker") {
+    return (
+      <>
+        {snapshot.summary.repo ? (
+          <Badge
+            variant="outline"
+            className="h-4 max-w-24 shrink-0 px-1 text-[8px] text-muted-foreground/80"
+            title={snapshot.summary.repo}
+          >
+            <span className="truncate">{snapshot.summary.repo}</span>
+          </Badge>
+        ) : null}
+        {snapshot.workerDetails ? (
+          <Badge
+            className={cn(
+              CHIP_CLASSNAME,
+              "border-0",
+              runtimeAuditBadgeClasses(snapshot.workerDetails.auditStatus),
+            )}
+          >
+            audit {snapshot.workerDetails.auditStatus}
+          </Badge>
+        ) : null}
+        {snapshot.workerDetails?.validationProfile ? (
+          <Badge variant="outline" className={CHIP_CLASSNAME}>
+            {snapshot.workerDetails.validationProfile}
+          </Badge>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {snapshot.summary.profile ? (
+        <Badge variant="outline" className={CHIP_CLASSNAME}>
+          {snapshot.summary.profile}
+        </Badge>
+      ) : null}
+      {generatedAge ? (
+        <Badge variant="outline" className={CHIP_CLASSNAME}>
+          {generatedAge}
+        </Badge>
+      ) : null}
+      {snapshot.summary.packCount > 0 ? (
+        <Badge variant="outline" className={CHIP_CLASSNAME}>
+          {snapshot.summary.packCount} packs
+        </Badge>
+      ) : null}
+      {snapshot.summary.skillCount > 0 ? (
+        <Badge variant="outline" className={CHIP_CLASSNAME}>
+          {snapshot.summary.skillCount} skills
+        </Badge>
+      ) : null}
+    </>
+  );
+}
+
+function AgentRuntimePopover({
+  agentKind,
+  runtimeState,
+  runtimeStateMessage,
+  threadId,
+  threadLabel,
+  titleLabel,
+  triggerClassName,
+}: {
+  agentKind: AgentRuntimeAgentKind;
+  runtimeState: SidebarAgentRuntimeState;
+  runtimeStateMessage: string | null;
+  threadId: ThreadId | null;
+  threadLabel: string;
+  titleLabel: string;
+  triggerClassName?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const runtimeLookupEnabled = open && runtimeState === "inspectable";
   const runtimeQuery = useQuery(
-    workerRuntimeSnapshotQueryOptions({
+    agentRuntimeSnapshotQueryOptions({
+      agentKind,
       threadId: runtimeLookupEnabled ? threadId : null,
-      worktreePath: runtimeLookupEnabled ? worktreePath : null,
     }),
   );
 
   const content = useMemo(() => {
-    return deriveWorkerRuntimeDialogState({
+    return deriveAgentRuntimeDialogState({
       data: runtimeQuery.data,
       error: runtimeQuery.error instanceof Error ? runtimeQuery.error : null,
       isError: runtimeQuery.isError,
@@ -275,8 +481,11 @@ function WorkerRuntimePopover({
         render={
           <button
             type="button"
-            className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-            aria-label={`Open runtime details for ${workerLabel}`}
+            className={cn(
+              "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground",
+              triggerClassName,
+            )}
+            aria-label={`Open runtime details for ${threadLabel}`}
             onClick={(event) => {
               event.stopPropagation();
             }}
@@ -293,9 +502,9 @@ function WorkerRuntimePopover({
                 {content.mode}
               </Badge>
             }
-            description="Live worker runtime contract details loaded on demand."
+            description="Live agent runtime contract details loaded on demand."
             icon={<HardHatIcon className="size-4" />}
-            title={`${workerLabel} runtime`}
+            title={`${titleLabel} runtime`}
           />
 
           {content.mode !== "ready" || !runtimeQuery.data ? (
@@ -308,56 +517,104 @@ function WorkerRuntimePopover({
           ) : (
             <>
               <div className="flex flex-wrap gap-1">
-                <RuntimeSourceBadge
-                  label="context-plan"
-                  status={runtimeQuery.data.sourceFiles.contextPlan.status}
+                {runtimeQuery.data.sourceFiles.map((sourceFile) => (
+                  <RuntimeSourceBadge
+                    key={sourceFile.key}
+                    label={sourceFile.label}
+                    status={sourceFile.status}
+                  />
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <RuntimeValueCard label="Repo" value={runtimeQuery.data.summary.repo} />
+                <RuntimeValueCard
+                  label={runtimeQuery.data.runtimeKind === "worker-contract" ? "Task" : "Role"}
+                  value={
+                    runtimeQuery.data.runtimeKind === "worker-contract"
+                      ? runtimeQuery.data.summary.taskClass
+                      : runtimeQuery.data.summary.role
+                  }
                 />
-                <RuntimeSourceBadge
-                  label="dispatch"
-                  status={runtimeQuery.data.sourceFiles.dispatchContract.status}
+                <RuntimeValueCard
+                  label={
+                    runtimeQuery.data.runtimeKind === "worker-contract" ? "Context" : "Profile"
+                  }
+                  value={
+                    runtimeQuery.data.runtimeKind === "worker-contract"
+                      ? runtimeQuery.data.summary.contextMode
+                      : runtimeQuery.data.summary.profile
+                  }
                 />
-                <RuntimeSourceBadge
-                  label="packs"
-                  status={runtimeQuery.data.sourceFiles.installedPacks.status}
-                />
-                <RuntimeSourceBadge
-                  label="audit"
-                  status={runtimeQuery.data.sourceFiles.instructionStackAudit.status}
+                <RuntimeValueCard
+                  label={
+                    runtimeQuery.data.runtimeKind === "worker-contract" ? "Closeout" : "Generated"
+                  }
+                  value={
+                    runtimeQuery.data.runtimeKind === "worker-contract"
+                      ? runtimeQuery.data.summary.closeoutAuthority
+                      : runtimeQuery.data.summary.generatedAt
+                  }
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+                <RuntimeValueCard label="Workspace" value={runtimeQuery.data.workspaceRoot} />
+                <RuntimeValueCard label="Runtime dir" value={runtimeQuery.data.runtimeDir} />
+              </div>
+
+              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
                   <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Repo
+                    Resolution
                   </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">
-                    {runtimeQuery.data.summary.repo ?? "unknown"}
-                  </p>
+                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                    {formatRuntimeResolutionKind(runtimeQuery.data.workspaceResolution.kind)}
+                  </Badge>
                 </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
+                  {runtimeQuery.data.workspaceResolution.detail ??
+                    "No workspace resolution detail."}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
                   <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Task
+                    Source Files
                   </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">
-                    {runtimeQuery.data.summary.taskClass ?? "unknown"}
-                  </p>
+                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                    {runtimeQuery.data.sourceFiles.length}
+                  </Badge>
                 </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Context
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">
-                    {runtimeQuery.data.summary.contextMode ?? "unknown"}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Closeout
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-foreground/90">
-                    {runtimeQuery.data.summary.closeoutAuthority ?? "unknown"}
-                  </p>
+                <div className="mt-2 space-y-1.5">
+                  {runtimeQuery.data.sourceFiles.map((sourceFile) => (
+                    <div
+                      key={sourceFile.key}
+                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1.5"
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <RuntimeSourceBadge label={sourceFile.label} status={sourceFile.status} />
+                        <Badge
+                          variant="outline"
+                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                        >
+                          {formatRuntimeSourceStatus(sourceFile.status)}
+                        </Badge>
+                        <span className="truncate text-[11px] font-medium text-foreground/90">
+                          {sourceFile.fileName}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-[10px] text-muted-foreground/70">
+                        {sourceFile.absolutePath}
+                      </p>
+                      {sourceFile.detail ? (
+                        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
+                          {sourceFile.detail}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -370,76 +627,256 @@ function WorkerRuntimePopover({
                     {runtimeQuery.data.summary.selectedPacks.length}
                   </Badge>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {runtimeQuery.data.summary.selectedPacks.length > 0 ? (
-                    runtimeQuery.data.summary.selectedPacks.slice(0, 6).map((pack) => (
-                      <Badge
-                        key={pack}
-                        variant="outline"
-                        className="h-5 px-1.5 text-[10px] font-medium leading-none text-muted-foreground/80"
-                      >
-                        {pack}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-muted-foreground/70">No packs selected.</span>
-                  )}
-                </div>
+                <RuntimeBadgeList
+                  emptyLabel="No packs selected."
+                  items={runtimeQuery.data.summary.selectedPacks}
+                />
               </div>
+
+              {runtimeQuery.data.runtimeKind === "role-runtime" ? (
+                <>
+                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                        Installed Skills
+                      </p>
+                      <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                        {runtimeQuery.data.summary.installedSkills.length}
+                      </Badge>
+                    </div>
+                    <RuntimeBadgeList
+                      emptyLabel="No runtime skills declared."
+                      items={runtimeQuery.data.summary.installedSkills}
+                    />
+                  </div>
+                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                        Role Runtime
+                      </p>
+                      {runtimeQuery.data.summary.generatedAt ? (
+                        <Badge
+                          variant="outline"
+                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                        >
+                          {formatGeneratedAge(runtimeQuery.data.summary.generatedAt)}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
+                      {runtimeQuery.data.roleDetails?.selectionReason ??
+                        "No profile selection rationale was recorded."}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <RuntimeValueCard
+                      label="Validation"
+                      value={runtimeQuery.data.workerDetails?.validationProfile ?? null}
+                    />
+                    <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                        Audit
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <Badge
+                          className={cn(
+                            "h-5 border-0 px-1.5 text-[10px] font-medium",
+                            runtimeAuditBadgeClasses(
+                              runtimeQuery.data.workerDetails?.auditStatus ?? "missing",
+                            ),
+                          )}
+                        >
+                          {runtimeQuery.data.workerDetails?.auditStatus ?? "missing"}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                        >
+                          {runtimeQuery.data.workerDetails?.packAuditIssueCount ?? 0} pack issues
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                        Capabilities
+                      </p>
+                      {runtimeQuery.data.workerDetails?.packAuditStatus ? (
+                        <Badge
+                          variant="outline"
+                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                        >
+                          {runtimeQuery.data.workerDetails.packAuditStatus}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
+                          Allowed
+                        </p>
+                        <RuntimeBadgeList
+                          emptyLabel="No explicit allowed capabilities."
+                          items={runtimeQuery.data.workerDetails?.allowedCapabilities ?? []}
+                        />
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
+                          Forbidden
+                        </p>
+                        <RuntimeBadgeList
+                          emptyLabel="No explicit forbidden capabilities."
+                          items={runtimeQuery.data.workerDetails?.forbiddenCapabilities ?? []}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
+                          Warnings
+                        </p>
+                        <RuntimeBadgeList
+                          emptyLabel="No runtime warnings."
+                          items={runtimeQuery.data.workerDetails?.warnings ?? []}
+                        />
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
+                          Conflicts
+                        </p>
+                        <RuntimeBadgeList
+                          emptyLabel="No declared conflicts."
+                          items={runtimeQuery.data.workerDetails?.conflicts ?? []}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                        Pack Inventory
+                      </p>
+                      <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                        {runtimeQuery.data.workerDetails?.packs.length ?? 0}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 space-y-1.5">
+                      {(runtimeQuery.data.workerDetails?.packs ?? []).length > 0 ? (
+                        (runtimeQuery.data.workerDetails?.packs ?? []).map((pack) => (
+                          <div
+                            key={pack.id}
+                            className="rounded-md border border-border/60 bg-background/40 px-2 py-1.5"
+                          >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] font-medium text-foreground/90">
+                                {pack.name ?? pack.slug}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                              >
+                                {pack.id}
+                              </Badge>
+                              {pack.scope ? (
+                                <Badge
+                                  variant="outline"
+                                  className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                                >
+                                  {pack.scope}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-[10px] text-muted-foreground/70">
+                              {pack.repo ?? "No repo"} · {pack.link}
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground/70">
+                          No installed packs were recorded.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
+                        Audit Findings
+                      </p>
+                      <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
+                        {runtimeQuery.data.workerDetails?.auditFindings.length ?? 0}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 space-y-1.5">
+                      {(runtimeQuery.data.workerDetails?.auditFindings ?? []).length > 0 ? (
+                        (runtimeQuery.data.workerDetails?.auditFindings ?? []).map((finding) => (
+                          <div
+                            key={`${finding.code ?? "finding"}:${finding.kind ?? "kind"}:${finding.detail ?? "detail"}`}
+                            className="rounded-md border border-border/60 bg-background/40 px-2 py-1.5"
+                          >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {finding.severity ? (
+                                <Badge
+                                  className={cn(
+                                    "h-5 border-0 px-1.5 text-[10px] font-medium",
+                                    finding.severity === "error"
+                                      ? "bg-red-500/12 text-red-700 dark:text-red-300"
+                                      : finding.severity === "warning"
+                                        ? "bg-amber-500/12 text-amber-700 dark:text-amber-300"
+                                        : "bg-muted text-muted-foreground",
+                                  )}
+                                >
+                                  {finding.severity}
+                                </Badge>
+                              ) : null}
+                              {finding.code ? (
+                                <Badge
+                                  variant="outline"
+                                  className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                                >
+                                  {finding.code}
+                                </Badge>
+                              ) : null}
+                              {finding.kind ? (
+                                <Badge
+                                  variant="outline"
+                                  className="h-4 px-1 text-[9px] text-muted-foreground/80"
+                                >
+                                  {finding.kind}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            {finding.detail ? (
+                              <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
+                                {finding.detail}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground/70">
+                          No audit findings were recorded.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
       </PopoverPopup>
     </Popover>
-  );
-}
-
-function WorkerRepoBadge({
-  runtimeState,
-  runtimeStateMessage,
-  threadId,
-  worktreePath,
-}: {
-  runtimeState: SidebarWorkerRuntimeState;
-  runtimeStateMessage: string | null;
-  threadId: ThreadId;
-  worktreePath: string | null;
-}) {
-  const runtimeStateBadge = workerRuntimeStateBadgeClasses(runtimeState);
-  const repoQuery = useQuery(
-    workerRuntimeRepoQueryOptions({
-      threadId: runtimeState === "inspectable" ? threadId : null,
-      worktreePath: runtimeState === "inspectable" ? worktreePath : null,
-    }),
-  );
-  const label =
-    runtimeState === "inspectable"
-      ? (repoQuery.data ??
-        (repoQuery.isLoading ? "loading" : repoQuery.isError ? "error" : "unknown"))
-      : runtimeStateBadge.label;
-  const title =
-    runtimeState === "inspectable"
-      ? (repoQuery.data ??
-        (repoQuery.isLoading
-          ? "Loading worker runtime repo."
-          : repoQuery.isError
-            ? repoQuery.error instanceof Error
-              ? repoQuery.error.message
-              : "Worker runtime repo could not be loaded."
-            : "Worker runtime loaded, but no authoritative repo was declared."))
-      : (runtimeStateMessage ?? runtimeStateBadge.title);
-
-  return (
-    <Badge
-      variant="outline"
-      title={title}
-      className={cn(
-        "h-4 max-w-24 shrink-0 px-1 text-[8px]",
-        runtimeState === "inspectable" ? "text-muted-foreground/80" : runtimeStateBadge.badge,
-      )}
-    >
-      <span className="truncate">{label}</span>
-    </Badge>
   );
 }
 
@@ -609,38 +1046,124 @@ function mergeItems(current: ReadonlySet<string>, itemIds: Iterable<string>) {
   return next ?? current;
 }
 
+function getProgramLanes(program: SidebarProgramNode): SidebarProgramLaneNode[] {
+  return program.currentLane
+    ? [program.currentLane, ...program.historicalLanes]
+    : program.historicalLanes;
+}
+
+function resolveSidebarThreadStatus(input: {
+  archivedAt?: string | null | undefined;
+  fallbackThreadLink: SidebarProgramLaneNode["fallbackThreadLink"];
+  isHistorical?: boolean | undefined;
+  lastVisitedAt?: string | undefined;
+  thread: Thread | null;
+}): SidebarThreadStatus | null {
+  const shouldSuppressLiveRuntime = input.isHistorical || input.archivedAt != null;
+
+  if (input.thread) {
+    const threadStatus = resolveThreadStatusPill({
+      thread: {
+        ...input.thread,
+        lastVisitedAt: input.lastVisitedAt,
+      },
+      hasPendingApprovals: derivePendingApprovals(input.thread.activities).length > 0,
+      hasPendingUserInput: derivePendingUserInputs(input.thread.activities).length > 0,
+    });
+    if (
+      shouldSuppressLiveRuntime &&
+      (threadStatus?.label === "Working" || threadStatus?.label === "Connecting")
+    ) {
+      return null;
+    }
+    return threadStatus;
+  }
+
+  if (!input.fallbackThreadLink) {
+    return null;
+  }
+
+  const fallbackStatus = resolveThreadStatusPill({
+    thread: {
+      interactionMode: "default",
+      latestTurn: input.fallbackThreadLink.latestTurn,
+      lastVisitedAt: input.lastVisitedAt,
+      proposedPlans: [],
+      session: input.fallbackThreadLink.session,
+    } as Parameters<typeof resolveThreadStatusPill>[0]["thread"],
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+  });
+
+  if (fallbackStatus?.label === "Completed") {
+    return null;
+  }
+
+  if (
+    shouldSuppressLiveRuntime &&
+    (fallbackStatus?.label === "Working" || fallbackStatus?.label === "Connecting")
+  ) {
+    return null;
+  }
+
+  return fallbackStatus;
+}
+
+function SidebarThreadActivityMeta({
+  activityAt,
+  status,
+}: {
+  activityAt: string | null;
+  status: SidebarThreadStatus | null;
+}) {
+  if (!status && !activityAt) {
+    return null;
+  }
+
+  const showsLiveRuntime = status?.label === "Working" || status?.label === "Connecting";
+  const activityLabel = activityAt
+    ? `${showsLiveRuntime ? "updated" : "last active"} ${formatRelativeTimeLabel(activityAt)}`
+    : null;
+
+  return (
+    <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/70">
+      {status ? <ThreadStatusLabel status={status} compact /> : null}
+      {status ? (
+        <span className="truncate">{showsLiveRuntime ? `${status.label} now` : status.label}</span>
+      ) : null}
+      {activityLabel ? <span className="truncate">{activityLabel}</span> : null}
+    </div>
+  );
+}
+
 function resolveAutoExpandedSidebarItems(input: {
   executives: ReturnType<typeof buildOrchestrationSidebarModel>["executives"];
   routeThreadId: ThreadId | null;
 }) {
   const openProgramIds = new Set<string>();
-  const openOrchestratorIds = new Set<string>();
+  const openLaneIds = new Set<string>();
   if (!input.routeThreadId) {
-    return { openOrchestratorIds, openProgramIds };
+    return { openLaneIds, openProgramIds };
   }
 
   for (const executive of input.executives) {
     for (const program of executive.programs) {
-      const workerRouteActive =
-        program.currentLane?.workers.some((worker) => worker.id === input.routeThreadId) ?? false;
-      const historicalRouteActive =
-        program.historicalOrchestratorThreadIds.includes(input.routeThreadId) ||
-        program.historicalWorkerThreadIds.includes(input.routeThreadId);
-      if (
-        input.routeThreadId === program.executiveThreadId ||
-        input.routeThreadId === program.currentLane?.id ||
-        workerRouteActive ||
-        historicalRouteActive
-      ) {
+      const programLanes = getProgramLanes(program);
+      const activeLane = programLanes.find(
+        (lane) =>
+          input.routeThreadId === lane.id ||
+          lane.workers.some((worker) => worker.id === input.routeThreadId),
+      );
+      if (input.routeThreadId === program.executiveThreadId || activeLane !== undefined) {
         openProgramIds.add(program.id);
       }
-      if (workerRouteActive && program.currentLane?.id) {
-        openOrchestratorIds.add(program.currentLane.id);
+      if (activeLane?.id) {
+        openLaneIds.add(activeLane.id);
       }
     }
   }
 
-  return { openOrchestratorIds, openProgramIds };
+  return { openLaneIds, openProgramIds };
 }
 
 export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
@@ -651,9 +1174,9 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     strict: false,
     select: (params) => (params.threadId ? (params.threadId as ThreadId) : null),
   });
+  const controlPlaneQuery = useQuery(agentsVxappControlPlaneSnapshotQueryOptions());
   const sqliteGraphQuery = useQuery(agentsVxappSidebarGraphQueryOptions());
   const projects = useStore((store) => store.projects);
-  const programs = useStore((store) => store.programs ?? []);
   const threads = useStore((store) => store.threads);
   const programNotifications = useStore((store) => store.programNotifications ?? []);
   const ctoAttentionItems = useStore((store) => store.ctoAttentionItems ?? []);
@@ -667,7 +1190,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const setAnchor = useThreadSelectionStore((store) => store.setAnchor);
   const { archiveThread, deleteThread } = useThreadActions();
   const [openProgramIds, setOpenProgramIds] = useState<ReadonlySet<string>>(new Set());
-  const [openOrchestratorIds, setOpenOrchestratorIds] = useState<ReadonlySet<string>>(new Set());
+  const [openLaneIds, setOpenLaneIds] = useState<ReadonlySet<string>>(new Set());
   const [programTodosDialog, setProgramTodosDialog] = useState<{
     programId: string;
     programTitle: string;
@@ -688,10 +1211,9 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const rootThreadIds = useMemo(
     () =>
       resolveSidebarRootThreadIds({
-        programs,
-        sqliteGraph: sqliteGraphQuery.data ?? null,
+        programs: controlPlaneQuery.data?.programs ?? [],
       }),
-    [programs, sqliteGraphQuery.data],
+    [controlPlaneQuery.data?.programs],
   );
   const sessionQueries = useQueries({
     queries: rootThreadIds.map((rootThreadId) =>
@@ -719,8 +1241,9 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     () =>
       buildOrchestrationSidebarModel({
         ctoAttentionItems,
+        currentTodos: controlPlaneQuery.data?.currentTodos ?? [],
         programNotifications,
-        programs,
+        programs: controlPlaneQuery.data?.programs ?? [],
         projects,
         sessionWorkerThreadsByRootId,
         sqliteGraph: sqliteGraphQuery.data ?? null,
@@ -729,8 +1252,9 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       }),
     [
       ctoAttentionItems,
+      controlPlaneQuery.data?.currentTodos,
       programNotifications,
-      programs,
+      controlPlaneQuery.data?.programs,
       projects,
       sessionWorkerThreadsByRootId,
       sqliteGraphQuery.data,
@@ -742,25 +1266,19 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const orderedWorkerThreadIds = useMemo(
     () =>
       model.executives.flatMap((executive) =>
-        executive.programs.flatMap(
-          (program) => program.currentLane?.workers.map((worker) => worker.id) ?? [],
+        executive.programs.flatMap((program) =>
+          getProgramLanes(program).flatMap((lane) => lane.workers.map((worker) => worker.id)),
         ),
       ),
     [model.executives],
   );
   const staleMirrorDescription = useMemo(() => {
-    if (!model.diagnostics.staleMirror) {
+    if (!import.meta.env.DEV || !model.diagnostics.staleMirror) {
       return null;
     }
     const parts: string[] = [];
-    if (model.diagnostics.divergentProgramIds.length > 0) {
-      parts.push(`${model.diagnostics.divergentProgramIds.length} divergent programs`);
-    }
     if (model.diagnostics.missingProjectIds.length > 0) {
       parts.push(`${model.diagnostics.missingProjectIds.length} projects`);
-    }
-    if (model.diagnostics.missingProgramIds.length > 0) {
-      parts.push(`${model.diagnostics.missingProgramIds.length} programs`);
     }
     if (model.diagnostics.missingThreadIds.length > 0) {
       parts.push(`${model.diagnostics.missingThreadIds.length} threads`);
@@ -777,10 +1295,8 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     if (nextAutoOpenState.openProgramIds.size > 0) {
       setOpenProgramIds((current) => mergeItems(current, nextAutoOpenState.openProgramIds));
     }
-    if (nextAutoOpenState.openOrchestratorIds.size > 0) {
-      setOpenOrchestratorIds((current) =>
-        mergeItems(current, nextAutoOpenState.openOrchestratorIds),
-      );
+    if (nextAutoOpenState.openLaneIds.size > 0) {
+      setOpenLaneIds((current) => mergeItems(current, nextAutoOpenState.openLaneIds));
     }
   }, [model.executives, routeThreadId]);
 
@@ -804,12 +1320,16 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const handleProgramToggle = useCallback(
     async (program: (typeof model.executives)[number]["programs"][number]) => {
       const isOpen = openProgramIds.has(program.id);
+      const programLanes = getProgramLanes(program);
       if (
         isOpen &&
         routeThreadId &&
         (routeThreadId === program.executiveThreadId ||
-          routeThreadId === program.currentLane?.id ||
-          program.currentLane?.workers.some((worker) => worker.id === routeThreadId))
+          programLanes.some(
+            (lane) =>
+              routeThreadId === lane.id ||
+              lane.workers.some((worker) => worker.id === routeThreadId),
+          ))
       ) {
         await navigateToNoThread();
       }
@@ -818,32 +1338,31 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     [navigateToNoThread, openProgramIds, routeThreadId],
   );
 
-  const handleOrchestratorToggle = useCallback(
-    async (program: (typeof model.executives)[number]["programs"][number]) => {
-      if (!program.currentLane?.id) {
+  const handleLaneToggle = useCallback(
+    async (lane: SidebarProgramLaneNode) => {
+      if (!lane.id) {
         return;
       }
-      const orchestratorId = program.currentLane.id;
-      const isOpen = openOrchestratorIds.has(orchestratorId);
+      const laneId = lane.id;
+      const isOpen = openLaneIds.has(laneId);
       if (
         isOpen &&
         routeThreadId &&
-        (routeThreadId === orchestratorId ||
-          program.currentLane.workers.some((worker) => worker.id === routeThreadId))
+        (routeThreadId === laneId || lane.workers.some((worker) => worker.id === routeThreadId))
       ) {
         await navigateToNoThread();
       }
-      setOpenOrchestratorIds((current) => toggleItem(current, orchestratorId));
+      setOpenLaneIds((current) => toggleItem(current, laneId));
     },
-    [navigateToNoThread, openOrchestratorIds, routeThreadId],
+    [navigateToNoThread, openLaneIds, routeThreadId],
   );
 
-  const handleOrchestratorNavigate = useCallback(
-    async (program: (typeof model.executives)[number]["programs"][number]) => {
-      if (!program.currentLane?.id) {
+  const handleLaneNavigate = useCallback(
+    async (lane: SidebarProgramLaneNode) => {
+      if (!lane.id) {
         return;
       }
-      await navigateToThread(program.currentLane.id as ThreadId);
+      await navigateToThread(lane.id as ThreadId);
     },
     [navigateToThread],
   );
@@ -977,6 +1496,233 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     ],
   );
 
+  const renderWorkerRow = (worker: SidebarProgramLaneNode["workers"][number]) => {
+    const thread = worker.thread;
+    const workerThreadId = worker.id as ThreadId;
+    const isActive = routeThreadId === worker.id;
+    const isSelected = selectedThreadIds.has(workerThreadId);
+    const threadStatus = resolveSidebarThreadStatus({
+      archivedAt: worker.archivedAt,
+      fallbackThreadLink: worker.fallbackThreadLink,
+      isHistorical: worker.isHistorical,
+      lastVisitedAt: threadLastVisitedAtById[worker.id] ?? undefined,
+      thread,
+    });
+
+    return (
+      <div
+        key={worker.id}
+        className={cn(
+          "relative flex items-center gap-1 rounded-md px-1.5 py-1 text-left",
+          isActive || isSelected ? "bg-accent/60" : "hover:bg-accent/40",
+        )}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (thread) {
+            void handleWorkerContextMenu(thread.id);
+          }
+        }}
+      >
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+        />
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
+          onClick={(event) => {
+            if (event.shiftKey) {
+              rangeSelectTo(workerThreadId, orderedWorkerThreadIds as ThreadId[]);
+              return;
+            }
+            if (event.metaKey || event.ctrlKey) {
+              toggleThread(workerThreadId);
+              return;
+            }
+            clearSelection();
+            setAnchor(workerThreadId);
+            void navigateToThread(workerThreadId);
+          }}
+        >
+          <span
+            className={cn(
+              "inline-flex size-4 shrink-0 items-center justify-center rounded-md",
+              worker.isHistorical
+                ? "bg-muted text-muted-foreground"
+                : "bg-amber-500/12 text-amber-600 dark:text-amber-300",
+            )}
+          >
+            <HardHatIcon className="size-3" />
+          </span>
+          {threadStatus ? <ThreadStatusLabel status={threadStatus} compact /> : null}
+          <AgentRuntimeInlineBadges
+            agentKind="worker"
+            runtimeState={worker.runtimeState}
+            runtimeStateMessage={worker.runtimeStateMessage}
+            threadId={workerThreadId}
+          />
+          <WakeBadge state={worker.wakeState} />
+          {renamingThreadId === worker.id && thread ? (
+            <input
+              ref={renamingInputRef}
+              value={renamingTitle}
+              onChange={(event) => {
+                setRenamingTitle(event.target.value);
+              }}
+              onBlur={() => {
+                void commitRename();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void commitRename();
+                }
+                if (event.key === "Escape") {
+                  setRenamingThreadId(null);
+                }
+              }}
+              className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 py-0.5 text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">
+              {worker.title}
+            </span>
+          )}
+        </button>
+        <AgentRuntimePopover
+          agentKind="worker"
+          runtimeState={worker.runtimeState}
+          runtimeStateMessage={worker.runtimeStateMessage}
+          threadId={workerThreadId}
+          threadLabel={worker.title}
+          titleLabel={worker.title}
+        />
+      </div>
+    );
+  };
+
+  const renderLane = (
+    lane: SidebarProgramLaneNode,
+    program: (typeof model.executives)[number]["programs"][number],
+    showTodosAction: boolean,
+  ) => {
+    const laneOpen = lane.id ? openLaneIds.has(lane.id) : false;
+    const laneStatus = resolveSidebarThreadStatus({
+      archivedAt: lane.archivedAt,
+      fallbackThreadLink: lane.fallbackThreadLink,
+      isHistorical: lane.isHistorical,
+      lastVisitedAt: lane.id ? (threadLastVisitedAtById[lane.id] ?? undefined) : undefined,
+      thread: lane.thread,
+    });
+
+    return (
+      <div key={lane.id ?? `${program.id}:${lane.title}`} className="relative">
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+        />
+        <div
+          className={cn(
+            "flex items-start gap-1 rounded-lg hover:bg-accent/40",
+            routeThreadId === lane.id ? "bg-accent/60" : "",
+          )}
+        >
+          <button
+            type="button"
+            aria-label={
+              laneOpen ? `Collapse workers for ${lane.title}` : `Expand workers for ${lane.title}`
+            }
+            className="ml-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => {
+              void handleLaneToggle(lane);
+            }}
+          >
+            <ChevronRightIcon
+              className={cn("size-3 shrink-0 transition-transform", laneOpen ? "rotate-90" : "")}
+            />
+          </button>
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-lg py-1.5 pr-2 text-left"
+            onClick={() => {
+              void handleLaneNavigate(lane);
+            }}
+          >
+            <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
+              <BotIcon className="size-3" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="truncate text-[11px] font-medium text-foreground/90">
+                  {lane.title}
+                </span>
+                <Badge variant="outline" className={CHIP_CLASSNAME}>
+                  {lane.workerCount} workers
+                </Badge>
+                {lane.isHistorical ? (
+                  <Badge variant="outline" className={CHIP_CLASSNAME}>
+                    Historical
+                  </Badge>
+                ) : null}
+                <AgentRuntimeInlineBadges
+                  agentKind="orchestrator"
+                  runtimeState={lane.runtimeState}
+                  runtimeStateMessage={lane.runtimeStateMessage}
+                  threadId={lane.id as ThreadId | null}
+                />
+              </div>
+              <SidebarThreadActivityMeta activityAt={lane.activityAt} status={laneStatus} />
+            </div>
+          </button>
+          <div className="mr-1 mt-1 flex shrink-0 items-center gap-1">
+            <AgentRuntimePopover
+              agentKind="orchestrator"
+              runtimeState={lane.runtimeState}
+              runtimeStateMessage={lane.runtimeStateMessage}
+              threadId={lane.id as ThreadId | null}
+              threadLabel={lane.title}
+              titleLabel={lane.title}
+            />
+            {showTodosAction ? (
+              <button
+                type="button"
+                aria-label={`Open TODOs for ${program.title}`}
+                className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setProgramTodosDialog({
+                    programId: program.id,
+                    programTitle: program.title,
+                  });
+                }}
+              >
+                <ListTodoIcon className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        {laneOpen ? (
+          <div ref={attachAnimatedListRef} className="ml-3 border-l border-border/50 pl-2">
+            {lane.workers.length > 0 ? (
+              <div ref={attachAnimatedListRef} className="space-y-0.5">
+                {lane.workers.map((worker) => renderWorkerRow(worker))}
+              </div>
+            ) : (
+              <div className="relative px-2 py-1.5 text-[10px] text-muted-foreground/70">
+                <span
+                  aria-hidden="true"
+                  className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+                />
+                {lane.isHistorical ? "No historical workers" : "No workers"}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const isStandaloneWindow = mode === "standalone";
 
   return (
@@ -998,364 +1744,326 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
             </div>
           ) : null}
           <SidebarMenu>
-            {model.executives.map((executive) => (
-              <SidebarMenuItem key={executive.id} className="rounded-md">
-                <SidebarMenuButton
-                  size="sm"
-                  className={cn(
-                    "h-auto min-h-7 gap-2 px-2 py-1.5 pr-9",
-                    executive.threadId ? "cursor-pointer" : "",
-                  )}
-                  render={executive.threadId ? <button type="button" /> : <div />}
-                  isActive={routeThreadId === executive.threadId}
-                  onClick={
-                    executive.threadId
-                      ? () => {
-                          void navigateToThread(executive.threadId as ThreadId);
-                        }
-                      : undefined
-                  }
-                >
-                  <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-500 dark:text-fuchsia-300">
-                    <BotIcon className="size-3" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-[11px] font-medium text-foreground/90">
-                        {executive.label}
-                      </span>
-                      <Badge variant="outline" className={CHIP_CLASSNAME}>
-                        Executive
-                      </Badge>
+            {model.executives.map((executive) => {
+              const executiveStatus = resolveSidebarThreadStatus({
+                fallbackThreadLink: executive.fallbackThreadLink,
+                lastVisitedAt: executive.threadId
+                  ? (threadLastVisitedAtById[executive.threadId] ?? undefined)
+                  : undefined,
+                thread: executive.thread,
+              });
+
+              return (
+                <SidebarMenuItem key={executive.id} className="rounded-md">
+                  <SidebarMenuButton
+                    size="sm"
+                    className={cn(
+                      "h-auto min-h-7 gap-2 px-2 py-1.5 pr-16",
+                      executive.threadId ? "cursor-pointer" : "",
+                    )}
+                    render={executive.threadId ? <button type="button" /> : <div />}
+                    isActive={routeThreadId === executive.threadId}
+                    onClick={
+                      executive.threadId
+                        ? () => {
+                            void navigateToThread(executive.threadId as ThreadId);
+                          }
+                        : undefined
+                    }
+                  >
+                    <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-500 dark:text-fuchsia-300">
+                      <BotIcon className="size-3" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-[11px] font-medium text-foreground/90">
+                          {executive.label}
+                        </span>
+                        <Badge variant="outline" className={CHIP_CLASSNAME}>
+                          Executive
+                        </Badge>
+                        <AgentRuntimeInlineBadges
+                          agentKind="executive"
+                          runtimeState={executive.runtimeState}
+                          runtimeStateMessage={executive.runtimeStateMessage}
+                          threadId={executive.threadId as ThreadId | null}
+                        />
+                      </div>
+                      <SidebarThreadActivityMeta
+                        activityAt={executive.activityAt}
+                        status={executiveStatus}
+                      />
                     </div>
-                  </div>
-                </SidebarMenuButton>
-                <ExecutiveNotificationsPopover notifications={executive.notifications} />
+                  </SidebarMenuButton>
+                  {executive.threadId !== null || executive.fallbackThreadLink !== null ? (
+                    <AgentRuntimePopover
+                      agentKind="executive"
+                      runtimeState={executive.runtimeState}
+                      runtimeStateMessage={executive.runtimeStateMessage}
+                      threadId={executive.threadId as ThreadId | null}
+                      threadLabel={executive.label}
+                      titleLabel={executive.label}
+                      triggerClassName="absolute right-8 top-1 size-6"
+                    />
+                  ) : null}
+                  <ExecutiveNotificationsPopover notifications={executive.notifications} />
 
-                <SidebarMenuSub ref={attachAnimatedListRef} className="mx-1 mt-1 gap-1 px-1.5">
-                  {executive.programs.map((program) => {
-                    const programOpen = openProgramIds.has(program.id);
-                    const orchestratorOpen = program.currentLane?.id
-                      ? openOrchestratorIds.has(program.currentLane.id)
-                      : false;
-                    const status = formatProgramStatus(program.status);
+                  <SidebarMenuSub ref={attachAnimatedListRef} className="mx-1 mt-1 gap-1 px-1.5">
+                    {executive.programs.map((program) => {
+                      const programOpen = openProgramIds.has(program.id);
+                      const programLanes = getProgramLanes(program);
+                      const baseStatusLabel =
+                        program.baseStatus && program.baseStatus !== program.currentStatus
+                          ? compactStatusLabel(program.baseStatus)
+                          : null;
+                      const watchLabel = program.watch?.classification
+                        ? compactStatusLabel(program.watch.classification)
+                        : null;
+                      const missingCount = program.closeoutSummary.missingItems.length;
 
-                    return (
-                      <SidebarMenuSubItem key={program.id} className="w-full">
-                        <div className="flex items-start gap-1 rounded-lg">
-                          <SidebarMenuSubButton
-                            render={<button type="button" />}
-                            size="sm"
-                            className="h-auto min-h-7 flex-1 cursor-pointer items-start px-2 py-1.5"
-                            onClick={() => {
-                              void handleProgramToggle(program);
-                            }}
-                          >
-                            <ChevronRightIcon
-                              className={cn(
-                                "mt-0.5 size-3 shrink-0 text-muted-foreground/70 transition-transform",
-                                programOpen ? "rotate-90" : "",
-                              )}
-                            />
-                            <div className="min-w-0 flex-1 text-left">
-                              <div className="flex min-w-0 items-center gap-1.5">
-                                <span className="truncate text-[11px] font-medium text-foreground/90">
-                                  {program.title}
-                                </span>
-                                <Badge className={cn(CHIP_CLASSNAME, "border-0", status.tone)}>
-                                  {status.label}
-                                </Badge>
-                                {program.attentionCount > 0 ? (
-                                  <Badge className="h-4 border-0 bg-red-500/12 px-1 text-[8px] text-red-700 dark:text-red-300">
-                                    {program.attentionCount} attention
+                      return (
+                        <SidebarMenuSubItem key={program.id} className="w-full">
+                          <div className="flex items-start gap-1 rounded-lg">
+                            <SidebarMenuSubButton
+                              render={<button type="button" />}
+                              size="sm"
+                              className="h-auto min-h-7 flex-1 cursor-pointer items-start px-2 py-1.5"
+                              onClick={() => {
+                                void handleProgramToggle(program);
+                              }}
+                            >
+                              <ChevronRightIcon
+                                className={cn(
+                                  "mt-0.5 size-3 shrink-0 text-muted-foreground/70 transition-transform",
+                                  programOpen ? "rotate-90" : "",
+                                )}
+                              />
+                              <div className="min-w-0 flex-1 text-left">
+                                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                  <span className="truncate text-[11px] font-medium text-foreground/90">
+                                    {program.title}
+                                  </span>
+                                  <Badge
+                                    className={cn(
+                                      CHIP_CLASSNAME,
+                                      "border-0",
+                                      programStatusTone(program.status),
+                                    )}
+                                  >
+                                    {compactStatusLabel(program.status)}
                                   </Badge>
+                                  {baseStatusLabel ? (
+                                    <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                      base {baseStatusLabel}
+                                    </Badge>
+                                  ) : null}
+                                  {program.attentionCount > 0 ? (
+                                    <Badge className="h-4 border-0 bg-red-500/12 px-1 text-[8px] text-red-700 dark:text-red-300">
+                                      {program.attentionCount} attention
+                                    </Badge>
+                                  ) : null}
+                                  {program.currentTodo ? (
+                                    <Badge
+                                      variant="outline"
+                                      title={program.currentTodo.todoId}
+                                      className={CHIP_CLASSNAME}
+                                    >
+                                      todo {program.currentTodo.agent}
+                                    </Badge>
+                                  ) : null}
+                                  {watchLabel ? (
+                                    <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                      {watchLabel}
+                                    </Badge>
+                                  ) : null}
+                                  {program.activeWorkerCount > 0 ? (
+                                    <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                      {program.activeWorkerCount} workers
+                                    </Badge>
+                                  ) : null}
+                                  {missingCount > 0 ? (
+                                    <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                      {missingCount} gaps
+                                    </Badge>
+                                  ) : program.closeoutSummary.verdict ? (
+                                    <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                      {program.closeoutSummary.verdict}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                {program.statusDetail ? (
+                                  <p className="mt-1 truncate text-[10px] leading-relaxed text-muted-foreground/75">
+                                    {program.statusDetail}
+                                  </p>
                                 ) : null}
+                                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+                                  <Badge
+                                    variant="outline"
+                                    title={program.closeoutSummary.scopeSummary}
+                                    className={CHIP_CLASSNAME}
+                                  >
+                                    scope
+                                  </Badge>
+                                </div>
                               </div>
-                            </div>
-                          </SidebarMenuSubButton>
-                          <button
-                            type="button"
-                            aria-label={`Open Program info for ${program.title}`}
-                            className="mr-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setProgramInfoDialogProgramId(program.id);
-                            }}
-                          >
-                            <InfoIcon className="size-3.5" />
-                          </button>
-                        </div>
+                            </SidebarMenuSubButton>
+                            <button
+                              type="button"
+                              aria-label={`Open TODOs for ${program.title}`}
+                              className="mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setProgramTodosDialog({
+                                  programId: program.id,
+                                  programTitle: program.title,
+                                });
+                              }}
+                            >
+                              <ListTodoIcon className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Open Program info for ${program.title}`}
+                              className="mr-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setProgramInfoDialogProgramId(program.id);
+                              }}
+                            >
+                              <InfoIcon className="size-3.5" />
+                            </button>
+                          </div>
 
-                        {programOpen ? (
-                          <div
-                            ref={attachAnimatedListRef}
-                            className="ml-3 border-l border-border/50 pl-2"
-                          >
-                            {program.currentLane ? (
-                              <div className="relative">
-                                <span
-                                  aria-hidden="true"
-                                  className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
-                                />
-                                <div
-                                  className={cn(
-                                    "flex items-start gap-1 rounded-lg hover:bg-accent/40",
-                                    routeThreadId === program.currentLane.id ? "bg-accent/60" : "",
-                                  )}
-                                >
-                                  <button
-                                    type="button"
-                                    aria-label={
-                                      orchestratorOpen
-                                        ? `Collapse workers for ${program.currentLane.title}`
-                                        : `Expand workers for ${program.currentLane.title}`
-                                    }
-                                    className="ml-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-                                    onClick={() => {
-                                      void handleOrchestratorToggle(program);
-                                    }}
-                                  >
-                                    <ChevronRightIcon
-                                      className={cn(
-                                        "size-3 shrink-0 transition-transform",
-                                        orchestratorOpen ? "rotate-90" : "",
-                                      )}
-                                    />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-lg py-1.5 pr-2 text-left"
-                                    onClick={() => {
-                                      void handleOrchestratorNavigate(program);
-                                    }}
-                                  >
+                          {programOpen ? (
+                            <div
+                              ref={attachAnimatedListRef}
+                              className="ml-3 border-l border-border/50 pl-2"
+                            >
+                              {program.currentLane === null &&
+                              program.historicalLanes.length === 0 ? (
+                                <div className="relative">
+                                  <span
+                                    aria-hidden="true"
+                                    className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+                                  />
+                                  <div className="flex items-start gap-2 rounded-lg border border-dashed border-border/60 bg-muted/20 px-2 py-1.5">
                                     <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
                                       <BotIcon className="size-3" />
                                     </span>
                                     <div className="min-w-0 flex-1">
-                                      <div className="flex min-w-0 items-center gap-1.5">
-                                        <span className="truncate text-[11px] font-medium text-foreground/90">
-                                          {program.currentLane.title}
+                                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                        <span className="text-[11px] font-medium text-foreground/90">
+                                          No active orchestrator lane
                                         </span>
-                                        <Badge variant="outline" className={CHIP_CLASSNAME}>
-                                          {program.currentLane.workerCount} workers
-                                        </Badge>
+                                        {program.historicalOrchestratorCount > 0 ? (
+                                          <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                            {program.historicalOrchestratorCount} historical lanes
+                                          </Badge>
+                                        ) : null}
+                                        {program.historicalWorkerCount > 0 ? (
+                                          <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                            {program.historicalWorkerCount} historical workers
+                                          </Badge>
+                                        ) : null}
+                                      </div>
+                                      <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
+                                        {program.statusDetail ??
+                                          (program.lastHistoricalLane
+                                            ? `Most recent archived lane: ${program.lastHistoricalLane.title}.`
+                                            : "This Program currently has no active lane and no recorded historical lineage.")}
+                                      </p>
+                                      <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/70">
+                                        {program.lastHistoricalLane
+                                          ? `Most recent archived lane: ${program.lastHistoricalLane.title}.`
+                                          : "No historical orchestration lineage is recorded for this Program."}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      aria-label={`Open TODOs for ${program.title}`}
+                                      className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setProgramTodosDialog({
+                                          programId: program.id,
+                                          programTitle: program.title,
+                                        });
+                                      }}
+                                    >
+                                      <ListTodoIcon className="size-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  {program.currentLane === null &&
+                                  program.historicalLanes.length > 0 ? (
+                                    <div className="relative mb-1">
+                                      <span
+                                        aria-hidden="true"
+                                        className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
+                                      />
+                                      <div className="flex items-start gap-2 rounded-lg border border-dashed border-border/60 bg-muted/20 px-2 py-1.5">
+                                        <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
+                                          <BotIcon className="size-3" />
+                                        </span>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                            <span className="text-[11px] font-medium text-foreground/90">
+                                              No active orchestrator lane
+                                            </span>
+                                            <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                              {program.historicalOrchestratorCount} historical lanes
+                                            </Badge>
+                                            {program.historicalWorkerCount > 0 ? (
+                                              <Badge variant="outline" className={CHIP_CLASSNAME}>
+                                                {program.historicalWorkerCount} historical workers
+                                              </Badge>
+                                            ) : null}
+                                          </div>
+                                          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
+                                            {program.statusDetail ??
+                                              "Historical orchestration remains browsable below."}
+                                          </p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          aria-label={`Open TODOs for ${program.title}`}
+                                          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setProgramTodosDialog({
+                                              programId: program.id,
+                                              programTitle: program.title,
+                                            });
+                                          }}
+                                        >
+                                          <ListTodoIcon className="size-3.5" />
+                                        </button>
                                       </div>
                                     </div>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    aria-label={`Open TODOs for ${program.title}`}
-                                    className="mr-1 mt-1 inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setProgramTodosDialog({
-                                        programId: program.id,
-                                        programTitle: program.title,
-                                      });
-                                    }}
-                                  >
-                                    <ListTodoIcon className="size-3.5" />
-                                  </button>
-                                </div>
+                                  ) : null}
 
-                                {orchestratorOpen ? (
-                                  <div
-                                    ref={attachAnimatedListRef}
-                                    className="ml-3 border-l border-border/50 pl-2"
-                                  >
-                                    {program.currentLane.workers.length > 0 ? (
-                                      <div ref={attachAnimatedListRef} className="space-y-0.5">
-                                        {program.currentLane.workers.map((worker) => {
-                                          const thread = worker.thread;
-                                          const isActive = routeThreadId === worker.id;
-                                          const isSelected = selectedThreadIds.has(
-                                            worker.id as ThreadId,
-                                          );
-                                          const lastVisitedAt =
-                                            threadLastVisitedAtById[worker.id] ?? undefined;
-                                          const threadStatus =
-                                            thread === null
-                                              ? null
-                                              : resolveThreadStatusPill({
-                                                  thread: {
-                                                    ...thread,
-                                                    lastVisitedAt,
-                                                  },
-                                                  hasPendingApprovals:
-                                                    derivePendingApprovals(thread.activities)
-                                                      .length > 0,
-                                                  hasPendingUserInput:
-                                                    derivePendingUserInputs(thread.activities)
-                                                      .length > 0,
-                                                });
-
-                                          return (
-                                            <div
-                                              key={worker.id}
-                                              className={cn(
-                                                "relative flex items-center gap-1 rounded-md px-1.5 py-1 text-left",
-                                                isActive || isSelected
-                                                  ? "bg-accent/60"
-                                                  : "hover:bg-accent/40",
-                                              )}
-                                              onContextMenu={(event) => {
-                                                event.preventDefault();
-                                                if (thread) {
-                                                  void handleWorkerContextMenu(thread.id);
-                                                }
-                                              }}
-                                            >
-                                              <span
-                                                aria-hidden="true"
-                                                className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
-                                              />
-                                              <button
-                                                type="button"
-                                                className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
-                                                onClick={(event) => {
-                                                  if (!thread) {
-                                                    return;
-                                                  }
-                                                  if (event.shiftKey) {
-                                                    rangeSelectTo(
-                                                      thread.id,
-                                                      orderedWorkerThreadIds as ThreadId[],
-                                                    );
-                                                    return;
-                                                  }
-                                                  if (event.metaKey || event.ctrlKey) {
-                                                    toggleThread(thread.id);
-                                                    return;
-                                                  }
-                                                  clearSelection();
-                                                  setAnchor(thread.id);
-                                                  void navigateToThread(thread.id);
-                                                }}
-                                              >
-                                                <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-amber-500/12 text-amber-600 dark:text-amber-300">
-                                                  <HardHatIcon className="size-3" />
-                                                </span>
-                                                {threadStatus ? (
-                                                  <ThreadStatusLabel
-                                                    status={threadStatus}
-                                                    compact
-                                                  />
-                                                ) : null}
-                                                <WorkerRepoBadge
-                                                  runtimeState={worker.runtimeState}
-                                                  runtimeStateMessage={worker.runtimeStateMessage}
-                                                  threadId={worker.id as ThreadId}
-                                                  worktreePath={worker.worktreePathHint}
-                                                />
-                                                <WakeBadge state={worker.wakeState} />
-                                                {renamingThreadId === worker.id && thread ? (
-                                                  <input
-                                                    ref={renamingInputRef}
-                                                    value={renamingTitle}
-                                                    onChange={(event) => {
-                                                      setRenamingTitle(event.target.value);
-                                                    }}
-                                                    onBlur={() => {
-                                                      void commitRename();
-                                                    }}
-                                                    onKeyDown={(event) => {
-                                                      if (event.key === "Enter") {
-                                                        event.preventDefault();
-                                                        void commitRename();
-                                                      }
-                                                      if (event.key === "Escape") {
-                                                        setRenamingThreadId(null);
-                                                      }
-                                                    }}
-                                                    className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 py-0.5 text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                                                  />
-                                                ) : (
-                                                  <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">
-                                                    {worker.title}
-                                                  </span>
-                                                )}
-                                              </button>
-                                              <WorkerRuntimePopover
-                                                runtimeState={worker.runtimeState}
-                                                runtimeStateMessage={worker.runtimeStateMessage}
-                                                threadId={worker.id as ThreadId}
-                                                worktreePath={worker.worktreePathHint}
-                                                workerLabel={worker.title}
-                                              />
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    ) : (
-                                      <div className="relative px-2 py-1.5 text-[10px] text-muted-foreground/70">
-                                        <span
-                                          aria-hidden="true"
-                                          className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
-                                        />
-                                        No workers
-                                      </div>
+                                  <div ref={attachAnimatedListRef} className="space-y-1">
+                                    {programLanes.map((lane, laneIndex) =>
+                                      renderLane(
+                                        lane,
+                                        program,
+                                        laneIndex === 0 && program.currentLane !== null,
+                                      ),
                                     )}
                                   </div>
-                                ) : null}
-                              </div>
-                            ) : (
-                              <div className="relative">
-                                <span
-                                  aria-hidden="true"
-                                  className="absolute left-0 top-3 h-px w-2 -translate-x-full bg-border/60"
-                                />
-                                <div className="flex items-start gap-2 rounded-lg border border-dashed border-border/60 bg-muted/20 px-2 py-1.5">
-                                  <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-300">
-                                    <BotIcon className="size-3" />
-                                  </span>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                      <span className="text-[11px] font-medium text-foreground/90">
-                                        No active orchestrator lane
-                                      </span>
-                                      {program.historicalOrchestratorCount > 0 ? (
-                                        <Badge variant="outline" className={CHIP_CLASSNAME}>
-                                          {program.historicalOrchestratorCount} historical lanes
-                                        </Badge>
-                                      ) : null}
-                                      {program.historicalWorkerCount > 0 ? (
-                                        <Badge variant="outline" className={CHIP_CLASSNAME}>
-                                          {program.historicalWorkerCount} historical workers
-                                        </Badge>
-                                      ) : null}
-                                    </div>
-                                    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
-                                      {program.lastHistoricalLane
-                                        ? `Most recent archived lane: ${program.lastHistoricalLane.title}.`
-                                        : "This Program currently has no active lane and no recorded historical lineage."}
-                                    </p>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    aria-label={`Open TODOs for ${program.title}`}
-                                    className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setProgramTodosDialog({
-                                        programId: program.id,
-                                        programTitle: program.title,
-                                      });
-                                    }}
-                                  >
-                                    <ListTodoIcon className="size-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
-                      </SidebarMenuSubItem>
-                    );
-                  })}
-                </SidebarMenuSub>
-              </SidebarMenuItem>
-            ))}
+                                </>
+                              )}
+                            </div>
+                          ) : null}
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                  </SidebarMenuSub>
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

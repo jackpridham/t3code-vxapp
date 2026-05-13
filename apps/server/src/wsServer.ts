@@ -86,6 +86,7 @@ import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
 import { makeVxappWsRouteHandlers, type VxappWsRouteHandlerServices } from "./extensions/vxapp";
 import { resolveStartupBootstrapSelection } from "./bootstrapThreadSelection";
+import { AgentRuntime } from "./agentRuntime/Services/AgentRuntime.ts";
 import { WorkerRuntime } from "./workerRuntime/Services/WorkerRuntime.ts";
 
 /**
@@ -193,6 +194,7 @@ export type ServerRuntimeServices =
   | WorkspaceFileSystem
   | WorkspacePaths
   | ProjectHooksService
+  | AgentRuntime
   | WorkerRuntime
   | VxappWsRouteHandlerServices
   | Open
@@ -310,6 +312,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const workspaceFileSystem = yield* WorkspaceFileSystem;
   const workspacePaths = yield* WorkspacePaths;
   const projectHooksService = yield* ProjectHooksService;
+  const agentRuntime = yield* AgentRuntime;
   const workerRuntime = yield* WorkerRuntime;
   const vxappWsRouteHandlers = yield* makeVxappWsRouteHandlers;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -1138,6 +1141,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.serverGetWorkerRuntimeSnapshot: {
         const body = stripRequestTag(request.body);
         return yield* workerRuntime
+          .getSnapshot(body)
+          .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message })));
+      }
+
+      case WS_METHODS.serverGetAgentRuntimeSnapshot: {
+        const body = stripRequestTag(request.body);
+        return yield* agentRuntime
           .getSnapshot(body)
           .pipe(Effect.mapError((cause) => new RouteRequestError({ message: cause.message })));
       }

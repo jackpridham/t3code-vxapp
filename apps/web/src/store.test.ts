@@ -18,6 +18,8 @@ vi.mock("./notificationDispatch", () => ({
   dispatchNotification: vi.fn(),
 }));
 
+import { dispatchNotification } from "./notificationDispatch";
+
 import {
   accumulateFileChanges,
   applyOrchestrationEvent,
@@ -52,6 +54,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     activities: [],
     proposedPlans: [],
     error: null,
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
     createdAt: "2026-02-13T00:00:00.000Z",
     archivedAt: null,
     latestTurn: null,
@@ -138,6 +144,10 @@ function makeReadModelThread(overrides: Partial<ReadModelThreadWithLabels> = {})
     proposedPlans: [],
     checkpoints: [],
     session: null,
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
     ...overrides,
   } satisfies ReadModelThreadWithLabels;
 }
@@ -689,6 +699,74 @@ describe("store read model sync", () => {
     );
 
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
+  });
+
+  it("suppresses archived capacity errors from the active thread banner but preserves raw session evidence", () => {
+    const capacityError = "Selected model is at capacity. Please try a different model.";
+    const next = syncServerReadModel(
+      makeState(makeThread()),
+      makeReadModel(
+        makeReadModelThread({
+          archivedAt: "2026-05-13T10:00:00.000Z",
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            status: "error",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: capacityError,
+            updatedAt: "2026-05-13T10:00:00.000Z",
+          },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: capacityError,
+          errorPresentationSource: "historical_session_last_error",
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.error).toBeNull();
+    expect(next.threads[0]?.hasActiveError).toBe(false);
+    expect(next.threads[0]?.historicalError).toBe(capacityError);
+    expect(next.threads[0]?.session?.lastError).toBe(capacityError);
+  });
+
+  it("maps active backend error presentation into the thread banner state", () => {
+    const usageLimitError =
+      "You've hit your usage limit. Upgrade to Pro or try again later.";
+    const next = syncServerReadModel(
+      makeState(makeThread()),
+      makeReadModel(
+        makeReadModelThread({
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-1"),
+            state: "error",
+            requestedAt: "2026-05-13T10:00:00.000Z",
+            startedAt: "2026-05-13T10:00:01.000Z",
+            completedAt: "2026-05-13T10:00:02.000Z",
+            assistantMessageId: null,
+          },
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            status: "error",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: usageLimitError,
+            updatedAt: "2026-05-13T10:00:02.000Z",
+          },
+          hasActiveError: true,
+          activeError: usageLimitError,
+          historicalError: null,
+          errorPresentationSource: "active_session_last_error",
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.error).toBe(usageLimitError);
+    expect(next.threads[0]?.hasActiveError).toBe(true);
+    expect(next.threads[0]?.activeError).toBe(usageLimitError);
+    expect(next.threads[0]?.historicalError).toBeNull();
   });
 
   it("maps snapshot coverage from bounded thread payloads", () => {
@@ -1818,6 +1896,10 @@ describe("incremental orchestration updates", () => {
             lastError: null,
             updatedAt: "2026-02-27T00:00:02.000Z",
           },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
         },
         { sequence: 2 },
       ),
@@ -1840,6 +1922,42 @@ describe("incremental orchestration updates", () => {
     expect(next.threads[0]?.session?.status).toBe("running");
     expect(next.threads[0]?.latestTurn?.state).toBe("completed");
     expect(next.threads[0]?.messages).toHaveLength(1);
+  });
+
+  it("does not fire a rate-limit notification for archived thread residue", () => {
+    const capacityError = "Selected model is at capacity. Please try a different model.";
+    const state = makeState(
+      makeThread({
+        archivedAt: "2026-05-13T10:05:00.000Z",
+      }),
+    );
+
+    applyOrchestrationEvent(
+      state,
+      makeEvent("thread.session-set", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "error",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: capacityError,
+          updatedAt: "2026-05-13T10:05:00.000Z",
+        },
+        hasActiveError: false,
+        activeError: null,
+        historicalError: capacityError,
+        errorPresentationSource: "historical_session_last_error",
+      }),
+    );
+
+    expect(dispatchNotification).not.toHaveBeenCalledWith(
+      "thread-rate-limited",
+      "warning",
+      "Rate limited",
+      capacityError,
+    );
   });
 
   it("does not regress latestTurn when an older turn diff completes late", () => {
@@ -2154,6 +2272,10 @@ describe("incremental orchestration updates", () => {
           lastError: null,
           updatedAt: "2026-02-27T00:00:04.000Z",
         },
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
       }),
     );
 

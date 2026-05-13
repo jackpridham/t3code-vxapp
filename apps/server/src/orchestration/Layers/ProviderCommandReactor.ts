@@ -29,6 +29,10 @@ import {
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  resolveLocalThreadErrorPresentation,
+  type LocalThreadErrorPresentation,
+} from "../localThreadErrorPresentation.ts";
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -245,6 +249,7 @@ const make = Effect.gen(function* () {
   const setThreadSession = (input: {
     readonly threadId: ThreadId;
     readonly session: OrchestrationSession;
+    readonly errorPresentation: LocalThreadErrorPresentation;
     readonly createdAt: string;
   }) =>
     orchestrationEngine.dispatch({
@@ -252,6 +257,7 @@ const make = Effect.gen(function* () {
       commandId: serverCommandId("provider-session-set"),
       threadId: input.threadId,
       session: input.session,
+      ...input.errorPresentation,
       createdAt: input.createdAt,
     });
 
@@ -287,6 +293,13 @@ const make = Effect.gen(function* () {
         providerName,
         runtimeMode,
       },
+      errorPresentation: resolveLocalThreadErrorPresentation({
+        archivedAt: thread.archivedAt,
+        deletedAt: thread.deletedAt,
+        latestTurnState: thread.latestTurn?.state ?? null,
+        sessionStatus: input.session.status,
+        sessionLastError: input.session.lastError,
+      }),
       createdAt: input.session.updatedAt,
     });
 
@@ -395,6 +408,13 @@ const make = Effect.gen(function* () {
           lastError: session.lastError ?? null,
           updatedAt: session.updatedAt,
         },
+        errorPresentation: resolveLocalThreadErrorPresentation({
+          archivedAt: thread.archivedAt,
+          deletedAt: thread.deletedAt,
+          latestTurnState: thread.latestTurn?.state ?? null,
+          sessionStatus: mapProviderSessionStatusToOrchestrationStatus(session.status),
+          sessionLastError: session.lastError ?? null,
+        }),
         createdAt,
       });
 
@@ -944,6 +964,13 @@ const make = Effect.gen(function* () {
         lastError: thread.session?.lastError ?? null,
         updatedAt: now,
       },
+      errorPresentation: resolveLocalThreadErrorPresentation({
+        archivedAt: thread.archivedAt,
+        deletedAt: thread.deletedAt,
+        latestTurnState: thread.latestTurn?.state ?? null,
+        sessionStatus: "stopped",
+        sessionLastError: thread.session?.lastError ?? null,
+      }),
       createdAt: now,
     });
     sessionBoundaryFences.delete(thread.id);
@@ -970,6 +997,13 @@ const make = Effect.gen(function* () {
           lastError: thread.session?.lastError ?? null,
           updatedAt: archivedAt,
         },
+        errorPresentation: resolveLocalThreadErrorPresentation({
+          archivedAt,
+          deletedAt: thread.deletedAt,
+          latestTurnState: thread.latestTurn?.state ?? null,
+          sessionStatus: "stopped",
+          sessionLastError: thread.session?.lastError ?? null,
+        }),
         createdAt: archivedAt,
       });
     }

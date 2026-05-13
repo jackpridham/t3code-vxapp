@@ -4,6 +4,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ModelSelection,
+  type OrchestrationThreadErrorPresentationSource,
   type OrchestrationLatestTurn,
   type OrchestrationProject,
   type OrchestrationProjectKind,
@@ -182,6 +183,36 @@ function mapSession(input: {
   };
 }
 
+function mapThreadErrorPresentation(input: JsonRecord): {
+  hasActiveError: boolean;
+  activeError: string | null;
+  historicalError: string | null;
+  errorPresentationSource: OrchestrationThreadErrorPresentationSource;
+} {
+  const hasActiveError = input.hasActiveError;
+  const activeError = asString(input.activeError);
+  const historicalError = asString(input.historicalError);
+  const errorPresentationSource = asString(input.errorPresentationSource);
+  if (
+    typeof hasActiveError !== "boolean" ||
+    (errorPresentationSource !== "none" &&
+      errorPresentationSource !== "active_session_last_error" &&
+      errorPresentationSource !== "active_runtime_failure" &&
+      errorPresentationSource !== "historical_session_last_error")
+  ) {
+    throw new Error("agents-vxapp thread payload is missing authoritative error presentation fields.");
+  }
+  if (hasActiveError && activeError === null) {
+    throw new Error("agents-vxapp thread payload declared an active error without activeError.");
+  }
+  return {
+    hasActiveError,
+    activeError,
+    historicalError,
+    errorPresentationSource,
+  };
+}
+
 function normalizeProjectKind(value: unknown): OrchestrationProjectKind {
   const kind = asString(value);
   return kind === "executive" || kind === "orchestrator" || kind === "project" ? kind : "project";
@@ -205,6 +236,7 @@ function mapThreadSummary(input: {
   }
   const session = asRecord(currentThread.session);
   const labels = normalizeThreadLabels(currentThread.labels);
+  const errorPresentation = mapThreadErrorPresentation(currentThread);
   return {
     id: threadId,
     projectId,
@@ -240,6 +272,7 @@ function mapThreadSummary(input: {
     executiveProjectId:
       (asString(currentThread.executiveProjectId) as ProjectId | null) ?? undefined,
     executiveThreadId: (asString(currentThread.executiveThreadId) as ThreadId | null) ?? undefined,
+    ...errorPresentation,
   };
 }
 

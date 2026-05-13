@@ -133,6 +133,14 @@ export interface Thread {
   messages: ChatMessage[];
   proposedPlans: ProposedPlan[];
   error: string | null;
+  hasActiveError: boolean;
+  activeError: string | null;
+  historicalError: string | null;
+  errorPresentationSource:
+    | "none"
+    | "active_session_last_error"
+    | "active_runtime_failure"
+    | "historical_session_last_error";
   createdAt: string;
   archivedAt: string | null;
   updatedAt?: string | undefined;

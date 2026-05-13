@@ -1797,6 +1797,10 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
               lastError: null,
               updatedAt: "2026-02-26T16:00:01.000Z",
             },
+            hasActiveError: false,
+            activeError: null,
+            historicalError: null,
+            errorPresentationSource: "none",
           },
         });
 
@@ -2144,6 +2148,10 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             lastError: null,
             updatedAt: "2026-02-26T14:00:02.000Z",
           },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
         },
       });
 
@@ -2354,6 +2362,10 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             lastError: null,
             updatedAt: "2026-02-26T17:00:03.000Z",
           },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
         },
       });
 
@@ -2466,6 +2478,10 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             lastError: null,
             updatedAt: "2026-02-26T17:00:06.000Z",
           },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
         },
       });
 
@@ -2776,6 +2792,10 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
             lastError: null,
             updatedAt: sessionSetAt,
           },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
         },
       });
 
@@ -3105,6 +3125,10 @@ it.layer(BaseTestLayer)("Projection late-turn reconciliation", (it) => {
               lastError: null,
               updatedAt: "2026-02-26T16:00:04.000Z",
             },
+            hasActiveError: false,
+            activeError: null,
+            historicalError: null,
+            errorPresentationSource: "none",
           },
         });
 
@@ -3249,6 +3273,10 @@ it.layer(BaseTestLayer)("Projection late-turn reconciliation", (it) => {
               lastError: null,
               updatedAt: "2026-02-26T16:30:03.000Z",
             },
+            hasActiveError: false,
+            activeError: null,
+            historicalError: null,
+            errorPresentationSource: "none",
           },
         });
 
@@ -3273,6 +3301,10 @@ it.layer(BaseTestLayer)("Projection late-turn reconciliation", (it) => {
               lastError: null,
               updatedAt: "2026-02-26T16:30:03.500Z",
             },
+            hasActiveError: false,
+            activeError: null,
+            historicalError: null,
+            errorPresentationSource: "none",
           },
         });
 

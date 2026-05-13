@@ -34,9 +34,13 @@ export function isMarkdownPath(pathValue: string | null | undefined): boolean {
 type IdeProjectThread = Pick<
   Thread,
   | "archivedAt"
+  | "activeError"
   | "createdAt"
   | "executiveProjectId"
   | "executiveThreadId"
+  | "errorPresentationSource"
+  | "hasActiveError"
+  | "historicalError"
   | "id"
   | "labels"
   | "modelSelection"

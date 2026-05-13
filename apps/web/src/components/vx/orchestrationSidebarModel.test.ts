@@ -3,13 +3,14 @@ import {
   ProgramId,
   ProjectId,
   ThreadId,
+  type ServerAgentsVxappProgramSnapshot,
   type ServerGetAgentsVxappSidebarGraphResult,
 } from "@t3tools/contracts";
 import {
   buildOrchestrationSidebarModel,
   resolveSidebarRootThreadIds,
 } from "./orchestrationSidebarModel";
-import type { Program, Project, Thread } from "~/types";
+import type { Project, Thread } from "~/types";
 
 function makeProject(input: Partial<Project> & Pick<Project, "id" | "name" | "cwd">): Project {
   return {
@@ -30,6 +31,10 @@ function makeThread(input: Partial<Thread> & Pick<Thread, "id" | "projectId" | "
     codexThreadId: null,
     createdAt: "2026-05-10T00:00:00.000Z",
     error: null,
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
     id,
     interactionMode: "default",
     latestTurn: null,
@@ -48,20 +53,25 @@ function makeThread(input: Partial<Thread> & Pick<Thread, "id" | "projectId" | "
   } as Thread;
 }
 
-function makeProgram(input: Partial<Program> & Pick<Program, "id" | "title" | "status">): Program {
+function makeProgram(
+  input: Partial<ServerAgentsVxappProgramSnapshot> &
+    Pick<ServerAgentsVxappProgramSnapshot, "id" | "title" | "status">,
+): ServerAgentsVxappProgramSnapshot {
   return {
-    affectedAppTargets: [],
+    baseStatus: input.status,
     completedAt: null,
+    currentStatus: input.status,
     currentOrchestratorThreadId: null,
-    declaredRepos: [],
     deletedAt: null,
     executiveProjectId: ProjectId.makeUnsafe("exec-project"),
     executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+    metadata: null,
+    closeout: null,
     objective: null,
     createdAt: "2026-05-10T00:00:00.000Z",
     updatedAt: "2026-05-10T00:00:00.000Z",
     ...input,
-  } as Program;
+  };
 }
 
 function makeSqliteGraph(
@@ -72,15 +82,12 @@ function makeSqliteGraph(
     dbPath: "/home/gizmo/agents-vxapp/.agents/state/vx_agents.sqlite3",
     fallbackReason: null,
     mirrorDiagnostics: {
-      divergentProgramIds: [],
-      missingProgramIds: [],
       missingProjectIds: [],
       missingThreadIds: [],
       staleMirror: false,
     },
     notifications: [],
     openWakes: [],
-    programs: [],
     source: "sqlite",
     threadLinks: [],
     watchProjections: [],
@@ -108,7 +115,14 @@ describe("buildOrchestrationSidebarModel", () => {
         } as any,
       ],
       programNotifications: [],
-      programs: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Program A",
+          status: "active",
+        }),
+      ],
       projects: [
         makeProject({
           id: ProjectId.makeUnsafe("exec-project"),
@@ -152,23 +166,6 @@ describe("buildOrchestrationSidebarModel", () => {
         }),
       ],
       sqliteGraph: makeSqliteGraph({
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: ProgramId.makeUnsafe("program-1"),
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Program A",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -260,6 +257,202 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.diagnostics.staleMirror).toBe(false);
   });
 
+  it("excludes terminal programs from the sidebar portfolio", () => {
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-active"),
+          id: ProgramId.makeUnsafe("program-active"),
+          title: "Active Program",
+          status: "active",
+        }),
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-completed"),
+          id: ProgramId.makeUnsafe("program-completed"),
+          title: "Completed Program",
+          status: "completed",
+        }),
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-cancelled"),
+          id: ProgramId.makeUnsafe("program-cancelled"),
+          title: "Cancelled Program",
+          status: "cancelled",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: null,
+      threads: [],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.programs.map((program) => program.id)).toEqual(["program-active"]);
+    expect(
+      resolveSidebarRootThreadIds({
+        programs: [
+          makeProgram({
+            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-active"),
+            id: ProgramId.makeUnsafe("program-active"),
+            title: "Active Program",
+            status: "active",
+          }),
+          makeProgram({
+            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-completed"),
+            id: ProgramId.makeUnsafe("program-completed"),
+            title: "Completed Program",
+            status: "completed",
+          }),
+        ],
+      }),
+    ).toEqual([ThreadId.makeUnsafe("orch-active")]);
+  });
+
+  it("preserves authoritative program status fields on sidebar nodes", () => {
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          baseStatus: "active",
+          currentStatus: "blocked",
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Blocked Program",
+          status: "blocked",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: null,
+      threads: [],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.programs[0]).toMatchObject({
+      baseStatus: "active",
+      currentStatus: "blocked",
+      status: "blocked",
+    });
+  });
+
+  it("attaches current todo, watch state, closeout summary, and worker counts to programs", () => {
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      currentTodos: [
+        {
+          agent: "jasper",
+          createdAt: "2026-05-10T00:00:00.000Z",
+          programId: ProgramId.makeUnsafe("program-1"),
+          todoId: "todo-123" as any,
+          updatedAt: "2026-05-10T00:00:01.000Z",
+        } as any,
+      ],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          closeout: {
+            closeout: {
+              lastMissing: ["PR missing"],
+            },
+            scope: {
+              declaredRepos: ["api-vxapp"],
+              appTargets: ["api"],
+              requiredExternalE2ESuites: [],
+              requiredLocalSuites: ["pnpm:type-check"],
+            },
+          },
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Blocked Program",
+          status: "blocked",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map([
+        [
+          ThreadId.makeUnsafe("orch-1"),
+          [
+            {
+              id: ThreadId.makeUnsafe("worker-1"),
+              latestTurn: null,
+              orchestratorProjectId: ProjectId.makeUnsafe("exec-project"),
+              projectId: ProjectId.makeUnsafe("exec-project"),
+              session: null,
+              spawnRole: "worker",
+              title: "worker/ket Validation worker",
+              worktreePath: "/worker-1",
+            },
+          ],
+        ],
+      ]),
+      sqliteGraph: makeSqliteGraph({
+        watchProjections: [
+          {
+            classification: "awaiting_external",
+            createdAt: "2026-05-10T00:00:00.000Z",
+            enabled: true,
+            programId: ProgramId.makeUnsafe("program-1"),
+            reason: "Waiting for vendor callback proof.",
+            updatedAt: "2026-05-10T00:00:01.000Z",
+            watchId: "watch-1" as any,
+          } as any,
+        ],
+      }),
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("orch-1"),
+          projectId: ProjectId.makeUnsafe("exec-project"),
+          title: "Orchestrator",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-1"),
+          orchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+          projectId: ProjectId.makeUnsafe("exec-project"),
+          spawnRole: "worker",
+          title: "worker/ket Validation worker",
+          worktreePath: "/worker-1",
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.programs[0]).toMatchObject({
+      activeWorkerCount: 1,
+      currentTodo: {
+        agent: "jasper",
+        todoId: "todo-123",
+      },
+      watch: {
+        classification: "awaiting_external",
+        enabled: true,
+        reason: "Waiting for vendor callback proof.",
+      },
+    });
+    expect(model.executives[0]?.programs[0]?.closeoutSummary.missingItems).toEqual(
+      expect.arrayContaining(["PR missing", "post-flight", "1 local suite"]),
+    );
+    expect(model.executives[0]?.programs[0]?.statusDetail).toContain("PR missing");
+  });
+
   it("keeps programs with null roots in an explicit empty orchestrator state", () => {
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
@@ -312,23 +505,6 @@ describe("buildOrchestrationSidebarModel", () => {
       ],
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: null,
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: ProgramId.makeUnsafe("program-party"),
-            metadata: null,
-            objective: null,
-            status: "awaiting_founder",
-            title: "PartyMore.ai launch plan and first delivery wave",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: "2026-05-09T00:00:00.000Z",
@@ -578,23 +754,6 @@ describe("buildOrchestrationSidebarModel", () => {
         ],
       ]),
       sqliteGraph: makeSqliteGraph({
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-live"),
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: ProgramId.makeUnsafe("program-1"),
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Program A",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -740,23 +899,6 @@ describe("buildOrchestrationSidebarModel", () => {
       ],
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: null,
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: ProgramId.makeUnsafe("program-1"),
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Program A",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: "2026-05-09T00:00:00.000Z",
@@ -851,7 +993,14 @@ describe("buildOrchestrationSidebarModel", () => {
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
       programNotifications: [],
-      programs: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-role-session"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "PartyMore.ai launch plan and first delivery wave",
+          status: "active",
+        }),
+      ],
       projects: [
         makeProject({
           id: ProjectId.makeUnsafe("workspace-project"),
@@ -861,23 +1010,6 @@ describe("buildOrchestrationSidebarModel", () => {
       ],
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-role-session"),
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: ProgramId.makeUnsafe("program-1"),
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "PartyMore.ai launch plan and first delivery wave",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -925,13 +1057,20 @@ describe("buildOrchestrationSidebarModel", () => {
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
       programNotifications: [],
-      programs: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-missing"),
+          executiveProjectId: ProjectId.makeUnsafe("exec-missing"),
+          executiveThreadId: ThreadId.makeUnsafe("exec-thread-missing"),
+          id: ProgramId.makeUnsafe("program-missing"),
+          title: "Missing Program",
+          status: "active",
+        }),
+      ],
       projects: [],
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
         mirrorDiagnostics: {
-          divergentProgramIds: [],
-          missingProgramIds: [ProgramId.makeUnsafe("program-missing")],
           missingProjectIds: [
             ProjectId.makeUnsafe("exec-missing"),
             ProjectId.makeUnsafe("worker-project-missing"),
@@ -944,23 +1083,6 @@ describe("buildOrchestrationSidebarModel", () => {
           ],
           staleMirror: true,
         },
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-missing"),
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-missing"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread-missing"),
-            id: ProgramId.makeUnsafe("program-missing"),
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Missing Program",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -992,8 +1114,6 @@ describe("buildOrchestrationSidebarModel", () => {
     });
 
     expect(model.diagnostics.staleMirror).toBe(true);
-    expect(model.diagnostics.divergentProgramIds).toEqual([]);
-    expect(model.diagnostics.missingProgramIds).toEqual(["program-missing"]);
     expect(model.diagnostics.missingProjectIds).toEqual(["exec-missing", "worker-project-missing"]);
     expect(model.diagnostics.missingThreadIds).toEqual([
       "exec-thread-missing",
@@ -1006,13 +1126,12 @@ describe("buildOrchestrationSidebarModel", () => {
   it("defaults missing divergent sqlite diagnostics to an empty list", () => {
     const sqliteGraph = makeSqliteGraph({
       mirrorDiagnostics: {
-        missingProgramIds: [ProgramId.makeUnsafe("program-missing")],
         missingProjectIds: [],
         missingThreadIds: [],
         staleMirror: true,
       } as unknown as ServerGetAgentsVxappSidebarGraphResult["mirrorDiagnostics"],
     });
-    delete (sqliteGraph.mirrorDiagnostics as Record<string, unknown>).divergentProgramIds;
+    delete (sqliteGraph.mirrorDiagnostics as Record<string, unknown>).missingProjectIds;
 
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
@@ -1025,12 +1144,11 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.diagnostics.divergentProgramIds).toEqual([]);
-    expect(model.diagnostics.missingProgramIds).toEqual(["program-missing"]);
+    expect(model.diagnostics.missingProjectIds).toEqual([]);
     expect(model.diagnostics.staleMirror).toBe(true);
   });
 
-  it("fails closed to live T3 programs when sqlite mirror has divergent program lineage", () => {
+  it("keeps authoritative control-plane programs when sqlite lineage diagnostics are stale", () => {
     const liveProgramId = ProgramId.makeUnsafe("program-live");
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
@@ -1053,29 +1171,10 @@ describe("buildOrchestrationSidebarModel", () => {
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
         mirrorDiagnostics: {
-          divergentProgramIds: [liveProgramId],
-          missingProgramIds: [],
           missingProjectIds: [],
-          missingThreadIds: [],
+          missingThreadIds: [ThreadId.makeUnsafe("orch-stale")],
           staleMirror: true,
         },
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-stale"),
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: liveProgramId,
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Stale Sqlite Program",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
       }),
       threads: [
         makeThread({
@@ -1087,13 +1186,13 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.source).toBe("t3");
+    expect(model.source).toBe("sqlite");
     expect(model.executives[0]?.programs[0]?.title).toBe("Live Program");
     expect(model.executives[0]?.programs[0]?.currentLane?.id).toBe("orch-live");
-    expect(model.diagnostics.divergentProgramIds).toEqual(["program-live"]);
+    expect(model.diagnostics.missingThreadIds).toEqual(["orch-stale"]);
   });
 
-  it("still uses sqlite executive thread authority when the program mirror is stale", () => {
+  it("still uses sqlite executive thread authority when sqlite lineage diagnostics are stale", () => {
     const liveProgramId = ProgramId.makeUnsafe("program-live");
     const executiveProjectId = ProjectId.makeUnsafe("exec-project");
     const executiveThreadId = ThreadId.makeUnsafe("exec-thread");
@@ -1121,29 +1220,10 @@ describe("buildOrchestrationSidebarModel", () => {
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
         mirrorDiagnostics: {
-          divergentProgramIds: [liveProgramId],
-          missingProgramIds: [],
           missingProjectIds: [],
-          missingThreadIds: [],
+          missingThreadIds: [ThreadId.makeUnsafe("orch-stale")],
           staleMirror: true,
         },
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-stale"),
-            deletedAt: null,
-            executiveProjectId,
-            executiveThreadId,
-            id: liveProgramId,
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Stale Sqlite Program",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -1185,7 +1265,7 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.source).toBe("t3");
+    expect(model.source).toBe("sqlite");
     expect(model.executives[0]?.threadId).toBe("exec-thread");
     expect(model.executives[0]?.thread?.id).toBe("exec-thread");
     expect(model.executives[0]?.runtimeState).toBe("inspectable");
@@ -1222,29 +1302,10 @@ describe("buildOrchestrationSidebarModel", () => {
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
         mirrorDiagnostics: {
-          divergentProgramIds: [liveProgramId],
-          missingProgramIds: [],
           missingProjectIds: [],
-          missingThreadIds: [],
+          missingThreadIds: [ThreadId.makeUnsafe("orch-stale")],
           staleMirror: true,
         },
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-stale"),
-            deletedAt: null,
-            executiveProjectId,
-            executiveThreadId: staleExecutiveThreadId,
-            id: liveProgramId,
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Stale Sqlite Program",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -1297,7 +1358,7 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.executives[0]?.programs[0]?.currentLane?.id).toBe("orch-live");
   });
 
-  it("resolves sidebar root thread ids from live programs when sqlite mirror is stale", () => {
+  it("resolves sidebar root thread ids from authoritative control-plane programs", () => {
     expect(
       resolveSidebarRootThreadIds({
         programs: [
@@ -1308,32 +1369,6 @@ describe("buildOrchestrationSidebarModel", () => {
             status: "active",
           }),
         ],
-        sqliteGraph: makeSqliteGraph({
-          mirrorDiagnostics: {
-            divergentProgramIds: [ProgramId.makeUnsafe("program-live")],
-            missingProgramIds: [],
-            missingProjectIds: [],
-            missingThreadIds: [],
-            staleMirror: true,
-          },
-          programs: [
-            {
-              closeout: null,
-              completedAt: null,
-              createdAt: "2026-05-10T00:00:00.000Z",
-              currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-stale"),
-              deletedAt: null,
-              executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-              executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-              id: ProgramId.makeUnsafe("program-live"),
-              metadata: null,
-              objective: null,
-              status: "active",
-              title: "Stale Sqlite Program",
-              updatedAt: "2026-05-10T00:00:00.000Z",
-            },
-          ],
-        }),
       }),
     ).toEqual([ThreadId.makeUnsafe("orch-live")]);
   });
@@ -1342,7 +1377,14 @@ describe("buildOrchestrationSidebarModel", () => {
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
       programNotifications: [],
-      programs: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Program A",
+          status: "active",
+        }),
+      ],
       projects: [
         makeProject({
           id: ProjectId.makeUnsafe("exec-project"),
@@ -1357,23 +1399,6 @@ describe("buildOrchestrationSidebarModel", () => {
       ],
       sessionWorkerThreadsByRootId: new Map(),
       sqliteGraph: makeSqliteGraph({
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: ProgramId.makeUnsafe("program-1"),
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Program A",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -1492,7 +1517,14 @@ describe("buildOrchestrationSidebarModel", () => {
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
       programNotifications: [],
-      programs: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Program A",
+          status: "active",
+        }),
+      ],
       projects: [
         makeProject({
           id: ProjectId.makeUnsafe("exec-project"),
@@ -1537,23 +1569,6 @@ describe("buildOrchestrationSidebarModel", () => {
         }),
       ],
       sqliteGraph: makeSqliteGraph({
-        programs: [
-          {
-            closeout: null,
-            completedAt: null,
-            createdAt: "2026-05-10T00:00:00.000Z",
-            currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
-            deletedAt: null,
-            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
-            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
-            id: ProgramId.makeUnsafe("program-1"),
-            metadata: null,
-            objective: null,
-            status: "active",
-            title: "Program A",
-            updatedAt: "2026-05-10T00:00:00.000Z",
-          },
-        ],
         threadLinks: [
           {
             archivedAt: null,
@@ -1611,6 +1626,73 @@ describe("buildOrchestrationSidebarModel", () => {
     );
     expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.worktreePathHint).toBe(
       "/api",
+    );
+  });
+
+  it("keeps workers inspectable when the live worker project carries the authoritative workspace", () => {
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Program A",
+          status: "active",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+        makeProject({
+          id: ProjectId.makeUnsafe("worker-project"),
+          name: "api-vxapp",
+          cwd: "/worktrees/api-vxapp-task-1",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map([
+        [
+          ThreadId.makeUnsafe("orch-1"),
+          [
+            {
+              id: ThreadId.makeUnsafe("worker-1"),
+              latestTurn: null,
+              orchestratorProjectId: ProjectId.makeUnsafe("exec-project"),
+              projectId: ProjectId.makeUnsafe("worker-project"),
+              session: null,
+              spawnRole: "worker",
+              title: "worker/ket Repair the OAuth callback flow",
+              worktreePath: null,
+            },
+          ],
+        ],
+      ]),
+      sqliteGraph: null,
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("orch-1"),
+          projectId: ProjectId.makeUnsafe("exec-project"),
+          title: "Orchestrator live",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-1"),
+          projectId: ProjectId.makeUnsafe("worker-project"),
+          title: "worker/ket Repair the OAuth callback flow",
+          spawnRole: "worker",
+          worktreePath: null,
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState).toBe(
+      "inspectable",
+    );
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.worktreePathHint).toBe(
+      "/worktrees/api-vxapp-task-1",
     );
   });
 

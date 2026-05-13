@@ -182,6 +182,10 @@ describe("processEventNotifications", () => {
           projectId: ProjectId.makeUnsafe("project-1"),
           title: "Thread 1",
           labels: ["urgent"],
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
           latestTurn: {
             turnId: TurnId.makeUnsafe("turn-1"),
             state: "completed",
@@ -206,6 +210,10 @@ describe("processEventNotifications", () => {
           lastError: null,
           updatedAt: "2026-02-27T00:00:03.000Z",
         },
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
       }),
     ]);
 
@@ -268,6 +276,114 @@ describe("processEventNotifications", () => {
         occurredAt: "2026-02-27T00:00:03.000Z",
         detail: "Post-turn hook failed",
       },
+    );
+  });
+
+  it("does not fire a rate-limit toast for archived thread residue", () => {
+    getState.mockReturnValue({
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project 1",
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread 1",
+          labels: ["urgent"],
+          archivedAt: "2026-05-13T10:10:00.000Z",
+          hasActiveError: false,
+          activeError: null,
+          historicalError: "Selected model is at capacity. Please try a different model.",
+          errorPresentationSource: "historical_session_last_error",
+        },
+      ],
+    });
+
+    processEventNotifications([
+      makeEvent("thread.session-set", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "error",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "Selected model is at capacity. Please try a different model.",
+          updatedAt: "2026-05-13T10:10:00.000Z",
+        },
+        hasActiveError: false,
+        activeError: null,
+        historicalError: "Selected model is at capacity. Please try a different model.",
+        errorPresentationSource: "historical_session_last_error",
+      }),
+    ]);
+
+    expect(dispatchNotification).not.toHaveBeenCalledWith(
+      "thread-rate-limited",
+      "warning",
+      "Rate Limited",
+      undefined,
+      expect.objectContaining({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        detail: "Selected model is at capacity. Please try a different model.",
+      }),
+    );
+  });
+
+  it("fires a rate-limit toast for an active failed thread when the backend marks it active", () => {
+    getState.mockReturnValue({
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-1"),
+          name: "Project 1",
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.makeUnsafe("thread-1"),
+          projectId: ProjectId.makeUnsafe("project-1"),
+          title: "Thread 1",
+          labels: ["urgent"],
+          archivedAt: null,
+          hasActiveError: true,
+          activeError: "Selected model is at capacity. Please try a different model.",
+          historicalError: null,
+          errorPresentationSource: "active_session_last_error",
+        },
+      ],
+    });
+
+    processEventNotifications([
+      makeEvent("thread.session-set", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "error",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "Selected model is at capacity. Please try a different model.",
+          updatedAt: "2026-05-13T10:10:00.000Z",
+        },
+        hasActiveError: true,
+        activeError: "Selected model is at capacity. Please try a different model.",
+        historicalError: null,
+        errorPresentationSource: "active_session_last_error",
+      }),
+    ]);
+
+    expect(dispatchNotification).toHaveBeenCalledWith(
+      "thread-rate-limited",
+      "warning",
+      "Rate Limited",
+      undefined,
+      expect.objectContaining({
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        detail: "Selected model is at capacity. Please try a different model.",
+      }),
     );
   });
 });

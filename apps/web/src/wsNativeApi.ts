@@ -239,6 +239,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(WS_METHODS.serverUpdateAgentsVxappTodo, input),
       deleteAgentsVxappTodo: (input) =>
         transport.request(WS_METHODS.serverDeleteAgentsVxappTodo, input),
+      getAgentRuntimeSnapshot: (input) =>
+        transport.request(WS_METHODS.serverGetAgentRuntimeSnapshot, input),
       getWorkerRuntimeSnapshot: (input) =>
         transport.request(WS_METHODS.serverGetWorkerRuntimeSnapshot, input),
     },

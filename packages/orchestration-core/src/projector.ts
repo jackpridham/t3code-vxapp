@@ -685,6 +685,10 @@ export function projectEvent(
             activities: [],
             checkpoints: [],
             session: null,
+            hasActiveError: false,
+            activeError: null,
+            historicalError: null,
+            errorPresentationSource: "none",
             orchestratorProjectId: payload.orchestratorProjectId,
             orchestratorThreadId: payload.orchestratorThreadId,
             parentThreadId: payload.parentThreadId,
@@ -917,6 +921,10 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
             latestTurn,
+            hasActiveError: payload.hasActiveError,
+            activeError: payload.activeError,
+            historicalError: payload.historicalError,
+            errorPresentationSource: payload.errorPresentationSource,
             updatedAt: event.occurredAt,
           }),
         };

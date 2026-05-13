@@ -3,6 +3,12 @@ import type {
   ServerAgentsVxappTodoSnapshot,
 } from "@t3tools/contracts";
 import type { Project, Thread } from "~/types";
+import { readProgramScope } from "./programDisplay";
+export {
+  readProgramCloseoutVerdict,
+  readProgramScope,
+  readProgramScopeSummary,
+} from "./programDisplay";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -52,12 +58,6 @@ export type ProgramTodoGroup =
       searchText: string;
       todos: readonly ServerAgentsVxappTodoSnapshot[];
     };
-
-function asScopeObject(value: unknown): JsonRecord | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : null;
-}
 
 function sortJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -132,38 +132,6 @@ export function resolveRoleSessionName(path: string | null | undefined): string 
   const normalized = path.replaceAll("\\", "/");
   const match = normalized.match(/\/role-sessions\/([^/]+)\/[^/]+\/workspace$/);
   return match?.[1] ? toTitleCase(match[1]) : null;
-}
-
-export function readProgramScope(program: ServerAgentsVxappProgramSnapshot): JsonRecord | null {
-  return asScopeObject(program.closeout?.scope);
-}
-
-export function readProgramCloseoutVerdict(
-  program: ServerAgentsVxappProgramSnapshot,
-): string | null {
-  const closeout = program.closeout;
-  const nestedCloseout =
-    closeout && typeof closeout.closeout === "object" && closeout.closeout !== null
-      ? (closeout.closeout as Record<string, unknown>)
-      : null;
-  const verdict = nestedCloseout?.lastVerdict;
-  return typeof verdict === "string" ? verdict : null;
-}
-
-export function readProgramScopeSummary(program: ServerAgentsVxappProgramSnapshot): string {
-  const scope = readProgramScope(program);
-  if (!scope) {
-    return "No scope metadata";
-  }
-  const declaredRepos = Array.isArray(scope.declaredRepos) ? scope.declaredRepos.length : 0;
-  const appTargets = Array.isArray(scope.appTargets) ? scope.appTargets.length : 0;
-  const localSuites = Array.isArray(scope.requiredLocalSuites)
-    ? scope.requiredLocalSuites.length
-    : 0;
-  const e2eSuites = Array.isArray(scope.requiredExternalE2ESuites)
-    ? scope.requiredExternalE2ESuites.length
-    : 0;
-  return `${declaredRepos} repos · ${appTargets} targets · ${localSuites} local suites · ${e2eSuites} e2e suites`;
 }
 
 export function resolveExecutiveOptions(input: {

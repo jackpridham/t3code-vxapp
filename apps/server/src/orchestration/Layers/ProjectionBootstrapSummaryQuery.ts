@@ -38,6 +38,7 @@ import { ProjectionOrchestratorWake } from "../../persistence/Services/Projectio
 import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
+import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import {
@@ -206,6 +207,10 @@ function mergeThreadsWithExternal(input: {
       activities: [],
       checkpoints: [],
       session: thread.session,
+      hasActiveError: thread.hasActiveError,
+      activeError: thread.activeError,
+      historicalError: thread.historicalError,
+      errorPresentationSource: thread.errorPresentationSource,
       ...(thread.orchestratorProjectId !== undefined
         ? { orchestratorProjectId: thread.orchestratorProjectId }
         : {}),
@@ -665,6 +670,13 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             (row) =>
               Object.assign(
                 {
+                  ...resolveLocalThreadErrorPresentation({
+                    archivedAt: row.archivedAt,
+                    deletedAt: row.deletedAt,
+                    latestTurnState: latestTurnByThread.get(row.threadId)?.state,
+                    sessionStatus: sessionsByThread.get(row.threadId)?.status,
+                    sessionLastError: sessionsByThread.get(row.threadId)?.lastError,
+                  }),
                   id: row.threadId,
                   projectId: row.projectId,
                   title: row.title,

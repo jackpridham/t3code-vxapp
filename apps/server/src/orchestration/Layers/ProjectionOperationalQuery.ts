@@ -65,6 +65,7 @@ import {
 } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { selectOperationalCtoAttentionItems } from "../projectionCtoAttention.ts";
+import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
 import {
   ProjectionOperationalQuery,
   type ProjectionOperationalQueryShape,
@@ -367,6 +368,13 @@ function mapThreadSummaryRows(input: {
   }
 
   return input.threads.map((row) => ({
+    ...resolveLocalThreadErrorPresentation({
+      archivedAt: row.archivedAt,
+      deletedAt: row.deletedAt,
+      latestTurnState: latestTurnByThreadId.get(row.threadId)?.state,
+      sessionStatus: sessionByThreadId.get(row.threadId)?.status,
+      sessionLastError: sessionByThreadId.get(row.threadId)?.lastError,
+    }),
     id: row.threadId,
     projectId: row.projectId,
     title: row.title,
@@ -434,6 +442,10 @@ function mapSummaryToThread(summary: OrchestrationThreadSummary): OrchestrationT
     checkpoints: [],
     snapshotCoverage: emptyThreadCoverage(),
     session: summary.session,
+    hasActiveError: summary.hasActiveError,
+    activeError: summary.activeError,
+    historicalError: summary.historicalError,
+    errorPresentationSource: summary.errorPresentationSource,
     ...(summary.orchestratorProjectId !== undefined
       ? { orchestratorProjectId: summary.orchestratorProjectId }
       : {}),

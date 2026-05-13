@@ -1,5 +1,6 @@
 import type { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
 import { dispatchNotification } from "./notificationDispatch";
+import { shouldDispatchThreadRateLimitNotification } from "./lib/threadRuntimePresentation";
 import { useStore } from "./store";
 
 export interface OrchestrationBatchEffects {
@@ -125,24 +126,17 @@ export function processEventNotifications(events: ReadonlyArray<OrchestrationEve
           }
         }
 
-        if (event.payload.session.lastError) {
-          const errorMsg =
-            typeof event.payload.session.lastError === "string"
-              ? event.payload.session.lastError
-              : "";
-          if (
-            errorMsg.toLowerCase().includes("rate") ||
-            errorMsg.toLowerCase().includes("limit") ||
-            errorMsg.toLowerCase().includes("429")
-          ) {
-            dispatchNotification("thread-rate-limited", "warning", "Rate Limited", undefined, {
-              threadId,
-              projectName: context.projectName,
-              labels: context.labels,
-              occurredAt: event.payload.session.updatedAt,
-              detail: errorMsg,
-            });
-          }
+        if (
+          context.thread !== undefined &&
+          shouldDispatchThreadRateLimitNotification(context.thread)
+        ) {
+          dispatchNotification("thread-rate-limited", "warning", "Rate Limited", undefined, {
+            threadId,
+            projectName: context.projectName,
+            labels: context.labels,
+            occurredAt: event.payload.session.updatedAt,
+            detail: context.thread.activeError ?? null,
+          });
         }
         break;
       }

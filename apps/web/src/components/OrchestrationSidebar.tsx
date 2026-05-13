@@ -48,6 +48,7 @@ import {
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import { isElectron } from "../env";
+import { presentThreadActiveError } from "../lib/threadRuntimePresentation";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { cn, isLinuxPlatform, isMacPlatform, newCommandId } from "../lib/utils";
 import { useStore } from "../store";
@@ -177,10 +178,14 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 type SidebarThreadSnapshot = Pick<
   Thread,
   | "activities"
+  | "activeError"
   | "archivedAt"
   | "branch"
   | "createdAt"
   | "error"
+  | "errorPresentationSource"
+  | "hasActiveError"
+  | "historicalError"
   | "id"
   | "interactionMode"
   | "latestTurn"
@@ -247,6 +252,10 @@ function toSidebarThreadSnapshot(
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
     error: thread.error,
+    hasActiveError: thread.hasActiveError,
+    activeError: thread.activeError,
+    historicalError: thread.historicalError,
+    errorPresentationSource: thread.errorPresentationSource,
     latestTurn: thread.latestTurn,
     labels: thread.labels ? [...thread.labels] : undefined,
     modelSelection: thread.modelSelection,
@@ -272,6 +281,7 @@ function toSidebarThreadSummarySnapshot(
   thread: OrchestrationThreadSummary,
   lastVisitedAt: string | undefined,
 ): SidebarThreadSnapshot {
+  const activeError = presentThreadActiveError(thread);
   return {
     id: thread.id,
     projectId: thread.projectId,
@@ -296,12 +306,16 @@ function toSidebarThreadSummarySnapshot(
             activeTurnId: thread.session.activeTurnId ?? undefined,
             createdAt: thread.session.updatedAt,
             updatedAt: thread.session.updatedAt,
-            ...(thread.session.lastError ? { lastError: thread.session.lastError } : {}),
+            ...(activeError ? { lastError: activeError } : {}),
           },
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
-    error: null,
+    error: activeError,
+    hasActiveError: thread.hasActiveError,
+    activeError: thread.activeError,
+    historicalError: thread.historicalError,
+    errorPresentationSource: thread.errorPresentationSource,
     latestTurn: thread.latestTurn,
     labels: thread.labels ? [...thread.labels] : undefined,
     modelSelection: thread.modelSelection,

@@ -6,7 +6,6 @@ import type {
   OrchestrationSessionStatus,
   ServerAgentsVxappSidebarAttentionItem,
   ServerAgentsVxappSidebarMirrorDiagnostics,
-  ServerAgentsVxappSidebarProgram,
   ServerAgentsVxappSidebarProgramNotification,
   ServerAgentsVxappSidebarThreadLink,
   ServerAgentsVxappSidebarWake,
@@ -30,18 +29,6 @@ import {
   type AgentsVxappSqliteRow,
   withAgentsVxappSqliteReadonly,
 } from "../agentsVxappSqlite";
-import { resolveProgramCurrentStatus } from "../programStatus";
-
-const VALID_PROGRAM_STATUSES = new Set([
-  "active",
-  "blocked",
-  "awaiting_founder",
-  "awaiting_external",
-  "closeout_in_progress",
-  "founder_review_ready",
-  "completed",
-  "cancelled",
-]);
 const VALID_SESSION_STATUSES = new Set([
   "idle",
   "starting",
@@ -54,20 +41,12 @@ const VALID_SESSION_STATUSES = new Set([
 const VALID_TURN_STATES = new Set(["running", "interrupted", "completed", "error"]);
 const VALID_NOTIFICATION_SEVERITIES = new Set(["critical", "warning", "info"]);
 const EMPTY_MIRROR_DIAGNOSTICS: ServerAgentsVxappSidebarMirrorDiagnostics = {
-  missingProgramIds: [],
-  divergentProgramIds: [],
   missingProjectIds: [],
   missingThreadIds: [],
   staleMirror: false,
 };
 
 const ProjectionProjectIdRow = Schema.Struct({ projectId: ProjectId });
-const ProjectionProgramMirrorRow = Schema.Struct({
-  programId: ProgramId,
-  executiveProjectId: Schema.NullOr(ProjectId),
-  executiveThreadId: Schema.NullOr(ThreadId),
-  currentOrchestratorThreadId: Schema.NullOr(ThreadId),
-});
 const ProjectionThreadIdRow = Schema.Struct({ threadId: ThreadId });
 
 function toProgramId(value: unknown): ProgramId {
@@ -133,13 +112,6 @@ function asStringArrayFromJson(value: unknown): string[] {
   }
 }
 
-function normalizeProgramStatus(value: unknown): ServerAgentsVxappSidebarProgram["status"] {
-  const status = asString(value);
-  return status && VALID_PROGRAM_STATUSES.has(status)
-    ? (status as ServerAgentsVxappSidebarProgram["status"])
-    : "active";
-}
-
 function normalizeNotificationSeverity(
   value: unknown,
 ): ServerAgentsVxappSidebarProgramNotification["severity"] {
@@ -147,30 +119,6 @@ function normalizeNotificationSeverity(
   return severity && VALID_NOTIFICATION_SEVERITIES.has(severity)
     ? (severity as ServerAgentsVxappSidebarProgramNotification["severity"])
     : "info";
-}
-
-function mapProgram(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarProgram {
-  const closeout = asJsonRecord(row.closeout_json);
-  const resolvedStatus = resolveProgramCurrentStatus({
-    closeout,
-    currentStatus: row.status,
-    status: row.status,
-  });
-  return {
-    id: toProgramId(row.program_id),
-    title: String(row.title),
-    objective: typeof row.objective === "string" ? row.objective : null,
-    status: normalizeProgramStatus(resolvedStatus),
-    executiveProjectId: toProjectIdOrNull(row.executive_project_id),
-    executiveThreadId: toThreadIdOrNull(row.executive_thread_id),
-    currentOrchestratorThreadId: toThreadIdOrNull(row.current_orchestrator_thread_id),
-    metadata: asJsonRecord(row.metadata_json),
-    closeout,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-    completedAt: asIsoDateTime(row.completed_at),
-    deletedAt: asIsoDateTime(row.deleted_at),
-  };
 }
 
 function mapSession(row: AgentsVxappSqliteRow, threadId: ThreadId): OrchestrationSession | null {
@@ -313,61 +261,17 @@ function mapAttentionItem(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarAt
 
 function buildMirrorDiagnostics(input: {
   graph: Omit<ServerGetAgentsVxappSidebarGraphResult, "mirrorDiagnostics">;
-  projectionPrograms: readonly Schema.Schema.Type<typeof ProjectionProgramMirrorRow>[];
   projectionProjectIds: readonly ProjectId[];
   projectionThreadIds: readonly ThreadId[];
   ignoredProjectIds?: ReadonlySet<ProjectId>;
   ignoredThreadIds?: ReadonlySet<ThreadId>;
 }): ServerAgentsVxappSidebarMirrorDiagnostics {
-  const projectionProgramIds = new Set(input.projectionPrograms.map((row) => row.programId));
-  const projectionProgramById = new Map(
-    input.projectionPrograms.map((row) => [row.programId, row] as const),
-  );
   const projectionProjectIds = new Set(input.projectionProjectIds);
   const projectionThreadIds = new Set(input.projectionThreadIds);
   const ignoredProjectIds = input.ignoredProjectIds ?? new Set<ProjectId>();
   const ignoredThreadIds = input.ignoredThreadIds ?? new Set<ThreadId>();
-  const missingProgramIds = new Set<ProgramId>();
-  const divergentProgramIds = new Set<ProgramId>();
   const missingProjectIds = new Set<ProjectId>();
   const missingThreadIds = new Set<ThreadId>();
-
-  for (const program of input.graph.programs) {
-    if (!projectionProgramIds.has(program.id)) {
-      missingProgramIds.add(program.id);
-    } else {
-      const mirroredProgram = projectionProgramById.get(program.id);
-      if (
-        mirroredProgram &&
-        (mirroredProgram.executiveProjectId !== program.executiveProjectId ||
-          mirroredProgram.executiveThreadId !== program.executiveThreadId ||
-          mirroredProgram.currentOrchestratorThreadId !== program.currentOrchestratorThreadId)
-      ) {
-        divergentProgramIds.add(program.id);
-      }
-    }
-    if (
-      program.executiveProjectId &&
-      !ignoredProjectIds.has(program.executiveProjectId) &&
-      !projectionProjectIds.has(program.executiveProjectId)
-    ) {
-      missingProjectIds.add(program.executiveProjectId);
-    }
-    if (
-      program.executiveThreadId &&
-      !ignoredThreadIds.has(program.executiveThreadId) &&
-      !projectionThreadIds.has(program.executiveThreadId)
-    ) {
-      missingThreadIds.add(program.executiveThreadId);
-    }
-    if (
-      program.currentOrchestratorThreadId &&
-      !ignoredThreadIds.has(program.currentOrchestratorThreadId) &&
-      !projectionThreadIds.has(program.currentOrchestratorThreadId)
-    ) {
-      missingThreadIds.add(program.currentOrchestratorThreadId);
-    }
-  }
 
   for (const threadLink of input.graph.threadLinks) {
     if (
@@ -414,24 +318,15 @@ function buildMirrorDiagnostics(input: {
   }
 
   return {
-    missingProgramIds: [...missingProgramIds].toSorted(),
-    divergentProgramIds: [...divergentProgramIds].toSorted(),
     missingProjectIds: [...missingProjectIds].toSorted(),
     missingThreadIds: [...missingThreadIds].toSorted(),
-    staleMirror:
-      missingProgramIds.size > 0 ||
-      divergentProgramIds.size > 0 ||
-      missingProjectIds.size > 0 ||
-      missingThreadIds.size > 0,
+    staleMirror: missingProjectIds.size > 0 || missingThreadIds.size > 0,
   };
 }
 
 function buildSidebarGraphFromQueryAll(
   queryAll: (sql: string) => AgentsVxappSqliteRow[],
 ): Omit<ServerGetAgentsVxappSidebarGraphResult, "mirrorDiagnostics"> {
-  const programs = queryAll(
-    "SELECT * FROM t3_programs WHERE deleted_at IS NULL ORDER BY updated_at DESC",
-  ).map(mapProgram);
   const threadLinks = queryAll(
     "SELECT * FROM t3_thread_links WHERE deleted_at IS NULL ORDER BY updated_at DESC",
   ).map(mapThreadLink);
@@ -452,7 +347,6 @@ function buildSidebarGraphFromQueryAll(
     source: "sqlite",
     dbPath: AGENTS_VXAPP_DB_PATH,
     fallbackReason: null,
-    programs,
     threadLinks,
     openWakes,
     watchProjections,
@@ -471,20 +365,6 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
       sql`
         SELECT project_id AS "projectId"
         FROM projection_projects
-        WHERE deleted_at IS NULL
-      `,
-  });
-  const listProjectionPrograms = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionProgramMirrorRow,
-    execute: () =>
-      sql`
-        SELECT
-          program_id AS "programId",
-          executive_project_id AS "executiveProjectId",
-          executive_thread_id AS "executiveThreadId",
-          current_orchestrator_thread_id AS "currentOrchestratorThreadId"
-        FROM projection_programs
         WHERE deleted_at IS NULL
       `,
   });
@@ -509,7 +389,6 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
           source: "unavailable" as const,
           dbPath: AGENTS_VXAPP_DB_PATH,
           fallbackReason: "agents-vxapp SQLite database not found.",
-          programs: [],
           threadLinks: [],
           openWakes: [],
           watchProjections: [],
@@ -532,22 +411,20 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
           }),
       });
 
-      const [projectionProjectRows, projectionProgramRows, projectionThreadRows] =
-        yield* Effect.all([
-          listProjectionProjectIds(undefined),
-          listProjectionPrograms(undefined),
-          listProjectionThreadIds(undefined),
-        ]).pipe(
-          Effect.mapError(
-            (error) =>
-              new AgentsVxappSidebarError({
-                message:
-                  error instanceof Error
-                    ? error.message
-                    : "Failed to query mirrored T3 projection tables.",
-              }),
-          ),
-        );
+      const [projectionProjectRows, projectionThreadRows] = yield* Effect.all([
+        listProjectionProjectIds(undefined),
+        listProjectionThreadIds(undefined),
+      ]).pipe(
+        Effect.mapError(
+          (error) =>
+            new AgentsVxappSidebarError({
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to query mirrored T3 projection tables.",
+            }),
+        ),
+      );
 
       const externalRoleIndex = yield* Effect.serviceOption(AgentsVxappExternalRoleAuthority).pipe(
         Effect.flatMap((externalRoleAuthorityOption) =>
@@ -573,7 +450,6 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
           Object.assign(
             {
               graph,
-              projectionPrograms: projectionProgramRows,
               projectionProjectIds: projectionProjectRows.map((row) => row.projectId),
               projectionThreadIds: projectionThreadRows.map((row) => row.threadId),
             },

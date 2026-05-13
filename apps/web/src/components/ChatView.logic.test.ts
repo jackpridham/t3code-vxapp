@@ -25,6 +25,7 @@ import {
   threadIsHydratingHistory,
   waitForStartedServerThread,
 } from "./ChatView.logic";
+import type { Thread } from "../types";
 
 describe("resolveInitialWorkerComposerHidden", () => {
   it("hides worker composer by default when orchestration mode is enabled", () => {
@@ -199,7 +200,7 @@ const makeThread = (input?: {
     startedAt: string | null;
     completedAt: string | null;
   } | null;
-}) => ({
+}): Thread => ({
   id: input?.id ?? ThreadId.makeUnsafe("thread-1"),
   codexThreadId: null,
   projectId: ProjectId.makeUnsafe("project-1"),
@@ -211,6 +212,10 @@ const makeThread = (input?: {
   messages: [],
   proposedPlans: [],
   error: null,
+  hasActiveError: false,
+  activeError: null,
+  historicalError: null,
+  errorPresentationSource: "none",
   createdAt: "2026-03-29T00:00:00.000Z",
   archivedAt: null,
   updatedAt: "2026-03-29T00:00:00.000Z",
@@ -549,6 +554,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       turnDiffSummaries: [],
       persistedFileChanges: [],
       activities: [],
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
     });
 
     expect(
@@ -586,6 +595,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       turnDiffSummaries: [],
       persistedFileChanges: [],
       activities: [],
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
     });
 
     expect(
@@ -632,6 +645,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       turnDiffSummaries: [],
       persistedFileChanges: [],
       activities: [],
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
     });
 
     expect(

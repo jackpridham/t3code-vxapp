@@ -545,6 +545,29 @@ export const OrchestrationSession = Schema.Struct({
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;
 
+export const OrchestrationThreadErrorPresentationSource = Schema.Literals([
+  "none",
+  "active_session_last_error",
+  "active_runtime_failure",
+  "historical_session_last_error",
+]);
+export type OrchestrationThreadErrorPresentationSource =
+  typeof OrchestrationThreadErrorPresentationSource.Type;
+
+const OrchestrationThreadErrorPresentationFields = {
+  hasActiveError: Schema.Boolean,
+  activeError: Schema.NullOr(TrimmedNonEmptyString),
+  historicalError: Schema.NullOr(TrimmedNonEmptyString),
+  errorPresentationSource: OrchestrationThreadErrorPresentationSource,
+} as const;
+
+const OptionalOrchestrationThreadErrorPresentationFields = {
+  hasActiveError: Schema.optional(Schema.Boolean),
+  activeError: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  historicalError: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  errorPresentationSource: Schema.optional(OrchestrationThreadErrorPresentationSource),
+} as const;
+
 export const OrchestrationCheckpointFile = Schema.Struct({
   path: TrimmedNonEmptyString,
   kind: TrimmedNonEmptyString,
@@ -666,6 +689,7 @@ export const OrchestrationThread = Schema.Struct({
   programId: Schema.optional(ProgramId).pipe(Schema.withDecodingDefault(() => undefined)),
   executiveProjectId: Schema.optional(ProjectId).pipe(Schema.withDecodingDefault(() => undefined)),
   executiveThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  ...OrchestrationThreadErrorPresentationFields,
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -721,6 +745,7 @@ export const OrchestrationThreadSummary = Schema.Struct({
   sessionWorkerThreadCount: Schema.optional(NonNegativeInt).pipe(
     Schema.withDecodingDefault(() => undefined),
   ),
+  ...OrchestrationThreadErrorPresentationFields,
 });
 export type OrchestrationThreadSummary = typeof OrchestrationThreadSummary.Type;
 
@@ -1200,6 +1225,7 @@ const ThreadSessionSetCommand = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
   createdAt: IsoDateTime,
+  ...OptionalOrchestrationThreadErrorPresentationFields,
 });
 
 const ThreadMessageAssistantDeltaCommand = Schema.Struct({
@@ -1601,6 +1627,7 @@ export const ThreadSessionStopRequestedPayload = Schema.Struct({
 export const ThreadSessionSetPayload = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
+  ...OrchestrationThreadErrorPresentationFields,
 });
 
 export const ThreadProposedPlanUpsertedPayload = Schema.Struct({

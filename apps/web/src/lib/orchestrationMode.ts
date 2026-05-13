@@ -62,6 +62,7 @@ type OrchestrationWorkerVisibilityMode = "selected-session" | "project-diagnosti
 
 type WorkerVisibilityThread = Pick<
   Thread,
+  | "archivedAt"
   | "id"
   | "spawnRole"
   | "parentThreadId"
@@ -72,6 +73,7 @@ type WorkerVisibilityThread = Pick<
   | "session"
   | "latestTurn"
   | "error"
+  | "hasActiveError"
   | "activities"
 >;
 
@@ -127,11 +129,12 @@ function workerNeedsAttention(input: {
   threads: readonly Pick<Thread, "id">[];
   projects?: readonly Pick<Project, "id">[];
 }): boolean {
+  if (input.thread.archivedAt) {
+    return false;
+  }
   return (
     getWorkerLineageErrors(input).length > 0 ||
-    isNonEmptyString(input.thread.error) ||
-    input.thread.session?.status === "error" ||
-    input.thread.latestTurn?.state === "error" ||
+    input.thread.hasActiveError ||
     input.thread.latestTurn?.state === "interrupted" ||
     hasPendingWorkerAction(input.thread)
   );

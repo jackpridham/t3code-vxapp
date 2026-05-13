@@ -25,6 +25,7 @@ import {
 } from "./commandInvariants.ts";
 
 const nowIso = () => new Date().toISOString();
+const LOCAL_ACTIVE_THREAD_FAILURE_MESSAGE = "Thread failed.";
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
   eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
   aggregateKind: "thread",
@@ -91,6 +92,66 @@ function requireActiveProgram(input: {
     commandType: input.command.type,
     detail: `Program '${input.programId}' does not exist.`,
   });
+}
+
+function resolveLocalThreadSessionSetErrorPresentation(input: {
+  readonly command: Extract<OrchestrationCommand, { type: "thread.session.set" }>;
+  readonly thread: OrchestrationReadModel["threads"][number];
+}) {
+  const { activeError, errorPresentationSource, hasActiveError, historicalError } = input.command;
+  if (
+    typeof hasActiveError === "boolean" &&
+    (errorPresentationSource === "none" ||
+      errorPresentationSource === "active_session_last_error" ||
+      errorPresentationSource === "active_runtime_failure" ||
+      errorPresentationSource === "historical_session_last_error") &&
+    (!hasActiveError || (typeof activeError === "string" && activeError.length > 0))
+  ) {
+    return {
+      hasActiveError,
+      activeError: activeError ?? null,
+      historicalError: historicalError ?? null,
+      errorPresentationSource,
+    };
+  }
+
+  const sessionLastError =
+    typeof input.command.session.lastError === "string" &&
+    input.command.session.lastError.length > 0
+      ? input.command.session.lastError
+      : null;
+  const isArchivedResidue = input.thread.archivedAt !== null || input.thread.deletedAt !== null;
+  if (isArchivedResidue) {
+    return {
+      hasActiveError: false,
+      activeError: null,
+      historicalError: sessionLastError,
+      errorPresentationSource:
+        sessionLastError === null ? ("none" as const) : ("historical_session_last_error" as const),
+    };
+  }
+
+  const isActiveFailure =
+    input.command.session.status === "error" || input.thread.latestTurn?.state === "error";
+  if (isActiveFailure) {
+    return {
+      hasActiveError: true,
+      activeError: sessionLastError ?? LOCAL_ACTIVE_THREAD_FAILURE_MESSAGE,
+      historicalError: null,
+      errorPresentationSource:
+        sessionLastError === null
+          ? ("active_runtime_failure" as const)
+          : ("active_session_last_error" as const),
+    };
+  }
+
+  return {
+    hasActiveError: false,
+    activeError: null,
+    historicalError: sessionLastError,
+    errorPresentationSource:
+      sessionLastError === null ? ("none" as const) : ("historical_session_last_error" as const),
+  };
 }
 
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
@@ -1151,11 +1212,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.session.set": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const errorPresentation = resolveLocalThreadSessionSetErrorPresentation({ command, thread });
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -1168,6 +1230,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           session: command.session,
+          ...errorPresentation,
         },
       };
     }

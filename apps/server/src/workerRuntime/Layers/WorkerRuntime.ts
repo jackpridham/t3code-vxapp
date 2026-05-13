@@ -310,18 +310,22 @@ export const makeWorkerRuntime = Effect.gen(function* () {
         return yield* decodeSnapshotResult(
           buildUnavailableSnapshot({
             threadId: thread.id,
-            reason: `Thread '${input.threadId}' is not marked as a worker thread.`,
+            reason: `Thread '${thread.id}' is not a worker thread.`,
             runtimeDir: null,
             worktreePath: thread.worktreePath ?? input.worktreePath ?? null,
           }),
         );
       }
-      const worktreePath = thread.worktreePath ?? input.worktreePath ?? null;
+      const workerProject = yield* projectionOperationalQuery.getProjectById({
+        projectId: thread.projectId,
+      });
+      const worktreePath =
+        thread.worktreePath ?? workerProject?.workspaceRoot ?? input.worktreePath ?? null;
       if (!worktreePath) {
         return yield* decodeSnapshotResult(
           buildUnavailableSnapshot({
             threadId: thread.id,
-            reason: `Worker thread '${input.threadId}' has no worktree path yet.`,
+            reason: `Thread '${thread.id}' has no worktree path yet.`,
             runtimeDir: null,
             worktreePath: null,
           }),

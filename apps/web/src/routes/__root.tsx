@@ -315,6 +315,26 @@ function findCurrentSessionRootThreadId(
   return null;
 }
 
+export function resolvePreferredCurrentThreadId(input: {
+  pathname: string;
+  bootstrapThreadId?: ThreadId | null;
+  projects: readonly Pick<Project, "currentSessionRootThreadId">[];
+}): ThreadId | null {
+  const routeThreadId = resolveRouteThreadId(input.pathname);
+  if (routeThreadId) {
+    return routeThreadId;
+  }
+  if (input.bootstrapThreadId) {
+    return input.bootstrapThreadId;
+  }
+  for (const project of input.projects) {
+    if (project.currentSessionRootThreadId) {
+      return project.currentSessionRootThreadId;
+    }
+  }
+  return null;
+}
+
 export function resolveRouteThreadId(pathname: string): ThreadId | null {
   const match = /^\/([^/?#]+)/.exec(pathname);
   if (!match) {
@@ -412,6 +432,7 @@ function EventRouter() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const pathnameRef = useRef(pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
+  const authoritativeBootstrapThreadIdRef = useRef<ThreadId | null>(null);
 
   pathnameRef.current = pathname;
 
@@ -556,17 +577,11 @@ function EventRouter() {
     };
 
     const resolveCurrentThreadId = (): ThreadId | null => {
-      const routeThreadId = resolveRouteThreadId(pathnameRef.current);
-      if (routeThreadId) {
-        return routeThreadId;
-      }
-      const projects = useStore.getState().projects;
-      for (const project of projects) {
-        if (project.currentSessionRootThreadId) {
-          return project.currentSessionRootThreadId;
-        }
-      }
-      return null;
+      return resolvePreferredCurrentThreadId({
+        pathname: pathnameRef.current,
+        bootstrapThreadId: authoritativeBootstrapThreadIdRef.current,
+        projects: useStore.getState().projects,
+      });
     };
 
     const runSnapshotRecovery = async (reason: "bootstrap" | "replay-failed"): Promise<void> => {
@@ -622,6 +637,7 @@ function EventRouter() {
     const unsubWelcome = onServerWelcome((payload) => {
       // Migrate old localStorage settings to server on first connect
       migrateLocalSettingsToServer();
+      authoritativeBootstrapThreadIdRef.current = payload.bootstrapThreadId ?? null;
       void (async () => {
         await bootstrapOrchestrationState({
           api,

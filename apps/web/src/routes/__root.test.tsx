@@ -118,6 +118,7 @@ import {
   bootstrapOrchestrationState,
   collectOrchestrationInvalidationTargets,
   isStandaloneRootRoutePath,
+  resolvePreferredCurrentThreadId,
   resolveRouteThreadId,
   shouldUseStandaloneRootLayout,
 } from "./__root";
@@ -174,6 +175,10 @@ function makeReadModel(
               activities: [],
               checkpoints: [],
               session: null,
+              hasActiveError: false,
+              activeError: null,
+              historicalError: null,
+              errorPresentationSource: "none",
             },
           ],
     orchestratorWakeItems: [],
@@ -441,6 +446,28 @@ describe("resolveRouteThreadId", () => {
     expect(resolveRouteThreadId("/sidebar/thread-1")).toBeNull();
     expect(resolveRouteThreadId("/artifact")).toBeNull();
     expect(resolveRouteThreadId("/artifacts/api/example")).toBeNull();
+  });
+});
+
+describe("resolvePreferredCurrentThreadId", () => {
+  it("prefers the routed thread over bootstrap and project roots", () => {
+    expect(
+      resolvePreferredCurrentThreadId({
+        pathname: "/thread-route",
+        bootstrapThreadId: ThreadId.makeUnsafe("thread-bootstrap"),
+        projects: [{ currentSessionRootThreadId: ThreadId.makeUnsafe("thread-project") }],
+      }),
+    ).toBe(ThreadId.makeUnsafe("thread-route"));
+  });
+
+  it("prefers the authoritative bootstrap thread over the first project root", () => {
+    expect(
+      resolvePreferredCurrentThreadId({
+        pathname: "/",
+        bootstrapThreadId: ThreadId.makeUnsafe("thread-bootstrap"),
+        projects: [{ currentSessionRootThreadId: ThreadId.makeUnsafe("thread-project") }],
+      }),
+    ).toBe(ThreadId.makeUnsafe("thread-bootstrap"));
   });
 });
 

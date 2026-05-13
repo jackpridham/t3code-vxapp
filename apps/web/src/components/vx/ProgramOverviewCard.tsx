@@ -9,6 +9,9 @@ import {
   CardTitle,
 } from "~/components/ui/card";
 import { cn } from "~/lib/utils";
+import { formatProgramStatusLabel, programStatusTone } from "./programDisplay";
+
+export { formatProgramStatusLabel, programStatusTone } from "./programDisplay";
 
 export type ProgramOverviewCardProps = {
   action?: ReactNode;
@@ -23,33 +26,6 @@ export type ProgramOverviewCardProps = {
   totalTodoCount: number;
   verdict: string | null;
 };
-
-export function formatProgramStatusLabel(value: string): string {
-  return value.replaceAll("_", " ");
-}
-
-export function programStatusTone(status: string): string {
-  switch (status) {
-    case "active":
-      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-    case "blocked":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "awaiting_founder":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-    case "awaiting_external":
-      return "bg-orange-500/12 text-orange-700 dark:text-orange-300";
-    case "closeout_in_progress":
-      return "bg-sky-500/12 text-sky-700 dark:text-sky-300";
-    case "founder_review_ready":
-      return "bg-fuchsia-500/12 text-fuchsia-700 dark:text-fuchsia-300";
-    case "completed":
-      return "bg-cyan-500/12 text-cyan-700 dark:text-cyan-300";
-    case "cancelled":
-      return "bg-muted text-muted-foreground";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 export function ProgramOverviewCard({
   action,

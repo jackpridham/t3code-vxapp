@@ -34,6 +34,7 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
 import { notifyOrchestratorChatMessage } from "../orchestratorNotify.ts";
+import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -1069,6 +1070,13 @@ const make = Effect.fn("make")(function* () {
               : "running";
 
       if (shouldApplyThreadLifecycle) {
+        const errorPresentation = resolveLocalThreadErrorPresentation({
+          archivedAt: thread.archivedAt,
+          deletedAt: thread.deletedAt,
+          latestTurnState: status === "error" ? "error" : null,
+          sessionStatus: status,
+          sessionLastError: lastError,
+        });
         if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
           yield* markSourceProposedPlanImplemented(
             acceptedTurnStartedSourcePlan.sourceThreadId,
@@ -1099,6 +1107,7 @@ const make = Effect.fn("make")(function* () {
             lastError,
             updatedAt: now,
           },
+          ...errorPresentation,
           createdAt: now,
         });
         yield* providerSessionDirectory.upsert({

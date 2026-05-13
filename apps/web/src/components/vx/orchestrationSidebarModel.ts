@@ -1,16 +1,19 @@
 import type {
+  ServerAgentsVxappCurrentTodoProjection,
   OrchestratorWakeItem,
   OrchestrationThreadSummary,
+  ServerAgentsVxappProgramSnapshot,
   ServerAgentsVxappSidebarAttentionItem,
-  ServerAgentsVxappSidebarProgram,
   ServerAgentsVxappSidebarProgramNotification,
   ServerAgentsVxappSidebarThreadLink,
+  ServerAgentsVxappSidebarWatchProjection,
   ServerGetAgentsVxappSidebarGraphResult,
   ThreadId,
 } from "@t3tools/contracts";
 import { isThreadRuntimeActive } from "../Sidebar.logic";
 import { collapseThreadToCanonicalProject } from "~/lib/orchestrationMode";
-import type { CtoAttentionItem, Program, ProgramNotification, Project, Thread } from "~/types";
+import type { CtoAttentionItem, ProgramNotification, Project, Thread } from "~/types";
+import { type ProgramCloseoutSummary, summarizeProgramCloseout } from "./programDisplay";
 
 export type SidebarNotificationSection = "attention" | "program-update";
 export type SidebarWorkerWakeState = "pending" | "delivering" | null;
@@ -25,6 +28,17 @@ type SidebarRuntimeMetadata = {
   runtimeStateMessage: string | null;
   worktreePathHint: string | null;
 };
+
+export interface SidebarProgramCurrentTodo {
+  agent: string;
+  todoId: string;
+}
+
+export interface SidebarProgramWatchState {
+  classification: string | null;
+  enabled: boolean;
+  reason: string | null;
+}
 
 export interface SidebarNotificationItem {
   id: string;
@@ -77,7 +91,12 @@ export interface SidebarHistoricalLaneNode {
 
 export interface SidebarProgramNode {
   activityAt: string | null;
+  activeWorkerCount: number;
   attentionCount: number;
+  baseStatus: string | null;
+  closeoutSummary: ProgramCloseoutSummary;
+  currentStatus: string | null;
+  currentTodo: SidebarProgramCurrentTodo | null;
   currentLane: SidebarProgramLaneNode | null;
   executiveProjectId: string | null;
   executiveThreadId: string | null;
@@ -91,7 +110,9 @@ export interface SidebarProgramNode {
   laneState: SidebarProgramLaneState;
   lastHistoricalLane: SidebarHistoricalLaneNode | null;
   status: string;
+  statusDetail: string | null;
   title: string;
+  watch: SidebarProgramWatchState | null;
 }
 
 export interface SidebarExecutiveNode extends SidebarRuntimeMetadata {
@@ -108,8 +129,6 @@ export interface SidebarExecutiveNode extends SidebarRuntimeMetadata {
 }
 
 export interface OrchestrationSidebarDiagnostics {
-  divergentProgramIds: string[];
-  missingProgramIds: string[];
   missingProjectIds: string[];
   missingThreadIds: string[];
   staleMirror: boolean;
@@ -135,12 +154,12 @@ type SessionWorkerThreadSummary = Pick<
 
 type SidebarWorkerAuthorityThread = Pick<
   Thread,
-  "id" | "latestTurn" | "session" | "spawnRole" | "worktreePath"
+  "id" | "latestTurn" | "projectId" | "session" | "spawnRole" | "worktreePath"
 >;
 
 type SidebarWorkerAuthoritySummary = Pick<
   SessionWorkerThreadSummary,
-  "id" | "latestTurn" | "session" | "spawnRole" | "worktreePath"
+  "id" | "latestTurn" | "projectId" | "session" | "spawnRole" | "worktreePath"
 >;
 
 type SidebarAgentAuthorityThread = Pick<Thread, "id" | "latestTurn" | "session" | "worktreePath">;
@@ -166,12 +185,15 @@ type SidebarProgramLineageEntry = {
 };
 
 type MirrorDiagnosticsLike = {
-  divergentProgramIds?: readonly string[];
-  missingProgramIds?: readonly string[];
   missingProjectIds?: readonly string[];
   missingThreadIds?: readonly string[];
   staleMirror?: boolean;
 };
+
+const TERMINAL_PROGRAM_STATUSES = new Set<ServerAgentsVxappProgramSnapshot["status"]>([
+  "cancelled",
+  "completed",
+]);
 
 type SidebarThreadActivitySource = {
   archivedAt?: string | null | undefined;
@@ -203,8 +225,6 @@ function normalizeMirrorDiagnostics(
 ): OrchestrationSidebarDiagnostics {
   if (sqliteGraph?.source !== "sqlite") {
     return {
-      divergentProgramIds: [],
-      missingProgramIds: [],
       missingProjectIds: [],
       missingThreadIds: [],
       staleMirror: false,
@@ -212,8 +232,6 @@ function normalizeMirrorDiagnostics(
   }
   const mirrorDiagnostics = sqliteGraph.mirrorDiagnostics as MirrorDiagnosticsLike;
   return {
-    divergentProgramIds: normalizeStringIdList(mirrorDiagnostics.divergentProgramIds).toSorted(),
-    missingProgramIds: normalizeStringIdList(mirrorDiagnostics.missingProgramIds).toSorted(),
     missingProjectIds: normalizeStringIdList(mirrorDiagnostics.missingProjectIds).toSorted(),
     missingThreadIds: normalizeStringIdList(mirrorDiagnostics.missingThreadIds).toSorted(),
     staleMirror: mirrorDiagnostics.staleMirror === true,
@@ -400,7 +418,7 @@ function getNotificationItems(input: {
     }
   };
 
-  if (shouldUseSqliteGraph(input.sqliteGraph)) {
+  if (hasSqliteGraphSource(input.sqliteGraph)) {
     addItems(input.sqliteGraph.attentionItems.map(normalizeSqliteAttention));
     addItems(input.sqliteGraph.notifications.map(normalizeSqliteNotification));
   }
@@ -417,7 +435,7 @@ function buildWakeStateByThreadId(input: {
 }): Map<string, SidebarWorkerWakeState> {
   const stateByThreadId = new Map<string, SidebarWorkerWakeState>();
 
-  if (shouldUseSqliteGraph(input.sqliteGraph)) {
+  if (hasSqliteGraphSource(input.sqliteGraph)) {
     for (const wake of input.sqliteGraph.openWakes) {
       const workerThreadId = wake.payload?.workerThreadId;
       if (typeof workerThreadId !== "string") {
@@ -444,15 +462,6 @@ function buildWakeStateByThreadId(input: {
     }
   }
   return stateByThreadId;
-}
-
-function shouldUseSqliteGraph(
-  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null,
-): sqliteGraph is ServerGetAgentsVxappSidebarGraphResult & { source: "sqlite" } {
-  return (
-    sqliteGraph?.source === "sqlite" &&
-    normalizeMirrorDiagnostics(sqliteGraph).staleMirror === false
-  );
 }
 
 function hasSqliteGraphSource(
@@ -505,7 +514,7 @@ function buildThreadLinkById(
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null,
 ): Map<string, ServerAgentsVxappSidebarThreadLink> {
   return new Map(
-    (shouldUseSqliteGraph(sqliteGraph) ? sqliteGraph.threadLinks : []).map(
+    (hasSqliteGraphSource(sqliteGraph) ? sqliteGraph.threadLinks : []).map(
       (thread) => [thread.threadId, thread] as const,
     ),
   );
@@ -522,6 +531,7 @@ function buildSqliteThreadLinkById(
 }
 
 function buildExecutiveAuthorityByProjectId(input: {
+  programs: readonly ServerAgentsVxappProgramSnapshot[];
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
 }): Map<
   string,
@@ -537,7 +547,7 @@ function buildExecutiveAuthorityByProjectId(input: {
   const sqliteThreadLinkById = buildSqliteThreadLinkById(input.sqliteGraph);
   const threadIdsByProjectId = new Map<string, Set<string>>();
 
-  for (const program of input.sqliteGraph.programs) {
+  for (const program of input.programs) {
     if (
       program.deletedAt !== null ||
       program.executiveProjectId === null ||
@@ -551,6 +561,25 @@ function buildExecutiveAuthorityByProjectId(input: {
       continue;
     }
     threadIdsByProjectId.set(program.executiveProjectId, new Set([program.executiveThreadId]));
+  }
+
+  for (const threadLink of input.sqliteGraph.threadLinks) {
+    if (
+      threadLink.deletedAt !== null ||
+      threadLink.executiveProjectId === null ||
+      threadLink.executiveThreadId === null
+    ) {
+      continue;
+    }
+    const existing = threadIdsByProjectId.get(threadLink.executiveProjectId);
+    if (existing) {
+      existing.add(threadLink.executiveThreadId);
+      continue;
+    }
+    threadIdsByProjectId.set(
+      threadLink.executiveProjectId,
+      new Set([threadLink.executiveThreadId]),
+    );
   }
 
   const authorityByProjectId = new Map<
@@ -649,7 +678,7 @@ function buildProgramLineageEntries(input: {
     });
   };
 
-  if (shouldUseSqliteGraph(input.sqliteGraph)) {
+  if (hasSqliteGraphSource(input.sqliteGraph)) {
     for (const threadLink of input.sqliteGraph.threadLinks) {
       if (threadLink.deletedAt !== null || threadLink.programId !== input.programId) {
         continue;
@@ -691,13 +720,11 @@ function buildProgramLineageEntries(input: {
 }
 
 function getProgramList(input: {
-  programs: readonly Program[];
-  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
-}): ReadonlyArray<Program | ServerAgentsVxappSidebarProgram> {
-  const visiblePrograms = shouldUseSqliteGraph(input.sqliteGraph)
-    ? input.sqliteGraph.programs
-    : input.programs;
-  return visiblePrograms.filter((program) => program.deletedAt === null);
+  programs: readonly ServerAgentsVxappProgramSnapshot[];
+}): readonly ServerAgentsVxappProgramSnapshot[] {
+  return input.programs.filter(
+    (program) => program.deletedAt === null && !TERMINAL_PROGRAM_STATUSES.has(program.status),
+  );
 }
 
 function resolveLineageRecency(entry: SidebarProgramLineageEntry): string {
@@ -756,8 +783,7 @@ function resolveLineageTitle(input: {
 }
 
 export function resolveSidebarRootThreadIds(input: {
-  programs: readonly Program[];
-  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
+  programs: readonly ServerAgentsVxappProgramSnapshot[];
 }): ThreadId[] {
   return [
     ...new Set(
@@ -785,21 +811,29 @@ function isTransientWorkerThread(
   return sessionLooksDormant && latestTurnState === null;
 }
 
-function isTransientAgentThread(
-  thread: SidebarAgentAuthorityThread | SidebarAgentAuthoritySummary,
-): boolean {
-  return isTransientWorkerThread(thread);
-}
-
 function classifyWorkerRuntime(input: {
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   label: string;
-  sessionThread?: SidebarAgentAuthoritySummary | null;
-  thread: SidebarAgentAuthorityThread | null;
+  projectById: ReadonlyMap<string, Project>;
+  sessionThread?: SidebarWorkerAuthoritySummary | null;
+  thread: SidebarWorkerAuthorityThread | null;
 }): SidebarRuntimeMetadata {
   const authoritativeThread = input.thread ?? input.sessionThread ?? null;
+  const authoritativeProjectId =
+    input.thread?.projectId ??
+    input.sessionThread?.projectId ??
+    input.fallbackThreadLink?.projectId ??
+    null;
+  const authoritativeProjectWorkspaceRoot =
+    authoritativeProjectId !== null
+      ? (input.projectById.get(authoritativeProjectId)?.cwd ?? null)
+      : null;
   const worktreePath =
-    authoritativeThread?.worktreePath ?? input.fallbackThreadLink?.worktreePath ?? null;
+    authoritativeThread?.worktreePath ??
+    authoritativeProjectWorkspaceRoot ??
+    input.fallbackThreadLink?.worktreePath ??
+    input.fallbackThreadLink?.workspaceRoot ??
+    null;
   if (worktreePath) {
     return {
       runtimeState: "inspectable",
@@ -808,7 +842,7 @@ function classifyWorkerRuntime(input: {
     };
   }
   if (authoritativeThread) {
-    if (isTransientAgentThread(authoritativeThread)) {
+    if (isTransientWorkerThread(authoritativeThread)) {
       return {
         runtimeState: "transient",
         runtimeStateMessage: `This ${input.label} appears to be a transient dispatch/runtime entry with no prepared worktree or runtime bundle.`,
@@ -968,10 +1002,83 @@ function sortNotifications(items: SidebarNotificationItem[]): SidebarNotificatio
   });
 }
 
+function buildProgramCurrentTodoById(input: {
+  currentTodos: readonly ServerAgentsVxappCurrentTodoProjection[] | undefined;
+}): Map<string, SidebarProgramCurrentTodo> {
+  return new Map(
+    (input.currentTodos ?? []).map((todo) => [
+      todo.programId,
+      {
+        agent: todo.agent,
+        todoId: todo.todoId,
+      },
+    ]),
+  );
+}
+
+function buildProgramWatchById(input: {
+  sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
+}): Map<string, SidebarProgramWatchState> {
+  const watchProjections: readonly ServerAgentsVxappSidebarWatchProjection[] = hasSqliteGraphSource(
+    input.sqliteGraph,
+  )
+    ? input.sqliteGraph.watchProjections
+    : [];
+  return new Map(
+    watchProjections.map((projection) => [
+      projection.programId,
+      {
+        classification: projection.classification,
+        enabled: projection.enabled,
+        reason: projection.reason,
+      },
+    ]),
+  );
+}
+
+function summarizeProgramStatusDetail(input: {
+  closeoutSummary: ProgramCloseoutSummary;
+  currentLane: SidebarProgramLaneNode | null;
+  program: ServerAgentsVxappProgramSnapshot;
+  watch: SidebarProgramWatchState | null;
+  workers: readonly SidebarWorkerNode[];
+}): string | null {
+  const missingSummary = input.closeoutSummary.missingItems.slice(0, 2).join(" · ");
+  if (
+    (input.program.status === "blocked" || input.program.status === "closeout_in_progress") &&
+    missingSummary
+  ) {
+    return missingSummary;
+  }
+  if (input.program.status === "founder_review_ready") {
+    return "Ready for founder review.";
+  }
+  if (input.program.status === "awaiting_founder") {
+    return "Waiting for founder input.";
+  }
+  if (input.program.status === "awaiting_external") {
+    return input.watch?.reason ?? "Waiting for external dependency.";
+  }
+  if (input.currentLane === null) {
+    return "No active orchestrator lane.";
+  }
+  if (input.workers.length === 0) {
+    return "No active workers in the current lane.";
+  }
+  if (input.watch?.classification) {
+    return input.watch.classification.replaceAll("_", " ");
+  }
+  if (input.closeoutSummary.postFlightSummary) {
+    return input.closeoutSummary.postFlightSummary;
+  }
+  return null;
+}
+
 export function buildOrchestrationSidebarModel(input: {
   ctoAttentionItems: readonly CtoAttentionItem[];
+  currentTodos?: readonly ServerAgentsVxappCurrentTodoProjection[];
   programNotifications: readonly ProgramNotification[];
-  programs: readonly Program[];
+  programs: readonly ServerAgentsVxappProgramSnapshot[];
   projects: readonly Project[];
   sessionWorkerThreadsByRootId: ReadonlyMap<string, readonly SessionWorkerThreadSummary[]>;
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
@@ -997,8 +1104,14 @@ export function buildOrchestrationSidebarModel(input: {
     sqliteGraph: input.sqliteGraph,
     wakeItems: input.wakeItems,
   });
-  const usableSqliteGraph = shouldUseSqliteGraph(input.sqliteGraph) ? input.sqliteGraph : null;
   const executiveAuthorityByProjectId = buildExecutiveAuthorityByProjectId({
+    programs: input.programs,
+    sqliteGraph: input.sqliteGraph,
+  });
+  const currentTodoByProgramId = buildProgramCurrentTodoById({
+    currentTodos: input.currentTodos,
+  });
+  const watchByProgramId = buildProgramWatchById({
     sqliteGraph: input.sqliteGraph,
   });
   const projectById = new Map(input.projects.map((project) => [project.id, project] as const));
@@ -1115,6 +1228,7 @@ export function buildOrchestrationSidebarModel(input: {
       const runtime = classifyWorkerRuntime({
         fallbackThreadLink: inputWorker.fallbackThreadLink,
         label: "worker row",
+        projectById,
         sessionThread: inputWorker.sessionThread,
         thread: inputWorker.thread,
       });
@@ -1270,6 +1384,7 @@ export function buildOrchestrationSidebarModel(input: {
     const latestHistoricalLaneEntry = historicalLanes[0] ?? null;
 
     const programItems = notificationsByProgramId.get(program.id) ?? [];
+    const watch = watchByProgramId.get(program.id) ?? null;
     const currentLane =
       currentRootThreadId === null
         ? null
@@ -1305,6 +1420,7 @@ export function buildOrchestrationSidebarModel(input: {
               worktreePathHint: runtime.worktreePathHint,
             };
           })();
+    const closeoutSummary = summarizeProgramCloseout(program);
     const programActivityAt =
       maxIsoTimestamp([
         program.updatedAt,
@@ -1314,6 +1430,7 @@ export function buildOrchestrationSidebarModel(input: {
       ]) ?? null;
     const programNode: SidebarProgramNode = {
       activityAt: programActivityAt,
+      activeWorkerCount: workers.length,
       attentionCount: programItems.filter((item) => item.section === "attention").length,
       currentLane,
       executiveProjectId,
@@ -1341,8 +1458,20 @@ export function buildOrchestrationSidebarModel(input: {
               thread: latestHistoricalLaneEntry.thread,
               title: latestHistoricalLaneEntry.title,
             },
+      baseStatus: program.baseStatus,
+      closeoutSummary,
+      currentStatus: program.currentStatus,
+      currentTodo: currentTodoByProgramId.get(program.id) ?? null,
       status: program.status,
+      statusDetail: summarizeProgramStatusDetail({
+        closeoutSummary,
+        currentLane,
+        program,
+        watch,
+        workers,
+      }),
       title: program.title,
+      watch,
     };
     executive.programs.push(programNode);
   }
@@ -1388,6 +1517,6 @@ export function buildOrchestrationSidebarModel(input: {
   return {
     diagnostics,
     executives,
-    source: usableSqliteGraph ? "sqlite" : "t3",
+    source: hasSqliteGraphSource(input.sqliteGraph) ? "sqlite" : "t3",
   };
 }

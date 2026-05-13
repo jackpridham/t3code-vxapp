@@ -330,7 +330,7 @@ function buildSettlementCommand(input: {
   readonly workspace: string;
 }): string {
   return [
-    "vx t3 lanes settle-observer",
+    "vx t3 lanes review-worker",
     `--orchestrator-thread ${shellQuote(input.item.orchestratorThreadId)}`,
     `--worker-thread ${shellQuote(input.item.workerThreadId)}`,
     `--workspace ${shellQuote(input.workspace)}`,
@@ -343,7 +343,7 @@ function buildFinalizeCommand(input: {
   readonly workspace: string;
 }): string {
   return [
-    "vx t3 lanes finalize-observer",
+    "vx t3 lanes finalize-worker-wake",
     `--orchestrator-thread ${shellQuote(input.item.orchestratorThreadId)}`,
     `--worker-thread ${shellQuote(input.item.workerThreadId)}`,
     `--workspace ${shellQuote(input.workspace)}`,

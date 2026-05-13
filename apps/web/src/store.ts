@@ -19,6 +19,10 @@ import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
 import { dispatchNotification } from "./notificationDispatch";
 import {
+  presentThreadActiveError,
+  shouldDispatchThreadRateLimitNotification,
+} from "./lib/threadRuntimePresentation";
+import {
   type ChatMessage,
   type CtoAttentionItem,
   type PersistedFileChange,
@@ -458,7 +462,11 @@ function mapThread(thread: OrchestrationThreadWithLabels): Thread {
     session: thread.session ? mapSession(thread.session) : null,
     messages: thread.messages.map(mapMessage),
     proposedPlans: thread.proposedPlans.map(mapProposedPlan),
-    error: thread.session?.lastError ?? null,
+    error: presentThreadActiveError(thread),
+    hasActiveError: thread.hasActiveError,
+    activeError: thread.activeError,
+    historicalError: thread.historicalError,
+    errorPresentationSource: thread.errorPresentationSource,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
     updatedAt: thread.updatedAt,
@@ -1244,6 +1252,10 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         activities: [],
         checkpoints: [],
         session: null,
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
         orchestratorProjectId: event.payload.orchestratorProjectId,
         orchestratorThreadId: event.payload.orchestratorThreadId,
         parentThreadId: event.payload.parentThreadId,
@@ -1517,22 +1529,29 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         return {
           ...thread,
           session: mapSession(event.payload.session),
-          error: event.payload.session.lastError ?? null,
+          error: presentThreadActiveError(event.payload),
+          hasActiveError: event.payload.hasActiveError,
+          activeError: event.payload.activeError,
+          historicalError: event.payload.historicalError,
+          errorPresentationSource: event.payload.errorPresentationSource,
           latestTurn,
           updatedAt: event.occurredAt,
         };
       });
       if (
         threads !== state.threads &&
-        event.payload.session.status === "error" &&
-        event.payload.session.lastError !== null &&
-        /rate.?limit/i.test(event.payload.session.lastError)
+        (() => {
+          const updatedThread = threads.find((thread) => thread.id === event.payload.threadId);
+          return (
+            updatedThread !== undefined && shouldDispatchThreadRateLimitNotification(updatedThread)
+          );
+        })()
       ) {
         dispatchNotification(
           "thread-rate-limited",
           "warning",
           "Rate limited",
-          event.payload.session.lastError,
+          event.payload.activeError ?? undefined,
         );
       }
       return threads === state.threads ? state : { ...state, threads };

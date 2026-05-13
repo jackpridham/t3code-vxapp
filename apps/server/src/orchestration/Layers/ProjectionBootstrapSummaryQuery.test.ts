@@ -47,7 +47,7 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
         latestTurn: null,
         createdAt: "2026-05-12T00:00:02.000Z",
         updatedAt: "2026-05-12T00:00:03.000Z",
-        archivedAt: null,
+        archivedAt: "2026-05-12T00:00:03.500Z",
         deletedAt: null,
         session: {
           threadId: ThreadId.makeUnsafe("external-cto-thread"),
@@ -55,9 +55,13 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
           providerName: "codex",
           runtimeMode: "full-access" as const,
           activeTurnId: null,
-          lastError: null,
+          lastError: "raw external residue error must not be re-derived",
           updatedAt: "2026-05-12T00:00:03.000Z",
         },
+        hasActiveError: false,
+        activeError: null,
+        historicalError: "Upstream authoritative historical residue",
+        errorPresentationSource: "historical_session_last_error" as const,
         spawnRole: "supervisor" as const,
         spawnedBy: "founder",
         executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
@@ -505,6 +509,16 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       assert.deepEqual(
         readModel.threads.map((thread) => thread.id),
         ["external-cto-thread"],
+      );
+      assert.equal(readModel.threads[0]?.hasActiveError, false);
+      assert.equal(readModel.threads[0]?.activeError, null);
+      assert.equal(
+        readModel.threads[0]?.historicalError,
+        "Upstream authoritative historical residue",
+      );
+      assert.equal(
+        readModel.threads[0]?.session?.lastError,
+        "raw external residue error must not be re-derived",
       );
     }).pipe(
       Effect.provideService(AgentsVxappExternalRoleAuthority, {
