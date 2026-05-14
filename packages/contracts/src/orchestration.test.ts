@@ -97,8 +97,14 @@ const PROGRAM_DELIVERY_SPEC = {
   requiredLocalSuites: [
     {
       repo: "t3code-vxapp",
-      suiteId: "lint",
-      description: "Run lint before closeout.",
+      suiteId: "validate:ai-runtime",
+      description: "Run bun run validate:ai-runtime before runtime plan closeout.",
+    },
+    {
+      repo: "t3code-vxapp",
+      suiteId: "test:ai-runtime:audit",
+      description:
+        "Run bun run test:ai-runtime:audit to verify no T3 orchestration coupling, no Bash runtime path, no direct v1 DB mutation path, schema-first contracts, explicit auth/session handoff, and confirmation enforcement.",
     },
   ],
   requiredExternalE2ESuites: [
@@ -106,6 +112,36 @@ const PROGRAM_DELIVERY_SPEC = {
       target: "web",
       suiteId: "founder-e2e",
       description: "Founder-visible E2E contract.",
+    },
+  ],
+  dependencyGates: [
+    {
+      repo: "vue-vxapp",
+      surface: "command-capability",
+      mode: "align",
+      state: "ready",
+      summary: "Align runtime command wiring with the Vue capability manifest.",
+      evidence: ["Vue capability decisions"],
+    },
+    {
+      repo: "vue-vxapp",
+      surface: "command-contract",
+      mode: "wait",
+      state: "ready",
+      summary: "Wait for the Vue command contract to stabilize before enabling runtime calls.",
+      evidence: ["Vue command contract decisions"],
+    },
+    {
+      repo: "api-vxapp",
+      surface: "tool-permission-confirmation",
+      mode: "wait",
+      state: "ready",
+      summary: "Wait for the API tool, permission, and confirmation contract decisions.",
+      evidence: [
+        "API tool contract decisions",
+        "API permission contract decisions",
+        "API confirmation contract decisions",
+      ],
     },
   ],
   requireDevelopmentDeploy: true,
@@ -267,6 +303,93 @@ it.effect("decodes thread.create and thread.meta.update labels with trimming", (
   }),
 );
 
+it.effect("decodes program dependency gates for runtime cross-repo alignment", () =>
+  Effect.gen(function* () {
+    const created = yield* decodeProgramCreateCommand({
+      type: "program.create",
+      commandId: "cmd-program-create",
+      programId: "program-runtime-1",
+      title: "AI-first SPA runtime",
+      objective: "Define runtime cross-repo dependency gates.",
+      status: "active",
+      ...PROGRAM_DELIVERY_SPEC,
+      executiveProjectId: "project-1",
+      executiveThreadId: "thread-1",
+      currentOrchestratorThreadId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.ok(created.dependencyGates);
+    assert.deepStrictEqual(
+      created.requiredLocalSuites.map((suite) => suite.suiteId),
+      ["validate:ai-runtime", "test:ai-runtime:audit"],
+    );
+    assert.strictEqual(created.dependencyGates[0]?.repo, "vue-vxapp");
+    assert.strictEqual(created.dependencyGates[1]?.mode, "wait");
+    assert.strictEqual(created.dependencyGates[2]?.surface, "tool-permission-confirmation");
+
+    const program = yield* decodeOrchestrationProgram({
+      id: "program-runtime-1",
+      title: "AI-first SPA runtime",
+      objective: "Define runtime cross-repo dependency gates.",
+      status: "active",
+      ...PROGRAM_DELIVERY_SPEC,
+      executiveProjectId: "project-1",
+      executiveThreadId: "thread-1",
+      currentOrchestratorThreadId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: null,
+      deletedAt: null,
+    });
+    assert.ok(program.dependencyGates);
+    assert.deepStrictEqual(
+      (program.requiredLocalSuites ?? []).map((suite) => ({
+        suiteId: suite.suiteId,
+        description: suite.description,
+      })),
+      [
+        {
+          suiteId: "validate:ai-runtime",
+          description: "Run bun run validate:ai-runtime before runtime plan closeout.",
+        },
+        {
+          suiteId: "test:ai-runtime:audit",
+          description:
+            "Run bun run test:ai-runtime:audit to verify no T3 orchestration coupling, no Bash runtime path, no direct v1 DB mutation path, schema-first contracts, explicit auth/session handoff, and confirmation enforcement.",
+        },
+      ],
+    );
+    assert.deepStrictEqual(
+      program.dependencyGates.map((gate) => ({
+        repo: gate.repo,
+        surface: gate.surface,
+        mode: gate.mode,
+        state: gate.state,
+      })),
+      [
+        {
+          repo: "vue-vxapp",
+          surface: "command-capability",
+          mode: "align",
+          state: "ready",
+        },
+        {
+          repo: "vue-vxapp",
+          surface: "command-contract",
+          mode: "wait",
+          state: "ready",
+        },
+        {
+          repo: "api-vxapp",
+          surface: "tool-permission-confirmation",
+          mode: "wait",
+          state: "ready",
+        },
+      ],
+    );
+  }),
+);
+
 it.effect("decodes historical project.created payloads with a default provider", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeProjectCreatedPayload({
@@ -402,6 +525,10 @@ it.effect("decodes thread snapshots with default labels", () =>
       updatedAt: "2026-01-01T00:00:00.000Z",
       archivedAt: null,
       deletedAt: null,
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
       messages: [],
       activities: [],
       checkpoints: [],
@@ -794,6 +921,10 @@ it.effect("OrchestrationThread schema includes lineage fields with undefined def
       updatedAt: "2026-01-01T00:00:00.000Z",
       archivedAt: null,
       deletedAt: null,
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
       messages: [],
       activities: [],
       checkpoints: [],
@@ -822,6 +953,10 @@ it.effect("OrchestrationThread schema includes lineage fields with undefined def
       updatedAt: "2026-01-01T00:00:00.000Z",
       archivedAt: null,
       deletedAt: null,
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
       messages: [],
       activities: [],
       checkpoints: [],
@@ -1031,6 +1166,10 @@ it.effect("decodes bounded orchestration read results", () =>
         worktreePath: null,
         createdAt: "2026-04-05T10:00:00.000Z",
         updatedAt: "2026-04-05T10:00:00.000Z",
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
       },
     ]);
     assert.strictEqual(threads.length, 1);
@@ -1067,6 +1206,10 @@ it.effect("decodes bounded orchestration read results", () =>
           updatedAt: "2026-04-05T10:00:00.000Z",
           archivedAt: null,
           deletedAt: null,
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
           messages: [],
           proposedPlans: [],
           activities: [],

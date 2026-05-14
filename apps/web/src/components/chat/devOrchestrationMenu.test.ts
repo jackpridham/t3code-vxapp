@@ -49,6 +49,8 @@ function makeProgram(overrides: Partial<Program> = {}): Program {
 }
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
+  const { hasActiveError, activeError, historicalError, errorPresentationSource, ...rest } =
+    overrides;
   return {
     id: ThreadId.makeUnsafe("thread-1"),
     codexThreadId: null,
@@ -73,7 +75,11 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     turnDiffSummaries: [],
     persistedFileChanges: [],
     activities: [],
-    ...overrides,
+    hasActiveError: hasActiveError ?? false,
+    activeError: activeError ?? null,
+    historicalError: historicalError ?? null,
+    errorPresentationSource: errorPresentationSource ?? "none",
+    ...rest,
   };
 }
 

@@ -5,6 +5,7 @@ import {
   ApprovalRequestId,
   ProviderKind,
   type OrchestrationEvent,
+  type ModelSelection,
   type OrchestrationThread,
 } from "@t3tools/contracts";
 import {
@@ -31,11 +32,12 @@ import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/La
 import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
 import { ProjectionCheckpointRepositoryLive } from "../src/persistence/Layers/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../src/persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProviderRuntimeEventLogRepositoryLive } from "../src/persistence/Layers/ProviderRuntimeEventLog.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
-import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
+import { ProviderUnsupportedError, ProviderValidationError } from "../src/provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
@@ -78,6 +80,33 @@ function runGit(cwd: string, args: ReadonlyArray<string>) {
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf8",
   });
+}
+
+function resolveHarnessStartProvider(input: {
+  readonly operation: string;
+  readonly provider?: ProviderKind | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly defaultProvider: ProviderKind;
+  readonly supportedProviders: ReadonlyArray<ProviderKind>;
+}) {
+  const modelProvider = input.modelSelection?.provider;
+  if (
+    input.provider !== undefined &&
+    modelProvider !== undefined &&
+    input.provider !== modelProvider
+  ) {
+    return Effect.fail(
+      new ProviderValidationError({
+        operation: input.operation,
+        issue: `Provider '${input.provider}' does not match modelSelection provider '${modelProvider}'.`,
+      }),
+    );
+  }
+
+  const resolvedProvider = input.provider ?? modelProvider ?? input.defaultProvider;
+  return input.supportedProviders.includes(resolvedProvider)
+    ? Effect.succeed(resolvedProvider)
+    : Effect.fail(new ProviderUnsupportedError({ provider: resolvedProvider }));
 }
 
 const initializeGitWorkspace = Effect.fn(function* (cwd: string) {
@@ -237,6 +266,14 @@ export const makeOrchestrationIntegrationHarness = (
               ? Effect.succeed(adapterHarness.adapter)
               : Effect.fail(new ProviderUnsupportedError({ provider: resolvedProvider })),
           listProviders: () => Effect.succeed([adapterHarness.provider]),
+          resolveStartProvider: ({ operation, provider, modelSelection }) =>
+            resolveHarnessStartProvider({
+              operation,
+              provider,
+              modelSelection,
+              defaultProvider: adapterHarness.provider,
+              supportedProviders: [adapterHarness.provider],
+            }),
         } as typeof ProviderAdapterRegistry.Service)
       : null;
     const rootDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -269,6 +306,14 @@ export const makeOrchestrationIntegrationHarness = (
               ? Effect.succeed(codexAdapter)
               : Effect.fail(new ProviderUnsupportedError({ provider: resolvedProvider })),
           listProviders: () => Effect.succeed(["codex"] as const),
+          resolveStartProvider: ({ operation, provider, modelSelection }) =>
+            resolveHarnessStartProvider({
+              operation,
+              provider,
+              modelSelection,
+              defaultProvider: "codex",
+              supportedProviders: ["codex"],
+            }),
         } as typeof ProviderAdapterRegistry.Service;
       }),
     ).pipe(
@@ -280,11 +325,13 @@ export const makeOrchestrationIntegrationHarness = (
     const providerLayer = useRealCodex
       ? makeProviderServiceLive().pipe(
           Layer.provide(providerSessionDirectoryLayer),
+          Layer.provideMerge(ProviderRuntimeEventLogRepositoryLive),
           Layer.provide(realCodexRegistry),
           Layer.provide(AnalyticsService.layerTest),
         )
       : makeProviderServiceLive().pipe(
           Layer.provide(providerSessionDirectoryLayer),
+          Layer.provideMerge(ProviderRuntimeEventLogRepositoryLive),
           Layer.provide(fakeRegistry!),
           Layer.provide(AnalyticsService.layerTest),
         );

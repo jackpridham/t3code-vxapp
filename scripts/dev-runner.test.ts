@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import fs from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 
@@ -53,13 +55,15 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
+          serverPort: undefined,
+          webPort: undefined,
           t3Home: undefined,
           authToken: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
+          logLevel: undefined,
           host: undefined,
-          port: undefined,
           devUrl: undefined,
         });
 
@@ -74,22 +78,26 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
+          serverPort: 4222,
+          webPort: 7331,
           t3Home: "/tmp/custom-t3",
           authToken: "secret",
           noBrowser: true,
           autoBootstrapProjectFromCwd: false,
           logWebSocketEvents: true,
+          logLevel: "debug",
           host: "0.0.0.0",
-          port: 4222,
           devUrl: new URL("http://localhost:7331"),
         });
 
         assert.equal(env.T3CODE_HOME, resolve("/tmp/custom-t3"));
         assert.equal(env.T3CODE_PORT, "4222");
+        assert.equal(env.PORT, "7331");
         assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
         assert.equal(env.T3CODE_NO_BROWSER, "1");
         assert.equal(env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
         assert.equal(env.T3CODE_LOG_WS_EVENTS, "1");
+        assert.equal(env.T3CODE_LOG_LEVEL, "debug");
         assert.equal(env.T3CODE_HOST, "0.0.0.0");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:7331/");
       }),
@@ -104,13 +112,15 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           },
           serverOffset: 0,
           webOffset: 0,
+          serverPort: undefined,
+          webPort: undefined,
           t3Home: undefined,
           authToken: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
+          logLevel: undefined,
           host: undefined,
-          port: undefined,
           devUrl: undefined,
         });
 
@@ -126,13 +136,15 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
+          serverPort: undefined,
+          webPort: undefined,
           t3Home: undefined,
           authToken: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: false,
+          logLevel: undefined,
           host: undefined,
-          port: undefined,
           devUrl: undefined,
         });
 
@@ -147,17 +159,44 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           baseEnv: {},
           serverOffset: 0,
           webOffset: 0,
+          serverPort: undefined,
+          webPort: undefined,
           t3Home: "/tmp/my-t3",
           authToken: undefined,
           noBrowser: undefined,
           autoBootstrapProjectFromCwd: undefined,
           logWebSocketEvents: undefined,
+          logLevel: undefined,
           host: undefined,
-          port: undefined,
           devUrl: undefined,
         });
 
         assert.equal(env.T3CODE_HOME, resolve("/tmp/my-t3"));
+      }),
+    );
+
+    it.effect("rejects invalid explicit log levels", () =>
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(
+          createDevRunnerEnv({
+            mode: "dev",
+            baseEnv: {},
+            serverOffset: 0,
+            webOffset: 0,
+            serverPort: undefined,
+            webPort: undefined,
+            t3Home: undefined,
+            authToken: undefined,
+            noBrowser: undefined,
+            autoBootstrapProjectFromCwd: undefined,
+            logWebSocketEvents: undefined,
+            logLevel: "verbose",
+            host: undefined,
+            devUrl: undefined,
+          }),
+        );
+
+        assert.ok(String(error).includes("Invalid log level"));
       }),
     );
   });
@@ -212,6 +251,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev",
           startOffset: 0,
           hasExplicitServerPort: false,
+          hasExplicitWebPort: false,
           hasExplicitDevUrl: false,
           checkPortAvailability: (port) => Effect.succeed(!taken.has(port)),
         });
@@ -227,6 +267,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev:web",
           startOffset: 0,
           hasExplicitServerPort: false,
+          hasExplicitWebPort: false,
           hasExplicitDevUrl: false,
           checkPortAvailability: (port) => Effect.succeed(!taken.has(port)),
         });
@@ -242,6 +283,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev:server",
           startOffset: 0,
           hasExplicitServerPort: false,
+          hasExplicitWebPort: false,
           hasExplicitDevUrl: false,
           checkPortAvailability: (port) => Effect.succeed(!taken.has(port)),
         });
@@ -256,6 +298,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev:web",
           startOffset: 0,
           hasExplicitServerPort: false,
+          hasExplicitWebPort: true,
           hasExplicitDevUrl: true,
           checkPortAvailability: () => Effect.succeed(false),
         });
@@ -270,11 +313,55 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev:server",
           startOffset: 0,
           hasExplicitServerPort: true,
+          hasExplicitWebPort: false,
           hasExplicitDevUrl: false,
           checkPortAvailability: () => Effect.succeed(false),
         });
 
         assert.deepStrictEqual(offsets, { serverOffset: 0, webOffset: 0 });
+      }),
+    );
+  });
+
+  describe("AI runtime audit scripts", () => {
+    it.effect("documents node/bun-based audit commands without a bash runtime path", () =>
+      Effect.sync(() => {
+        const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+        const packageJson = JSON.parse(
+          fs.readFileSync(resolve(repoRoot, "package.json"), "utf8"),
+        ) as {
+          scripts?: Record<string, string>;
+        };
+        const scripts = packageJson.scripts ?? {};
+
+        assert.equal(
+          scripts["test:ai-runtime:audit"],
+          "bun run test:ai-runtime:audit:contracts && bun run test:ai-runtime:audit:server && bun run test:ai-runtime:audit:boundary",
+        );
+        assert.equal(
+          scripts["test:ai-runtime:audit:contracts"],
+          "bun run --cwd packages/contracts test src/providerRuntime.test.ts src/orchestration.test.ts",
+        );
+        assert.equal(
+          scripts["test:ai-runtime:audit:server"],
+          "bun run --cwd apps/server test src/orchestration/Layers/ProviderRuntimeIngestion.test.ts integration/orchestrationEngine.integration.test.ts",
+        );
+        assert.equal(
+          scripts["test:ai-runtime:audit:boundary"],
+          "bun run --cwd packages/orchestration-core test src/roundtrip.test.ts && bun run --cwd scripts test dev-runner.test.ts",
+        );
+
+        for (const scriptName of [
+          "test:ai-runtime:audit",
+          "test:ai-runtime:audit:contracts",
+          "test:ai-runtime:audit:server",
+          "test:ai-runtime:audit:boundary",
+          "validate:ai-runtime",
+        ] as const) {
+          const command = scripts[scriptName];
+          assert.ok(command, `expected ${scriptName} to be defined`);
+          assert.equal(/(^|\s)(bash|sh)(\s|$)|\.sh\b/.test(command), false);
+        }
       }),
     );
   });

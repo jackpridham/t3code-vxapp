@@ -14,6 +14,8 @@ import {
 } from "./orchestrationMode";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
+  const { hasActiveError, activeError, historicalError, errorPresentationSource, ...rest } =
+    overrides;
   return {
     id: ThreadId.makeUnsafe("thread-1"),
     codexThreadId: null,
@@ -39,7 +41,11 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
-    ...overrides,
+    hasActiveError: hasActiveError ?? false,
+    activeError: activeError ?? null,
+    historicalError: historicalError ?? null,
+    errorPresentationSource: errorPresentationSource ?? "none",
+    ...rest,
   };
 }
 

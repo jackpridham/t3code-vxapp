@@ -261,6 +261,24 @@ export const ProgramPostFlight = Schema.Struct({
 });
 export type ProgramPostFlight = typeof ProgramPostFlight.Type;
 
+export const ProgramDependencyGateMode = Schema.Literals(["wait", "align"]);
+export type ProgramDependencyGateMode = typeof ProgramDependencyGateMode.Type;
+
+export const ProgramDependencyGateState = Schema.Literals(["pending", "blocked", "ready"]);
+export type ProgramDependencyGateState = typeof ProgramDependencyGateState.Type;
+
+export const ProgramDependencyGate = Schema.Struct({
+  repo: TrimmedNonEmptyString,
+  surface: TrimmedNonEmptyString,
+  mode: ProgramDependencyGateMode,
+  state: ProgramDependencyGateState,
+  summary: TrimmedNonEmptyString,
+  evidence: Schema.optional(Schema.Array(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+});
+export type ProgramDependencyGate = typeof ProgramDependencyGate.Type;
+
 const ProgramDeliveryScopeReadModelFields = {
   declaredRepos: Schema.optional(ProgramDeclaredRepos).pipe(Schema.withDecodingDefault(() => [])),
   affectedAppTargets: Schema.optional(ProgramAffectedAppTargets).pipe(
@@ -270,6 +288,9 @@ const ProgramDeliveryScopeReadModelFields = {
     Schema.withDecodingDefault(() => []),
   ),
   requiredExternalE2ESuites: Schema.optional(Schema.Array(ProgramRequiredExternalE2ESuite)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  dependencyGates: Schema.optional(Schema.Array(ProgramDependencyGate)).pipe(
     Schema.withDecodingDefault(() => []),
   ),
   requireDevelopmentDeploy: Schema.optional(Schema.Boolean).pipe(
@@ -287,6 +308,7 @@ const ProgramDeliveryScopeCreateFields = {
   affectedAppTargets: ProgramAffectedAppTargets,
   requiredLocalSuites: Schema.Array(ProgramRequiredLocalSuite),
   requiredExternalE2ESuites: Schema.Array(ProgramRequiredExternalE2ESuite),
+  dependencyGates: Schema.Array(ProgramDependencyGate),
   requireDevelopmentDeploy: Schema.Boolean,
   requireExternalE2E: Schema.Boolean,
   requireCleanPostFlight: Schema.Boolean,
@@ -298,6 +320,7 @@ const ProgramDeliveryScopeUpdateFields = {
   affectedAppTargets: Schema.optional(ProgramAffectedAppTargets),
   requiredLocalSuites: Schema.optional(Schema.Array(ProgramRequiredLocalSuite)),
   requiredExternalE2ESuites: Schema.optional(Schema.Array(ProgramRequiredExternalE2ESuite)),
+  dependencyGates: Schema.optional(Schema.Array(ProgramDependencyGate)),
   requireDevelopmentDeploy: Schema.optional(Schema.Boolean),
   requireExternalE2E: Schema.optional(Schema.Boolean),
   requireCleanPostFlight: Schema.optional(Schema.Boolean),
@@ -545,6 +568,29 @@ export const OrchestrationSession = Schema.Struct({
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;
 
+export const OrchestrationThreadErrorPresentationSource = Schema.Literals([
+  "none",
+  "active_session_last_error",
+  "active_runtime_failure",
+  "historical_session_last_error",
+]);
+export type OrchestrationThreadErrorPresentationSource =
+  typeof OrchestrationThreadErrorPresentationSource.Type;
+
+const OrchestrationThreadErrorPresentationFields = {
+  hasActiveError: Schema.Boolean,
+  activeError: Schema.NullOr(TrimmedNonEmptyString),
+  historicalError: Schema.NullOr(TrimmedNonEmptyString),
+  errorPresentationSource: OrchestrationThreadErrorPresentationSource,
+} as const;
+
+const OptionalOrchestrationThreadErrorPresentationFields = {
+  hasActiveError: Schema.optional(Schema.Boolean),
+  activeError: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  historicalError: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  errorPresentationSource: Schema.optional(OrchestrationThreadErrorPresentationSource),
+} as const;
+
 export const OrchestrationCheckpointFile = Schema.Struct({
   path: TrimmedNonEmptyString,
   kind: TrimmedNonEmptyString,
@@ -666,6 +712,7 @@ export const OrchestrationThread = Schema.Struct({
   programId: Schema.optional(ProgramId).pipe(Schema.withDecodingDefault(() => undefined)),
   executiveProjectId: Schema.optional(ProjectId).pipe(Schema.withDecodingDefault(() => undefined)),
   executiveThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  ...OrchestrationThreadErrorPresentationFields,
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -721,6 +768,7 @@ export const OrchestrationThreadSummary = Schema.Struct({
   sessionWorkerThreadCount: Schema.optional(NonNegativeInt).pipe(
     Schema.withDecodingDefault(() => undefined),
   ),
+  ...OrchestrationThreadErrorPresentationFields,
 });
 export type OrchestrationThreadSummary = typeof OrchestrationThreadSummary.Type;
 
@@ -1200,6 +1248,7 @@ const ThreadSessionSetCommand = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
   createdAt: IsoDateTime,
+  ...OptionalOrchestrationThreadErrorPresentationFields,
 });
 
 const ThreadMessageAssistantDeltaCommand = Schema.Struct({
@@ -1601,6 +1650,7 @@ export const ThreadSessionStopRequestedPayload = Schema.Struct({
 export const ThreadSessionSetPayload = Schema.Struct({
   threadId: ThreadId,
   session: OrchestrationSession,
+  ...OrchestrationThreadErrorPresentationFields,
 });
 
 export const ThreadProposedPlanUpsertedPayload = Schema.Struct({

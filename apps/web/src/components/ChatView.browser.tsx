@@ -272,6 +272,10 @@ function createSnapshotForTargetUser(options: {
         activities: [],
         proposedPlans: [],
         checkpoints: [],
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
         session: {
           threadId: THREAD_ID,
           status: options.sessionStatus ?? "ready",
@@ -331,6 +335,10 @@ function addThreadToSnapshot(
         activities: [],
         proposedPlans: [],
         checkpoints: [],
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
         session: {
           threadId,
           status: "ready",

@@ -248,6 +248,7 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.authToken, "env-token");
       assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
       assert.equal(resolvedConfig?.logWebSocketEvents, true);
+      assert.equal(resolvedConfig?.logLevel, "info");
       assert.equal(findAvailablePort.mock.calls.length, 0);
     }),
   );
@@ -306,6 +307,7 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.authToken, "bootstrap-token");
       assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, false);
       assert.equal(resolvedConfig?.logWebSocketEvents, true);
+      assert.equal(resolvedConfig?.logLevel, "info");
     }),
   );
 
@@ -342,6 +344,7 @@ it.layer(testLayer)("server CLI command", (it) => {
       assert.equal(resolvedConfig?.authToken, "cli-token");
       assert.equal(resolvedConfig?.autoBootstrapProjectFromCwd, true);
       assert.equal(resolvedConfig?.logWebSocketEvents, true);
+      assert.equal(resolvedConfig?.logLevel, "info");
     }),
   );
 
@@ -427,6 +430,22 @@ it.layer(testLayer)("server CLI command", (it) => {
     }),
   );
 
+  it.effect("accepts explicit log level and bootstrap log level fallbacks", () =>
+    Effect.gen(function* () {
+      const fd = yield* openBootstrapFd({
+        logLevel: "warn",
+      });
+
+      yield* runCli([], {
+        T3CODE_BOOTSTRAP_FD: String(fd),
+        T3CODE_LOG_LEVEL: "debug",
+      });
+
+      assert.equal(start.mock.calls.length, 1);
+      assert.equal(resolvedConfig?.logLevel, "debug");
+    }),
+  );
+
   it.effect("hydrates PATH before server startup", () =>
     Effect.gen(function* () {
       yield* runCli([]);
@@ -499,6 +518,17 @@ it.layer(testLayer)("server CLI command", (it) => {
   it.effect("does not start server for invalid --dev-url values", () =>
     Effect.gen(function* () {
       yield* runCli(["--dev-url", "not-a-url"]).pipe(Effect.catch(() => Effect.void));
+
+      assert.equal(start.mock.calls.length, 0);
+      assert.equal(stop.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("does not start server for invalid log level values", () =>
+    Effect.gen(function* () {
+      yield* runCli([], {
+        T3CODE_LOG_LEVEL: "verbose",
+      }).pipe(Effect.catch(() => Effect.void));
 
       assert.equal(start.mock.calls.length, 0);
       assert.equal(stop.mock.calls.length, 0);

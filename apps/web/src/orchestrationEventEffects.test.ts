@@ -182,6 +182,10 @@ describe("processEventNotifications", () => {
           projectId: ProjectId.makeUnsafe("project-1"),
           title: "Thread 1",
           labels: ["urgent"],
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
           latestTurn: {
             turnId: TurnId.makeUnsafe("turn-1"),
             state: "completed",
@@ -206,6 +210,10 @@ describe("processEventNotifications", () => {
           lastError: null,
           updatedAt: "2026-02-27T00:00:03.000Z",
         },
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
       }),
     ]);
 

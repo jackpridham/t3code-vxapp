@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  EventId,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -228,6 +229,190 @@ function requestKindFromCanonicalRequestType(
   }
 }
 
+function isMutationRequestKind(
+  requestKind: "command" | "file-read" | "file-change" | undefined,
+): boolean {
+  return requestKind === "command" || requestKind === "file-change";
+}
+
+interface ToolExecutionContext {
+  readonly tenantId?: string;
+  readonly userId?: string;
+  readonly auditReference?: string;
+  readonly toolUseId?: string;
+}
+
+function readToolExecutionContext(
+  raw: ProviderRuntimeEvent["raw"] | undefined,
+): ToolExecutionContext {
+  const payload =
+    raw && typeof raw.payload === "object" && raw.payload !== null && !Array.isArray(raw.payload)
+      ? (raw.payload as Record<string, unknown>)
+      : undefined;
+  if (!payload) {
+    return {};
+  }
+
+  const auditReference =
+    typeof payload.auditReference === "string"
+      ? payload.auditReference
+      : typeof payload.auditRef === "string"
+        ? payload.auditRef
+        : typeof payload.audit_reference === "string"
+          ? payload.audit_reference
+          : typeof payload.auditId === "string"
+            ? payload.auditId
+            : undefined;
+
+  return {
+    ...(typeof payload.tenantId === "string" ? { tenantId: payload.tenantId } : {}),
+    ...(typeof payload.userId === "string" ? { userId: payload.userId } : {}),
+    ...(auditReference ? { auditReference } : {}),
+    ...(typeof payload.toolUseId === "string" ? { toolUseId: payload.toolUseId } : {}),
+  };
+}
+
+function withToolExecutionContext(
+  payload: Record<string, unknown>,
+  event: ProviderRuntimeEvent,
+): Record<string, unknown> {
+  return {
+    ...payload,
+    ...readToolExecutionContext(event.raw),
+  };
+}
+
+function makeDerivedActivityId(eventId: EventId, suffix: string): EventId {
+  return EventId.makeUnsafe(`${eventId}:${suffix}`);
+}
+
+function toolCallLifecycleKind(
+  lifecycle: "started" | "updated" | "completed" | "progress" | "permission_denied",
+  status?: string,
+): string {
+  switch (lifecycle) {
+    case "started":
+      return "tool_call_started";
+    case "updated":
+    case "progress":
+      return "tool_call_progress";
+    case "completed":
+      return status === "failed" ? "tool_call_failed" : "tool_call_result";
+    case "permission_denied":
+      return "permission_denied";
+  }
+}
+
+function uiCommandLifecycleSummary(
+  status: "completed" | "failed" | "rejected" | "timed_out" | "requested",
+  command: string,
+): string {
+  switch (status) {
+    case "requested":
+      return `UI command requested: ${command}`;
+    case "completed":
+      return `UI command completed: ${command}`;
+    case "failed":
+      return `UI command failed: ${command}`;
+    case "rejected":
+      return `UI command rejected: ${command}`;
+    case "timed_out":
+      return `UI command timed out: ${command}`;
+  }
+}
+
+function renderBlockSummary(block: { readonly type: string; readonly title?: string }): string {
+  switch (block.type) {
+    case "table":
+      return `Render block requested: ${block.title ?? "table"}`;
+    case "native":
+      return `Render block requested: ${block.title ?? "native"}`;
+    case "status":
+      return `Render block requested: ${block.title ?? "status"}`;
+    default:
+      return "Render block requested";
+  }
+}
+
+function renderBlockTone(block: {
+  readonly type: string;
+  readonly level?: string;
+}): "info" | "error" {
+  if (block.type === "status" && block.level === "error") {
+    return "error";
+  }
+  return "info";
+}
+
+function makeToolLifecycleActivities(input: {
+  readonly event: Extract<
+    ProviderRuntimeEvent,
+    { type: "item.started" | "item.updated" | "item.completed" }
+  >;
+  readonly lifecycle: "started" | "updated" | "completed";
+  readonly maybeSequence: { readonly sequence?: number };
+}): ReadonlyArray<OrchestrationThreadActivity> {
+  const { event, lifecycle, maybeSequence } = input;
+  if (!isToolLifecycleItemType(event.payload.itemType)) {
+    return [];
+  }
+
+  const payload = withToolExecutionContext(
+    {
+      itemType: event.payload.itemType,
+      ...(event.payload.status ? { status: event.payload.status } : {}),
+      ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+      ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+    },
+    event,
+  );
+
+  const genericKind =
+    lifecycle === "started"
+      ? "tool.started"
+      : lifecycle === "updated"
+        ? "tool.updated"
+        : "tool.completed";
+  const genericSummary =
+    lifecycle === "started"
+      ? `${event.payload.title ?? "Tool"} started`
+      : lifecycle === "updated"
+        ? (event.payload.title ?? "Tool updated")
+        : (event.payload.title ?? "Tool");
+  const specificKind = toolCallLifecycleKind(lifecycle, event.payload.status);
+  const specificSummary =
+    lifecycle === "started"
+      ? `${event.payload.title ?? "Tool"} started`
+      : lifecycle === "updated"
+        ? `${event.payload.title ?? "Tool"} progressing`
+        : event.payload.status === "failed"
+          ? `${event.payload.title ?? "Tool"} failed`
+          : `${event.payload.title ?? "Tool"} result`;
+
+  const genericActivity = {
+    id: event.eventId,
+    createdAt: event.createdAt,
+    tone: "tool",
+    kind: genericKind,
+    summary: genericSummary,
+    payload,
+    turnId: toTurnId(event.turnId) ?? null,
+    ...maybeSequence,
+  } satisfies OrchestrationThreadActivity;
+  const specificActivity = {
+    id: makeDerivedActivityId(event.eventId, specificKind),
+    createdAt: event.createdAt,
+    tone: "tool",
+    kind: specificKind,
+    summary: specificSummary,
+    payload,
+    turnId: toTurnId(event.turnId) ?? null,
+    ...maybeSequence,
+  } satisfies OrchestrationThreadActivity;
+
+  return [genericActivity, specificActivity];
+}
+
 function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
 ): ReadonlyArray<OrchestrationThreadActivity> {
@@ -254,26 +439,36 @@ function runtimeEventToActivities(
         return [];
       }
       const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType);
+      const isMutationRequest = isMutationRequestKind(requestKind);
+      const preview =
+        isMutationRequest && typeof event.payload.detail === "string"
+          ? truncateDetail(event.payload.detail)
+          : undefined;
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "approval",
           kind: "approval.requested",
-          summary:
-            requestKind === "command"
-              ? "Command approval requested"
-              : requestKind === "file-read"
-                ? "File-read approval requested"
-                : requestKind === "file-change"
-                  ? "File-change approval requested"
-                  : "Approval requested",
-          payload: {
-            requestId: toApprovalRequestId(event.requestId),
-            ...(requestKind ? { requestKind } : {}),
-            requestType: event.payload.requestType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-          },
+          summary: isMutationRequest
+            ? "Mutation preview requested"
+            : requestKind === "file-read"
+              ? "File-read approval requested"
+              : requestKind === "file-change"
+                ? "Mutation preview requested"
+                : "Approval requested",
+          payload: withToolExecutionContext(
+            {
+              requestId: toApprovalRequestId(event.requestId),
+              ...(requestKind ? { requestKind } : {}),
+              requestType: event.payload.requestType,
+              ...(event.requestId ? { operationId: event.requestId } : {}),
+              ...(preview ? { preview } : {}),
+              ...(isMutationRequest ? { confirmationRequired: true } : {}),
+              ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            },
+            event,
+          ),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
@@ -285,19 +480,94 @@ function runtimeEventToActivities(
         return [];
       }
       const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType);
+      const isMutationRequest = isMutationRequestKind(requestKind);
+      const isAcceptedDecision =
+        event.payload.decision === "accept" || event.payload.decision === "acceptForSession";
+      const isRejectedDecision =
+        event.payload.decision === "decline" || event.payload.decision === "cancel";
+      const payload = {
+        requestId: toApprovalRequestId(event.requestId),
+        ...(requestKind ? { requestKind } : {}),
+        requestType: event.payload.requestType,
+        ...(event.requestId ? { operationId: event.requestId } : {}),
+        ...(event.payload.decision ? { decision: event.payload.decision } : {}),
+      };
+      const approvalResolved = {
+        id: event.eventId,
+        createdAt: event.createdAt,
+        tone: "approval",
+        kind: "approval.resolved",
+        summary: isMutationRequest
+          ? isAcceptedDecision
+            ? "Mutation confirmed"
+            : isRejectedDecision
+              ? "Mutation rejected"
+              : "Mutation confirmation resolved"
+          : "Approval resolved",
+        payload: withToolExecutionContext(payload, event),
+        turnId: toTurnId(event.turnId) ?? null,
+        ...maybeSequence,
+      } satisfies OrchestrationThreadActivity;
+      const deniedActivity = isRejectedDecision
+        ? ({
+            id: makeDerivedActivityId(event.eventId, "permission_denied"),
+            createdAt: event.createdAt,
+            tone: "approval",
+            kind: "permission_denied",
+            summary: "Permission denied",
+            payload: withToolExecutionContext(
+              {
+                ...payload,
+                decision: event.payload.decision,
+              },
+              event,
+            ),
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          } satisfies OrchestrationThreadActivity)
+        : null;
+      return deniedActivity ? [approvalResolved, deniedActivity] : [approvalResolved];
+    }
+
+    case "tool.progress": {
       return [
         {
           id: event.eventId,
           createdAt: event.createdAt,
-          tone: "approval",
-          kind: "approval.resolved",
-          summary: "Approval resolved",
-          payload: {
-            requestId: toApprovalRequestId(event.requestId),
-            ...(requestKind ? { requestKind } : {}),
-            requestType: event.payload.requestType,
-            ...(event.payload.decision ? { decision: event.payload.decision } : {}),
-          },
+          tone: "tool",
+          kind: "tool.progress",
+          summary: event.payload.summary ?? event.payload.toolName ?? "Tool progressing",
+          payload: withToolExecutionContext(
+            {
+              ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+              ...(event.payload.toolName ? { toolName: event.payload.toolName } : {}),
+              ...(event.payload.summary ? { summary: event.payload.summary } : {}),
+              ...(event.payload.elapsedSeconds !== undefined
+                ? { elapsedSeconds: event.payload.elapsedSeconds }
+                : {}),
+            },
+            event,
+          ),
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+        {
+          id: makeDerivedActivityId(event.eventId, "tool_call_progress"),
+          createdAt: event.createdAt,
+          tone: "tool",
+          kind: "tool_call_progress",
+          summary: event.payload.summary ?? event.payload.toolName ?? "Tool progressing",
+          payload: withToolExecutionContext(
+            {
+              ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+              ...(event.payload.toolName ? { toolName: event.payload.toolName } : {}),
+              ...(event.payload.summary ? { summary: event.payload.summary } : {}),
+              ...(event.payload.elapsedSeconds !== undefined
+                ? { elapsedSeconds: event.payload.elapsedSeconds }
+                : {}),
+            },
+            event,
+          ),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
@@ -489,74 +759,157 @@ function runtimeEventToActivities(
     }
 
     case "item.updated": {
-      if (!isToolLifecycleItemType(event.payload.itemType)) {
-        return [];
-      }
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "tool",
-          kind: "tool.updated",
-          summary: event.payload.title ?? "Tool updated",
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
+      return makeToolLifecycleActivities({
+        event,
+        lifecycle: "updated",
+        maybeSequence,
+      });
     }
 
     case "item.completed": {
-      if (!isToolLifecycleItemType(event.payload.itemType)) {
-        return [];
-      }
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "tool",
-          kind: "tool.completed",
-          summary: event.payload.title ?? "Tool",
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
+      return makeToolLifecycleActivities({
+        event,
+        lifecycle: "completed",
+        maybeSequence,
+      });
     }
 
     case "item.started": {
-      if (!isToolLifecycleItemType(event.payload.itemType)) {
-        return [];
-      }
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "tool",
-          kind: "tool.started",
-          summary: `${event.payload.title ?? "Tool"} started`,
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
+      return makeToolLifecycleActivities({
+        event,
+        lifecycle: "started",
+        maybeSequence,
+      });
     }
+  }
 
-    default:
-      break;
+  const runtimeEventType = event.type as string;
+  if (runtimeEventType === "ui.command.requested") {
+    const uiCommandEvent = event as unknown as {
+      readonly eventId: EventId;
+      readonly createdAt: string;
+      readonly turnId?: TurnId;
+      readonly payload: {
+        readonly command: {
+          readonly name: string;
+        };
+        readonly args: Record<string, unknown>;
+      };
+    };
+    const commandName = uiCommandEvent.payload.command.name;
+    const commandArgs = uiCommandEvent.payload.args;
+    const summary =
+      commandName === "navigate.toRoute" && typeof commandArgs["routeName"] === "string"
+        ? `Navigation intent requested: ${commandArgs["routeName"]}`
+        : commandName === "component.mountResult" && typeof commandArgs["componentId"] === "string"
+          ? `Result mount intent requested: ${commandArgs["componentId"]}`
+          : uiCommandLifecycleSummary("requested", commandName);
+    return [
+      {
+        id: uiCommandEvent.eventId,
+        createdAt: uiCommandEvent.createdAt,
+        tone: "tool",
+        kind: "ui.command.requested",
+        summary,
+        payload: withToolExecutionContext({ ...(event.payload as Record<string, unknown>) }, event),
+        turnId: toTurnId(uiCommandEvent.turnId) ?? null,
+        ...maybeSequence,
+      },
+    ];
+  }
+
+  if (runtimeEventType === "ui.command.result") {
+    const uiCommandEvent = event as unknown as {
+      readonly eventId: EventId;
+      readonly createdAt: string;
+      readonly turnId?: TurnId;
+      readonly payload: {
+        readonly command: string;
+        readonly status: "completed" | "failed" | "rejected" | "timed_out";
+      };
+    };
+    const tone =
+      uiCommandEvent.payload.status === "completed"
+        ? "info"
+        : uiCommandEvent.payload.status === "rejected"
+          ? "approval"
+          : "error";
+    return [
+      {
+        id: uiCommandEvent.eventId,
+        createdAt: uiCommandEvent.createdAt,
+        tone,
+        kind: "ui.command.result",
+        summary: uiCommandLifecycleSummary(
+          uiCommandEvent.payload.status,
+          uiCommandEvent.payload.command,
+        ),
+        payload: withToolExecutionContext({ ...(event.payload as Record<string, unknown>) }, event),
+        turnId: toTurnId(uiCommandEvent.turnId) ?? null,
+        ...maybeSequence,
+      },
+    ];
+  }
+
+  if (runtimeEventType === "tool.summary") {
+    const toolSummaryEvent = event as unknown as {
+      readonly eventId: EventId;
+      readonly createdAt: string;
+      readonly turnId?: TurnId;
+      readonly payload: {
+        readonly summary: string;
+        readonly precedingToolUseIds?: ReadonlyArray<string>;
+      };
+    };
+    return [
+      {
+        id: toolSummaryEvent.eventId,
+        createdAt: toolSummaryEvent.createdAt,
+        tone: "info",
+        kind: "tool.summary",
+        summary: toolSummaryEvent.payload.summary,
+        payload: withToolExecutionContext(
+          {
+            summary: toolSummaryEvent.payload.summary,
+            ...(toolSummaryEvent.payload.precedingToolUseIds &&
+            toolSummaryEvent.payload.precedingToolUseIds.length > 0
+              ? { precedingToolUseIds: toolSummaryEvent.payload.precedingToolUseIds }
+              : {}),
+          },
+          event,
+        ),
+        turnId: toTurnId(toolSummaryEvent.turnId) ?? null,
+        ...maybeSequence,
+      },
+    ];
+  }
+
+  if (runtimeEventType === "agent.render_block") {
+    const renderBlockEvent = event as unknown as {
+      readonly eventId: EventId;
+      readonly createdAt: string;
+      readonly turnId?: TurnId;
+      readonly payload: {
+        readonly requestId: string;
+        readonly block: {
+          readonly type: string;
+          readonly title?: string;
+          readonly level?: string;
+        };
+      };
+    };
+    return [
+      {
+        id: renderBlockEvent.eventId,
+        createdAt: renderBlockEvent.createdAt,
+        tone: renderBlockTone(renderBlockEvent.payload.block),
+        kind: "agent.render_block",
+        summary: renderBlockSummary(renderBlockEvent.payload.block),
+        payload: withToolExecutionContext({ ...(event.payload as Record<string, unknown>) }, event),
+        turnId: toTurnId(renderBlockEvent.turnId) ?? null,
+        ...maybeSequence,
+      },
+    ];
   }
 
   return [];

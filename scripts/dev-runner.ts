@@ -13,6 +13,7 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
+const DEV_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 
 export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3"),
@@ -67,6 +68,11 @@ const optionalUrlConfig = (name: string): Config.Config<URL | undefined> =>
     Config.option,
     Config.map((value) => Option.getOrUndefined(value)),
   );
+const optionalLogLevelConfig = (name: string): Config.Config<string | undefined> =>
+  Config.string(name).pipe(
+    Config.option,
+    Config.map((value) => Option.getOrUndefined(value)),
+  );
 
 const OffsetConfig = Config.all({
   portOffset: optionalIntegerConfig("T3CODE_PORT_OFFSET"),
@@ -118,13 +124,15 @@ interface CreateDevRunnerEnvInput {
   readonly baseEnv: NodeJS.ProcessEnv;
   readonly serverOffset: number;
   readonly webOffset: number;
+  readonly serverPort: number | undefined;
+  readonly webPort: number | undefined;
   readonly t3Home: string | undefined;
   readonly authToken: string | undefined;
   readonly noBrowser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
+  readonly logLevel: string | undefined;
   readonly host: string | undefined;
-  readonly port: number | undefined;
   readonly devUrl: URL | undefined;
 }
 
@@ -133,28 +141,30 @@ export function createDevRunnerEnv({
   baseEnv,
   serverOffset,
   webOffset,
+  serverPort,
+  webPort,
   t3Home,
   authToken,
   noBrowser,
   autoBootstrapProjectFromCwd,
   logWebSocketEvents,
+  logLevel,
   host,
-  port,
   devUrl,
-}: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
+}: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, DevRunnerError, Path.Path> {
   return Effect.gen(function* () {
-    const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
-    const webPort = BASE_WEB_PORT + webOffset;
+    const resolvedServerPort = serverPort ?? BASE_SERVER_PORT + serverOffset;
+    const resolvedWebPort = webPort ?? BASE_WEB_PORT + webOffset;
     const resolvedBaseDir = yield* resolveBaseDir(t3Home);
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
-      PORT: String(webPort),
-      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
+      PORT: String(resolvedWebPort),
+      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${resolvedWebPort}`,
       T3CODE_MODE: "web",
-      T3CODE_PORT: String(serverPort),
+      T3CODE_PORT: String(resolvedServerPort),
       T3CODE_HOME: resolvedBaseDir,
-      VITE_WS_URL: `ws://localhost:${serverPort}`,
+      VITE_WS_URL: `ws://localhost:${resolvedServerPort}`,
     };
 
     if (host !== undefined) {
@@ -185,7 +195,36 @@ export function createDevRunnerEnv({
       delete output.T3CODE_LOG_WS_EVENTS;
     }
 
+    const resolvedLogLevel = yield* Effect.try({
+      try: () => resolveOptionalLogLevelOverride(logLevel),
+      catch: (cause) =>
+        new DevRunnerError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    });
+    if (resolvedLogLevel !== undefined) {
+      output.T3CODE_LOG_LEVEL = resolvedLogLevel;
+    } else {
+      delete output.T3CODE_LOG_LEVEL;
+    }
+
     return output;
+  });
+}
+
+function resolveOptionalLogLevelOverride(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (DEV_LOG_LEVELS.includes(normalized as (typeof DEV_LOG_LEVELS)[number])) {
+    return normalized;
+  }
+
+  throw new DevRunnerError({
+    message: `Invalid log level: ${value}. Expected one of ${DEV_LOG_LEVELS.join(", ")}.`,
   });
 }
 
@@ -263,14 +302,16 @@ interface ResolveModePortOffsetsInput<R = NetService> {
   readonly mode: DevMode;
   readonly startOffset: number;
   readonly hasExplicitServerPort: boolean;
+  readonly hasExplicitWebPort: boolean;
   readonly hasExplicitDevUrl: boolean;
-  readonly checkPortAvailability?: PortAvailabilityCheck<R>;
+  readonly checkPortAvailability: PortAvailabilityCheck<R> | undefined;
 }
 
 export function resolveModePortOffsets<R = NetService>({
   mode,
   startOffset,
   hasExplicitServerPort,
+  hasExplicitWebPort,
   hasExplicitDevUrl,
   checkPortAvailability,
 }: ResolveModePortOffsetsInput<R>): Effect.Effect<
@@ -283,7 +324,7 @@ export function resolveModePortOffsets<R = NetService>({
       defaultCheckPortAvailability) as PortAvailabilityCheck<R>;
 
     if (mode === "dev:web") {
-      if (hasExplicitDevUrl) {
+      if (hasExplicitDevUrl || hasExplicitWebPort) {
         return { serverOffset: startOffset, webOffset: startOffset };
       }
 
@@ -313,7 +354,7 @@ export function resolveModePortOffsets<R = NetService>({
     const sharedOffset = yield* findFirstAvailableOffset({
       startOffset,
       requireServerPort: !hasExplicitServerPort,
-      requireWebPort: !hasExplicitDevUrl,
+      requireWebPort: !hasExplicitWebPort && !hasExplicitDevUrl,
       checkPortAvailability: checkPort,
     });
 
@@ -328,8 +369,10 @@ interface DevRunnerCliInput {
   readonly noBrowser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
   readonly logWebSocketEvents: boolean | undefined;
+  readonly logLevel: string | undefined;
   readonly host: string | undefined;
-  readonly port: number | undefined;
+  readonly serverPort: number | undefined;
+  readonly webPort: number | undefined;
   readonly devUrl: URL | undefined;
   readonly dryRun: boolean;
   readonly turboArgs: ReadonlyArray<string>;
@@ -349,6 +392,38 @@ const readOptionalBooleanEnv = (name: string): boolean | undefined => {
   return undefined;
 };
 
+const readOptionalPortEnv = (name: string): number | undefined => {
+  const value = process.env[name];
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= MAX_PORT) {
+    return parsed;
+  }
+
+  throw new DevRunnerError({
+    message: `Invalid ${name}: ${value}. Expected an integer between 1 and ${MAX_PORT}.`,
+  });
+};
+
+const readOptionalLogLevelEnv = (name: string): string | undefined => {
+  const value = process.env[name];
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (DEV_LOG_LEVELS.includes(normalized as (typeof DEV_LOG_LEVELS)[number])) {
+    return normalized;
+  }
+
+  throw new DevRunnerError({
+    message: `Invalid ${name}: ${value}. Expected one of ${DEV_LOG_LEVELS.join(", ")}.`,
+  });
+};
+
 const resolveOptionalBooleanOverride = (
   explicitValue: boolean | undefined,
   envValue: boolean | undefined,
@@ -363,6 +438,56 @@ const resolveOptionalBooleanOverride = (
 
   return envValue;
 };
+
+const resolveOptionalStringOverride = (
+  explicitValue: string | undefined,
+  envValue: string | undefined,
+): string | undefined => explicitValue ?? envValue;
+
+interface ResolvePortSelectionInput<R = NetService> {
+  readonly mode: DevMode;
+  readonly startOffset: number;
+  readonly explicitServerPort: number | undefined;
+  readonly explicitWebPort: number | undefined;
+  readonly explicitDevUrl: URL | undefined;
+  readonly checkPortAvailability?: PortAvailabilityCheck<R>;
+}
+
+function resolvePortSelection<R = NetService>({
+  mode,
+  startOffset,
+  explicitServerPort,
+  explicitWebPort,
+  explicitDevUrl,
+  checkPortAvailability,
+}: ResolvePortSelectionInput<R>) {
+  return Effect.gen(function* () {
+    if (explicitServerPort !== undefined && explicitWebPort !== undefined) {
+      return {
+        serverPort: explicitServerPort,
+        webPort: explicitWebPort,
+        serverOffset: startOffset,
+        webOffset: startOffset,
+      } as const;
+    }
+
+    const { serverOffset, webOffset } = yield* resolveModePortOffsets({
+      mode,
+      startOffset,
+      hasExplicitServerPort: explicitServerPort !== undefined,
+      hasExplicitWebPort: explicitWebPort !== undefined,
+      hasExplicitDevUrl: explicitDevUrl !== undefined,
+      checkPortAvailability,
+    });
+
+    return {
+      serverPort: explicitServerPort,
+      webPort: explicitWebPort,
+      serverOffset,
+      webOffset,
+    } as const;
+  });
+}
 
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
@@ -389,13 +514,20 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       noBrowser: readOptionalBooleanEnv("T3CODE_NO_BROWSER"),
       autoBootstrapProjectFromCwd: readOptionalBooleanEnv("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
       logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
+      logLevel: readOptionalLogLevelEnv("T3CODE_LOG_LEVEL"),
+      serverPort: readOptionalPortEnv("T3CODE_SERVER_PORT"),
+      webPort: readOptionalPortEnv("T3CODE_WEB_PORT"),
     };
 
-    const { serverOffset, webOffset } = yield* resolveModePortOffsets({
+    const explicitServerPort = envOverrides.serverPort ?? input.serverPort;
+    const explicitWebPort = envOverrides.webPort ?? input.webPort;
+
+    const { serverPort, webPort, serverOffset, webOffset } = yield* resolvePortSelection({
       mode: input.mode,
       startOffset: offset,
-      hasExplicitServerPort: input.port !== undefined,
-      hasExplicitDevUrl: input.devUrl !== undefined,
+      explicitServerPort,
+      explicitWebPort,
+      explicitDevUrl: input.devUrl,
     });
 
     const env = yield* createDevRunnerEnv({
@@ -403,6 +535,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       baseEnv: process.env,
       serverOffset,
       webOffset,
+      serverPort,
+      webPort,
       t3Home: input.t3Home,
       authToken: input.authToken,
       noBrowser: resolveOptionalBooleanOverride(input.noBrowser, envOverrides.noBrowser),
@@ -414,8 +548,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         input.logWebSocketEvents,
         envOverrides.logWebSocketEvents,
       ),
+      logLevel: resolveOptionalStringOverride(input.logLevel, envOverrides.logLevel),
       host: input.host,
-      port: input.port,
       devUrl: input.devUrl,
     });
 
@@ -497,14 +631,23 @@ const devRunnerCli = Command.make("dev-runner", {
     Flag.withAlias("log-ws-events"),
     Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_LOG_WS_EVENTS")),
   ),
+  logLevel: Flag.string("log-level").pipe(
+    Flag.withDescription("Minimum server log level (debug, info, warn, error)."),
+    Flag.withFallbackConfig(optionalLogLevelConfig("T3CODE_LOG_LEVEL")),
+  ),
   host: Flag.string("host").pipe(
     Flag.withDescription("Server host/interface override (forwards to T3CODE_HOST)."),
     Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOST")),
   ),
-  port: Flag.integer("port").pipe(
+  serverPort: Flag.integer("server-port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
     Flag.withDescription("Server port override (forwards to T3CODE_PORT)."),
     Flag.withFallbackConfig(optionalPortConfig("T3CODE_PORT")),
+  ),
+  webPort: Flag.integer("web-port").pipe(
+    Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
+    Flag.withDescription("Web port override (forwards to PORT)."),
+    Flag.withFallbackConfig(optionalPortConfig("T3CODE_WEB_PORT")),
   ),
   devUrl: Flag.string("dev-url").pipe(
     Flag.withSchema(Schema.URLFromString),

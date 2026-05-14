@@ -369,7 +369,10 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.startSession.mock.calls[0]?.[0]).toEqual(ThreadId.makeUnsafe("thread-1"));
-    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+    const startInput = harness.startSession.mock.calls[0]?.[1] as
+      | Record<string, unknown>
+      | undefined;
+    expect(startInput).toMatchObject({
       cwd: "/tmp/provider-project",
       modelSelection: {
         provider: "codex",
@@ -377,6 +380,7 @@ describe("ProviderCommandReactor", () => {
       },
       runtimeMode: "approval-required",
     });
+    expect(startInput).not.toHaveProperty("provider");
 
     const readModel = await Effect.runPromise(harness.engine.getReadModel());
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
@@ -803,7 +807,10 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+    const startInput = harness.startSession.mock.calls[0]?.[1] as
+      | Record<string, unknown>
+      | undefined;
+    expect(startInput).toMatchObject({
       modelSelection: {
         provider: "codex",
         model: "gpt-5.3-codex",
@@ -813,6 +820,7 @@ describe("ProviderCommandReactor", () => {
         },
       },
     });
+    expect(startInput).not.toHaveProperty("provider");
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId: ThreadId.makeUnsafe("thread-1"),
       modelSelection: {
@@ -911,7 +919,10 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 1);
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+    const startInput = harness.startSession.mock.calls[0]?.[1] as
+      | Record<string, unknown>
+      | undefined;
+    expect(startInput).toMatchObject({
       modelSelection: {
         provider: "claudeAgent",
         model: "claude-opus-4-6",
@@ -920,6 +931,7 @@ describe("ProviderCommandReactor", () => {
         },
       },
     });
+    expect(startInput).not.toHaveProperty("provider");
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       threadId: ThreadId.makeUnsafe("thread-1"),
       modelSelection: {
@@ -1193,7 +1205,10 @@ describe("ProviderCommandReactor", () => {
 
     await waitFor(() => harness.startSession.mock.calls.length === 2);
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+    const restartInput = harness.startSession.mock.calls[1]?.[1] as
+      | Record<string, unknown>
+      | undefined;
+    expect(restartInput).toMatchObject({
       resumeCursor: { opaque: "resume-1" },
       modelSelection: {
         provider: "claudeAgent",
@@ -1203,6 +1218,7 @@ describe("ProviderCommandReactor", () => {
         },
       },
     });
+    expect(restartInput).not.toHaveProperty("provider");
   });
 
   it("restarts the provider session when runtime mode is updated on the thread", async () => {

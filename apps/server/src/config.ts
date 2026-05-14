@@ -9,6 +9,11 @@
 import { Effect, FileSystem, Layer, Path, ServiceMap } from "effect";
 
 export const DEFAULT_PORT = 3773;
+export const DEFAULT_SERVER_LOG_LEVEL = "info" as const;
+
+export const SERVER_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+
+export type ServerLogLevel = (typeof SERVER_LOG_LEVELS)[number];
 
 export type RuntimeMode = "web" | "desktop";
 
@@ -45,6 +50,20 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly authToken: string | undefined;
   readonly autoBootstrapProjectFromCwd: boolean;
   readonly logWebSocketEvents: boolean;
+  readonly logLevel: ServerLogLevel;
+}
+
+export function resolveServerLogLevel(value: string | undefined): ServerLogLevel {
+  if (value === undefined) {
+    return DEFAULT_SERVER_LOG_LEVEL;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (SERVER_LOG_LEVELS.includes(normalized as ServerLogLevel)) {
+    return normalized as ServerLogLevel;
+  }
+
+  throw new Error(`Invalid T3CODE_LOG_LEVEL: ${value}`);
 }
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -103,6 +122,7 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           mode: "web",
           autoBootstrapProjectFromCwd: false,
           logWebSocketEvents: false,
+          logLevel: DEFAULT_SERVER_LOG_LEVEL,
           port: 0,
           host: undefined,
           authToken: undefined,

@@ -22,7 +22,19 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, PubSub, Queue, Schema, SchemaIssue, Stream } from "effect";
+import {
+  Cause,
+  Effect,
+  Layer,
+  Option,
+  PubSub,
+  Queue,
+  Schema,
+  SchemaIssue,
+  Stream,
+  SynchronizedRef,
+} from "effect";
+import * as Semaphore from "effect/Semaphore";
 
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
@@ -32,6 +44,7 @@ import {
   type ProviderRuntimeBinding,
 } from "../Services/ProviderSessionDirectory.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { ProviderRuntimeEventLogRepository } from "../../persistence/Services/ProviderRuntimeEventLog.ts";
 import { AnalyticsService } from "../../telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 
@@ -44,6 +57,8 @@ const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
   numTurns: NonNegativeInt,
 });
+
+const PROVIDER_RUNTIME_EVENT_QUEUE_CAPACITY = 1_024;
 
 function toValidationError(
   operation: string,
@@ -138,6 +153,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
   Effect.gen(function* () {
     const analytics = yield* Effect.service(AnalyticsService);
     const serverSettings = yield* ServerSettingsService;
+    const runtimeEventLogRepository = yield* ProviderRuntimeEventLogRepository;
     const canonicalEventLogger =
       options?.canonicalEventLogger ??
       (options?.canonicalEventLogPath !== undefined
@@ -148,17 +164,55 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const registry = yield* ProviderAdapterRegistry;
     const directory = yield* ProviderSessionDirectory;
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
+      PROVIDER_RUNTIME_EVENT_QUEUE_CAPACITY,
+    );
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+    const sessionLocksRef = yield* SynchronizedRef.make(new Map<ThreadId, Semaphore.Semaphore>());
 
-    const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Effect.succeed(event).pipe(
-        Effect.tap((canonicalEvent) =>
-          canonicalEventLogger ? canonicalEventLogger.write(canonicalEvent, null) : Effect.void,
+    const getSessionSemaphore = (threadId: ThreadId) =>
+      SynchronizedRef.modifyEffect(sessionLocksRef, (current) => {
+        const existing = current.get(threadId);
+        if (existing) {
+          return Effect.succeed([existing, current] as const);
+        }
+
+        return Semaphore.make(1).pipe(
+          Effect.map((semaphore) => {
+            const next = new Map(current);
+            next.set(threadId, semaphore);
+            return [semaphore, next] as const;
+          }),
+        );
+      });
+
+    const withSessionLock = <A, E, R>(
+      threadId: ThreadId,
+      effect: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E, R> =>
+      Effect.flatMap(getSessionSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
+
+    const persistRuntimeEvent = (event: ProviderRuntimeEvent) =>
+      runtimeEventLogRepository.append(event).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to persist provider runtime event", {
+            eventId: event.eventId,
+            threadId: event.threadId,
+            eventType: event.type,
+            cause: Cause.pretty(cause),
+          }).pipe(Effect.asVoid),
         ),
-        Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
         Effect.asVoid,
       );
+
+    const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (canonicalEventLogger) {
+          yield* canonicalEventLogger.write(event, null);
+        }
+        yield* persistRuntimeEvent(event);
+        yield* PubSub.publish(runtimeEventPubSub, event);
+      }).pipe(Effect.asVoid);
 
     const upsertSessionBinding = (
       session: ProviderSession,
@@ -285,186 +339,209 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       });
 
     const startSession: ProviderServiceShape["startSession"] = (threadId, rawInput) =>
-      Effect.gen(function* () {
-        const parsed = yield* decodeInputOrValidationError({
-          operation: "ProviderService.startSession",
-          schema: ProviderSessionStartInput,
-          payload: rawInput,
-        });
+      withSessionLock(
+        threadId,
+        Effect.gen(function* () {
+          const parsed = yield* decodeInputOrValidationError({
+            operation: "ProviderService.startSession",
+            schema: ProviderSessionStartInput,
+            payload: rawInput,
+          });
 
-        const input = {
-          ...parsed,
-          threadId,
-          provider: parsed.provider ?? "codex",
-        };
-        const settings = yield* serverSettings.getSettings.pipe(
-          Effect.mapError((error) =>
-            toValidationError(
-              "ProviderService.startSession",
-              `Failed to load provider settings: ${error.message}`,
-              error,
+          const input = {
+            ...parsed,
+            threadId,
+          };
+          const provider = yield* registry.resolveStartProvider({
+            operation: "ProviderService.startSession",
+            ...(input.provider !== undefined ? { provider: input.provider } : {}),
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+          });
+          const settings = yield* serverSettings.getSettings.pipe(
+            Effect.mapError((error) =>
+              toValidationError(
+                "ProviderService.startSession",
+                `Failed to load provider settings: ${error.message}`,
+                error,
+              ),
             ),
-          ),
-        );
-        if (!settings.providers[input.provider].enabled) {
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            `Provider '${input.provider}' is disabled in T3 Code settings.`,
           );
-        }
-        const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
-        const effectiveResumeCursor =
-          input.resumeCursor ??
-          (persistedBinding?.provider === input.provider
-            ? persistedBinding.resumeCursor
-            : undefined);
-        const adapter = yield* registry.getByProvider(input.provider);
-        const session = yield* adapter.startSession({
-          ...input,
-          ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
-        });
+          if (!settings.providers[provider].enabled) {
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              `Provider '${provider}' is disabled in T3 Code settings.`,
+            );
+          }
+          const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+          const effectiveResumeCursor =
+            input.resumeCursor ??
+            (persistedBinding?.provider === provider ? persistedBinding.resumeCursor : undefined);
+          const adapter = yield* registry.getByProvider(provider);
+          const session = yield* adapter.startSession({
+            ...input,
+            provider,
+            ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
+          });
 
-        if (session.provider !== adapter.provider) {
-          return yield* toValidationError(
-            "ProviderService.startSession",
-            `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
-          );
-        }
+          if (session.provider !== adapter.provider) {
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
+            );
+          }
 
-        yield* upsertSessionBinding(session, threadId, {
-          modelSelection: input.modelSelection,
-        });
-        yield* analytics.record("provider.session.started", {
-          provider: session.provider,
-          runtimeMode: input.runtimeMode,
-          hasResumeCursor: session.resumeCursor !== undefined,
-          hasCwd: typeof input.cwd === "string" && input.cwd.trim().length > 0,
-          hasModel:
-            typeof input.modelSelection?.model === "string" &&
-            input.modelSelection.model.trim().length > 0,
-        });
+          yield* upsertSessionBinding(session, threadId, {
+            modelSelection: input.modelSelection,
+          });
+          yield* analytics.record("provider.session.started", {
+            provider: session.provider,
+            runtimeMode: input.runtimeMode,
+            hasResumeCursor: session.resumeCursor !== undefined,
+            hasCwd: typeof input.cwd === "string" && input.cwd.trim().length > 0,
+            hasModel:
+              typeof input.modelSelection?.model === "string" &&
+              input.modelSelection.model.trim().length > 0,
+          });
 
-        return session;
-      });
+          return session;
+        }),
+      );
 
     const sendTurn: ProviderServiceShape["sendTurn"] = (rawInput) =>
-      Effect.gen(function* () {
-        const parsed = yield* decodeInputOrValidationError({
-          operation: "ProviderService.sendTurn",
-          schema: ProviderSendTurnInput,
-          payload: rawInput,
-        });
+      withSessionLock(
+        rawInput.threadId,
+        Effect.gen(function* () {
+          const parsed = yield* decodeInputOrValidationError({
+            operation: "ProviderService.sendTurn",
+            schema: ProviderSendTurnInput,
+            payload: rawInput,
+          });
 
-        const input = {
-          ...parsed,
-          attachments: parsed.attachments ?? [],
-        };
-        if (!input.input && input.attachments.length === 0) {
-          return yield* toValidationError(
-            "ProviderService.sendTurn",
-            "Either input text or at least one attachment is required",
-          );
-        }
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.sendTurn",
-          allowRecovery: true,
-        });
-        const turn = yield* routed.adapter.sendTurn(input);
-        yield* directory.upsert({
-          threadId: input.threadId,
-          provider: routed.adapter.provider,
-          status: "running",
-          ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
-          runtimePayload: {
-            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
-            activeTurnId: turn.turnId,
-            lastRuntimeEvent: "provider.sendTurn",
-            lastRuntimeEventAt: new Date().toISOString(),
-          },
-        });
-        yield* analytics.record("provider.turn.sent", {
-          provider: routed.adapter.provider,
-          model: input.modelSelection?.model,
-          interactionMode: input.interactionMode,
-          attachmentCount: input.attachments.length,
-          hasInput: typeof input.input === "string" && input.input.trim().length > 0,
-        });
-        return turn;
-      });
+          const input = {
+            ...parsed,
+            attachments: parsed.attachments ?? [],
+          };
+          if (!input.input && input.attachments.length === 0) {
+            return yield* toValidationError(
+              "ProviderService.sendTurn",
+              "Either input text or at least one attachment is required",
+            );
+          }
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.sendTurn",
+            allowRecovery: true,
+          });
+          const turn = yield* routed.adapter.sendTurn(input);
+          yield* directory.upsert({
+            threadId: input.threadId,
+            provider: routed.adapter.provider,
+            status: "running",
+            ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+            runtimePayload: {
+              ...(input.modelSelection !== undefined
+                ? { modelSelection: input.modelSelection }
+                : {}),
+              activeTurnId: turn.turnId,
+              lastRuntimeEvent: "provider.sendTurn",
+              lastRuntimeEventAt: new Date().toISOString(),
+            },
+          });
+          yield* analytics.record("provider.turn.sent", {
+            provider: routed.adapter.provider,
+            model: input.modelSelection?.model,
+            interactionMode: input.interactionMode,
+            attachmentCount: input.attachments.length,
+            hasInput: typeof input.input === "string" && input.input.trim().length > 0,
+          });
+          return turn;
+        }),
+      );
 
     const interruptTurn: ProviderServiceShape["interruptTurn"] = (rawInput) =>
-      Effect.gen(function* () {
-        const input = yield* decodeInputOrValidationError({
-          operation: "ProviderService.interruptTurn",
-          schema: ProviderInterruptTurnInput,
-          payload: rawInput,
-        });
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.interruptTurn",
-          allowRecovery: true,
-        });
-        yield* routed.adapter.interruptTurn(routed.threadId, input.turnId);
-        yield* analytics.record("provider.turn.interrupted", {
-          provider: routed.adapter.provider,
-        });
-      });
+      withSessionLock(
+        rawInput.threadId,
+        Effect.gen(function* () {
+          const input = yield* decodeInputOrValidationError({
+            operation: "ProviderService.interruptTurn",
+            schema: ProviderInterruptTurnInput,
+            payload: rawInput,
+          });
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.interruptTurn",
+            allowRecovery: true,
+          });
+          yield* routed.adapter.interruptTurn(routed.threadId, input.turnId);
+          yield* analytics.record("provider.turn.interrupted", {
+            provider: routed.adapter.provider,
+          });
+        }),
+      );
 
     const respondToRequest: ProviderServiceShape["respondToRequest"] = (rawInput) =>
-      Effect.gen(function* () {
-        const input = yield* decodeInputOrValidationError({
-          operation: "ProviderService.respondToRequest",
-          schema: ProviderRespondToRequestInput,
-          payload: rawInput,
-        });
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.respondToRequest",
-          allowRecovery: true,
-        });
-        yield* routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision);
-        yield* analytics.record("provider.request.responded", {
-          provider: routed.adapter.provider,
-          decision: input.decision,
-        });
-      });
+      withSessionLock(
+        rawInput.threadId,
+        Effect.gen(function* () {
+          const input = yield* decodeInputOrValidationError({
+            operation: "ProviderService.respondToRequest",
+            schema: ProviderRespondToRequestInput,
+            payload: rawInput,
+          });
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.respondToRequest",
+            allowRecovery: true,
+          });
+          yield* routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision);
+          yield* analytics.record("provider.request.responded", {
+            provider: routed.adapter.provider,
+            decision: input.decision,
+          });
+        }),
+      );
 
     const respondToUserInput: ProviderServiceShape["respondToUserInput"] = (rawInput) =>
-      Effect.gen(function* () {
-        const input = yield* decodeInputOrValidationError({
-          operation: "ProviderService.respondToUserInput",
-          schema: ProviderRespondToUserInputInput,
-          payload: rawInput,
-        });
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.respondToUserInput",
-          allowRecovery: true,
-        });
-        yield* routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers);
-      });
+      withSessionLock(
+        rawInput.threadId,
+        Effect.gen(function* () {
+          const input = yield* decodeInputOrValidationError({
+            operation: "ProviderService.respondToUserInput",
+            schema: ProviderRespondToUserInputInput,
+            payload: rawInput,
+          });
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.respondToUserInput",
+            allowRecovery: true,
+          });
+          yield* routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers);
+        }),
+      );
 
     const stopSession: ProviderServiceShape["stopSession"] = (rawInput) =>
-      Effect.gen(function* () {
-        const input = yield* decodeInputOrValidationError({
-          operation: "ProviderService.stopSession",
-          schema: ProviderStopSessionInput,
-          payload: rawInput,
-        });
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.stopSession",
-          allowRecovery: false,
-        });
-        if (routed.isActive) {
-          yield* routed.adapter.stopSession(routed.threadId);
-        }
-        yield* directory.remove(input.threadId);
-        yield* analytics.record("provider.session.stopped", {
-          provider: routed.adapter.provider,
-        });
-      });
+      withSessionLock(
+        rawInput.threadId,
+        Effect.gen(function* () {
+          const input = yield* decodeInputOrValidationError({
+            operation: "ProviderService.stopSession",
+            schema: ProviderStopSessionInput,
+            payload: rawInput,
+          });
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.stopSession",
+            allowRecovery: false,
+          });
+          if (routed.isActive) {
+            yield* routed.adapter.stopSession(routed.threadId);
+          }
+          yield* directory.remove(input.threadId);
+          yield* analytics.record("provider.session.stopped", {
+            provider: routed.adapter.provider,
+          });
+        }),
+      );
 
     const listSessions: ProviderServiceShape["listSessions"] = () =>
       Effect.gen(function* () {
@@ -517,26 +594,29 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
 
     const rollbackConversation: ProviderServiceShape["rollbackConversation"] = (rawInput) =>
-      Effect.gen(function* () {
-        const input = yield* decodeInputOrValidationError({
-          operation: "ProviderService.rollbackConversation",
-          schema: ProviderRollbackConversationInput,
-          payload: rawInput,
-        });
-        if (input.numTurns === 0) {
-          return;
-        }
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: "ProviderService.rollbackConversation",
-          allowRecovery: true,
-        });
-        yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns);
-        yield* analytics.record("provider.conversation.rolled_back", {
-          provider: routed.adapter.provider,
-          turns: input.numTurns,
-        });
-      });
+      withSessionLock(
+        rawInput.threadId,
+        Effect.gen(function* () {
+          const input = yield* decodeInputOrValidationError({
+            operation: "ProviderService.rollbackConversation",
+            schema: ProviderRollbackConversationInput,
+            payload: rawInput,
+          });
+          if (input.numTurns === 0) {
+            return;
+          }
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: "ProviderService.rollbackConversation",
+            allowRecovery: true,
+          });
+          yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns);
+          yield* analytics.record("provider.conversation.rolled_back", {
+            provider: routed.adapter.provider,
+            turns: input.numTurns,
+          });
+        }),
+      );
 
     const runStopAll = () =>
       Effect.gen(function* () {

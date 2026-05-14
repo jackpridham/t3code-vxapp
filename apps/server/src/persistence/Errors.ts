@@ -92,6 +92,8 @@ export class ProviderSessionRepositoryPersistenceError extends Schema.TaggedErro
 
 export type OrchestrationEventStoreError = PersistenceSqlError | PersistenceDecodeError;
 
+export type ProviderRuntimeEventLogRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+
 export type ProviderSessionRepositoryError =
   | ProviderSessionRepositoryValidationError
   | ProviderSessionRepositoryPersistenceError;

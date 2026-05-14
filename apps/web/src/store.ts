@@ -480,6 +480,10 @@ function mapThread(thread: OrchestrationThreadWithLabels): Thread {
     programId: thread.programId,
     executiveProjectId: thread.executiveProjectId,
     executiveThreadId: thread.executiveThreadId,
+    hasActiveError: thread.hasActiveError,
+    activeError: thread.activeError,
+    historicalError: thread.historicalError,
+    errorPresentationSource: thread.errorPresentationSource,
   };
 }
 
@@ -1253,6 +1257,10 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         programId: event.payload.programId,
         executiveProjectId: event.payload.executiveProjectId,
         executiveThreadId: event.payload.executiveThreadId,
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
       });
       const threads = existing
         ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))

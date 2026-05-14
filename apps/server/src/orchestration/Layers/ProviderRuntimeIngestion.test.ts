@@ -1375,33 +1375,6 @@ describe("ProviderRuntimeIngestion", () => {
         createdAt,
       }),
     );
-    harness.setProviderSession({
-      provider: "codex",
-      status: "running",
-      runtimeMode: "approval-required",
-      threadId: targetThreadId,
-      createdAt,
-      updatedAt: createdAt,
-      activeTurnId,
-    });
-
-    harness.emit({
-      type: "turn.started",
-      eventId: asEventId("evt-turn-started-already-running"),
-      provider: "codex",
-      createdAt,
-      threadId: targetThreadId,
-      turnId: activeTurnId,
-    });
-
-    await waitForThread(
-      harness.engine,
-      (thread) =>
-        thread.session?.status === "running" && thread.session?.activeTurnId === activeTurnId,
-      2_000,
-      targetThreadId,
-    );
-
     harness.emit({
       type: "turn.proposed.completed",
       eventId: asEventId("evt-plan-source-completed-guarded"),
@@ -1455,6 +1428,16 @@ describe("ProviderRuntimeIngestion", () => {
       }),
     );
 
+    harness.setProviderSession({
+      provider: "codex",
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId: targetThreadId,
+      createdAt,
+      updatedAt: createdAt,
+      activeTurnId,
+    });
+
     harness.emit({
       type: "turn.started",
       eventId: asEventId("evt-turn-started-stale-plan-implementation"),
@@ -1481,7 +1464,7 @@ describe("ProviderRuntimeIngestion", () => {
       (entry) => entry.id === targetThreadId,
     );
     expect(targetThreadAfterRejectedStart?.session?.status).toBe("running");
-    expect(targetThreadAfterRejectedStart?.session?.activeTurnId).toBe(activeTurnId);
+    expect(targetThreadAfterRejectedStart?.session?.activeTurnId).toBe(staleTurnId);
   });
 
   it("does not mark the source proposed plan implemented for an unrelated turn.started when no thread active turn is tracked", async () => {
@@ -2040,6 +2023,16 @@ describe("ProviderRuntimeIngestion", () => {
         requestType: "command_execution_approval",
         detail: "pwd",
       },
+      raw: {
+        source: "claude.sdk.permission",
+        method: "canUseTool/request",
+        payload: {
+          tenantId: "tenant-preview",
+          userId: "user-preview",
+          auditReference: "audit-preview",
+          toolUseId: "tool-preview",
+        },
+      },
     });
 
     harness.emit({
@@ -2052,6 +2045,16 @@ describe("ProviderRuntimeIngestion", () => {
       payload: {
         requestType: "command_execution_approval",
         decision: "accept",
+      },
+      raw: {
+        source: "claude.sdk.permission",
+        method: "canUseTool/decision",
+        payload: {
+          tenantId: "tenant-preview",
+          userId: "user-preview",
+          auditReference: "audit-preview",
+          toolUseId: "tool-preview",
+        },
       },
     });
 
@@ -2079,6 +2082,13 @@ describe("ProviderRuntimeIngestion", () => {
         : undefined;
     expect(requestedPayload?.requestKind).toBe("command");
     expect(requestedPayload?.requestType).toBe("command_execution_approval");
+    expect(requestedPayload?.operationId).toBe("req-open");
+    expect(requestedPayload?.preview).toBe("pwd");
+    expect(requestedPayload?.confirmationRequired).toBe(true);
+    expect(requestedPayload?.tenantId).toBe("tenant-preview");
+    expect(requestedPayload?.userId).toBe("user-preview");
+    expect(requestedPayload?.auditReference).toBe("audit-preview");
+    expect(requestedPayload?.toolUseId).toBe("tool-preview");
 
     const resolved = thread?.activities.find(
       (activity: ProviderRuntimeTestActivity) => activity.id === "evt-request-resolved",
@@ -2089,6 +2099,322 @@ describe("ProviderRuntimeIngestion", () => {
         : undefined;
     expect(resolvedPayload?.requestKind).toBe("command");
     expect(resolvedPayload?.requestType).toBe("command_execution_approval");
+    expect(resolvedPayload?.operationId).toBe("req-open");
+    expect(resolvedPayload?.decision).toBe("accept");
+    expect(resolvedPayload?.tenantId).toBe("tenant-preview");
+    expect(resolvedPayload?.userId).toBe("user-preview");
+    expect(resolvedPayload?.auditReference).toBe("audit-preview");
+    expect(resolvedPayload?.toolUseId).toBe("tool-preview");
+  });
+
+  it("projects capability-manifest driven UI command request/result activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "ui.command.requested",
+      eventId: asEventId("evt-ui-command-requested"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: "ui-command-request-1",
+      payload: {
+        requestId: "ui-command-request-1",
+        correlationId: "ui-command-correlation-1",
+        manifest: {
+          manifestId: "spa-manifest-1",
+          version: 1,
+          registeredAt: now,
+          commands: [
+            {
+              name: "navigate.toRoute",
+              deterministic: true,
+              requiresConfirmation: false,
+              timeoutMs: 1_500,
+            },
+          ],
+        },
+        command: {
+          name: "navigate.toRoute",
+          deterministic: true,
+          requiresConfirmation: false,
+          timeoutMs: 1_500,
+        },
+        args: {
+          routeName: "quotes.index",
+        },
+        advisoryContext: {
+          routeSnapshot: {
+            pathname: "/quotes",
+          },
+          pageSnapshot: {
+            pageKey: "quotes.index",
+          },
+          userSnapshot: {
+            userId: "user-render",
+          },
+          capabilitySnapshot: {
+            allowlisted: false,
+            commandNames: ["navigate.toRoute"],
+          },
+        },
+        allowlisted: true,
+        requestedAt: now,
+      },
+    });
+
+    harness.emit({
+      type: "ui.command.result",
+      eventId: asEventId("evt-ui-command-result"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: "ui-command-request-1",
+      payload: {
+        requestId: "ui-command-request-1",
+        correlationId: "ui-command-correlation-1",
+        manifestId: "spa-manifest-1",
+        command: "navigate.toRoute",
+        status: "completed",
+        result: {
+          routeName: "quotes.index",
+        },
+        completedAt: now,
+      },
+    });
+
+    harness.emit({
+      type: "ui.command.requested",
+      eventId: asEventId("evt-ui-command-mount-requested"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: "ui-command-request-2",
+      raw: {
+        source: "claude.sdk.permission",
+        method: "canUseTool/request",
+        payload: {
+          tenantId: "tenant-render",
+          userId: "user-render",
+          auditReference: "audit-render",
+          toolUseId: "tool-render",
+        },
+      },
+      payload: {
+        requestId: "ui-command-request-2",
+        correlationId: "ui-command-correlation-2",
+        manifest: {
+          manifestId: "spa-manifest-2",
+          version: 1,
+          registeredAt: now,
+          commands: [
+            {
+              name: "component.mountResult",
+              deterministic: true,
+              requiresConfirmation: false,
+              timeoutMs: 1_500,
+              renderBlock: {
+                type: "native",
+                title: "Recurring Quotes",
+                componentId: "recurring-quotes.table",
+                props: {
+                  routeName: "quotes.index",
+                },
+              },
+            },
+          ],
+        },
+        command: {
+          name: "component.mountResult",
+          deterministic: true,
+          requiresConfirmation: false,
+          timeoutMs: 1_500,
+          renderBlock: {
+            type: "native",
+            title: "Recurring Quotes",
+            componentId: "recurring-quotes.table",
+            props: {
+              routeName: "quotes.index",
+            },
+          },
+        },
+        args: {
+          componentId: "recurring-quotes.table",
+          props: {
+            routeName: "quotes.index",
+          },
+        },
+        allowlisted: true,
+        requestedAt: now,
+      },
+    });
+
+    harness.emit({
+      type: "agent.render_block",
+      eventId: asEventId("evt-agent-render-block"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: "render-request-1",
+      raw: {
+        source: "claude.sdk.message",
+        method: "agent/render_block",
+        payload: {
+          tenantId: "tenant-render",
+          userId: "user-render",
+          auditReference: "audit-render",
+          toolUseId: "tool-render",
+        },
+      },
+      payload: {
+        requestId: "render-request-1",
+        block: {
+          type: "table",
+          title: "Recurring Quotes",
+          columns: [
+            {
+              key: "quoteNumber",
+              label: "Quote #",
+            },
+            {
+              key: "generatedDate",
+              label: "Generated",
+              format: "date",
+            },
+          ],
+          rows: [
+            {
+              quoteNumber: "Q-1001",
+              generatedDate: "2026-02-01",
+            },
+          ],
+          rowActions: [
+            {
+              label: "Open quote",
+              command: "navigate.toRoute",
+              args: {
+                routeName: "quotes.show",
+                quoteGuid: "quote-1001",
+              },
+            },
+          ],
+          summary: "Recurring quotes due this month",
+        },
+      },
+    });
+
+    harness.emit({
+      type: "tool.summary",
+      eventId: asEventId("evt-tool-summary"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-call"),
+      raw: {
+        source: "claude.sdk.message",
+        method: "tool_use_summary",
+        payload: {
+          tenantId: "tenant-render",
+          userId: "user-render",
+          auditReference: "audit-render",
+          toolUseId: "tool-render",
+        },
+      },
+      payload: {
+        summary: "Recurring quotes due this month loaded.",
+        precedingToolUseIds: ["tool-use-77"],
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "ui.command.requested",
+        ) &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "ui.command.result",
+        ) &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "agent.render_block",
+        ) &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.summary",
+        ),
+    );
+
+    const result = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "ui.command.result",
+    );
+    const navigationRequested = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) =>
+        activity.kind === "ui.command.requested" &&
+        typeof activity.payload === "object" &&
+        activity.payload !== null &&
+        (activity.payload as Record<string, unknown>).requestId === "ui-command-request-1",
+    );
+    const mountRequested = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) =>
+        activity.kind === "ui.command.requested" &&
+        typeof activity.payload === "object" &&
+        activity.payload !== null &&
+        (activity.payload as Record<string, unknown>).requestId === "ui-command-request-2",
+    );
+    const renderBlock = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "agent.render_block",
+    );
+    const summary = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.summary",
+    );
+
+    expect(navigationRequested?.payload).toMatchObject({
+      requestId: "ui-command-request-1",
+      correlationId: "ui-command-correlation-1",
+      allowlisted: true,
+      manifest: {
+        manifestId: "spa-manifest-1",
+      },
+      command: {
+        name: "navigate.toRoute",
+      },
+      advisoryContext: {
+        routeSnapshot: {
+          pathname: "/quotes",
+        },
+        pageSnapshot: {
+          pageKey: "quotes.index",
+        },
+        userSnapshot: {
+          userId: "user-render",
+        },
+        capabilitySnapshot: {
+          allowlisted: false,
+          commandNames: ["navigate.toRoute"],
+        },
+      },
+    });
+    expect(result?.payload).toMatchObject({
+      requestId: "ui-command-request-1",
+      correlationId: "ui-command-correlation-1",
+      manifestId: "spa-manifest-1",
+      command: "navigate.toRoute",
+      status: "completed",
+    });
+    expect(mountRequested?.summary).toContain("Result mount intent requested");
+    expect(renderBlock?.payload).toMatchObject({
+      tenantId: "tenant-render",
+      userId: "user-render",
+      auditReference: "audit-render",
+      toolUseId: "tool-render",
+      requestId: "render-request-1",
+    });
+    expect(summary?.payload).toMatchObject({
+      tenantId: "tenant-render",
+      userId: "user-render",
+      auditReference: "audit-render",
+      toolUseId: "tool-render",
+      summary: "Recurring quotes due this month loaded.",
+    });
   });
 
   it("maps runtime.error into errored session state", async () => {
@@ -2481,6 +2807,186 @@ describe("ProviderRuntimeIngestion", () => {
       lastInputTokens: 120,
       lastOutputTokens: 6,
       compactsAutomatically: true,
+    });
+  });
+
+  it("projects runtime tool-call execution outcomes with tenant, user, and audit context", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    const toolContext = {
+      tenantId: "tenant-7",
+      userId: "user-19",
+      auditReference: "audit-4f7e",
+      toolUseId: "tool-use-77",
+    };
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-tool-call-started"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-call"),
+      itemId: asItemId("tool-use-77"),
+      payload: {
+        itemType: "command_execution",
+        status: "in_progress",
+        title: "Execute approved PHP tool",
+        detail: "api/v1/tools/quotes:run",
+        data: { endpoint: "/api/v1/tools/quotes:run" },
+      },
+      raw: {
+        source: "claude.sdk.permission",
+        method: "canUseTool/request",
+        payload: toolContext,
+      },
+    });
+
+    harness.emit({
+      type: "tool.progress",
+      eventId: asEventId("evt-tool-call-progress"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-call"),
+      payload: {
+        toolUseId: "tool-use-77",
+        toolName: "quotes:run",
+        summary: "Queued with tenant context",
+        elapsedSeconds: 0.75,
+      },
+      raw: {
+        source: "claude.sdk.message",
+        method: "tool/progress",
+        payload: toolContext,
+      },
+    });
+
+    harness.emit({
+      type: "item.updated",
+      eventId: asEventId("evt-tool-call-updated"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-call"),
+      itemId: asItemId("tool-use-77"),
+      payload: {
+        itemType: "command_execution",
+        status: "in_progress",
+        title: "Execute approved PHP tool",
+        detail: "Running with authenticated tenant and user context",
+        data: { endpoint: "/api/v1/tools/quotes:run" },
+      },
+      raw: {
+        source: "claude.sdk.permission",
+        method: "canUseTool/progress",
+        payload: toolContext,
+      },
+    });
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-tool-call-completed"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-call"),
+      itemId: asItemId("tool-use-77"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Execute approved PHP tool",
+        detail: "Audit ref: AUD-77",
+        data: {
+          endpoint: "/api/v1/tools/quotes:run",
+          auditReference: "AUD-77",
+        },
+      },
+      raw: {
+        source: "claude.sdk.permission",
+        method: "canUseTool/result",
+        payload: toolContext,
+      },
+    });
+
+    harness.emit({
+      type: "request.resolved",
+      eventId: asEventId("evt-tool-call-denied"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-tool-call"),
+      requestId: ApprovalRequestId.makeUnsafe("req-tool-denied"),
+      payload: {
+        requestType: "command_execution_approval",
+        decision: "decline",
+      },
+      raw: {
+        source: "claude.sdk.permission",
+        method: "canUseTool/decision",
+        payload: toolContext,
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) =>
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "tool_call_started",
+        ) &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "tool_call_progress",
+        ) &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "tool_call_result",
+        ) &&
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === "permission_denied",
+        ),
+    );
+
+    const started = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "tool_call_started",
+    );
+    const progress = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "tool_call_progress",
+    );
+    const result = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "tool_call_result",
+    );
+    const denied = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "permission_denied",
+    );
+
+    expect(started?.payload).toMatchObject({
+      tenantId: toolContext.tenantId,
+      userId: toolContext.userId,
+      auditReference: toolContext.auditReference,
+      toolUseId: toolContext.toolUseId,
+      itemType: "command_execution",
+    });
+    expect(progress?.payload).toMatchObject({
+      tenantId: toolContext.tenantId,
+      userId: toolContext.userId,
+      auditReference: toolContext.auditReference,
+      toolUseId: toolContext.toolUseId,
+      toolName: "quotes:run",
+    });
+    expect(result?.payload).toMatchObject({
+      tenantId: toolContext.tenantId,
+      userId: toolContext.userId,
+      auditReference: toolContext.auditReference,
+      toolUseId: toolContext.toolUseId,
+      itemType: "command_execution",
+      status: "completed",
+    });
+    expect(denied?.payload).toMatchObject({
+      tenantId: toolContext.tenantId,
+      userId: toolContext.userId,
+      auditReference: toolContext.auditReference,
+      requestType: "command_execution_approval",
+      decision: "decline",
     });
   });
 

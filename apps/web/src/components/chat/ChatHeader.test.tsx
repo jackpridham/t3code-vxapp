@@ -19,6 +19,7 @@ const baseProps = {
   changesPanelOpen: false,
   mobileSidebarOpen: false,
   showChangesDrawerToggle: true,
+  onToggleMobileSidebar: vi.fn(),
   onAddProjectHook: vi.fn(async () => {}),
   onUpdateProjectHook: vi.fn(async () => {}),
   onDeleteProjectHook: vi.fn(async () => {}),

@@ -23,6 +23,7 @@ import {
   requireThreadNotArchived,
   requireThreadTurnStartSlotAvailable,
 } from "./commandInvariants.ts";
+import { resolveThreadErrorPresentation } from "./threadErrorPresentation.ts";
 
 const nowIso = () => new Date().toISOString();
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
@@ -1168,6 +1169,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           session: command.session,
+          ...resolveThreadErrorPresentation({
+            sessionStatus: command.session.status,
+            sessionLastError: command.session.lastError,
+          }),
         },
       };
     }

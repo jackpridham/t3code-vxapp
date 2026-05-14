@@ -42,6 +42,10 @@ export function buildLocalDraftThread(
     persistedFileChanges: [],
     activities: [],
     proposedPlans: [],
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
   };
 }
 

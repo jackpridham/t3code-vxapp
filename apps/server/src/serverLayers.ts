@@ -8,6 +8,7 @@ import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { ServerConfig } from "./config";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore";
+import { ProviderRuntimeEventLogRepositoryLive } from "./persistence/Layers/ProviderRuntimeEventLog";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
 import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./orchestration/Layers/ProjectionBootstrapSummaryQuery";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
@@ -98,7 +99,11 @@ export function makeServerProviderLayer(): Layer.Layer<
     );
     return makeProviderServiceLive(
       canonicalEventLogger ? { canonicalEventLogger } : undefined,
-    ).pipe(Layer.provide(adapterRegistryLayer), Layer.provide(providerSessionDirectoryLayer));
+    ).pipe(
+      Layer.provide(adapterRegistryLayer),
+      Layer.provide(providerSessionDirectoryLayer),
+      Layer.provideMerge(ProviderRuntimeEventLogRepositoryLive),
+    );
   }).pipe(Layer.unwrap);
 }
 

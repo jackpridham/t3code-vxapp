@@ -36,6 +36,10 @@ function makeThreadSummary(
     archivedAt: null,
     deletedAt: null,
     session: null,
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
     ...overrides,
   };
 }

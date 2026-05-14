@@ -40,6 +40,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
     ...overrides,
   };
 }
@@ -123,6 +127,10 @@ function makeReadModel(): OrchestrationReadModel {
         proposedPlans: [],
         activities: [],
         checkpoints: [],
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
         session: null,
       },
     ],

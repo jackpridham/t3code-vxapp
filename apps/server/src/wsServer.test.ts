@@ -66,6 +66,7 @@ import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import { DEFAULT_SERVER_LOG_LEVEL } from "./config";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -305,10 +306,11 @@ function asWebSocketResponse(message: unknown): WebSocketResponse | null {
   return message as WebSocketResponse;
 }
 
-function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
+function connectWsOnce(port: number, token?: string, routePath = "/"): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`);
+    const normalizedPath = routePath.startsWith("/") ? routePath : `/${routePath}`;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${normalizedPath}${query}`);
     const channels: SocketChannels = {
       push: { queue: [], waiters: [] },
       response: { queue: [], waiters: [] },
@@ -332,12 +334,17 @@ function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
   });
 }
 
-async function connectWs(port: number, token?: string, attempts = 5): Promise<WebSocket> {
+async function connectWs(
+  port: number,
+  token?: string,
+  attempts = 5,
+  routePath = "/",
+): Promise<WebSocket> {
   let lastError: unknown = new Error("WebSocket connection failed");
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await connectWsOnce(port, token);
+      return await connectWsOnce(port, token, routePath);
     } catch (error) {
       lastError = error;
       if (attempt < attempts - 1) {
@@ -353,8 +360,9 @@ async function connectWs(port: number, token?: string, attempts = 5): Promise<We
 async function connectAndAwaitWelcome(
   port: number,
   token?: string,
+  routePath = "/",
 ): Promise<[WebSocket, WsPushMessage<typeof WS_CHANNELS.serverWelcome>]> {
-  const ws = await connectWs(port, token);
+  const ws = await connectWs(port, token, 5, routePath);
   const welcome = await waitForPush(ws, WS_CHANNELS.serverWelcome);
   return [ws, welcome];
 }
@@ -509,6 +517,7 @@ describe("WebSocket Server", () => {
       cwd?: string;
       autoBootstrapProjectFromCwd?: boolean;
       logWebSocketEvents?: boolean;
+      logLevel?: "debug" | "info" | "warn" | "error";
       devUrl?: string;
       authToken?: string;
       baseDir?: string;
@@ -556,6 +565,7 @@ describe("WebSocket Server", () => {
       authToken: options.authToken,
       autoBootstrapProjectFromCwd: options.autoBootstrapProjectFromCwd ?? false,
       logWebSocketEvents: options.logWebSocketEvents ?? Boolean(options.devUrl),
+      logLevel: options.logLevel ?? DEFAULT_SERVER_LOG_LEVEL,
     } satisfies ServerConfigShape);
     const infrastructureLayer = providerLayer.pipe(Layer.provideMerge(persistenceLayer));
     const providerRuntimeLayer = infrastructureLayer.pipe(
@@ -1674,6 +1684,50 @@ describe("WebSocket Server", () => {
     });
     expect(response.error).toBeUndefined();
     expect(openCalls).toEqual([{ cwd: "/my/workspace", editor: "cursor" }]);
+  });
+
+  it("closes overloaded websocket sessions with 1013", async () => {
+    const openService: OpenShape = {
+      openBrowser: () => Effect.void,
+      openInEditor: () =>
+        Effect.promise(
+          () =>
+            new Promise<void>((resolve) => {
+              setTimeout(resolve, 250);
+            }),
+        ),
+    };
+
+    server = await createTestServer({ cwd: "/my/workspace", open: openService });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const closePromise = new Promise<{ code: number; reason: string }>((resolve) => {
+      ws.once("close", (code, reason) => {
+        resolve({ code, reason: reason.toString("utf8") });
+      });
+    });
+
+    for (let index = 0; index <= 8; index += 1) {
+      ws.send(
+        JSON.stringify({
+          id: `req-overload-${index}`,
+          body: {
+            _tag: WS_METHODS.shellOpenInEditor,
+            cwd: "/my/workspace",
+            editor: "cursor",
+          },
+        }),
+      );
+    }
+
+    await expect(closePromise).resolves.toEqual({
+      code: 1013,
+      reason: "Server overloaded",
+    });
   });
 
   it("reads keybindings from the configured state directory", async () => {
@@ -2936,5 +2990,28 @@ describe("WebSocket Server", () => {
 
     const [authorizedWs] = await connectAndAwaitWelcome(port, "secret-token");
     connections.push(authorizedWs);
+  });
+
+  it("accepts explicit workspace websocket bridge aliases", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const acceptedRoutes = ["/ws", "/ai/workspace/ws", "/ai/workspace/analytics/ws"];
+
+    for (const routePath of acceptedRoutes) {
+      const [ws] = await connectAndAwaitWelcome(port, undefined, routePath);
+      connections.push(ws);
+    }
+  });
+
+  it("rejects unknown websocket routes", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    await expect(connectWs(port, undefined, 5, "/not-a-real-route")).rejects.toThrow(
+      "WebSocket connection failed",
+    );
   });
 });

@@ -11,8 +11,10 @@ import { Command, Flag } from "effect/unstable/cli";
 import { NetService } from "@t3tools/shared/Net";
 import {
   DEFAULT_PORT,
+  DEFAULT_SERVER_LOG_LEVEL,
   deriveServerPaths,
   resolveStaticDir,
+  resolveServerLogLevel,
   ServerConfig,
   type RuntimeMode,
   type ServerConfigShape,
@@ -47,6 +49,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   authToken: Schema.optional(Schema.String),
   autoBootstrapProjectFromCwd: Schema.optional(Schema.Boolean),
   logWebSocketEvents: Schema.optional(Schema.Boolean),
+  logLevel: Schema.optional(Schema.String),
 });
 
 interface CliInput {
@@ -60,6 +63,7 @@ interface CliInput {
   readonly bootstrapFd: Option.Option<number>;
   readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
+  readonly logLevel: Option.Option<string>;
 }
 
 /**
@@ -132,6 +136,10 @@ const CliEnvConfig = Config.all({
     Config.map(Option.getOrUndefined),
   ),
   logWebSocketEvents: Config.boolean("T3CODE_LOG_WS_EVENTS").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  logLevel: Config.string("T3CODE_LOG_LEVEL").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
@@ -261,6 +269,26 @@ export const ServerConfigLive = (input: CliInput) =>
           () => Boolean(devUrl),
         ),
       );
+      const logLevel = yield* Effect.try({
+        try: () =>
+          resolveServerLogLevel(
+            Option.getOrElse(
+              resolveOptionPrecedence(
+                input.logLevel,
+                Option.fromUndefinedOr(env.logLevel),
+                Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+                  Option.fromUndefinedOr(bootstrap.logLevel),
+                ),
+              ),
+              () => DEFAULT_SERVER_LOG_LEVEL,
+            ),
+          ),
+        catch: (cause) =>
+          new StartupError({
+            message: cause instanceof Error ? cause.message : "Failed to resolve log level",
+            cause,
+          }),
+      });
       const staticDir = devUrl ? undefined : yield* cliConfig.resolveStaticDir;
       const host = Option.getOrElse(
         resolveOptionPrecedence(
@@ -284,6 +312,7 @@ export const ServerConfigLive = (input: CliInput) =>
         authToken: Option.getOrUndefined(authToken),
         autoBootstrapProjectFromCwd,
         logWebSocketEvents,
+        logLevel,
       } satisfies ServerConfigShape;
 
       return config;
@@ -431,6 +460,10 @@ const bootstrapFdFlag = Flag.integer("bootstrap-fd").pipe(
   Flag.withDescription("Read one-time bootstrap secrets from the given file descriptor."),
   Flag.optional,
 );
+const logLevelFlag = Flag.string("log-level").pipe(
+  Flag.withDescription("Minimum server log level (debug, info, warn, error)."),
+  Flag.optional,
+);
 const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-from-cwd").pipe(
   Flag.withDescription(
     "Create a project for the current working directory on startup when missing.",
@@ -457,6 +490,7 @@ export const makeT3Cli = <Services, Error, Requirements>(
     noBrowser: noBrowserFlag,
     authToken: authTokenFlag,
     bootstrapFd: bootstrapFdFlag,
+    logLevel: logLevelFlag,
     autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
     logWebSocketEvents: logWebSocketEventsFlag,
   }).pipe(

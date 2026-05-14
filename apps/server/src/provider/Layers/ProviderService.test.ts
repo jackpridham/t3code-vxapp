@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type {
+  ModelSelection,
   ProviderApprovalDecision,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -20,7 +21,7 @@ import {
 import { it, assert, vi } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
 
-import { Effect, Fiber, Layer, Option, PubSub, Ref, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, PubSub, Ref, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
@@ -36,6 +37,7 @@ import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.t
 import { makeProviderServiceLive } from "./ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { ProviderRuntimeEventLogRepositoryLive } from "../../persistence/Layers/ProviderRuntimeEventLog.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
 import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
 import {
@@ -230,6 +232,32 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
 const sleep = (ms: number) =>
   Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
+function resolveTestStartProvider(input: {
+  readonly operation: string;
+  readonly provider?: ProviderKind | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly supportedProviders: ReadonlyArray<ProviderKind>;
+}) {
+  const modelProvider = input.modelSelection?.provider;
+  if (
+    input.provider !== undefined &&
+    modelProvider !== undefined &&
+    input.provider !== modelProvider
+  ) {
+    return Effect.fail(
+      new ProviderValidationError({
+        operation: input.operation,
+        issue: `Provider '${input.provider}' does not match modelSelection provider '${modelProvider}'.`,
+      }),
+    );
+  }
+
+  const resolved = input.provider ?? modelProvider ?? "codex";
+  return input.supportedProviders.includes(resolved)
+    ? Effect.succeed(resolved)
+    : Effect.fail(new ProviderUnsupportedError({ provider: resolved }));
+}
+
 function makeProviderServiceLayer() {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter("claudeAgent");
@@ -241,10 +269,20 @@ function makeProviderServiceLayer() {
           ? Effect.succeed(claude.adapter)
           : Effect.fail(new ProviderUnsupportedError({ provider })),
     listProviders: () => Effect.succeed(["codex", "claudeAgent"]),
+    resolveStartProvider: ({ operation, provider, modelSelection }) =>
+      resolveTestStartProvider({
+        operation,
+        provider,
+        modelSelection,
+        supportedProviders: ["codex", "claudeAgent"],
+      }),
   };
 
   const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
   const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+    Layer.provide(SqlitePersistenceMemory),
+  );
+  const runtimeEventLogRepositoryLayer = ProviderRuntimeEventLogRepositoryLive.pipe(
     Layer.provide(SqlitePersistenceMemory),
   );
   const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
@@ -254,12 +292,14 @@ function makeProviderServiceLayer() {
       makeProviderServiceLive().pipe(
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
+        Layer.provide(runtimeEventLogRepositoryLayer),
         Layer.provide(defaultServerSettingsLayer),
         Layer.provideMerge(AnalyticsService.layerTest),
       ),
       directoryLayer,
 
       runtimeRepositoryLayer,
+      runtimeEventLogRepositoryLayer,
       NodeServices.layer,
     ),
   );
@@ -283,6 +323,13 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
             ? Effect.succeed(claude.adapter)
             : Effect.fail(new ProviderUnsupportedError({ provider })),
       listProviders: () => Effect.succeed(["codex", "claudeAgent"]),
+      resolveStartProvider: ({ operation, provider, modelSelection }) =>
+        resolveTestStartProvider({
+          operation,
+          provider,
+          modelSelection,
+          supportedProviders: ["codex", "claudeAgent"],
+        }),
     };
     const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
     const serverSettingsLayer = ServerSettingsService.layerTest({
@@ -295,10 +342,14 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
     const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
       Layer.provide(SqlitePersistenceMemory),
     );
+    const runtimeEventLogRepositoryLayer = ProviderRuntimeEventLogRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
     const providerLayer = makeProviderServiceLive().pipe(
       Layer.provide(providerAdapterLayer),
       Layer.provide(directoryLayer),
+      Layer.provide(runtimeEventLogRepositoryLayer),
       Layer.provide(serverSettingsLayer),
       Layer.provide(AnalyticsService.layerTest),
     );
@@ -333,10 +384,20 @@ it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", (
           ? Effect.succeed(codex.adapter)
           : Effect.fail(new ProviderUnsupportedError({ provider })),
       listProviders: () => Effect.succeed(["codex"]),
+      resolveStartProvider: ({ operation, provider, modelSelection }) =>
+        resolveTestStartProvider({
+          operation,
+          provider,
+          modelSelection,
+          supportedProviders: ["codex"],
+        }),
     };
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath);
     const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(persistenceLayer),
+    );
+    const runtimeEventLogRepositoryLayer = ProviderRuntimeEventLogRepositoryLive.pipe(
       Layer.provide(persistenceLayer),
     );
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
@@ -352,6 +413,7 @@ it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", (
     const providerLayer = makeProviderServiceLive().pipe(
       Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
+      Layer.provide(runtimeEventLogRepositoryLayer),
       Layer.provide(defaultServerSettingsLayer),
       Layer.provide(AnalyticsService.layerTest),
     );
@@ -396,6 +458,9 @@ it.effect(
       const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
         Layer.provide(persistenceLayer),
       );
+      const runtimeEventLogRepositoryLayer = ProviderRuntimeEventLogRepositoryLive.pipe(
+        Layer.provide(persistenceLayer),
+      );
 
       const firstCodex = makeFakeCodexAdapter();
       const firstRegistry: typeof ProviderAdapterRegistry.Service = {
@@ -404,6 +469,13 @@ it.effect(
             ? Effect.succeed(firstCodex.adapter)
             : Effect.fail(new ProviderUnsupportedError({ provider })),
         listProviders: () => Effect.succeed(["codex"]),
+        resolveStartProvider: ({ operation, provider, modelSelection }) =>
+          resolveTestStartProvider({
+            operation,
+            provider,
+            modelSelection,
+            supportedProviders: ["codex"],
+          }),
       };
 
       const firstDirectoryLayer = ProviderSessionDirectoryLive.pipe(
@@ -412,6 +484,7 @@ it.effect(
       const firstProviderLayer = makeProviderServiceLive().pipe(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, firstRegistry)),
         Layer.provide(firstDirectoryLayer),
+        Layer.provide(runtimeEventLogRepositoryLayer),
         Layer.provide(defaultServerSettingsLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
@@ -457,6 +530,13 @@ it.effect(
             ? Effect.succeed(secondCodex.adapter)
             : Effect.fail(new ProviderUnsupportedError({ provider })),
         listProviders: () => Effect.succeed(["codex"]),
+        resolveStartProvider: ({ operation, provider, modelSelection }) =>
+          resolveTestStartProvider({
+            operation,
+            provider,
+            modelSelection,
+            supportedProviders: ["codex"],
+          }),
       };
       const secondDirectoryLayer = ProviderSessionDirectoryLive.pipe(
         Layer.provide(runtimeRepositoryLayer),
@@ -464,6 +544,7 @@ it.effect(
       const secondProviderLayer = makeProviderServiceLive().pipe(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, secondRegistry)),
         Layer.provide(secondDirectoryLayer),
+        Layer.provide(runtimeEventLogRepositoryLayer),
         Layer.provide(defaultServerSettingsLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
@@ -578,6 +659,72 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("serializes concurrent provider turns per thread", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const release = yield* Deferred.make<void>();
+      let activeTurns = 0;
+      let maxActiveTurns = 0;
+      const originalSendTurn = routing.codex.sendTurn.getMockImplementation();
+
+      try {
+        routing.codex.sendTurn.mockImplementation((input) =>
+          Effect.gen(function* () {
+            activeTurns += 1;
+            maxActiveTurns = Math.max(maxActiveTurns, activeTurns);
+            yield* Deferred.await(release);
+            activeTurns -= 1;
+            return {
+              threadId: input.threadId,
+              turnId: TurnId.makeUnsafe(`turn-${String(input.threadId)}`),
+            };
+          }),
+        );
+
+        const session = yield* provider.startSession(asThreadId("thread-serial"), {
+          provider: "codex",
+          threadId: asThreadId("thread-serial"),
+          cwd: "/tmp/project-serial",
+          runtimeMode: "full-access",
+        });
+
+        const first = yield* provider
+          .sendTurn({
+            threadId: session.threadId,
+            input: "first",
+            attachments: [],
+          })
+          .pipe(Effect.forkChild);
+        const second = yield* provider
+          .sendTurn({
+            threadId: session.threadId,
+            input: "second",
+            attachments: [],
+          })
+          .pipe(Effect.forkChild);
+
+        yield* sleep(50);
+        assert.equal(maxActiveTurns, 1);
+
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+
+        assert.equal(activeTurns, 0);
+        assert.equal(maxActiveTurns, 1);
+      } finally {
+        routing.codex.sendTurn.mockImplementation(
+          originalSendTurn ??
+            ((input: ProviderSendTurnInput) =>
+              Effect.succeed({
+                threadId: input.threadId,
+                turnId: TurnId.makeUnsafe(`turn-${String(input.threadId)}`),
+              })),
+        );
+      }
+    }),
+  );
+
   it.effect("recovers stale persisted sessions for rollback by resuming thread identity", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;
@@ -638,6 +785,66 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.provider, "claudeAgent");
         assert.equal(startPayload.cwd, "/tmp/project-claude");
       }
+    }),
+  );
+
+  it.effect("derives the provider from modelSelection when startSession omits provider", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const claudeCallsBefore = routing.claude.startSession.mock.calls.length;
+
+      const session = yield* provider.startSession(asThreadId("thread-claude-derived"), {
+        threadId: asThreadId("thread-claude-derived"),
+        cwd: "/tmp/project-claude-derived",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+        },
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(session.provider, "claudeAgent");
+      assert.equal(routing.claude.startSession.mock.calls.length, claudeCallsBefore + 1);
+      const startInput = routing.claude.startSession.mock.calls.at(-1)?.[0];
+      assert.equal(typeof startInput === "object" && startInput !== null, true);
+      if (startInput && typeof startInput === "object") {
+        const startPayload = startInput as { provider?: string; modelSelection?: unknown };
+        assert.equal(startPayload.provider, "claudeAgent");
+        assert.deepEqual(startPayload.modelSelection, {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+        });
+      }
+    }),
+  );
+
+  it.effect("rejects mismatched provider and modelSelection on startSession", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const codexCallsBefore = routing.codex.startSession.mock.calls.length;
+      const claudeCallsBefore = routing.claude.startSession.mock.calls.length;
+
+      const result = yield* Effect.result(
+        provider.startSession(asThreadId("thread-provider-mismatch"), {
+          provider: "codex",
+          threadId: asThreadId("thread-provider-mismatch"),
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
+          runtimeMode: "full-access",
+        }),
+      );
+
+      assertFailure(
+        result,
+        new ProviderValidationError({
+          operation: "ProviderService.startSession",
+          issue: "Provider 'codex' does not match modelSelection provider 'claudeAgent'.",
+        }),
+      );
+      assert.equal(routing.codex.startSession.mock.calls.length, codexCallsBefore);
+      assert.equal(routing.claude.startSession.mock.calls.length, claudeCallsBefore);
     }),
   );
 
@@ -810,6 +1017,9 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
         Layer.provide(persistenceLayer),
       );
+      const runtimeEventLogRepositoryLayer = ProviderRuntimeEventLogRepositoryLive.pipe(
+        Layer.provide(persistenceLayer),
+      );
 
       const firstClaude = makeFakeCodexAdapter("claudeAgent");
       const firstRegistry: typeof ProviderAdapterRegistry.Service = {
@@ -818,6 +1028,13 @@ routing.layer("ProviderServiceLive routing", (it) => {
             ? Effect.succeed(firstClaude.adapter)
             : Effect.fail(new ProviderUnsupportedError({ provider })),
         listProviders: () => Effect.succeed(["claudeAgent"]),
+        resolveStartProvider: ({ operation, provider, modelSelection }) =>
+          resolveTestStartProvider({
+            operation,
+            provider,
+            modelSelection,
+            supportedProviders: ["claudeAgent"],
+          }),
       };
       const firstDirectoryLayer = ProviderSessionDirectoryLive.pipe(
         Layer.provide(runtimeRepositoryLayer),
@@ -825,6 +1042,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const firstProviderLayer = makeProviderServiceLive().pipe(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, firstRegistry)),
         Layer.provide(firstDirectoryLayer),
+        Layer.provide(runtimeEventLogRepositoryLayer),
         Layer.provide(defaultServerSettingsLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
@@ -851,6 +1069,13 @@ routing.layer("ProviderServiceLive routing", (it) => {
             ? Effect.succeed(secondClaude.adapter)
             : Effect.fail(new ProviderUnsupportedError({ provider })),
         listProviders: () => Effect.succeed(["claudeAgent"]),
+        resolveStartProvider: ({ operation, provider, modelSelection }) =>
+          resolveTestStartProvider({
+            operation,
+            provider,
+            modelSelection,
+            supportedProviders: ["claudeAgent"],
+          }),
       };
       const secondDirectoryLayer = ProviderSessionDirectoryLive.pipe(
         Layer.provide(runtimeRepositoryLayer),
@@ -858,6 +1083,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const secondProviderLayer = makeProviderServiceLive().pipe(
         Layer.provide(Layer.succeed(ProviderAdapterRegistry, secondRegistry)),
         Layer.provide(secondDirectoryLayer),
+        Layer.provide(runtimeEventLogRepositoryLayer),
         Layer.provide(defaultServerSettingsLayer),
         Layer.provide(AnalyticsService.layerTest),
       );
