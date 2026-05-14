@@ -166,7 +166,9 @@ function stripRequestTag<T extends { _tag: string }>(body: T) {
 }
 
 const encodeWsResponse = Schema.encodeEffect(Schema.fromJsonString(WsResponse));
-const decodeWebSocketRequest = decodeJsonResult(WebSocketRequest);
+const decodeWebSocketRequest = decodeJsonResult(WebSocketRequest as never) as (
+  input: string,
+) => Result.Result<Schema.Schema.Type<typeof WebSocketRequest>, Cause.Cause<Schema.SchemaError>>;
 
 export type ServerCoreRuntimeServices =
   | ProjectionBootstrapSummaryQuery
@@ -275,6 +277,12 @@ class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("Ro
 
 const MAX_PENDING_WS_REQUESTS_PER_CLIENT = 8;
 const WS_OVERLOAD_CLOSE_CODE = 1013;
+const SERVER_WS_ROUTE_PATHS = new Set([
+  "/",
+  "/ws",
+  "/ai/workspace/ws",
+  "/ai/workspace/analytics/ws",
+]);
 
 interface SocketRequestState {
   pending: number;
@@ -1229,15 +1237,21 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   httpServer.on("upgrade", (request, socket, head) => {
     socket.on("error", () => {}); // Prevent unhandled `EPIPE`/`ECONNRESET` from crashing the process if the client disconnects mid-handshake
 
+    let url: URL;
+    try {
+      url = new URL(request.url ?? "/", `http://localhost:${port}`);
+    } catch {
+      rejectUpgrade(socket, 400, "Invalid WebSocket URL");
+      return;
+    }
+
+    if (!SERVER_WS_ROUTE_PATHS.has(url.pathname)) {
+      rejectUpgrade(socket, 400, "Unknown WebSocket route");
+      return;
+    }
+
     if (authToken) {
-      let providedToken: string | null = null;
-      try {
-        const url = new URL(request.url ?? "/", `http://localhost:${port}`);
-        providedToken = url.searchParams.get("token");
-      } catch {
-        rejectUpgrade(socket, 400, "Invalid WebSocket URL");
-        return;
-      }
+      const providedToken = url.searchParams.get("token");
 
       if (providedToken !== authToken) {
         rejectUpgrade(socket, 401, "Unauthorized WebSocket connection");

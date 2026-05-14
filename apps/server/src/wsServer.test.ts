@@ -306,10 +306,11 @@ function asWebSocketResponse(message: unknown): WebSocketResponse | null {
   return message as WebSocketResponse;
 }
 
-function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
+function connectWsOnce(port: number, token?: string, routePath = "/"): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`);
+    const normalizedPath = routePath.startsWith("/") ? routePath : `/${routePath}`;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${normalizedPath}${query}`);
     const channels: SocketChannels = {
       push: { queue: [], waiters: [] },
       response: { queue: [], waiters: [] },
@@ -333,12 +334,17 @@ function connectWsOnce(port: number, token?: string): Promise<WebSocket> {
   });
 }
 
-async function connectWs(port: number, token?: string, attempts = 5): Promise<WebSocket> {
+async function connectWs(
+  port: number,
+  token?: string,
+  attempts = 5,
+  routePath = "/",
+): Promise<WebSocket> {
   let lastError: unknown = new Error("WebSocket connection failed");
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await connectWsOnce(port, token);
+      return await connectWsOnce(port, token, routePath);
     } catch (error) {
       lastError = error;
       if (attempt < attempts - 1) {
@@ -354,8 +360,9 @@ async function connectWs(port: number, token?: string, attempts = 5): Promise<We
 async function connectAndAwaitWelcome(
   port: number,
   token?: string,
+  routePath = "/",
 ): Promise<[WebSocket, WsPushMessage<typeof WS_CHANNELS.serverWelcome>]> {
-  const ws = await connectWs(port, token);
+  const ws = await connectWs(port, token, 5, routePath);
   const welcome = await waitForPush(ws, WS_CHANNELS.serverWelcome);
   return [ws, welcome];
 }
@@ -2983,5 +2990,28 @@ describe("WebSocket Server", () => {
 
     const [authorizedWs] = await connectAndAwaitWelcome(port, "secret-token");
     connections.push(authorizedWs);
+  });
+
+  it("accepts explicit workspace websocket bridge aliases", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const acceptedRoutes = ["/ws", "/ai/workspace/ws", "/ai/workspace/analytics/ws"];
+
+    for (const routePath of acceptedRoutes) {
+      const [ws] = await connectAndAwaitWelcome(port, undefined, routePath);
+      connections.push(ws);
+    }
+  });
+
+  it("rejects unknown websocket routes", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    await expect(connectWs(port, undefined, 5, "/not-a-real-route")).rejects.toThrow(
+      "WebSocket connection failed",
+    );
   });
 });

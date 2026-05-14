@@ -59,6 +59,7 @@ import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionTh
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
+import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
 import { selectOperationalCtoAttentionItems } from "../projectionCtoAttention.ts";
 import {
   ProjectionOperationalQuery,
@@ -287,6 +288,13 @@ function mapThreadSummaryRows(input: {
   }
 
   return input.threads.map((row) => ({
+    ...resolveLocalThreadErrorPresentation({
+      archivedAt: row.archivedAt,
+      deletedAt: row.deletedAt,
+      latestTurnState: latestTurnByThreadId.get(row.threadId)?.state,
+      sessionStatus: sessionByThreadId.get(row.threadId)?.status,
+      sessionLastError: sessionByThreadId.get(row.threadId)?.lastError,
+    }),
     id: row.threadId,
     projectId: row.projectId,
     title: row.title,
@@ -354,6 +362,10 @@ function mapSummaryToThread(summary: OrchestrationThreadSummary): OrchestrationT
     checkpoints: [],
     snapshotCoverage: emptyThreadCoverage(),
     session: summary.session,
+    hasActiveError: summary.hasActiveError,
+    activeError: summary.activeError,
+    historicalError: summary.historicalError,
+    errorPresentationSource: summary.errorPresentationSource,
     ...(summary.orchestratorProjectId !== undefined
       ? { orchestratorProjectId: summary.orchestratorProjectId }
       : {}),

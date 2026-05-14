@@ -7,6 +7,10 @@ import pkg from "./package.json" with { type: "json" };
 
 const port = Number(process.env.PORT ?? 5733);
 const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
+const wsProxyTarget = process.env.VITE_WS_PROXY_PORT
+  ? `http://localhost:${process.env.VITE_WS_PROXY_PORT}`
+  : null;
+const wsProxyAliases = ["/ws", "/ai/workspace/ws", "/ai/workspace/analytics/ws"];
 
 const buildSourcemap =
   sourcemapEnv === "0" || sourcemapEnv === "false"
@@ -57,15 +61,18 @@ export default defineConfig({
     },
     // Proxy WebSocket upgrade requests so the browser only needs the Vite
     // port (avoids firewall issues when the bun server port is blocked).
-    ...(process.env.VITE_WS_PROXY_PORT
+    ...(wsProxyTarget
       ? {
-          proxy: {
-            "/ws": {
-              target: `http://localhost:${process.env.VITE_WS_PROXY_PORT}`,
-              ws: true,
-              rewriteWsOrigin: true,
-            },
-          },
+          proxy: Object.fromEntries(
+            wsProxyAliases.map((route) => [
+              route,
+              {
+                target: wsProxyTarget,
+                ws: true,
+                rewriteWsOrigin: true,
+              },
+            ]),
+          ),
         }
       : {}),
   },

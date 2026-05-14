@@ -1,5 +1,6 @@
 import type {
   OrchestrationCtoAttentionItem,
+  OrchestrationThreadErrorPresentationSource,
   ModelSelection,
   OrchestrationLatestTurn,
   OrchestrationProgram,
@@ -156,6 +157,10 @@ export interface Thread {
   executiveProjectId?: string | undefined;
   executiveThreadId?: string | undefined;
   sessionWorkerThreadCount?: number | undefined;
+  hasActiveError: boolean;
+  activeError: string | null;
+  historicalError: string | null;
+  errorPresentationSource: OrchestrationThreadErrorPresentationSource;
 }
 
 export interface ThreadSession {

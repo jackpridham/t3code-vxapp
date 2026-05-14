@@ -33,6 +33,10 @@ function makeSummary(
     spawnRole: overrides.spawnRole,
     spawnedBy: overrides.spawnedBy,
     workflowId: overrides.workflowId,
+    hasActiveError: overrides.hasActiveError ?? false,
+    activeError: overrides.activeError ?? null,
+    historicalError: overrides.historicalError ?? null,
+    errorPresentationSource: overrides.errorPresentationSource ?? "none",
   };
 }
 

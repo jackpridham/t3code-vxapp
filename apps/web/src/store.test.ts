@@ -57,6 +57,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
     ...overrides,
   };
 }
@@ -138,6 +142,10 @@ function makeReadModelThread(overrides: Partial<ReadModelThreadWithLabels> = {})
     proposedPlans: [],
     checkpoints: [],
     session: null,
+    hasActiveError: false,
+    activeError: null,
+    historicalError: null,
+    errorPresentationSource: "none",
     ...overrides,
   } satisfies ReadModelThreadWithLabels;
 }
@@ -1818,6 +1826,10 @@ describe("incremental orchestration updates", () => {
             lastError: null,
             updatedAt: "2026-02-27T00:00:02.000Z",
           },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
         },
         { sequence: 2 },
       ),
@@ -2154,6 +2166,10 @@ describe("incremental orchestration updates", () => {
           lastError: null,
           updatedAt: "2026-02-27T00:00:04.000Z",
         },
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
       }),
     );
 

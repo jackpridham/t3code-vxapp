@@ -10,6 +10,7 @@ vi.mock("../notificationDispatch", () => ({
 }));
 
 import { useStore } from "../store";
+import { type Thread } from "../types";
 
 import {
   buildExpiredTerminalContextToastCopy,
@@ -199,7 +200,7 @@ const makeThread = (input?: {
     startedAt: string | null;
     completedAt: string | null;
   } | null;
-}) => ({
+}): Thread => ({
   id: input?.id ?? ThreadId.makeUnsafe("thread-1"),
   codexThreadId: null,
   projectId: ProjectId.makeUnsafe("project-1"),
@@ -225,6 +226,10 @@ const makeThread = (input?: {
   turnDiffSummaries: [],
   persistedFileChanges: [],
   activities: [],
+  hasActiveError: false,
+  activeError: null,
+  historicalError: null,
+  errorPresentationSource: "none",
 });
 
 afterEach(() => {
@@ -549,6 +554,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       turnDiffSummaries: [],
       persistedFileChanges: [],
       activities: [],
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
     });
 
     expect(
@@ -586,6 +595,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       turnDiffSummaries: [],
       persistedFileChanges: [],
       activities: [],
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
     });
 
     expect(
@@ -632,6 +645,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       turnDiffSummaries: [],
       persistedFileChanges: [],
       activities: [],
+      hasActiveError: false,
+      activeError: null,
+      historicalError: null,
+      errorPresentationSource: "none",
     });
 
     expect(

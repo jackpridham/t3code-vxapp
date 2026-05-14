@@ -57,6 +57,7 @@ import {
   upsertCtoAttentionItemByKey,
   updateCtoAttentionItemByNotificationId,
 } from "./ctoAttention.ts";
+import { resolveThreadErrorPresentation } from "./threadErrorPresentation.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 type ProgramPatch = Partial<Omit<OrchestrationProgram, "id">>;
@@ -681,6 +682,10 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
             archivedAt: null,
             deletedAt: null,
+            ...resolveThreadErrorPresentation({
+              sessionStatus: null,
+              sessionLastError: null,
+            }),
             messages: [],
             activities: [],
             checkpoints: [],
@@ -916,6 +921,10 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
+            hasActiveError: payload.hasActiveError,
+            activeError: payload.activeError,
+            historicalError: payload.historicalError,
+            errorPresentationSource: payload.errorPresentationSource,
             latestTurn,
             updatedAt: event.occurredAt,
           }),

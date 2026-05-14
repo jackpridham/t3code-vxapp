@@ -520,93 +520,100 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           deletedAt: null,
         },
       ]);
-      assert.deepEqual(snapshot.programs, [
-        {
-          id: asProgramId("program-cto"),
-          title: "Founder task",
-          objective: "Convert founder request into Jasper orchestration.",
-          status: "active",
-          declaredRepos: ["t3code-vxapp", "vortex-scripts"],
-          affectedAppTargets: ["web", "api"],
-          requiredLocalSuites: [
-            {
-              repo: "t3code-vxapp",
-              suiteId: "lint",
-              description: "Run lint before review.",
+      assert.deepEqual(
+        (snapshot.programs ?? []).map((program) => ({
+          ...program,
+          dependencyGates: (program as { dependencyGates?: unknown[] }).dependencyGates ?? [],
+        })),
+        [
+          {
+            id: asProgramId("program-cto"),
+            title: "Founder task",
+            objective: "Convert founder request into Jasper orchestration.",
+            status: "active",
+            declaredRepos: ["t3code-vxapp", "vortex-scripts"],
+            dependencyGates: [],
+            affectedAppTargets: ["web", "api"],
+            requiredLocalSuites: [
+              {
+                repo: "t3code-vxapp",
+                suiteId: "lint",
+                description: "Run lint before review.",
+              },
+            ],
+            requiredExternalE2ESuites: [
+              {
+                target: "web",
+                suiteId: "founder-e2e",
+                description: "Founder-visible E2E.",
+              },
+            ],
+            requireDevelopmentDeploy: true,
+            requireExternalE2E: true,
+            requireCleanPostFlight: true,
+            requirePrPerRepo: true,
+            executiveProjectId: asProjectId("project-1"),
+            executiveThreadId: asThreadId("thread-1"),
+            currentOrchestratorThreadId: asThreadId("thread-1"),
+            repoPrs: [
+              {
+                repo: "t3code-vxapp",
+                url: "https://github.com/t3tools/t3code-vxapp/pull/42",
+                number: 42,
+                state: "OPEN",
+                isDraft: false,
+                reviewDecision: "APPROVED",
+                mergeStateStatus: "CLEAN",
+                headRefName: "feature/program-closeout",
+                baseRefName: "main",
+                updatedAt: "2026-02-24T00:00:01.300Z",
+              },
+            ],
+            localValidation: [
+              {
+                repo: "t3code-vxapp",
+                suiteId: "lint",
+                kind: "bun_lint",
+                status: "passed",
+                summary: "bun lint passed",
+                command: "bun lint",
+                recordedAt: "2026-02-24T00:00:01.350Z",
+              },
+            ],
+            appValidations: [
+              {
+                target: "web",
+                kind: "development_deploy",
+                suiteId: "dev-deploy",
+                status: "passed",
+                summary: "Development deploy succeeded",
+                command: "vx apps web --deploy development",
+                url: "https://web.dev.example.test",
+                recordedAt: "2026-02-24T00:00:01.360Z",
+              },
+            ],
+            observedRepos: [
+              {
+                repo: "t3code-vxapp",
+                source: "git-status",
+                observedAt: "2026-02-24T00:00:01.370Z",
+              },
+            ],
+            postFlight: {
+              status: "clean",
+              summary: "Closeout checks passed",
+              recordedAt: "2026-02-24T00:00:01.380Z",
             },
-          ],
-          requiredExternalE2ESuites: [
-            {
-              target: "web",
-              suiteId: "founder-e2e",
-              description: "Founder-visible E2E.",
-            },
-          ],
-          requireDevelopmentDeploy: true,
-          requireExternalE2E: true,
-          requireCleanPostFlight: true,
-          requirePrPerRepo: true,
-          executiveProjectId: asProjectId("project-1"),
-          executiveThreadId: asThreadId("thread-1"),
-          currentOrchestratorThreadId: asThreadId("thread-1"),
-          repoPrs: [
-            {
-              repo: "t3code-vxapp",
-              url: "https://github.com/t3tools/t3code-vxapp/pull/42",
-              number: 42,
-              state: "OPEN",
-              isDraft: false,
-              reviewDecision: "APPROVED",
-              mergeStateStatus: "CLEAN",
-              headRefName: "feature/program-closeout",
-              baseRefName: "main",
-              updatedAt: "2026-02-24T00:00:01.300Z",
-            },
-          ],
-          localValidation: [
-            {
-              repo: "t3code-vxapp",
-              suiteId: "lint",
-              kind: "bun_lint",
-              status: "passed",
-              summary: "bun lint passed",
-              command: "bun lint",
-              recordedAt: "2026-02-24T00:00:01.350Z",
-            },
-          ],
-          appValidations: [
-            {
-              target: "web",
-              kind: "development_deploy",
-              suiteId: "dev-deploy",
-              status: "passed",
-              summary: "Development deploy succeeded",
-              command: "vx apps web --deploy development",
-              url: "https://web.dev.example.test",
-              recordedAt: "2026-02-24T00:00:01.360Z",
-            },
-          ],
-          observedRepos: [
-            {
-              repo: "t3code-vxapp",
-              source: "git-status",
-              observedAt: "2026-02-24T00:00:01.370Z",
-            },
-          ],
-          postFlight: {
-            status: "clean",
-            summary: "Closeout checks passed",
-            recordedAt: "2026-02-24T00:00:01.380Z",
+            createdAt: "2026-02-24T00:00:01.250Z",
+            updatedAt: "2026-02-24T00:00:01.500Z",
+            completedAt: null,
+            cancelReason: null,
+            cancelledAt: null,
+            supersededByProgramId: null,
+            deletedAt: null,
           },
-          createdAt: "2026-02-24T00:00:01.250Z",
-          updatedAt: "2026-02-24T00:00:01.500Z",
-          completedAt: null,
-          cancelReason: null,
-          cancelledAt: null,
-          supersededByProgramId: null,
-          deletedAt: null,
-        },
-      ]);
+        ],
+      );
       assert.deepEqual(snapshot.programNotifications, [
         {
           notificationId: asProgramNotificationId("notif-cto"),
@@ -731,6 +738,10 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         updatedAt: "2026-02-24T00:00:03.000Z",
         archivedAt: null,
         deletedAt: null,
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
         messages: [
           {
             id: asMessageId("message-1"),
