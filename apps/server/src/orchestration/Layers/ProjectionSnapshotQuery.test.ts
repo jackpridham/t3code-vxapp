@@ -13,7 +13,12 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import {
+  AgentsVxappControlPlane,
+  type AgentsVxappControlPlaneShape,
+} from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -32,6 +37,173 @@ const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.makeUnsa
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
 );
+
+const ownerBindingAuthority = {
+  authorityStore: "vx_agents_sqlite",
+  authoritySource: "binding",
+  legacyFallbackUsed: false,
+  diagnostics: null,
+  jasper: {
+    currentThread: {
+      id: ThreadId.makeUnsafe("binding-authoritative-thread"),
+      programId: ProgramId.makeUnsafe("external-cto-program"),
+      projectId: ProjectId.makeUnsafe("external-cto-project"),
+    },
+    project: {
+      currentSessionRootThreadId: ThreadId.makeUnsafe("binding-authoritative-thread"),
+    },
+  },
+} satisfies {
+  authorityStore: string;
+  authoritySource: string;
+  legacyFallbackUsed: false;
+  diagnostics: null;
+  jasper: {
+    currentThread: {
+      id: ThreadId;
+      programId: ProgramId;
+      projectId: ProjectId;
+    };
+    project: {
+      currentSessionRootThreadId: ThreadId;
+    };
+  };
+};
+
+const ownerNotificationSummary = {
+  authorityStore: "vx_agents_sqlite",
+  authoritySource: "local_program_projection",
+  legacyFallbackUsed: false,
+  notifications: [
+    {
+      notificationId: ProgramNotificationId.makeUnsafe("notif-authoritative"),
+      programId: ProgramId.makeUnsafe("external-cto-program"),
+      executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
+      executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+      orchestratorThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+      kind: "status_update" as const,
+      severity: "info" as const,
+      summary: "Owner notification wins",
+      evidence: {},
+      state: "pending" as const,
+      queuedAt: "2026-05-12T00:00:05.000Z",
+      deliveredAt: null,
+      consumedAt: null,
+      droppedAt: null,
+      consumeReason: undefined,
+      dropReason: undefined,
+      createdAt: "2026-05-12T00:00:05.000Z",
+      updatedAt: "2026-05-12T00:00:06.000Z",
+    },
+  ],
+  attention: [],
+} as const;
+
+const ownerAttentionSummary = {
+  authorityStore: "vx_agents_sqlite",
+  authoritySource: "local_attention_projection",
+  legacyFallbackUsed: false,
+  attention: [
+    {
+      attentionId: "att-authoritative",
+      attentionKey: "att-authoritative",
+      notificationId: ProgramNotificationId.makeUnsafe("notif-authoritative"),
+      programId: ProgramId.makeUnsafe("external-cto-program"),
+      executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
+      executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+      sourceThreadId: ThreadId.makeUnsafe("worker-thread"),
+      sourceRole: "worker",
+      kind: "blocked" as const,
+      severity: "warning" as const,
+      summary: "Owner attention wins",
+      evidence: {},
+      state: "required" as const,
+      queuedAt: "2026-05-12T00:00:05.000Z",
+      acknowledgedAt: null,
+      resolvedAt: null,
+      droppedAt: null,
+      createdAt: "2026-05-12T00:00:05.000Z",
+      updatedAt: "2026-05-12T00:00:06.000Z",
+    },
+  ],
+  resolvedAttention: [],
+  passiveNotifications: [],
+} as const;
+
+const vxappControlPlaneMock = {
+  getBindingAuthorityExport: () => Effect.succeed(ownerBindingAuthority),
+  getProgramAuthorityExport: () =>
+    Effect.die("unexpected getProgramAuthorityExport in ProjectionSnapshotQuery test"),
+  getAttentionSummaryExport: () => Effect.succeed(ownerAttentionSummary),
+  getNotificationSummaryExport: () => Effect.succeed(ownerNotificationSummary),
+  getWatchSummaryExport: () =>
+    Effect.die("unexpected getWatchSummaryExport in ProjectionSnapshotQuery test"),
+  getProjectionAuthoritySnapshot: () =>
+    Effect.die("unexpected getProjectionAuthoritySnapshot in ProjectionSnapshotQuery test"),
+  getSnapshot: () => Effect.die("unexpected getSnapshot in ProjectionSnapshotQuery test"),
+  createProgram: () => Effect.die("unexpected createProgram in ProjectionSnapshotQuery test"),
+  updateProgram: () => Effect.die("unexpected updateProgram in ProjectionSnapshotQuery test"),
+  deleteProgram: () => Effect.die("unexpected deleteProgram in ProjectionSnapshotQuery test"),
+  setProgramLifecycle: () =>
+    Effect.die("unexpected setProgramLifecycle in ProjectionSnapshotQuery test"),
+  createTodo: () => Effect.die("unexpected createTodo in ProjectionSnapshotQuery test"),
+  updateTodo: () => Effect.die("unexpected updateTodo in ProjectionSnapshotQuery test"),
+  deleteTodo: () => Effect.die("unexpected deleteTodo in ProjectionSnapshotQuery test"),
+} satisfies AgentsVxappControlPlaneShape;
+
+const externalRoleAuthoritySnapshot = {
+  projects: [
+    {
+      id: ProjectId.makeUnsafe("external-cto-project"),
+      title: "CTOv2",
+      workspaceRoot: "/home/gizmo/agents-vxapp/CTOv2",
+      kind: "executive" as const,
+      sidebarParentProjectId: null,
+      currentSessionRootThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+      defaultModelSelection: { provider: "codex" as const, model: "gpt-5.4" },
+      scripts: [],
+      hooks: [],
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:01.000Z",
+      deletedAt: null,
+    },
+  ],
+  threadSummaries: [
+    {
+      id: ThreadId.makeUnsafe("external-cto-thread"),
+      projectId: ProjectId.makeUnsafe("external-cto-project"),
+      title: "Review Jasper blocker and yacht watch",
+      labels: ["cto-autonomous"],
+      modelSelection: { provider: "codex" as const, model: "gpt-5.4" },
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+      branch: null,
+      worktreePath: "/home/gizmo/agents-vxapp/CTOv2",
+      latestTurn: null,
+      createdAt: "2026-05-12T00:00:02.000Z",
+      updatedAt: "2026-05-12T00:00:03.000Z",
+      archivedAt: null,
+      deletedAt: null,
+      session: {
+        threadId: ThreadId.makeUnsafe("external-cto-thread"),
+        status: "ready" as const,
+        providerName: "codex",
+        runtimeMode: "full-access" as const,
+        activeTurnId: null,
+        lastError: "raw external session error must not be re-derived",
+        updatedAt: "2026-05-12T00:00:03.000Z",
+      },
+      hasActiveError: true,
+      activeError: "Upstream authoritative active error",
+      historicalError: null,
+      errorPresentationSource: "active_runtime_failure" as const,
+      spawnRole: "supervisor" as const,
+      spawnedBy: "founder",
+      executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
+      executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+    },
+  ],
+} as const;
 
 projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
   it.effect("hydrates read model from projection tables and computes snapshot sequence", () =>
@@ -864,11 +1036,265 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("uses owner exports for vxapp-backed notifications, attention, and binding", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_program_notifications`;
+      yield* sql`DELETE FROM projection_cto_attention`;
+      yield* sql`DELETE FROM projection_programs`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_sessions`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_orchestrator_wakes`;
+      yield* sql`DELETE FROM projection_thread_proposed_plans`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          current_session_root_thread_id,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'local-stale-project',
+          'CTOv2',
+          '/home/gizmo/agents-vxapp/CTOv2',
+          'local-stale-thread',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '[]',
+          '2026-05-11T23:00:00.000Z',
+          '2026-05-11T23:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          labels_json,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES (
+          'local-stale-thread',
+          'local-stale-project',
+          'Stale CTO Root',
+          '[]',
+          '{"provider":"codex","model":"gpt-5.4"}',
+          'full-access',
+          'default',
+          NULL,
+          '/home/gizmo/agents-vxapp/CTOv2',
+          NULL,
+          '2026-05-11T23:00:02.000Z',
+          '2026-05-11T23:00:03.000Z',
+          NULL,
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_program_notifications (
+          notification_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id,
+          orchestrator_thread_id,
+          kind,
+          severity,
+          summary,
+          evidence_json,
+          state,
+          queued_at,
+          delivered_at,
+          consumed_at,
+          dropped_at,
+          consume_reason,
+          drop_reason,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'notif-local',
+          'local-stale-program',
+          'local-stale-project',
+          'local-stale-thread',
+          'local-stale-thread',
+          'status_update',
+          'warning',
+          'Local notification must not win',
+          '{}',
+          'pending',
+          '2026-05-11T23:30:00.000Z',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          '2026-05-11T23:30:00.000Z',
+          '2026-05-11T23:30:01.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_cto_attention (
+          attention_id,
+          attention_key,
+          notification_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id,
+          source_thread_id,
+          source_role,
+          kind,
+          severity,
+          summary,
+          evidence_json,
+          state,
+          queued_at,
+          acknowledged_at,
+          resolved_at,
+          dropped_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'att-local',
+          'att-local',
+          'notif-local',
+          'local-stale-program',
+          'local-stale-project',
+          'local-stale-thread',
+          'local-stale-worker-thread',
+          'worker',
+          'blocked',
+          'warning',
+          'Local attention must not win',
+          '{}',
+          'required',
+          '2026-05-11T23:30:00.000Z',
+          NULL,
+          NULL,
+          NULL,
+          '2026-05-11T23:30:00.000Z',
+          '2026-05-11T23:30:01.000Z'
+        )
+      `;
+
+      let sequence = 5;
+      for (const projector of Object.values(ORCHESTRATION_PROJECTOR_NAMES)) {
+        yield* sql`
+          INSERT INTO projection_state (
+            projector,
+            last_applied_sequence,
+            updated_at
+          )
+          VALUES (
+            ${projector},
+            ${sequence},
+            '2026-05-12T00:00:04.000Z'
+          )
+        `;
+        sequence += 1;
+      }
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+
+      assert.equal(snapshot.snapshotProfile, "operational");
+      assert.deepEqual(
+        snapshot.projects.map((project) => project.id),
+        [asProjectId("external-cto-project")],
+      );
+      assert.equal(
+        snapshot.projects[0]?.currentSessionRootThreadId,
+        "binding-authoritative-thread",
+      );
+      assert.deepEqual(
+        snapshot.threads.map((thread) => thread.id),
+        [asThreadId("external-cto-thread")],
+      );
+      assert.deepEqual(snapshot.programNotifications, [
+        {
+          notificationId: asProgramNotificationId("notif-authoritative"),
+          programId: asProgramId("external-cto-program"),
+          executiveProjectId: asProjectId("external-cto-project"),
+          executiveThreadId: asThreadId("external-cto-thread"),
+          orchestratorThreadId: asThreadId("external-cto-thread"),
+          kind: "status_update",
+          severity: "info",
+          summary: "Owner notification wins",
+          evidence: {},
+          state: "pending",
+          queuedAt: "2026-05-12T00:00:05.000Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          consumeReason: undefined,
+          dropReason: undefined,
+          createdAt: "2026-05-12T00:00:05.000Z",
+          updatedAt: "2026-05-12T00:00:06.000Z",
+        },
+      ]);
+      assert.deepEqual(snapshot.ctoAttentionItems, [
+        {
+          attentionId: asCtoAttentionId("att-authoritative"),
+          attentionKey: "att-authoritative",
+          notificationId: asProgramNotificationId("notif-authoritative"),
+          programId: asProgramId("external-cto-program"),
+          executiveProjectId: asProjectId("external-cto-project"),
+          executiveThreadId: asThreadId("external-cto-thread"),
+          sourceThreadId: asThreadId("worker-thread"),
+          sourceRole: "worker",
+          kind: "blocked",
+          severity: "warning",
+          summary: "Owner attention wins",
+          evidence: {},
+          state: "required",
+          queuedAt: "2026-05-12T00:00:05.000Z",
+          acknowledgedAt: null,
+          resolvedAt: null,
+          droppedAt: null,
+          createdAt: "2026-05-12T00:00:05.000Z",
+          updatedAt: "2026-05-12T00:00:06.000Z",
+        },
+      ]);
+    }).pipe(
+      Effect.provideService(AgentsVxappExternalRoleAuthority, {
+        getSnapshot: () => Effect.succeed(externalRoleAuthoritySnapshot),
+      }),
+      Effect.provideService(AgentsVxappControlPlane, vxappControlPlaneMock),
+    ),
+  );
+
   it.effect("excludes deleted programs from snapshot program rows", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
+      yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_programs`;
       yield* sql`DELETE FROM projection_state`;
 

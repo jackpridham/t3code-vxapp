@@ -1,5 +1,6 @@
 import {
   ChatAttachment,
+  CtoAttentionId,
   IsoDateTime,
   MessageId,
   NonNegativeInt,
@@ -9,6 +10,8 @@ import {
   OrchestrationProjectKind,
   ProgramNotificationEvidence,
   OrchestratorWakeItem,
+  ProgramId,
+  ProgramNotificationId,
   ProjectId,
   ProjectHooks,
   ProjectScript,
@@ -63,6 +66,7 @@ import {
   buildExternalRoleAuthorityIndex,
   type AgentsVxappExternalRoleAuthoritySnapshot,
 } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
+import { AgentsVxappControlPlane } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { selectOperationalCtoAttentionItems } from "../projectionCtoAttention.ts";
 import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
@@ -109,6 +113,7 @@ const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
 type ProjectionProjectSummaryDbRow = typeof ProjectionProjectSummaryDbRowSchema.Type;
 type ProjectionThreadSummaryDbRow = typeof ProjectionThreadSummaryDbRowSchema.Type;
 type ProjectionThreadSessionDbRow = typeof ProjectionThreadSessionDbRowSchema.Type;
+type OrchestrationProjectSummary = OrchestrationListProjectsResult[number];
 
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
@@ -162,75 +167,239 @@ const ProjectionSessionWorkerCountDbRowSchema = Schema.Struct({
   workerThreadCount: NonNegativeInt,
 });
 
-function mapProjectRowToReadModelProject(
-  row: ProjectionProjectSummaryDbRow,
-): OrchestrationReadModel["projects"][number] {
-  return Object.assign(
-    {
-      id: row.projectId,
-      title: row.title,
-      workspaceRoot: row.workspaceRoot,
-      kind: row.kind ?? "project",
-      defaultModelSelection: row.defaultModelSelection ?? null,
-      scripts: row.scripts,
-      hooks: row.hooks,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      deletedAt: row.deletedAt ?? null,
-    },
-    row.sidebarParentProjectId !== null
-      ? { sidebarParentProjectId: row.sidebarParentProjectId }
-      : undefined,
-    row.currentSessionRootThreadId !== null
-      ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
-      : undefined,
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function asJsonRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asIsoDateTime(value: unknown): string | null {
+  const normalized = asString(value);
+  return normalized && Number.isFinite(Date.parse(normalized)) ? normalized : null;
+}
+
+function requireOwnerString(value: unknown, field: string): string {
+  const normalized = asString(value);
+  if (!normalized) {
+    throw new Error(`vxapp owner export is missing ${field}.`);
+  }
+  return normalized;
+}
+
+function requireOwnerObject(value: unknown, field: string): Record<string, unknown> {
+  const object = asJsonRecord(value);
+  if (!object) {
+    throw new Error(`vxapp owner export is missing ${field}.`);
+  }
+  return object;
+}
+
+function mapOwnerProgramNotification(
+  row: Record<string, unknown>,
+): OrchestrationProgramNotification {
+  const notificationId = requireOwnerString(row.notificationId ?? row.id, "notificationId");
+  const programId = requireOwnerString(row.programId, "programId");
+  const executiveProjectId = requireOwnerString(
+    row.executiveProjectId ?? row.projectId,
+    "executiveProjectId",
+  );
+  const executiveThreadId = requireOwnerString(
+    row.executiveThreadId ?? row.threadId,
+    "executiveThreadId",
+  );
+  const orchestratorThreadId = asString(row.orchestratorThreadId ?? row.threadId);
+  return {
+    notificationId: ProgramNotificationId.makeUnsafe(notificationId),
+    programId: ProgramId.makeUnsafe(programId),
+    executiveProjectId: ProjectId.makeUnsafe(executiveProjectId),
+    executiveThreadId: ThreadId.makeUnsafe(executiveThreadId),
+    orchestratorThreadId: orchestratorThreadId ? ThreadId.makeUnsafe(orchestratorThreadId) : null,
+    kind: requireOwnerString(
+      row.kind ?? row.notificationKind,
+      "kind",
+    ) as OrchestrationProgramNotification["kind"],
+    severity: requireOwnerString(
+      row.severity,
+      "severity",
+    ) as OrchestrationProgramNotification["severity"],
+    summary: requireOwnerString(row.summary, "summary"),
+    evidence: requireOwnerObject(row.evidence ?? row.source ?? {}, "evidence"),
+    state: requireOwnerString(row.state, "state") as OrchestrationProgramNotification["state"],
+    queuedAt: requireOwnerString(row.queuedAt ?? row.createdAt ?? row.updatedAt, "queuedAt"),
+    deliveredAt: asIsoDateTime(row.deliveredAt ?? null),
+    consumedAt: asIsoDateTime(row.consumedAt ?? null),
+    droppedAt: asIsoDateTime(row.droppedAt ?? null),
+    consumeReason: asString(row.consumeReason ?? null) ?? undefined,
+    dropReason: asString(row.dropReason ?? null) ?? undefined,
+    createdAt: requireOwnerString(row.createdAt ?? row.queuedAt ?? row.updatedAt, "createdAt"),
+    updatedAt: requireOwnerString(row.updatedAt ?? row.createdAt ?? row.queuedAt, "updatedAt"),
+  };
+}
+
+function mapOwnerCtoAttentionItem(row: Record<string, unknown>): OrchestrationCtoAttentionItem {
+  const attentionId = requireOwnerString(
+    row.attentionId ?? row.id ?? row.notificationId,
+    "attentionId",
+  );
+  const attentionKey = requireOwnerString(
+    row.attentionKey ?? row.id ?? row.attentionId,
+    "attentionKey",
+  );
+  const notificationId = requireOwnerString(row.notificationId, "notificationId");
+  const programId = requireOwnerString(row.programId, "programId");
+  const executiveProjectId = requireOwnerString(
+    row.executiveProjectId ?? row.projectId,
+    "executiveProjectId",
+  );
+  const executiveThreadId = requireOwnerString(
+    row.executiveThreadId ?? row.threadId,
+    "executiveThreadId",
+  );
+  const sourceThreadId = asString(row.sourceThreadId ?? row.threadId);
+  return {
+    attentionId: CtoAttentionId.makeUnsafe(attentionId),
+    attentionKey,
+    notificationId: ProgramNotificationId.makeUnsafe(notificationId),
+    programId: ProgramId.makeUnsafe(programId),
+    executiveProjectId: ProjectId.makeUnsafe(executiveProjectId),
+    executiveThreadId: ThreadId.makeUnsafe(executiveThreadId),
+    sourceThreadId: sourceThreadId ? ThreadId.makeUnsafe(sourceThreadId) : null,
+    sourceRole: asString(row.sourceRole ?? row.sourceKind) ?? null,
+    kind: requireOwnerString(row.kind, "kind") as OrchestrationCtoAttentionItem["kind"],
+    severity: requireOwnerString(
+      row.severity,
+      "severity",
+    ) as OrchestrationCtoAttentionItem["severity"],
+    summary: requireOwnerString(row.summary, "summary"),
+    evidence: requireOwnerObject(row.evidence ?? row.source ?? {}, "evidence"),
+    state: requireOwnerString(row.state, "state") as OrchestrationCtoAttentionItem["state"],
+    queuedAt: requireOwnerString(row.queuedAt ?? row.createdAt ?? row.updatedAt, "queuedAt"),
+    acknowledgedAt: asIsoDateTime(row.acknowledgedAt ?? null),
+    resolvedAt: asIsoDateTime(row.resolvedAt ?? null),
+    droppedAt: asIsoDateTime(row.droppedAt ?? null),
+    createdAt: requireOwnerString(row.createdAt ?? row.queuedAt ?? row.updatedAt, "createdAt"),
+    updatedAt: requireOwnerString(row.updatedAt ?? row.createdAt ?? row.queuedAt, "updatedAt"),
+  };
+}
+
+function applyBindingCurrentThreadToProjects(
+  projects: ReadonlyArray<OrchestrationReadModel["projects"][number]>,
+  bindingAuthority: { jasper: { currentThread: { id: string; projectId: string } } } | null,
+): OrchestrationReadModel["projects"] {
+  if (!bindingAuthority) {
+    return [...projects];
+  }
+  const currentThread = bindingAuthority.jasper.currentThread;
+  return projects.map((project) =>
+    project.id === currentThread.projectId
+      ? {
+          ...project,
+          currentSessionRootThreadId: ThreadId.makeUnsafe(currentThread.id),
+        }
+      : project,
   );
 }
 
-function mapProjectRowToSummary(
-  row: ProjectionProjectSummaryDbRow,
-): OrchestrationListProjectsResult[number] {
-  return Object.assign(
-    {
-      id: row.projectId,
-      title: row.title,
-      workspaceRoot: row.workspaceRoot,
-      kind: row.kind ?? null,
-      defaultModelSelection: row.defaultModelSelection ?? null,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      deletedAt: row.deletedAt ?? null,
-    },
-    row.sidebarParentProjectId !== null
-      ? { sidebarParentProjectId: row.sidebarParentProjectId }
-      : undefined,
-    row.currentSessionRootThreadId !== null
-      ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
-      : undefined,
+function applyBindingCurrentThreadToProjectSummary(
+  project: OrchestrationProjectSummary | null,
+  bindingAuthority: { jasper: { currentThread: { id: string; projectId: string } } } | null,
+): OrchestrationProjectSummary | null {
+  if (
+    !project ||
+    !bindingAuthority ||
+    project.id !== bindingAuthority.jasper.currentThread.projectId
+  ) {
+    return project;
+  }
+  return {
+    ...project,
+    currentSessionRootThreadId: ThreadId.makeUnsafe(bindingAuthority.jasper.currentThread.id),
+  };
+}
+
+function applyBindingCurrentThreadToProjectSummaries(
+  projects: ReadonlyArray<OrchestrationProjectSummary>,
+  bindingAuthority: { jasper: { currentThread: { id: string; projectId: string } } } | null,
+): OrchestrationProjectSummary[] {
+  if (!bindingAuthority) {
+    return [...projects];
+  }
+  const currentThread = bindingAuthority.jasper.currentThread;
+  return projects.map((project) =>
+    project.id === currentThread.projectId
+      ? {
+          ...project,
+          currentSessionRootThreadId: ThreadId.makeUnsafe(currentThread.id),
+        }
+      : project,
   );
+}
+
+function mapProjectRowToReadModelProject(
+  row: ProjectionProjectSummaryDbRow,
+): OrchestrationReadModel["projects"][number] {
+  return {
+    id: row.projectId,
+    title: row.title,
+    workspaceRoot: row.workspaceRoot,
+    kind: row.kind ?? "project",
+    defaultModelSelection: row.defaultModelSelection ?? null,
+    scripts: row.scripts,
+    hooks: row.hooks,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+    ...(row.sidebarParentProjectId !== null
+      ? { sidebarParentProjectId: row.sidebarParentProjectId }
+      : {}),
+    ...(row.currentSessionRootThreadId !== null
+      ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
+      : {}),
+  };
+}
+
+function mapProjectRowToSummary(row: ProjectionProjectSummaryDbRow): OrchestrationProjectSummary {
+  return {
+    id: row.projectId,
+    title: row.title,
+    workspaceRoot: row.workspaceRoot,
+    kind: row.kind ?? null,
+    defaultModelSelection: row.defaultModelSelection ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
+    ...(row.sidebarParentProjectId !== null
+      ? { sidebarParentProjectId: row.sidebarParentProjectId }
+      : {}),
+    ...(row.currentSessionRootThreadId !== null
+      ? { currentSessionRootThreadId: row.currentSessionRootThreadId }
+      : {}),
+  };
 }
 
 function mapProjectToSummary(
   project: OrchestrationReadModel["projects"][number],
-): OrchestrationListProjectsResult[number] {
-  return Object.assign(
-    {
-      id: project.id,
-      title: project.title,
-      workspaceRoot: project.workspaceRoot,
-      kind: project.kind ?? null,
-      defaultModelSelection: project.defaultModelSelection ?? null,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-      deletedAt: project.deletedAt ?? null,
-    },
-    project.sidebarParentProjectId !== undefined
+): OrchestrationProjectSummary {
+  return {
+    id: project.id,
+    title: project.title,
+    workspaceRoot: project.workspaceRoot,
+    kind: project.kind ?? null,
+    defaultModelSelection: project.defaultModelSelection ?? null,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    deletedAt: project.deletedAt ?? null,
+    ...(project.sidebarParentProjectId !== undefined
       ? { sidebarParentProjectId: project.sidebarParentProjectId }
-      : undefined,
-    project.currentSessionRootThreadId !== undefined
+      : {}),
+    ...(project.currentSessionRootThreadId !== undefined
       ? { currentSessionRootThreadId: project.currentSessionRootThreadId }
-      : undefined,
-  );
+      : {}),
+  };
 }
 
 function mergeProjectRowsWithExternal(
@@ -533,6 +702,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
   });
 
   const listProgramNotificationRows = SqlSchema.findAll({
+    // Local mirror path for native/non-vxapp workspaces only.
     Request: Schema.Void,
     Result: ProjectionProgramNotificationDbRowSchema,
     execute: () =>
@@ -564,6 +734,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
   });
 
   const listCtoAttentionRows = SqlSchema.findAll({
+    // Local mirror path for native/non-vxapp workspaces only.
     Request: Schema.Void,
     Result: ProjectionCtoAttentionDbRowSchema,
     execute: () =>
@@ -1696,6 +1867,38 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       ),
     );
 
+  const getBindingAuthorityForExternalSnapshot = (
+    externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
+  ) =>
+    Effect.gen(function* () {
+      if (externalSnapshot.projects.length === 0 && externalSnapshot.threadSummaries.length === 0) {
+        return null;
+      }
+      const controlPlaneOption = yield* Effect.serviceOption(AgentsVxappControlPlane);
+      if (Option.isNone(controlPlaneOption)) {
+        return yield* toPersistenceSqlError(
+          "ProjectionOperationalQuery.getBindingAuthorityForExternalSnapshot:missingControlPlane",
+        )(new Error("vxapp-backed snapshot requires external control plane service."));
+      }
+      const bindingAuthority = yield* controlPlaneOption.value
+        .getBindingAuthorityExport()
+        .pipe(
+          Effect.mapError(
+            toPersistenceSqlError(
+              "ProjectionOperationalQuery.getBindingAuthorityForExternalSnapshot:readOwnerExport",
+            ),
+          ),
+        );
+      return {
+        jasper: {
+          currentThread: {
+            id: bindingAuthority.jasper.currentThread.id,
+            projectId: bindingAuthority.jasper.currentThread.projectId,
+          },
+        },
+      };
+    });
+
   const getReadiness: ProjectionOperationalQueryShape["getReadiness"] = () =>
     Effect.all({
       stateRows: listProjectionStateRows(undefined).pipe(
@@ -1761,22 +1964,89 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               ),
             ),
           );
-          const programNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionOperationalQuery.getCurrentState:listProgramNotifications:query",
-                "ProjectionOperationalQuery.getCurrentState:listProgramNotifications:decodeRows",
+          const vxappBacked =
+            externalSnapshot.projects.length > 0 || externalSnapshot.threadSummaries.length > 0;
+          let bindingAuthority: {
+            jasper: {
+              currentThread: {
+                id: string;
+                projectId: string;
+              };
+            };
+          } | null = null;
+          let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
+          let ctoAttentionRows: ReadonlyArray<OrchestrationCtoAttentionItem> = [];
+          if (vxappBacked) {
+            const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
+              Effect.flatMap((controlPlaneOption) =>
+                Option.match(controlPlaneOption, {
+                  onNone: () =>
+                    Effect.fail(
+                      new Error("vxapp-backed snapshot requires external control plane service."),
+                    ),
+                  onSome: (service) => Effect.succeed(service),
+                }),
               ),
-            ),
-          );
-          const ctoAttentionRows = yield* listCtoAttentionRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionOperationalQuery.getCurrentState:listCtoAttention:query",
-                "ProjectionOperationalQuery.getCurrentState:listCtoAttention:decodeRows",
+            );
+            const [bindingAuthorityExport, notificationSummaryExport, attentionSummaryExport] =
+              yield* Effect.all([
+                controlPlane.getBindingAuthorityExport(),
+                controlPlane.getNotificationSummaryExport(),
+                controlPlane.getAttentionSummaryExport(),
+              ]);
+            bindingAuthority = {
+              jasper: {
+                currentThread: {
+                  id: bindingAuthorityExport.jasper.currentThread.id,
+                  projectId: bindingAuthorityExport.jasper.currentThread.projectId,
+                },
+              },
+            };
+            programNotificationRows = notificationSummaryExport.notifications.map(
+              mapOwnerProgramNotification,
+            );
+            ctoAttentionRows = selectOperationalCtoAttentionItems(
+              attentionSummaryExport.attention.map(mapOwnerCtoAttentionItem),
+            );
+          } else {
+            const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionOperationalQuery.getCurrentState:listProgramNotifications:query",
+                  "ProjectionOperationalQuery.getCurrentState:listProgramNotifications:decodeRows",
+                ),
               ),
-            ),
-          );
+            );
+            const localCtoAttentionRows = yield* listCtoAttentionRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionOperationalQuery.getCurrentState:listCtoAttention:query",
+                  "ProjectionOperationalQuery.getCurrentState:listCtoAttention:decodeRows",
+                ),
+              ),
+            );
+            programNotificationRows = localProgramNotificationRows.map((row) => ({
+              notificationId: row.notificationId,
+              programId: row.programId,
+              executiveProjectId: row.executiveProjectId,
+              executiveThreadId: row.executiveThreadId,
+              orchestratorThreadId: row.orchestratorThreadId,
+              kind: row.kind,
+              severity: row.severity,
+              summary: row.summary,
+              evidence: row.evidence,
+              state: row.state,
+              queuedAt: row.queuedAt,
+              deliveredAt: row.deliveredAt,
+              consumedAt: row.consumedAt,
+              droppedAt: row.droppedAt,
+              consumeReason: row.consumeReason ?? undefined,
+              dropReason: row.dropReason ?? undefined,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+            }));
+            ctoAttentionRows = selectOperationalCtoAttentionItems(localCtoAttentionRows);
+          }
 
           const threadRows = yield* listCurrentThreadRows(undefined).pipe(
             Effect.mapError(
@@ -1808,7 +2078,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             sessions: sessionRows,
             latestTurns: latestTurnRows,
           });
-          const mergedProjects = mergeProjectRowsWithExternal(projectRows, externalSnapshot);
+          const mergedProjects = applyBindingCurrentThreadToProjects(
+            mergeProjectRowsWithExternal(projectRows, externalSnapshot),
+            bindingAuthority,
+          );
           const mergedThreadSummaries = mergeThreadSummariesWithExternal({
             localThreadSummaries: threadSummaries,
             localProjectRows: projectRows,
@@ -1844,30 +2117,6 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
           );
 
-          const programNotifications: ReadonlyArray<OrchestrationProgramNotification> =
-            programNotificationRows.map((row) => ({
-              notificationId: row.notificationId,
-              programId: row.programId,
-              executiveProjectId: row.executiveProjectId,
-              executiveThreadId: row.executiveThreadId,
-              orchestratorThreadId: row.orchestratorThreadId,
-              kind: row.kind,
-              severity: row.severity,
-              summary: row.summary,
-              evidence: row.evidence,
-              state: row.state,
-              queuedAt: row.queuedAt,
-              deliveredAt: row.deliveredAt,
-              consumedAt: row.consumedAt,
-              droppedAt: row.droppedAt,
-              consumeReason: row.consumeReason ?? undefined,
-              dropReason: row.dropReason ?? undefined,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-            }));
-          const ctoAttentionItems: ReadonlyArray<OrchestrationCtoAttentionItem> =
-            selectOperationalCtoAttentionItems(ctoAttentionRows);
-
           const readModel = {
             snapshotSequence: computeSnapshotSequence(stateRows),
             snapshotProfile: "bootstrap-summary" as const,
@@ -1879,8 +2128,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             },
             projects: mergedProjects,
             programs,
-            programNotifications,
-            ctoAttentionItems,
+            programNotifications: programNotificationRows,
+            ctoAttentionItems: ctoAttentionRows,
             threads: mergedThreadSummaries.map(mapSummaryToThread),
             orchestratorWakeItems: [],
             updatedAt,
@@ -1916,9 +2165,16 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       ),
       externalSnapshot: getExternalSnapshot(),
     }).pipe(
-      Effect.map(
-        ({ projectRows, externalSnapshot }): OrchestrationListProjectsResult =>
-          mergeProjectSummariesWithExternal(projectRows, externalSnapshot),
+      Effect.flatMap(({ projectRows, externalSnapshot }) =>
+        getBindingAuthorityForExternalSnapshot(externalSnapshot).pipe(
+          Effect.map(
+            (bindingAuthority): OrchestrationListProjectsResult =>
+              applyBindingCurrentThreadToProjectSummaries(
+                mergeProjectSummariesWithExternal(projectRows, externalSnapshot),
+                bindingAuthority,
+              ),
+          ),
+        ),
       ),
     );
 
@@ -1934,17 +2190,27 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       ),
       externalSnapshot: getExternalSnapshot(),
     }).pipe(
-      Effect.map(({ projectRow, externalSnapshot }) => {
-        const externalProject =
-          externalSnapshot.projects.find((project) => project.id === input.projectId) ?? null;
-        if (externalProject) {
-          return mapProjectToSummary(externalProject);
-        }
-        return Option.match(projectRow, {
-          onNone: (): null => null,
-          onSome: mapProjectRowToSummary,
-        });
-      }),
+      Effect.flatMap(({ projectRow, externalSnapshot }) =>
+        getBindingAuthorityForExternalSnapshot(externalSnapshot).pipe(
+          Effect.map((bindingAuthority) => {
+            const externalProject =
+              externalSnapshot.projects.find((project) => project.id === input.projectId) ?? null;
+            if (externalProject) {
+              return applyBindingCurrentThreadToProjectSummary(
+                mapProjectToSummary(externalProject),
+                bindingAuthority,
+              );
+            }
+            return applyBindingCurrentThreadToProjectSummary(
+              Option.match(projectRow, {
+                onNone: (): null => null,
+                onSome: mapProjectRowToSummary,
+              }),
+              bindingAuthority,
+            );
+          }),
+        ),
+      ),
     );
 
   const getProjectByWorkspace: ProjectionOperationalQueryShape["getProjectByWorkspace"] = (input) =>
@@ -1959,19 +2225,29 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       ),
       externalSnapshot: getExternalSnapshot(),
     }).pipe(
-      Effect.map(({ projectRow, externalSnapshot }): OrchestrationGetProjectByWorkspaceResult => {
-        const externalProject =
-          externalSnapshot.projects.find(
-            (project) => project.workspaceRoot === input.workspaceRoot,
-          ) ?? null;
-        if (externalProject) {
-          return mapProjectToSummary(externalProject);
-        }
-        return Option.match(projectRow, {
-          onNone: () => null,
-          onSome: mapProjectRowToSummary,
-        });
-      }),
+      Effect.flatMap(({ projectRow, externalSnapshot }) =>
+        getBindingAuthorityForExternalSnapshot(externalSnapshot).pipe(
+          Effect.map((bindingAuthority): OrchestrationGetProjectByWorkspaceResult => {
+            const externalProject =
+              externalSnapshot.projects.find(
+                (project) => project.workspaceRoot === input.workspaceRoot,
+              ) ?? null;
+            if (externalProject) {
+              return applyBindingCurrentThreadToProjectSummary(
+                mapProjectToSummary(externalProject),
+                bindingAuthority,
+              );
+            }
+            return applyBindingCurrentThreadToProjectSummary(
+              Option.match(projectRow, {
+                onNone: () => null,
+                onSome: mapProjectRowToSummary,
+              }),
+              bindingAuthority,
+            );
+          }),
+        ),
+      ),
     );
 
   const getThreadById: ProjectionOperationalQueryShape["getThreadById"] = (input) =>

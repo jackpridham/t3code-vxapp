@@ -22,10 +22,16 @@ import {
 import {
   AgentsVxappControlPlane,
   AgentsVxappControlPlaneError,
+  type AgentsVxappAttentionSummaryExport,
+  type AgentsVxappBindingAuthorityExport,
+  type AgentsVxappNotificationSummaryExport,
   type AgentsVxappControlPlaneShape,
+  type AgentsVxappProgramAuthorityExport,
+  type AgentsVxappWatchSummaryExport,
 } from "../Services/AgentsVxappControlPlane.ts";
 import {
   hydrateProgramSnapshotFromCloseoutFile,
+  normalizeProgramStatus,
   resolveProgramCurrentStatus,
 } from "../programStatus";
 
@@ -34,20 +40,16 @@ const CONTROL_PLANE_OWNER_PATH = path.join(
   "scripts/tools/t3-control-plane-owner",
 );
 const TODO_OWNER_PATH = path.join(AGENTS_VXAPP_ROOT, "scripts/tools/todo-owner");
+const AGENTS_VXAPP_OWNER_EXPORT_PATH_ENV = "T3_AGENTS_VXAPP_OWNER_EXPORT_PATH";
+const OWNER_EXPORT_ROOT = path.join(AGENTS_VXAPP_ROOT, ".agents/state/exports/t3");
+const BINDING_AUTHORITY_EXPORT_PATH = path.join(OWNER_EXPORT_ROOT, "binding-authority.json");
+const PROGRAM_AUTHORITY_EXPORT_PATH = path.join(OWNER_EXPORT_ROOT, "program-authority.json");
+const ATTENTION_SUMMARY_EXPORT_PATH = path.join(OWNER_EXPORT_ROOT, "attention-summary.json");
+const NOTIFICATION_SUMMARY_EXPORT_PATH = path.join(OWNER_EXPORT_ROOT, "notification-summary.json");
+const WATCH_SUMMARY_EXPORT_PATH = path.join(OWNER_EXPORT_ROOT, "watch-summary.json");
 const OWNER_COMMAND_TIMEOUT_MS = 30_000;
 const OWNER_COMMAND_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const TODO_ID_ALLOWED = /^[A-Za-z0-9._-]+$/;
-const VALID_PROGRAM_STATUSES = new Set([
-  "active",
-  "blocked",
-  "awaiting_founder",
-  "awaiting_external",
-  "closeout_in_progress",
-  "founder_review_ready",
-  "completed",
-  "cancelled",
-]);
-
 type JsonRecord = Record<string, unknown>;
 const isAgentsVxappControlPlaneError = Schema.is(AgentsVxappControlPlaneError);
 
@@ -72,13 +74,6 @@ function asObjectArray(value: unknown): JsonRecord[] {
           entry !== null && typeof entry === "object" && !Array.isArray(entry),
       )
     : [];
-}
-
-function normalizeProgramStatus(value: unknown): ServerAgentsVxappProgramSnapshot["status"] {
-  const normalized = asString(value);
-  return normalized && VALID_PROGRAM_STATUSES.has(normalized)
-    ? (normalized as ServerAgentsVxappProgramSnapshot["status"])
-    : "active";
 }
 
 function parseJsonText(operation: string, raw: string): unknown {
@@ -130,6 +125,350 @@ function ownerErrorDetail(payload: unknown, fallback: string): string {
     asString(object?.detail) ??
     asString(object?.stderr);
   return message ?? fallback;
+}
+
+function requireObject(operation: string, value: unknown, detail: string): JsonRecord {
+  const object = asObject(value);
+  if (!object) {
+    throw new AgentsVxappControlPlaneError({
+      operation,
+      detail,
+    });
+  }
+  return object;
+}
+
+function requireString(operation: string, value: unknown, detail: string): string {
+  const normalized = asString(value);
+  if (!normalized) {
+    throw new AgentsVxappControlPlaneError({
+      operation,
+      detail,
+    });
+  }
+  return normalized;
+}
+
+function requireBoolean(operation: string, value: unknown, detail: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new AgentsVxappControlPlaneError({
+      operation,
+      detail,
+    });
+  }
+  return value;
+}
+
+function requireStringArray(operation: string, value: unknown, detail: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new AgentsVxappControlPlaneError({
+      operation,
+      detail,
+    });
+  }
+  return value.map((entry, index) => {
+    const normalized = asString(entry);
+    if (!normalized) {
+      throw new AgentsVxappControlPlaneError({
+        operation,
+        detail: `${detail} Invalid string at index ${index}.`,
+      });
+    }
+    return normalized;
+  });
+}
+
+function requireObjectArray(operation: string, value: unknown, detail: string): JsonRecord[] {
+  if (!Array.isArray(value)) {
+    throw new AgentsVxappControlPlaneError({
+      operation,
+      detail,
+    });
+  }
+  return value.map((entry, index) => {
+    const object = asObject(entry);
+    if (!object) {
+      throw new AgentsVxappControlPlaneError({
+        operation,
+        detail: `${detail} Invalid object at index ${index}.`,
+      });
+    }
+    return object;
+  });
+}
+
+function validateOwnerEnvelope(operation: string, payload: JsonRecord, exportPath: string): void {
+  requireString(operation, payload.authorityStore, `Invalid authorityStore in '${exportPath}'.`);
+  requireString(operation, payload.authoritySource, `Invalid authoritySource in '${exportPath}'.`);
+  if (payload.legacyFallbackUsed !== false) {
+    throw new AgentsVxappControlPlaneError({
+      operation,
+      detail: `Owner export '${exportPath}' must set legacyFallbackUsed to false.`,
+    });
+  }
+}
+
+function readOwnerExportPayload(
+  fileSystem: FileSystem.FileSystem,
+  exportPath: string,
+  operation: string,
+): Effect.Effect<JsonRecord, AgentsVxappControlPlaneError, never> {
+  return Effect.gen(function* () {
+    const exists = yield* fileSystem
+      .exists(exportPath)
+      .pipe(
+        mapFileSystemError(operation, `Failed to inspect vxapp owner export at '${exportPath}'.`),
+      );
+    if (!exists) {
+      return yield* new AgentsVxappControlPlaneError({
+        operation,
+        detail: `Missing vxapp owner export at '${exportPath}'.`,
+      });
+    }
+
+    const raw = yield* fileSystem
+      .readFileString(exportPath)
+      .pipe(mapFileSystemError(operation, `Failed to read vxapp owner export at '${exportPath}'.`));
+    const parsed = parseJsonText(operation, raw);
+    return requireObject(
+      operation,
+      parsed,
+      `vxapp owner export at '${exportPath}' must be a JSON object.`,
+    );
+  });
+}
+
+function buildBindingAuthorityExport(
+  payload: JsonRecord,
+  exportPath: string,
+  operation: string,
+): AgentsVxappBindingAuthorityExport {
+  validateOwnerEnvelope(operation, payload, exportPath);
+  const jasper = requireObject(
+    operation,
+    payload.jasper,
+    "binding-authority.json is missing jasper.",
+  );
+  const currentThread = requireObject(
+    operation,
+    jasper.currentThread,
+    "binding-authority.json is missing jasper.currentThread.",
+  );
+  const project = requireObject(
+    operation,
+    jasper.project,
+    "binding-authority.json is missing jasper.project.",
+  );
+  const currentThreadId = requireString(
+    operation,
+    currentThread.id,
+    "binding-authority.json is missing jasper.currentThread.id.",
+  );
+  const currentThreadProgramId = requireString(
+    operation,
+    currentThread.programId,
+    "binding-authority.json is missing jasper.currentThread.programId.",
+  );
+  const currentThreadProjectId = requireString(
+    operation,
+    currentThread.projectId,
+    "binding-authority.json is missing jasper.currentThread.projectId.",
+  );
+  const currentSessionRootThreadId = requireString(
+    operation,
+    project.currentSessionRootThreadId,
+    "binding-authority.json is missing jasper.project.currentSessionRootThreadId.",
+  );
+
+  if (currentThreadId !== currentSessionRootThreadId) {
+    throw new AgentsVxappControlPlaneError({
+      operation,
+      detail:
+        "binding-authority.json currentThread.id must match jasper.project.currentSessionRootThreadId.",
+    });
+  }
+
+  return {
+    authorityStore: requireString(
+      operation,
+      payload.authorityStore,
+      "binding-authority.json is missing authorityStore.",
+    ),
+    authoritySource: requireString(
+      operation,
+      payload.authoritySource,
+      "binding-authority.json is missing authoritySource.",
+    ),
+    legacyFallbackUsed: false as const,
+    diagnostics: payload.diagnostics ?? null,
+    jasper: {
+      ...jasper,
+      currentThread: {
+        ...currentThread,
+        id: currentThreadId,
+        programId: currentThreadProgramId,
+        projectId: currentThreadProjectId,
+      },
+      project: {
+        ...project,
+        currentSessionRootThreadId,
+      },
+    },
+  };
+}
+
+function buildProgramAuthorityExport(
+  payload: JsonRecord,
+  exportPath: string,
+  operation: string,
+): AgentsVxappProgramAuthorityExport {
+  validateOwnerEnvelope(operation, payload, exportPath);
+  return {
+    authorityStore: requireString(
+      operation,
+      payload.authorityStore,
+      "program-authority.json is missing authorityStore.",
+    ),
+    authoritySource: requireString(
+      operation,
+      payload.authoritySource,
+      "program-authority.json is missing authoritySource.",
+    ),
+    legacyFallbackUsed: false as const,
+    action: requireString(operation, payload.action, "program-authority.json is missing action."),
+    enabled: requireBoolean(
+      operation,
+      payload.enabled,
+      "program-authority.json is missing enabled.",
+    ),
+    mode: requireString(operation, payload.mode, "program-authority.json is missing mode."),
+  };
+}
+
+function buildNotificationSummaryExport(
+  payload: JsonRecord,
+  exportPath: string,
+  operation: string,
+): AgentsVxappNotificationSummaryExport {
+  validateOwnerEnvelope(operation, payload, exportPath);
+  return {
+    authorityStore: requireString(
+      operation,
+      payload.authorityStore,
+      "notification-summary.json is missing authorityStore.",
+    ),
+    authoritySource: requireString(
+      operation,
+      payload.authoritySource,
+      "notification-summary.json is missing authoritySource.",
+    ),
+    legacyFallbackUsed: false as const,
+    notifications: requireObjectArray(
+      operation,
+      payload.notifications,
+      "notification-summary.json is missing notifications.",
+    ),
+    attention: requireObjectArray(
+      operation,
+      payload.attention,
+      "notification-summary.json is missing attention.",
+    ),
+  };
+}
+
+function buildAttentionSummaryExport(
+  payload: JsonRecord,
+  exportPath: string,
+  operation: string,
+): AgentsVxappAttentionSummaryExport {
+  validateOwnerEnvelope(operation, payload, exportPath);
+  return {
+    authorityStore: requireString(
+      operation,
+      payload.authorityStore,
+      "attention-summary.json is missing authorityStore.",
+    ),
+    authoritySource: requireString(
+      operation,
+      payload.authoritySource,
+      "attention-summary.json is missing authoritySource.",
+    ),
+    legacyFallbackUsed: false as const,
+    attention: requireObjectArray(
+      operation,
+      payload.attention,
+      "attention-summary.json is missing attention.",
+    ),
+    resolvedAttention: requireObjectArray(
+      operation,
+      payload.resolvedAttention,
+      "attention-summary.json is missing resolvedAttention.",
+    ),
+    passiveNotifications: requireObjectArray(
+      operation,
+      payload.passiveNotifications,
+      "attention-summary.json is missing passiveNotifications.",
+    ),
+  };
+}
+
+function buildWatchSummaryExport(
+  payload: JsonRecord,
+  exportPath: string,
+  operation: string,
+): AgentsVxappWatchSummaryExport {
+  validateOwnerEnvelope(operation, payload, exportPath);
+  return {
+    authorityStore: requireString(
+      operation,
+      payload.authorityStore,
+      "watch-summary.json is missing authorityStore.",
+    ),
+    authoritySource: requireString(
+      operation,
+      payload.authoritySource,
+      "watch-summary.json is missing authoritySource.",
+    ),
+    legacyFallbackUsed: false as const,
+    enabledPrograms: requireStringArray(
+      operation,
+      payload.enabledPrograms,
+      "watch-summary.json is missing enabledPrograms.",
+    ),
+    state: requireObject(operation, payload.state, "watch-summary.json is missing state."),
+    classification:
+      typeof payload.classification === "string" || payload.classification === null
+        ? (payload.classification as string | null)
+        : null,
+    recommendedAction:
+      typeof payload.recommendedAction === "string" || payload.recommendedAction === null
+        ? (payload.recommendedAction as string | null)
+        : null,
+    program:
+      payload.program === null
+        ? null
+        : requireObject(
+            operation,
+            payload.program,
+            "watch-summary.json has an invalid program payload.",
+          ),
+    currentOrchestratorThread:
+      payload.currentOrchestratorThread === null
+        ? null
+        : requireObject(
+            operation,
+            payload.currentOrchestratorThread,
+            "watch-summary.json has an invalid currentOrchestratorThread payload.",
+          ),
+    wakeDecision:
+      payload.wakeDecision === null
+        ? null
+        : requireObject(
+            operation,
+            payload.wakeDecision,
+            "watch-summary.json has an invalid wakeDecision payload.",
+          ),
+  };
 }
 
 async function runOwnerJsonCommand(input: {
@@ -255,11 +594,21 @@ function normalizeProgramSnapshot(program: JsonRecord): ServerAgentsVxappProgram
     currentStatus: program.currentStatus,
     status: program.status,
   });
+  const status = normalizeProgramStatus(resolvedStatus);
+  if (status === null) {
+    throw new AgentsVxappControlPlaneError({
+      operation: "programs.snapshot",
+      detail:
+        resolvedStatus === null
+          ? `Program '${id}' is missing a valid contract-backed status.`
+          : `Program '${id}' has invalid status '${resolvedStatus}'.`,
+    });
+  }
   return {
     id: ProgramId.makeUnsafe(id),
     title: asString(program.title) ?? id,
     objective: typeof program.objective === "string" ? program.objective : null,
-    status: normalizeProgramStatus(resolvedStatus),
+    status,
     baseStatus: asString(program.baseStatus),
     currentStatus: resolvedStatus,
     executiveProjectId: asString(program.executiveProjectId)
@@ -492,6 +841,125 @@ function nextPlanLinks(input: {
 
 const makeAgentsVxappControlPlane = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
+
+  const loadOwnerExport = <T>(input: {
+    readonly exportPath: string;
+    readonly operation: string;
+    readonly detail: string;
+    readonly build: (payload: JsonRecord) => T;
+  }) =>
+    readOwnerExportPayload(fileSystem, input.exportPath, input.operation).pipe(
+      Effect.flatMap((payload) =>
+        Effect.try({
+          try: () => input.build(payload),
+          catch: (cause) => toControlPlaneError(input.operation, input.detail, cause),
+        }),
+      ),
+    );
+
+  const getBindingAuthorityExport: AgentsVxappControlPlaneShape["getBindingAuthorityExport"] = () =>
+    loadOwnerExport<AgentsVxappBindingAuthorityExport>({
+      exportPath: BINDING_AUTHORITY_EXPORT_PATH,
+      operation: "ownerProjectionAuthority.bindingAuthority.getSnapshot",
+      detail: `Failed to read vxapp binding authority export at '${BINDING_AUTHORITY_EXPORT_PATH}'.`,
+      build: (payload) =>
+        buildBindingAuthorityExport(
+          payload,
+          BINDING_AUTHORITY_EXPORT_PATH,
+          "ownerProjectionAuthority.bindingAuthority.getSnapshot",
+        ),
+    });
+
+  const getProgramAuthorityExport: AgentsVxappControlPlaneShape["getProgramAuthorityExport"] = () =>
+    loadOwnerExport<AgentsVxappProgramAuthorityExport>({
+      exportPath: PROGRAM_AUTHORITY_EXPORT_PATH,
+      operation: "ownerProjectionAuthority.programAuthority.getSnapshot",
+      detail: `Failed to read vxapp program authority export at '${PROGRAM_AUTHORITY_EXPORT_PATH}'.`,
+      build: (payload) =>
+        buildProgramAuthorityExport(
+          payload,
+          PROGRAM_AUTHORITY_EXPORT_PATH,
+          "ownerProjectionAuthority.programAuthority.getSnapshot",
+        ),
+    });
+
+  const getAttentionSummaryExport: AgentsVxappControlPlaneShape["getAttentionSummaryExport"] = () =>
+    loadOwnerExport<AgentsVxappAttentionSummaryExport>({
+      exportPath: ATTENTION_SUMMARY_EXPORT_PATH,
+      operation: "ownerProjectionAuthority.attentionSummary.getSnapshot",
+      detail: `Failed to read vxapp attention summary export at '${ATTENTION_SUMMARY_EXPORT_PATH}'.`,
+      build: (payload) =>
+        buildAttentionSummaryExport(
+          payload,
+          ATTENTION_SUMMARY_EXPORT_PATH,
+          "ownerProjectionAuthority.attentionSummary.getSnapshot",
+        ),
+    });
+
+  const getNotificationSummaryExport: AgentsVxappControlPlaneShape["getNotificationSummaryExport"] =
+    () =>
+      loadOwnerExport<AgentsVxappNotificationSummaryExport>({
+        exportPath: NOTIFICATION_SUMMARY_EXPORT_PATH,
+        operation: "ownerProjectionAuthority.notificationSummary.getSnapshot",
+        detail: `Failed to read vxapp notification summary export at '${NOTIFICATION_SUMMARY_EXPORT_PATH}'.`,
+        build: (payload) =>
+          buildNotificationSummaryExport(
+            payload,
+            NOTIFICATION_SUMMARY_EXPORT_PATH,
+            "ownerProjectionAuthority.notificationSummary.getSnapshot",
+          ),
+      });
+
+  const getWatchSummaryExport: AgentsVxappControlPlaneShape["getWatchSummaryExport"] = () =>
+    loadOwnerExport<AgentsVxappWatchSummaryExport>({
+      exportPath: WATCH_SUMMARY_EXPORT_PATH,
+      operation: "ownerProjectionAuthority.watchSummary.getSnapshot",
+      detail: `Failed to read vxapp watch summary export at '${WATCH_SUMMARY_EXPORT_PATH}'.`,
+      build: (payload) =>
+        buildWatchSummaryExport(
+          payload,
+          WATCH_SUMMARY_EXPORT_PATH,
+          "ownerProjectionAuthority.watchSummary.getSnapshot",
+        ),
+    });
+
+  const getProjectionAuthoritySnapshot: AgentsVxappControlPlaneShape["getProjectionAuthoritySnapshot"] =
+    () =>
+      Effect.gen(function* () {
+        const exportPath = process.env[AGENTS_VXAPP_OWNER_EXPORT_PATH_ENV]?.trim();
+        if (!exportPath) {
+          return yield* new AgentsVxappControlPlaneError({
+            operation: "ownerProjectionAuthority.getSnapshot",
+            detail:
+              "Missing vxapp owner export path. Configure T3_AGENTS_VXAPP_OWNER_EXPORT_PATH after agents-vxapp Phases 08-10 land.",
+          });
+        }
+
+        const raw = yield* fileSystem
+          .readFileString(exportPath)
+          .pipe(
+            mapFileSystemError(
+              "ownerProjectionAuthority.getSnapshot",
+              `Failed to read vxapp owner export at '${exportPath}'.`,
+            ),
+          );
+        const parsed = parseJsonText("ownerProjectionAuthority.getSnapshot", raw);
+        const payload = asObject(parsed);
+        if (!payload) {
+          return yield* new AgentsVxappControlPlaneError({
+            operation: "ownerProjectionAuthority.getSnapshot",
+            detail: "vxapp owner export payload must be a JSON object.",
+          });
+        }
+
+        return {
+          contractFamily: asString(payload.contractFamily),
+          contractVersion: asString(payload.contractVersion),
+          exportPath,
+          fetchedAt: nowIso(),
+          payload,
+        };
+      });
 
   const getSnapshot: AgentsVxappControlPlaneShape["getSnapshot"] = (_input) =>
     Effect.gen(function* () {
@@ -904,6 +1372,12 @@ const makeAgentsVxappControlPlane = Effect.gen(function* () {
     });
 
   return {
+    getBindingAuthorityExport,
+    getProgramAuthorityExport,
+    getAttentionSummaryExport,
+    getNotificationSummaryExport,
+    getWatchSummaryExport,
+    getProjectionAuthoritySnapshot,
     getSnapshot,
     createProgram,
     updateProgram,

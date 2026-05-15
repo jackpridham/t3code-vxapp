@@ -5,6 +5,8 @@ import {
   OrchestrationProjectKind,
   OrchestrationReadModel,
   ProgramNotificationEvidence,
+  ProgramId,
+  ProgramNotificationId,
   ProjectId,
   ProjectHooks,
   ProjectScript,
@@ -46,6 +48,7 @@ import {
   buildExternalRoleAuthorityIndex,
   type AgentsVxappExternalRoleAuthoritySnapshot,
 } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
+import { AgentsVxappControlPlane } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionBootstrapSummaryQuery,
@@ -235,6 +238,88 @@ function mergeThreadsWithExternal(input: {
   );
 }
 
+function requireOwnerString(value: unknown, field: string): string {
+  const normalized = typeof value === "string" && value.trim().length > 0 ? value : null;
+  if (!normalized) {
+    throw new Error(`vxapp owner export is missing ${field}.`);
+  }
+  return normalized;
+}
+
+function requireOwnerObject(value: unknown, field: string): Record<string, unknown> {
+  const normalized =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!normalized) {
+    throw new Error(`vxapp owner export is missing ${field}.`);
+  }
+  return normalized;
+}
+
+function mapOwnerProgramNotification(
+  row: Record<string, unknown>,
+): OrchestrationProgramNotification {
+  const notificationId = requireOwnerString(row.notificationId ?? row.id, "notificationId");
+  const programId = requireOwnerString(row.programId, "programId");
+  const executiveProjectId = requireOwnerString(
+    row.executiveProjectId ?? row.projectId,
+    "executiveProjectId",
+  );
+  const executiveThreadId = requireOwnerString(
+    row.executiveThreadId ?? row.threadId,
+    "executiveThreadId",
+  );
+  const orchestratorThreadId =
+    typeof (row.orchestratorThreadId ?? row.threadId) === "string"
+      ? ((row.orchestratorThreadId ?? row.threadId) as ThreadId)
+      : null;
+  return {
+    notificationId: ProgramNotificationId.makeUnsafe(notificationId),
+    programId: ProgramId.makeUnsafe(programId),
+    executiveProjectId: ProjectId.makeUnsafe(executiveProjectId),
+    executiveThreadId: ThreadId.makeUnsafe(executiveThreadId),
+    orchestratorThreadId,
+    kind: requireOwnerString(
+      row.kind ?? row.notificationKind,
+      "kind",
+    ) as OrchestrationProgramNotification["kind"],
+    severity: requireOwnerString(
+      row.severity,
+      "severity",
+    ) as OrchestrationProgramNotification["severity"],
+    summary: requireOwnerString(row.summary, "summary"),
+    evidence: requireOwnerObject(row.evidence ?? row.source ?? {}, "evidence"),
+    state: requireOwnerString(row.state, "state") as OrchestrationProgramNotification["state"],
+    queuedAt: requireOwnerString(row.queuedAt ?? row.createdAt ?? row.updatedAt, "queuedAt"),
+    deliveredAt: typeof row.deliveredAt === "string" ? row.deliveredAt : null,
+    consumedAt: typeof row.consumedAt === "string" ? row.consumedAt : null,
+    droppedAt: typeof row.droppedAt === "string" ? row.droppedAt : null,
+    consumeReason: typeof row.consumeReason === "string" ? row.consumeReason : undefined,
+    dropReason: typeof row.dropReason === "string" ? row.dropReason : undefined,
+    createdAt: requireOwnerString(row.createdAt ?? row.queuedAt ?? row.updatedAt, "createdAt"),
+    updatedAt: requireOwnerString(row.updatedAt ?? row.createdAt ?? row.queuedAt, "updatedAt"),
+  };
+}
+
+function applyBindingCurrentThreadToProjects(
+  projects: ReadonlyArray<OrchestrationProject>,
+  bindingAuthority: { jasper: { currentThread: { id: string; projectId: string } } } | null,
+): OrchestrationProject[] {
+  if (!bindingAuthority) {
+    return [...projects];
+  }
+  const currentThread = bindingAuthority.jasper.currentThread;
+  return projects.map((project) =>
+    project.id === currentThread.projectId
+      ? {
+          ...project,
+          currentSessionRootThreadId: currentThread.id as ThreadId,
+        }
+      : project,
+  );
+}
+
 const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -302,6 +387,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
   });
 
   const listProgramNotificationRows = SqlSchema.findAll({
+    // Local mirror path for native/non-vxapp workspaces only.
     Request: Schema.Void,
     Result: ProjectionProgramNotificationDbRowSchema,
     execute: () =>
@@ -479,7 +565,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           const [
             projectRows,
             programRows,
-            programNotificationRows,
             threadRows,
             sessionRows,
             latestTurnRows,
@@ -500,14 +585,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 toPersistenceSqlOrDecodeError(
                   "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:query",
                   "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:decodeRows",
-                ),
-              ),
-            ),
-            listProgramNotificationRows(undefined).pipe(
-              Effect.mapError(
-                toPersistenceSqlOrDecodeError(
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:query",
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:decodeRows",
                 ),
               ),
             ),
@@ -557,6 +634,74 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
           const sessionsByThread = new Map<string, OrchestrationSession>();
           let updatedAt: string | null = null;
+          const vxappBacked =
+            externalSnapshot.projects.length > 0 || externalSnapshot.threadSummaries.length > 0;
+          let bindingAuthority: {
+            jasper: {
+              currentThread: {
+                id: string;
+                projectId: string;
+              };
+            };
+          } | null = null;
+          let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
+          if (vxappBacked) {
+            const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
+              Effect.flatMap((controlPlaneOption) =>
+                Option.match(controlPlaneOption, {
+                  onNone: () =>
+                    Effect.fail(
+                      new Error("vxapp-backed bootstrap requires external control plane service."),
+                    ),
+                  onSome: (service) => Effect.succeed(service),
+                }),
+              ),
+            );
+            const [bindingAuthorityExport, notificationSummaryExport] = yield* Effect.all([
+              controlPlane.getBindingAuthorityExport(),
+              controlPlane.getNotificationSummaryExport(),
+            ]);
+            bindingAuthority = {
+              jasper: {
+                currentThread: {
+                  id: bindingAuthorityExport.jasper.currentThread.id,
+                  projectId: bindingAuthorityExport.jasper.currentThread.projectId,
+                },
+              },
+            };
+            programNotificationRows = notificationSummaryExport.notifications.map(
+              mapOwnerProgramNotification,
+            );
+          } else {
+            const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:decodeRows",
+                ),
+              ),
+            );
+            programNotificationRows = localProgramNotificationRows.map((row) => ({
+              notificationId: row.notificationId,
+              programId: row.programId,
+              executiveProjectId: row.executiveProjectId,
+              executiveThreadId: row.executiveThreadId,
+              orchestratorThreadId: row.orchestratorThreadId,
+              kind: row.kind,
+              severity: row.severity,
+              summary: row.summary,
+              evidence: row.evidence,
+              state: row.state,
+              queuedAt: row.queuedAt,
+              deliveredAt: row.deliveredAt,
+              consumedAt: row.consumedAt,
+              droppedAt: row.droppedAt,
+              consumeReason: row.consumeReason ?? undefined,
+              dropReason: row.dropReason ?? undefined,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+            }));
+          }
 
           for (const row of latestTurnRows) {
             updatedAt = maxIso(updatedAt, row.requestedAt);
@@ -638,33 +783,16 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 : undefined,
             ),
           );
-          const projects = mergeProjectsWithExternal(localProjects, externalSnapshot);
+          const projects = applyBindingCurrentThreadToProjects(
+            mergeProjectsWithExternal(localProjects, externalSnapshot),
+            bindingAuthority,
+          );
 
           const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) =>
             toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
           );
 
-          const programNotifications: ReadonlyArray<OrchestrationProgramNotification> =
-            programNotificationRows.map((row) => ({
-              notificationId: row.notificationId,
-              programId: row.programId,
-              executiveProjectId: row.executiveProjectId,
-              executiveThreadId: row.executiveThreadId,
-              orchestratorThreadId: row.orchestratorThreadId,
-              kind: row.kind,
-              severity: row.severity,
-              summary: row.summary,
-              evidence: row.evidence,
-              state: row.state,
-              queuedAt: row.queuedAt,
-              deliveredAt: row.deliveredAt,
-              consumedAt: row.consumedAt,
-              droppedAt: row.droppedAt,
-              consumeReason: row.consumeReason ?? undefined,
-              dropReason: row.dropReason ?? undefined,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-            }));
+          const programNotifications = programNotificationRows;
 
           const localThreads: ReadonlyArray<OrchestrationThread> = threadRows.map(
             (row) =>

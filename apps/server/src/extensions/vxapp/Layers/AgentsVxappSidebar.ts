@@ -21,6 +21,11 @@ import {
   type AgentsVxappSidebarShape,
 } from "../Services/AgentsVxappSidebar.ts";
 import {
+  AgentsVxappControlPlane,
+  type AgentsVxappBindingAuthorityExport,
+  type AgentsVxappWatchSummaryExport,
+} from "../Services/AgentsVxappControlPlane.ts";
+import {
   AgentsVxappExternalRoleAuthority,
   buildExternalRoleAuthorityIndex,
 } from "../Services/AgentsVxappExternalRoleAuthority.ts";
@@ -77,11 +82,10 @@ function asIsoDateTime(value: unknown): string | null {
   return normalized && Number.isFinite(Date.parse(normalized)) ? normalized : null;
 }
 
-function asBoolean(value: unknown): boolean {
-  return value === true || value === 1 || value === "1";
-}
-
 function asJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
   const raw = asString(value);
   if (!raw) {
     return null;
@@ -119,6 +123,29 @@ function normalizeNotificationSeverity(
   return severity && VALID_NOTIFICATION_SEVERITIES.has(severity)
     ? (severity as ServerAgentsVxappSidebarProgramNotification["severity"])
     : "info";
+}
+
+function requireOwnerString(value: unknown, field: string): string {
+  const normalized = asString(value);
+  if (!normalized) {
+    throw new AgentsVxappSidebarError({
+      message: `vxapp owner export is missing ${field}.`,
+    });
+  }
+  return normalized;
+}
+
+function requireOwnerObject(value: unknown, field: string): Record<string, unknown> {
+  const normalized =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  if (!normalized) {
+    throw new AgentsVxappSidebarError({
+      message: `vxapp owner export is missing ${field}.`,
+    });
+  }
+  return normalized;
 }
 
 function mapSession(row: AgentsVxappSqliteRow, threadId: ThreadId): OrchestrationSession | null {
@@ -198,65 +225,127 @@ function mapWake(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarWake {
   };
 }
 
-function mapWatchProjection(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarWatchProjection {
+function mapOwnerNotification(
+  row: Record<string, unknown>,
+): ServerAgentsVxappSidebarProgramNotification {
   return {
-    programId: toProgramId(row.program_id),
-    enabled: asBoolean(row.enabled),
-    classification: asString(row.classification),
-    reason: typeof row.reason === "string" && row.reason.length > 0 ? row.reason : null,
-    signature: asString(row.signature),
-    suppression: asJsonRecord(row.suppression_json),
-    metadata: asJsonRecord(row.metadata_json),
-    lastEvaluatedAt: asIsoDateTime(row.last_evaluated_at),
-    updatedAt: asIsoDateTime(row.updated_at),
+    notificationId: requireOwnerString(row.notificationId ?? row.id, "notificationId"),
+    programId: asString(row.programId) ? toProgramId(row.programId) : null,
+    executiveProjectId: toProjectIdOrNull(row.executiveProjectId ?? row.projectId),
+    executiveThreadId: toThreadIdOrNull(row.executiveThreadId ?? row.threadId),
+    orchestratorThreadId: toThreadIdOrNull(row.orchestratorThreadId ?? row.threadId),
+    kind: requireOwnerString(row.kind ?? row.notificationKind, "kind"),
+    severity: normalizeNotificationSeverity(row.severity),
+    summary: requireOwnerString(row.summary, "summary"),
+    evidence: asJsonRecord(row.evidence ?? row.source),
+    state: requireOwnerString(row.state, "state"),
+    queuedAt: requireOwnerString(
+      row.queuedAt ?? row.queued_at ?? row.createdAt ?? row.created_at,
+      "queuedAt",
+    ),
+    deliveredAt: asIsoDateTime(row.deliveredAt ?? row.delivered_at),
+    consumedAt: asIsoDateTime(row.consumedAt ?? row.consumed_at),
+    droppedAt: asIsoDateTime(row.droppedAt ?? row.dropped_at),
+    consumeReason: asString(row.consumeReason ?? row.consume_reason),
+    dropReason: asString(row.dropReason ?? row.drop_reason),
+    createdAt: requireOwnerString(
+      row.createdAt ?? row.created_at ?? row.queuedAt ?? row.queued_at,
+      "createdAt",
+    ),
+    updatedAt: requireOwnerString(
+      row.updatedAt ?? row.updated_at ?? row.createdAt ?? row.createdAt,
+      "updatedAt",
+    ),
   };
 }
 
-function mapNotification(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarProgramNotification {
+function mapOwnerAttentionItem(
+  row: Record<string, unknown>,
+): ServerAgentsVxappSidebarAttentionItem {
   return {
-    notificationId: String(row.notification_id),
-    programId: row.program_id ? toProgramId(row.program_id) : null,
-    executiveProjectId: toProjectIdOrNull(row.executive_project_id),
-    executiveThreadId: toThreadIdOrNull(row.executive_thread_id),
-    orchestratorThreadId: toThreadIdOrNull(row.orchestrator_thread_id),
-    kind: String(row.kind),
+    attentionId: requireOwnerString(row.attentionId ?? row.id ?? row.notificationId, "attentionId"),
+    attentionKey: asString(row.attentionKey ?? row.id ?? row.attentionId),
+    notificationId: asString(row.notificationId),
+    programId: asString(row.programId) ? toProgramId(row.programId) : null,
+    executiveProjectId: toProjectIdOrNull(row.executiveProjectId ?? row.projectId),
+    executiveThreadId: toThreadIdOrNull(row.executiveThreadId ?? row.threadId),
+    sourceThreadId: toThreadIdOrNull(row.sourceThreadId ?? row.threadId),
+    sourceRole: asString(row.sourceRole ?? row.sourceKind),
+    kind: requireOwnerString(row.kind ?? row.notificationKind, "kind"),
     severity: normalizeNotificationSeverity(row.severity),
-    summary: String(row.summary),
-    evidence: asJsonRecord(row.evidence_json),
-    state: String(row.state),
-    queuedAt: asIsoDateTime(row.queued_at),
-    deliveredAt: asIsoDateTime(row.delivered_at),
-    consumedAt: asIsoDateTime(row.consumed_at),
-    droppedAt: asIsoDateTime(row.dropped_at),
-    consumeReason: typeof row.consume_reason === "string" ? row.consume_reason : null,
-    dropReason: typeof row.drop_reason === "string" ? row.drop_reason : null,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
+    summary: requireOwnerString(row.summary, "summary"),
+    evidence: asJsonRecord(row.evidence ?? row.source),
+    state: requireOwnerString(row.state, "state"),
+    queuedAt: requireOwnerString(
+      row.queuedAt ?? row.queued_at ?? row.createdAt ?? row.created_at,
+      "queuedAt",
+    ),
+    acknowledgedAt: asIsoDateTime(row.acknowledgedAt ?? row.acknowledged_at),
+    resolvedAt: asIsoDateTime(row.resolvedAt ?? row.resolved_at),
+    droppedAt: asIsoDateTime(row.droppedAt ?? row.dropped_at),
+    createdAt: requireOwnerString(
+      row.createdAt ?? row.created_at ?? row.queuedAt ?? row.queued_at,
+      "createdAt",
+    ),
+    updatedAt: requireOwnerString(
+      row.updatedAt ?? row.updated_at ?? row.createdAt ?? row.createdAt,
+      "updatedAt",
+    ),
   };
 }
 
-function mapAttentionItem(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarAttentionItem {
-  return {
-    attentionId: String(row.attention_id),
-    attentionKey: asString(row.attention_key),
-    notificationId: asString(row.notification_id),
-    programId: row.program_id ? toProgramId(row.program_id) : null,
-    executiveProjectId: toProjectIdOrNull(row.executive_project_id),
-    executiveThreadId: toThreadIdOrNull(row.executive_thread_id),
-    sourceThreadId: toThreadIdOrNull(row.source_thread_id),
-    sourceRole: asString(row.source_role),
-    kind: String(row.kind),
-    severity: normalizeNotificationSeverity(row.severity),
-    summary: String(row.summary),
-    evidence: asJsonRecord(row.evidence_json),
-    state: String(row.state),
-    queuedAt: asIsoDateTime(row.queued_at),
-    acknowledgedAt: asIsoDateTime(row.acknowledged_at),
-    resolvedAt: asIsoDateTime(row.resolved_at),
-    droppedAt: asIsoDateTime(row.dropped_at),
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-  };
+function mapOwnerWatchProjections(
+  watchSummary: AgentsVxappWatchSummaryExport,
+  bindingAuthority: AgentsVxappBindingAuthorityExport | null,
+): ServerAgentsVxappSidebarWatchProjection[] {
+  const state = requireOwnerObject(watchSummary.state, "state");
+  const summaryProgramId =
+    asString((watchSummary.program as Record<string, unknown> | null)?.id) ?? null;
+  const bindingProgramId = bindingAuthority?.jasper.currentThread.programId ?? null;
+  const enabledProgramId =
+    watchSummary.enabledPrograms.length === 1 ? watchSummary.enabledPrograms[0] : null;
+  const programId = summaryProgramId ?? enabledProgramId ?? bindingProgramId;
+  if (!programId) {
+    throw new AgentsVxappSidebarError({
+      message: "watch-summary.json is missing a program id.",
+    });
+  }
+  if (summaryProgramId && bindingProgramId && summaryProgramId !== bindingProgramId) {
+    throw new AgentsVxappSidebarError({
+      message: "watch-summary.json program id does not match binding authority.",
+    });
+  }
+
+  const enabled =
+    typeof state.enabled === "boolean"
+      ? state.enabled
+      : watchSummary.enabledPrograms.includes(programId);
+  const classification = asString(watchSummary.classification ?? state.classification);
+  const reason = asString(
+    state.reason ?? state.recommendedAction ?? watchSummary.recommendedAction ?? null,
+  );
+  const signature = asString(state.signature ?? state.lastSignature);
+  const lastEvaluatedAt = asIsoDateTime(state.last_evaluated_at ?? state.lastEvaluatedAt);
+  const updatedAt = asIsoDateTime(state.updated_at ?? state.updatedAt);
+  if (!signature || !lastEvaluatedAt || !updatedAt) {
+    throw new AgentsVxappSidebarError({
+      message: "watch-summary.json state is missing signature or timestamps.",
+    });
+  }
+
+  return [
+    {
+      programId: ProgramId.makeUnsafe(programId),
+      enabled,
+      classification,
+      reason,
+      signature,
+      suppression: asJsonRecord(state.suppression),
+      metadata: asJsonRecord(state.metadata),
+      lastEvaluatedAt,
+      updatedAt,
+    },
+  ];
 }
 
 function buildMirrorDiagnostics(input: {
@@ -333,15 +422,6 @@ function buildSidebarGraphFromQueryAll(
   const openWakes = queryAll(
     "SELECT * FROM t3_wake_items WHERE settled_at IS NULL ORDER BY updated_at DESC",
   ).map(mapWake);
-  const watchProjections = queryAll(
-    "SELECT * FROM t3_watch_projections ORDER BY updated_at DESC",
-  ).map(mapWatchProjection);
-  const notifications = queryAll(
-    "SELECT * FROM t3_program_notifications WHERE dropped_at IS NULL ORDER BY updated_at DESC",
-  ).map(mapNotification);
-  const attentionItems = queryAll(
-    "SELECT * FROM t3_attention_items WHERE dropped_at IS NULL ORDER BY updated_at DESC",
-  ).map(mapAttentionItem);
 
   return {
     source: "sqlite",
@@ -349,9 +429,9 @@ function buildSidebarGraphFromQueryAll(
     fallbackReason: null,
     threadLinks,
     openWakes,
-    watchProjections,
-    notifications,
-    attentionItems,
+    watchProjections: [],
+    notifications: [],
+    attentionItems: [],
   };
 }
 
@@ -411,6 +491,41 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
           }),
       });
 
+      const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
+        Effect.flatMap((controlPlaneOption) =>
+          Option.match(controlPlaneOption, {
+            onNone: () =>
+              Effect.fail(
+                new AgentsVxappSidebarError({
+                  message: "vxapp sidebar requires the external control plane service.",
+                }),
+              ),
+            onSome: (service) => Effect.succeed(service),
+          }),
+        ),
+      );
+      const [
+        bindingAuthority,
+        watchSummaryExport,
+        notificationSummaryExport,
+        attentionSummaryExport,
+      ] = yield* Effect.all([
+        controlPlane.getBindingAuthorityExport(),
+        controlPlane.getWatchSummaryExport(),
+        controlPlane.getNotificationSummaryExport(),
+        controlPlane.getAttentionSummaryExport(),
+      ]).pipe(
+        Effect.mapError(
+          (error) =>
+            new AgentsVxappSidebarError({
+              message: error instanceof Error ? error.message : "Failed to read owner exports.",
+            }),
+        ),
+      );
+      const ownerWatchProjections = mapOwnerWatchProjections(watchSummaryExport, bindingAuthority);
+      const ownerNotifications = notificationSummaryExport.notifications.map(mapOwnerNotification);
+      const ownerAttentionItems = attentionSummaryExport.attention.map(mapOwnerAttentionItem);
+
       const [projectionProjectRows, projectionThreadRows] = yield* Effect.all([
         listProjectionProjectIds(undefined),
         listProjectionThreadIds(undefined),
@@ -446,6 +561,9 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
 
       return {
         ...graph,
+        watchProjections: ownerWatchProjections,
+        notifications: ownerNotifications,
+        attentionItems: ownerAttentionItems,
         mirrorDiagnostics: buildMirrorDiagnostics(
           Object.assign(
             {

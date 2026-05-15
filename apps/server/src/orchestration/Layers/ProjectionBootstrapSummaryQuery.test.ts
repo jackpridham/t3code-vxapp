@@ -3,6 +3,10 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import {
+  AgentsVxappControlPlane,
+  type AgentsVxappControlPlaneShape,
+} from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
@@ -69,6 +73,124 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       },
     ],
   } as const;
+
+  const ownerBindingAuthority = {
+    authorityStore: "vx_agents_sqlite",
+    authoritySource: "binding",
+    legacyFallbackUsed: false,
+    diagnostics: null,
+    jasper: {
+      currentThread: {
+        id: ThreadId.makeUnsafe("binding-authoritative-thread"),
+        programId: ProgramId.makeUnsafe("external-cto-program"),
+        projectId: ProjectId.makeUnsafe("external-cto-project"),
+      },
+      project: {
+        currentSessionRootThreadId: ThreadId.makeUnsafe("binding-authoritative-thread"),
+      },
+    },
+  } satisfies {
+    authorityStore: string;
+    authoritySource: string;
+    legacyFallbackUsed: false;
+    diagnostics: null;
+    jasper: {
+      currentThread: {
+        id: ThreadId;
+        programId: ProgramId;
+        projectId: ProjectId;
+      };
+      project: {
+        currentSessionRootThreadId: ThreadId;
+      };
+    };
+  };
+
+  const ownerNotificationSummary = {
+    authorityStore: "vx_agents_sqlite",
+    authoritySource: "local_program_projection",
+    legacyFallbackUsed: false,
+    notifications: [
+      {
+        notificationId: ProgramNotificationId.makeUnsafe("notif-authoritative"),
+        programId: ProgramId.makeUnsafe("external-cto-program"),
+        executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
+        executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+        orchestratorThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+        kind: "status_update" as const,
+        severity: "info" as const,
+        summary: "Owner notification wins",
+        evidence: {},
+        state: "pending" as const,
+        queuedAt: "2026-05-12T00:00:05.000Z",
+        deliveredAt: null,
+        consumedAt: null,
+        droppedAt: null,
+        consumeReason: undefined,
+        dropReason: undefined,
+        createdAt: "2026-05-12T00:00:05.000Z",
+        updatedAt: "2026-05-12T00:00:06.000Z",
+      },
+    ],
+    attention: [],
+  } as const;
+
+  const ownerAttentionSummary = {
+    authorityStore: "vx_agents_sqlite",
+    authoritySource: "local_attention_projection",
+    legacyFallbackUsed: false,
+    attention: [
+      {
+        attentionId: "att-authoritative",
+        attentionKey: "att-authoritative",
+        notificationId: ProgramNotificationId.makeUnsafe("notif-authoritative"),
+        programId: ProgramId.makeUnsafe("external-cto-program"),
+        executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
+        executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+        sourceThreadId: ThreadId.makeUnsafe("worker-thread"),
+        sourceRole: "worker",
+        kind: "blocked" as const,
+        severity: "warning" as const,
+        summary: "Owner attention wins",
+        evidence: {},
+        state: "required" as const,
+        queuedAt: "2026-05-12T00:00:05.000Z",
+        acknowledgedAt: null,
+        resolvedAt: null,
+        droppedAt: null,
+        createdAt: "2026-05-12T00:00:05.000Z",
+        updatedAt: "2026-05-12T00:00:06.000Z",
+      },
+    ],
+    resolvedAttention: [],
+    passiveNotifications: [],
+  } as const;
+
+  const vxappControlPlaneMock = {
+    getBindingAuthorityExport: () => Effect.succeed(ownerBindingAuthority),
+    getProgramAuthorityExport: () =>
+      Effect.die("unexpected getProgramAuthorityExport in ProjectionBootstrapSummaryQuery test"),
+    getAttentionSummaryExport: () => Effect.succeed(ownerAttentionSummary),
+    getNotificationSummaryExport: () => Effect.succeed(ownerNotificationSummary),
+    getWatchSummaryExport: () =>
+      Effect.die("unexpected getWatchSummaryExport in ProjectionBootstrapSummaryQuery test"),
+    getProjectionAuthoritySnapshot: () =>
+      Effect.die(
+        "unexpected getProjectionAuthoritySnapshot in ProjectionBootstrapSummaryQuery test",
+      ),
+    getSnapshot: () => Effect.die("unexpected getSnapshot in ProjectionBootstrapSummaryQuery test"),
+    createProgram: () =>
+      Effect.die("unexpected createProgram in ProjectionBootstrapSummaryQuery test"),
+    updateProgram: () =>
+      Effect.die("unexpected updateProgram in ProjectionBootstrapSummaryQuery test"),
+    deleteProgram: () =>
+      Effect.die("unexpected deleteProgram in ProjectionBootstrapSummaryQuery test"),
+    setProgramLifecycle: () =>
+      Effect.die("unexpected setProgramLifecycle in ProjectionBootstrapSummaryQuery test"),
+    createTodo: () => Effect.die("unexpected createTodo in ProjectionBootstrapSummaryQuery test"),
+    updateTodo: () => Effect.die("unexpected updateTodo in ProjectionBootstrapSummaryQuery test"),
+    deleteTodo: () => Effect.die("unexpected deleteTodo in ProjectionBootstrapSummaryQuery test"),
+  } satisfies AgentsVxappControlPlaneShape;
 
   it.effect("returns a bounded bootstrap read model without archived threads", () =>
     Effect.gen(function* () {
@@ -506,10 +628,37 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
         readModel.projects.map((project) => project.id),
         ["external-cto-project"],
       );
+      assert.equal(
+        readModel.projects[0]?.currentSessionRootThreadId,
+        "binding-authoritative-thread",
+      );
       assert.deepEqual(
         readModel.threads.map((thread) => thread.id),
         ["external-cto-thread"],
       );
+      assert.deepEqual(readModel.programNotifications, [
+        {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-authoritative"),
+          programId: ProgramId.makeUnsafe("external-cto-program"),
+          executiveProjectId: ProjectId.makeUnsafe("external-cto-project"),
+          executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+          orchestratorThreadId: ThreadId.makeUnsafe("external-cto-thread"),
+          kind: "status_update",
+          severity: "info",
+          summary: "Owner notification wins",
+          evidence: {},
+          state: "pending",
+          queuedAt: "2026-05-12T00:00:05.000Z",
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          consumeReason: undefined,
+          dropReason: undefined,
+          createdAt: "2026-05-12T00:00:05.000Z",
+          updatedAt: "2026-05-12T00:00:06.000Z",
+        },
+      ]);
+      assert.deepEqual(readModel.ctoAttentionItems, []);
       assert.equal(readModel.threads[0]?.hasActiveError, false);
       assert.equal(readModel.threads[0]?.activeError, null);
       assert.equal(
@@ -524,6 +673,7 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       Effect.provideService(AgentsVxappExternalRoleAuthority, {
         getSnapshot: () => Effect.succeed(externalRoleAuthoritySnapshot),
       }),
+      Effect.provideService(AgentsVxappControlPlane, vxappControlPlaneMock),
     ),
   );
 });
