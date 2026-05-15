@@ -15,7 +15,10 @@ function requireThreadErrorPresentation(input: ThreadErrorPresentation): asserts
   historicalError: string | null;
   errorPresentationSource: ThreadErrorPresentation["errorPresentationSource"];
 } {
-  if (input.hasActiveError && (typeof input.activeError !== "string" || input.activeError.length === 0)) {
+  if (
+    input.hasActiveError &&
+    (typeof input.activeError !== "string" || input.activeError.length === 0)
+  ) {
     throw new Error("Thread payload is missing activeError for an active error presentation.");
   }
   if (!input.hasActiveError && input.errorPresentationSource.startsWith("active_")) {
@@ -30,5 +33,7 @@ export function presentThreadActiveError(input: ThreadErrorPresentation): string
 
 export function shouldDispatchThreadRateLimitNotification(input: ThreadErrorPresentation): boolean {
   const activeError = presentThreadActiveError(input);
-  return typeof activeError === "string" && /rate.?limit|429|capacity|usage limit/i.test(activeError);
+  return (
+    typeof activeError === "string" && /rate.?limit|429|capacity|usage limit/i.test(activeError)
+  );
 }

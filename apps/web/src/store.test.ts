@@ -732,8 +732,7 @@ describe("store read model sync", () => {
   });
 
   it("maps active backend error presentation into the thread banner state", () => {
-    const usageLimitError =
-      "You've hit your usage limit. Upgrade to Pro or try again later.";
+    const usageLimitError = "You've hit your usage limit. Upgrade to Pro or try again later.";
     const next = syncServerReadModel(
       makeState(makeThread()),
       makeReadModel(

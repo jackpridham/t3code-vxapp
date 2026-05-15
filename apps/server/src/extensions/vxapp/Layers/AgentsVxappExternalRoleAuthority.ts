@@ -200,7 +200,9 @@ function mapThreadErrorPresentation(input: JsonRecord): {
       errorPresentationSource !== "active_runtime_failure" &&
       errorPresentationSource !== "historical_session_last_error")
   ) {
-    throw new Error("agents-vxapp thread payload is missing authoritative error presentation fields.");
+    throw new Error(
+      "agents-vxapp thread payload is missing authoritative error presentation fields.",
+    );
   }
   if (hasActiveError && activeError === null) {
     throw new Error("agents-vxapp thread payload declared an active error without activeError.");
