@@ -29,10 +29,12 @@ const ownerThreadLink = {
   executive_project_id: null,
   executive_thread_id: null,
   orchestrator_thread_id: null,
-  labels_json: "[]",
+  labels_json: JSON.stringify(["role:jasper", "role-session-id:jasper-session-1"]),
   session_json: null,
   latest_turn_json: null,
-  metadata_json: null,
+  metadata_json: JSON.stringify({
+    workspacePath: "/tmp/worktree-local",
+  }),
   created_at: "2026-05-12T00:00:00.000Z",
   updated_at: "2026-05-12T00:00:01.000Z",
   archived_at: null,
@@ -285,6 +287,11 @@ projectionSidebarLayer("AgentsVxappSidebar", (it) => {
         graph.threadLinks.map((threadLink) => threadLink.threadId),
         ["thread-local"],
       );
+      assert.deepEqual(graph.threadLinks[0]?.roleSession, {
+        role: "jasper",
+        sessionId: "jasper-session-1",
+        workspacePath: "/tmp/worktree-local",
+      });
       assert.deepEqual(
         graph.openWakes.map((wake) => wake.wakeId),
         ["wake-local"],
@@ -351,6 +358,7 @@ projectionSidebarLayer("AgentsVxappSidebar", (it) => {
     }).pipe(
       Effect.provideService(AgentsVxappControlPlane, vxappControlPlaneMock),
       Effect.provideService(AgentsVxappExternalRoleAuthority, {
+        getRuntimePaths: () => Effect.die("unexpected getRuntimePaths in AgentsVxappSidebar test"),
         getSnapshot: () => Effect.succeed({ projects: [], threadSummaries: [] }),
       }),
     ),

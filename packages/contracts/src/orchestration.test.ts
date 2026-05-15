@@ -114,6 +114,13 @@ const PROGRAM_DELIVERY_SPEC = {
   requirePrPerRepo: true,
 } as const;
 
+const THREAD_NO_ERROR_PRESENTATION = {
+  hasActiveError: false,
+  activeError: null,
+  historicalError: null,
+  errorPresentationSource: "none",
+} as const;
+
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeTurnDiffInput({
@@ -406,6 +413,7 @@ it.effect("decodes thread snapshots with default labels", () =>
       activities: [],
       checkpoints: [],
       session: null,
+      ...THREAD_NO_ERROR_PRESENTATION,
     });
 
     assert.deepStrictEqual(parsed.labels, []);
@@ -798,6 +806,7 @@ it.effect("OrchestrationThread schema includes lineage fields with undefined def
       activities: [],
       checkpoints: [],
       session: null,
+      ...THREAD_NO_ERROR_PRESENTATION,
     });
     // Legacy threads without lineage fields should decode with undefined defaults
     assert.strictEqual(parsed.orchestratorProjectId, undefined);
@@ -832,6 +841,7 @@ it.effect("OrchestrationThread schema includes lineage fields with undefined def
       spawnRole: "worker",
       spawnedBy: "jasper",
       workflowId: "workflow-abc",
+      ...THREAD_NO_ERROR_PRESENTATION,
     });
     assert.strictEqual(withLineage.orchestratorProjectId, "project-1");
     assert.strictEqual(withLineage.orchestratorThreadId, "thread-orch-1");
@@ -1031,6 +1041,7 @@ it.effect("decodes bounded orchestration read results", () =>
         worktreePath: null,
         createdAt: "2026-04-05T10:00:00.000Z",
         updatedAt: "2026-04-05T10:00:00.000Z",
+        ...THREAD_NO_ERROR_PRESENTATION,
       },
     ]);
     assert.strictEqual(threads.length, 1);
@@ -1087,6 +1098,7 @@ it.effect("decodes bounded orchestration read results", () =>
             checkpointsTruncated: false,
             warnings: ["thread thread-1 message total 12000 exceeds warning threshold 10000."],
           },
+          ...THREAD_NO_ERROR_PRESENTATION,
         },
       ],
       orchestratorWakeItems: [],

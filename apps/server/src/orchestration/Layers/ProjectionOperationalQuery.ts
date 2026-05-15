@@ -67,6 +67,7 @@ import {
   type AgentsVxappExternalRoleAuthoritySnapshot,
 } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappControlPlane } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
+import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { selectOperationalCtoAttentionItems } from "../projectionCtoAttention.ts";
 import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
@@ -76,7 +77,7 @@ import {
   type ProjectionThreadCheckpointContext,
 } from "../Services/ProjectionOperationalQuery.ts";
 
-const ProjectionProjectSummaryDbRowSchema = ProjectionProject.mapFields(
+const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     kind: Schema.NullOr(OrchestrationProjectKind),
     sidebarParentProjectId: Schema.NullOr(ProjectId),
@@ -110,7 +111,7 @@ const ProjectionThreadSummaryDbRowSchema = ProjectionThread.mapFields(
 );
 
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
-type ProjectionProjectSummaryDbRow = typeof ProjectionProjectSummaryDbRowSchema.Type;
+type ProjectionProjectDbRow = typeof ProjectionProjectDbRowSchema.Type;
 type ProjectionThreadSummaryDbRow = typeof ProjectionThreadSummaryDbRowSchema.Type;
 type ProjectionThreadSessionDbRow = typeof ProjectionThreadSessionDbRowSchema.Type;
 type OrchestrationProjectSummary = OrchestrationListProjectsResult[number];
@@ -180,6 +181,58 @@ function asJsonRecord(value: unknown): Record<string, unknown> | null {
 function asIsoDateTime(value: unknown): string | null {
   const normalized = asString(value);
   return normalized && Number.isFinite(Date.parse(normalized)) ? normalized : null;
+}
+
+function isVxappWorkspaceRoot(workspaceRoot: string): boolean {
+  return workspaceRoot.startsWith(AGENTS_VXAPP_ROOT);
+}
+
+function hasVxappBackedProjectRows(
+  projectRows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>>,
+): boolean {
+  return projectRows.some((row) => isVxappWorkspaceRoot(row.workspaceRoot));
+}
+
+type VxappBindingAuthority = {
+  jasper: {
+    currentThread: {
+      id: string;
+      projectId: string;
+    };
+  };
+};
+
+function getBindingAuthorityForVxappProjectRows(
+  projectRows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>>,
+): Effect.Effect<VxappBindingAuthority | null, ProjectionRepositoryError, never> {
+  if (!hasVxappBackedProjectRows(projectRows)) {
+    return Effect.succeed(null);
+  }
+  return Effect.gen(function* () {
+    const controlPlaneOption = yield* Effect.serviceOption(AgentsVxappControlPlane);
+    if (Option.isNone(controlPlaneOption)) {
+      return yield* toPersistenceSqlError(
+        "ProjectionOperationalQuery.getBindingAuthorityForVxappProjectRows:missingControlPlane",
+      )(new Error("vxapp-backed snapshot requires external control plane service."));
+    }
+    const bindingAuthority = yield* controlPlaneOption.value
+      .getBindingAuthorityExport()
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlError(
+            "ProjectionOperationalQuery.getBindingAuthorityForVxappProjectRows:readOwnerExport",
+          ),
+        ),
+      );
+    return {
+      jasper: {
+        currentThread: {
+          id: bindingAuthority.jasper.currentThread.id,
+          projectId: bindingAuthority.jasper.currentThread.projectId,
+        },
+      },
+    };
+  });
 }
 
 function requireOwnerString(value: unknown, field: string): string {
@@ -340,7 +393,7 @@ function applyBindingCurrentThreadToProjectSummaries(
 }
 
 function mapProjectRowToReadModelProject(
-  row: ProjectionProjectSummaryDbRow,
+  row: ProjectionProjectDbRow,
 ): OrchestrationReadModel["projects"][number] {
   return {
     id: row.projectId,
@@ -362,7 +415,7 @@ function mapProjectRowToReadModelProject(
   };
 }
 
-function mapProjectRowToSummary(row: ProjectionProjectSummaryDbRow): OrchestrationProjectSummary {
+function mapProjectRowToSummary(row: ProjectionProjectDbRow): OrchestrationProjectSummary {
   return {
     id: row.projectId,
     title: row.title,
@@ -403,7 +456,7 @@ function mapProjectToSummary(
 }
 
 function mergeProjectRowsWithExternal(
-  localRows: ReadonlyArray<ProjectionProjectSummaryDbRow>,
+  localRows: ReadonlyArray<ProjectionProjectDbRow>,
   externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
 ): OrchestrationReadModel["projects"] {
   const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
@@ -423,7 +476,7 @@ function mergeProjectRowsWithExternal(
 
 function mergeThreadSummariesWithExternal(input: {
   localThreadSummaries: ReadonlyArray<OrchestrationThreadSummary>;
-  localProjectRows: ReadonlyArray<ProjectionProjectSummaryDbRow>;
+  localProjectRows: ReadonlyArray<ProjectionProjectDbRow>;
   externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot;
 }): OrchestrationThreadSummary[] {
   const externalIndex = buildExternalRoleAuthorityIndex(input.externalSnapshot);
@@ -448,7 +501,7 @@ function mergeThreadSummariesWithExternal(input: {
 }
 
 function mergeProjectSummariesWithExternal(
-  localRows: ReadonlyArray<ProjectionProjectSummaryDbRow>,
+  localRows: ReadonlyArray<ProjectionProjectDbRow>,
   externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
 ): OrchestrationListProjectsResult {
   return mergeProjectRowsWithExternal(localRows, externalSnapshot).map(mapProjectToSummary);
@@ -640,7 +693,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
 
   const listProjectRows = SqlSchema.findAll({
     Request: Schema.Void,
-    Result: ProjectionProjectSummaryDbRowSchema,
+    Result: ProjectionProjectDbRowSchema,
     execute: () =>
       sql`
         SELECT
@@ -766,7 +819,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
 
   const getProjectByWorkspaceRow = SqlSchema.findOneOption({
     Request: Schema.Struct({ workspaceRoot: Schema.String }),
-    Result: ProjectionProjectSummaryDbRowSchema,
+    Result: ProjectionProjectDbRowSchema,
     execute: ({ workspaceRoot }) =>
       sql`
         SELECT
@@ -792,7 +845,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
 
   const getProjectByIdRow = SqlSchema.findOneOption({
     Request: Schema.Struct({ projectId: ProjectId }),
-    Result: ProjectionProjectSummaryDbRowSchema,
+    Result: ProjectionProjectDbRowSchema,
     execute: ({ projectId }) =>
       sql`
         SELECT
@@ -1867,38 +1920,6 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       ),
     );
 
-  const getBindingAuthorityForExternalSnapshot = (
-    externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
-  ) =>
-    Effect.gen(function* () {
-      if (externalSnapshot.projects.length === 0 && externalSnapshot.threadSummaries.length === 0) {
-        return null;
-      }
-      const controlPlaneOption = yield* Effect.serviceOption(AgentsVxappControlPlane);
-      if (Option.isNone(controlPlaneOption)) {
-        return yield* toPersistenceSqlError(
-          "ProjectionOperationalQuery.getBindingAuthorityForExternalSnapshot:missingControlPlane",
-        )(new Error("vxapp-backed snapshot requires external control plane service."));
-      }
-      const bindingAuthority = yield* controlPlaneOption.value
-        .getBindingAuthorityExport()
-        .pipe(
-          Effect.mapError(
-            toPersistenceSqlError(
-              "ProjectionOperationalQuery.getBindingAuthorityForExternalSnapshot:readOwnerExport",
-            ),
-          ),
-        );
-      return {
-        jasper: {
-          currentThread: {
-            id: bindingAuthority.jasper.currentThread.id,
-            projectId: bindingAuthority.jasper.currentThread.projectId,
-          },
-        },
-      };
-    });
-
   const getReadiness: ProjectionOperationalQueryShape["getReadiness"] = () =>
     Effect.all({
       stateRows: listProjectionStateRows(undefined).pipe(
@@ -1964,8 +1985,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               ),
             ),
           );
-          const vxappBacked =
-            externalSnapshot.projects.length > 0 || externalSnapshot.threadSummaries.length > 0;
+          const vxappBacked = hasVxappBackedProjectRows(projectRows);
           let bindingAuthority: {
             jasper: {
               currentThread: {
@@ -2166,7 +2186,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       externalSnapshot: getExternalSnapshot(),
     }).pipe(
       Effect.flatMap(({ projectRows, externalSnapshot }) =>
-        getBindingAuthorityForExternalSnapshot(externalSnapshot).pipe(
+        getBindingAuthorityForVxappProjectRows(projectRows).pipe(
           Effect.map(
             (bindingAuthority): OrchestrationListProjectsResult =>
               applyBindingCurrentThreadToProjectSummaries(
@@ -2191,7 +2211,12 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       externalSnapshot: getExternalSnapshot(),
     }).pipe(
       Effect.flatMap(({ projectRow, externalSnapshot }) =>
-        getBindingAuthorityForExternalSnapshot(externalSnapshot).pipe(
+        getBindingAuthorityForVxappProjectRows(
+          Option.match(projectRow, {
+            onNone: () => [],
+            onSome: (row) => [row],
+          }),
+        ).pipe(
           Effect.map((bindingAuthority) => {
             const externalProject =
               externalSnapshot.projects.find((project) => project.id === input.projectId) ?? null;
@@ -2226,7 +2251,12 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       externalSnapshot: getExternalSnapshot(),
     }).pipe(
       Effect.flatMap(({ projectRow, externalSnapshot }) =>
-        getBindingAuthorityForExternalSnapshot(externalSnapshot).pipe(
+        getBindingAuthorityForVxappProjectRows(
+          Option.match(projectRow, {
+            onNone: () => [],
+            onSome: (row) => [row],
+          }),
+        ).pipe(
           Effect.map((bindingAuthority): OrchestrationGetProjectByWorkspaceResult => {
             const externalProject =
               externalSnapshot.projects.find(

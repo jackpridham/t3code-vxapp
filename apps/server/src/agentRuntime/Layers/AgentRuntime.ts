@@ -6,8 +6,8 @@ import type {
   GetWorkerRuntimeSnapshotResult,
 } from "@t3tools/contracts";
 import { GetAgentRuntimeSnapshotResult as GetAgentRuntimeSnapshotResultSchema } from "@t3tools/contracts";
-import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
 import { ProjectionOperationalQuery } from "../../orchestration/Services/ProjectionOperationalQuery.ts";
+import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import {
   AgentRuntime,
   AgentRuntimeError,
@@ -406,123 +406,83 @@ function parseJsonFile<T>({
   });
 }
 
-function latestSessionRecordDirectory(input: {
-  path: Path.Path;
-  repoRoot: string;
-  role: "cto" | "jasper";
-}) {
-  return input.path.join(
-    input.repoRoot,
-    ".agents",
-    "runtime",
-    "role-state",
-    input.role,
-    "sessions",
-  );
-}
-
 function runtimeDirForWorkspaceRoot(path: Path.Path, workspaceRoot: string) {
   return path.join(workspaceRoot, ".agents", "runtime");
 }
 
-function roleSessionLooksLikeWorkspace(
-  pathValue: string | null | undefined,
-  role: "jasper" | "cto",
-) {
-  if (!pathValue) {
-    return false;
-  }
-  const normalized = pathValue.replaceAll("\\", "/");
-  return (
-    normalized.includes(`/.agents/runtime/role-sessions/${role}/`) &&
-    normalized.endsWith("/workspace")
-  );
-}
-
 function resolveRoleWorkspaceRoot(input: {
   agentKind: Exclude<GetAgentRuntimeSnapshotInput["agentKind"], "worker">;
+  authorityDetailPrefix: string;
   fileSystem: FileSystem.FileSystem;
   path: Path.Path;
+  runtimePaths: {
+    roleSessionsRoot: string;
+    roles: {
+      cto: { sessionsRoot: string };
+      jasper: { sessionsRoot: string };
+    };
+  };
   threadWorktreePath: string | null;
 }): Effect.Effect<
-  {
-    workspaceResolution: GetAgentRuntimeSnapshotResult["workspaceResolution"];
-    workspaceRoot: string;
-  },
+  | {
+      workspaceResolution: GetAgentRuntimeSnapshotResult["workspaceResolution"];
+      workspaceRoot: string;
+    }
+  | {
+      unavailableReason: string;
+    },
   AgentRuntimeError
 > {
   return Effect.gen(function* () {
-    const repoRoot = AGENTS_VXAPP_ROOT;
-    if (input.agentKind === "executive") {
-      const canonicalRoot = input.path.join(repoRoot, "CTOv2");
-      const fallbackRoot =
-        (yield* findLatestRoleSessionWorkspaceRoot({
-          fileSystem: input.fileSystem,
-          path: input.path,
-          repoRoot,
-          role: "cto",
-        })) ?? canonicalRoot;
-      const canonicalRuntimeDir = runtimeDirForWorkspaceRoot(input.path, canonicalRoot);
-      const canonicalExists = yield* input.fileSystem
-        .exists(canonicalRuntimeDir)
-        .pipe(Effect.orElseSucceed(() => false));
-      if (canonicalExists) {
-        return {
-          workspaceResolution: {
-            kind: "canonical-role-root",
-            detail: "Using the canonical executive workspace root.",
-          },
-          workspaceRoot: canonicalRoot,
-        };
-      }
-      if (fallbackRoot !== canonicalRoot) {
-        return {
-          workspaceResolution: {
-            kind: "latest-role-session",
-            detail: "Using the most recent generated CTO role-session workspace.",
-          },
-          workspaceRoot: fallbackRoot,
-        };
-      }
-      return {
-        workspaceResolution: {
-          kind: "canonical-role-root",
-          detail: "Falling back to the canonical executive workspace root.",
-        },
-        workspaceRoot: canonicalRoot,
-      };
-    }
-
+    const role = input.agentKind === "executive" ? "cto" : "jasper";
     const latestGeneratedRoot = yield* findLatestRoleSessionWorkspaceRoot({
       fileSystem: input.fileSystem,
       path: input.path,
-      repoRoot,
-      role: "jasper",
+      sessionsRoot: input.runtimePaths.roles[role].sessionsRoot,
     });
-    if (latestGeneratedRoot) {
+    if (!latestGeneratedRoot) {
       return {
-        workspaceResolution: {
-          kind: "latest-role-session",
-          detail: "Using the most recent generated Jasper role-session workspace.",
-        },
-        workspaceRoot: latestGeneratedRoot,
+        unavailableReason: `${input.authorityDetailPrefix}: missing owner role session record.`,
       };
     }
-    if (roleSessionLooksLikeWorkspace(input.threadWorktreePath, "jasper")) {
+    if (
+      !isValidOwnerRoleSessionWorkspace({
+        path: input.path,
+        role,
+        roleSessionsRoot: input.runtimePaths.roleSessionsRoot,
+        workspaceRoot: latestGeneratedRoot,
+      })
+    ) {
       return {
-        workspaceResolution: {
-          kind: "role-session-thread-worktree",
-          detail: "Using the Jasper role-session workspace referenced by the thread worktree.",
-        },
-        workspaceRoot: input.threadWorktreePath as string,
+        unavailableReason:
+          `${input.authorityDetailPrefix}: owner workspace path is outside roleSessionsRoot ` +
+          `or does not match /${role}/{session-id}/workspace.`,
+      };
+    }
+    const runtimeDir = runtimeDirForWorkspaceRoot(input.path, latestGeneratedRoot);
+    const metadataExists = yield* input.fileSystem
+      .exists(runtimeDir)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!metadataExists) {
+      return {
+        unavailableReason:
+          `${input.authorityDetailPrefix}: owner workspace metadata directory is missing at ` +
+          `${runtimeDir}.`,
+      };
+    }
+    if (input.threadWorktreePath && input.threadWorktreePath !== latestGeneratedRoot) {
+      return {
+        unavailableReason:
+          `${input.authorityDetailPrefix}: thread worktree disagrees with owner runtime-paths ` +
+          `workspace (${input.threadWorktreePath} != ${latestGeneratedRoot}).`,
       };
     }
     return {
       workspaceResolution: {
-        kind: "repo-role-root",
-        detail: "Using the repo-owned Jasper workspace root.",
+        kind: "latest-role-session",
+        detail: `Using the latest owner-managed ${role} role-session workspace.`,
       },
-      workspaceRoot: input.path.join(repoRoot, "Jasper"),
+      workspaceRoot: latestGeneratedRoot,
     };
   });
 }
@@ -559,28 +519,22 @@ function resolveWorkerWorkspaceResolution(input: {
 function findLatestRoleSessionWorkspaceRoot(input: {
   fileSystem: FileSystem.FileSystem;
   path: Path.Path;
-  repoRoot: string;
-  role: "cto" | "jasper";
+  sessionsRoot: string;
 }): Effect.Effect<string | null, AgentRuntimeError> {
   return Effect.gen(function* () {
-    const sessionsDir = latestSessionRecordDirectory({
-      path: input.path,
-      repoRoot: input.repoRoot,
-      role: input.role,
-    });
     const exists = yield* input.fileSystem
-      .exists(sessionsDir)
+      .exists(input.sessionsRoot)
       .pipe(Effect.orElseSucceed(() => false));
     if (!exists) {
       return null;
     }
 
     const entries = yield* input.fileSystem
-      .readDirectory(sessionsDir, { recursive: false })
+      .readDirectory(input.sessionsRoot, { recursive: false })
       .pipe(Effect.mapError((cause) => new AgentRuntimeError({ message: cause.message })));
     const recordPaths = entries
       .filter((entry) => entry.endsWith(".json"))
-      .map((entry) => input.path.join(sessionsDir, entry));
+      .map((entry) => input.path.join(input.sessionsRoot, entry));
     const recordsWithMtime = yield* Effect.forEach(recordPaths, (recordPath) =>
       input.fileSystem.stat(recordPath).pipe(
         Effect.map((stat) => ({
@@ -620,7 +574,30 @@ function findLatestRoleSessionWorkspaceRoot(input: {
   });
 }
 
+function isValidOwnerRoleSessionWorkspace(input: {
+  path: Path.Path;
+  role: "cto" | "jasper";
+  roleSessionsRoot: string;
+  workspaceRoot: string;
+}) {
+  const normalizedRoot = input.path.normalize(input.roleSessionsRoot);
+  const normalizedWorkspace = input.path.normalize(input.workspaceRoot);
+  if (!normalizedWorkspace.startsWith(normalizedRoot)) {
+    return false;
+  }
+  const relative = input.path.relative(normalizedRoot, normalizedWorkspace).replaceAll("\\", "/");
+  const segments = relative.split("/").filter(Boolean);
+  if (segments.length !== 3) {
+    return false;
+  }
+  const role = segments[0];
+  const sessionId = segments[1] ?? "";
+  const workspaceSegment = segments[2] ?? "";
+  return role === input.role && sessionId.length > 0 && workspaceSegment === "workspace";
+}
+
 export const makeAgentRuntime = Effect.gen(function* () {
+  const externalRoleAuthority = yield* AgentsVxappExternalRoleAuthority;
   const projectionOperationalQuery = yield* ProjectionOperationalQuery;
   const workerRuntime = yield* WorkerRuntime;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -666,12 +643,59 @@ export const makeAgentRuntime = Effect.gen(function* () {
         );
       }
 
+      const runtimePathsResult = yield* Effect.exit(externalRoleAuthority.getRuntimePaths());
+      if (runtimePathsResult._tag === "Failure") {
+        const failure = Cause.squash(runtimePathsResult.cause) as unknown;
+        const detail =
+          failure !== null &&
+          typeof failure === "object" &&
+          "detail" in failure &&
+          typeof failure.detail === "string"
+            ? failure.detail
+            : failure instanceof Error && failure.message.length > 0
+              ? failure.message
+              : "Owner runtime-paths authority unavailable.";
+        const reason = `Owner runtime-paths authority unavailable: ${detail}`;
+        return yield* decodeSnapshotResult(
+          buildUnavailableSnapshot({
+            agentKind: input.agentKind,
+            reason,
+            runtimeDir: null,
+            runtimeKind: "role-runtime",
+            threadId: input.threadId,
+            workspaceRoot: null,
+            workspaceResolution: {
+              kind: "input-worktree-fallback",
+              detail: reason,
+            },
+          }),
+        );
+      }
+      const runtimePaths = runtimePathsResult.value;
       const roleWorkspace = yield* resolveRoleWorkspaceRoot({
         agentKind: input.agentKind,
+        authorityDetailPrefix: "Owner runtime-paths authority unavailable",
         fileSystem,
         path,
+        runtimePaths,
         threadWorktreePath: thread.worktreePath ?? null,
       });
+      if ("unavailableReason" in roleWorkspace) {
+        return yield* decodeSnapshotResult(
+          buildUnavailableSnapshot({
+            agentKind: input.agentKind,
+            reason: roleWorkspace.unavailableReason,
+            runtimeDir: null,
+            runtimeKind: "role-runtime",
+            threadId: input.threadId,
+            workspaceRoot: null,
+            workspaceResolution: {
+              kind: "input-worktree-fallback",
+              detail: roleWorkspace.unavailableReason,
+            },
+          }),
+        );
+      }
       const workspaceRoot = roleWorkspace.workspaceRoot;
       const runtimeDir = runtimeDirForWorkspaceRoot(path, workspaceRoot);
 
@@ -744,7 +768,7 @@ export const makeAgentRuntime = Effect.gen(function* () {
           workspaceCompositionResult.sourceFile,
         ],
         summary: {
-          repo: basename(AGENTS_VXAPP_ROOT),
+          repo: basename(runtimePaths.runtimeRoot),
           role:
             asString(generatedWorkspaceSummary?.role) ??
             asString(installedRoleSkills?.role) ??

@@ -192,6 +192,15 @@ export const ServerAgentsVxappSidebarThreadLink = Schema.Struct({
   projectId: Schema.NullOr(ProjectId),
   workspaceRoot: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  roleSession: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        role: Schema.Literals(["cto", "jasper"]),
+        sessionId: Schema.NullOr(TrimmedNonEmptyString),
+        workspacePath: Schema.NullOr(TrimmedNonEmptyString),
+      }),
+    ),
+  ),
   title: Schema.NullOr(Schema.String),
   spawnRole: Schema.NullOr(TrimmedNonEmptyString),
   spawnedBy: Schema.NullOr(TrimmedNonEmptyString),

@@ -153,6 +153,7 @@ const EMPTY_AGENTS: readonly string[] = [];
 const EMPTY_THREAD_LINKS: readonly {
   threadId: Thread["id"];
   title: string | null;
+  roleSession?: { role: "cto" | "jasper"; sessionId: string | null } | null;
   workspaceRoot: string | null;
   worktreePath: string | null;
   spawnRole: string | null;
@@ -859,6 +860,7 @@ export function ProgramsTodosView() {
           sidebarGraphQuery.data?.threadLinks.map((link) => ({
             threadId: link.threadId,
             title: link.title,
+            roleSession: link.roleSession ?? null,
             workspaceRoot: link.workspaceRoot,
             worktreePath: link.worktreePath,
             spawnRole: link.spawnRole,

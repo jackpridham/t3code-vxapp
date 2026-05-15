@@ -191,10 +191,12 @@ describe("programsTodosModel", () => {
         {
           threadId: ThreadId.makeUnsafe("orch-jasper"),
           title: "workspace",
-          workspaceRoot:
-            "/home/gizmo/agents-vxapp/.agents/runtime/role-sessions/jasper/jasper-123/workspace",
-          worktreePath:
-            "/home/gizmo/agents-vxapp/.agents/runtime/role-sessions/jasper/jasper-123/workspace",
+          roleSession: {
+            role: "jasper",
+            sessionId: "jasper-123",
+          },
+          workspaceRoot: null,
+          worktreePath: null,
           spawnRole: "orchestrator",
         },
       ],

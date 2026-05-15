@@ -29,6 +29,8 @@ type ProjectionProjectDbRow = typeof ProjectionProjectDbRow.Type;
 
 const makeProjectionProjectRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Phase-11 prep note: projection_projects is persistence/mirror state, not vxapp owner authority.
+  // Keep writes/reads for replication and local-native flows only until owner export cutover lands.
 
   const upsertProjectionProjectRow = SqlSchema.void({
     Request: ProjectionProject,

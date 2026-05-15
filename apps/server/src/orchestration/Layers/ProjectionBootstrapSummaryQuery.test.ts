@@ -1,4 +1,5 @@
 import { ProgramId, ProgramNotificationId, ProjectId, ThreadId } from "@t3tools/contracts";
+import path from "node:path";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -9,9 +10,12 @@ import {
 } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
+import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./ProjectionBootstrapSummaryQuery.ts";
 import { ProjectionBootstrapSummaryQuery } from "../Services/ProjectionBootstrapSummaryQuery.ts";
+
+const ctoWorkspaceRoot = path.join(AGENTS_VXAPP_ROOT, "CTOv2");
 
 const projectionBootstrapSummaryLayer = it.layer(
   OrchestrationProjectionBootstrapSummaryQueryLive.pipe(
@@ -25,7 +29,7 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       {
         id: ProjectId.makeUnsafe("external-cto-project"),
         title: "CTOv2",
-        workspaceRoot: "/home/gizmo/agents-vxapp/CTOv2",
+        workspaceRoot: ctoWorkspaceRoot,
         kind: "executive" as const,
         sidebarParentProjectId: null,
         currentSessionRootThreadId: ThreadId.makeUnsafe("external-cto-thread"),
@@ -47,7 +51,7 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
         runtimeMode: "full-access" as const,
         interactionMode: "default" as const,
         branch: null,
-        worktreePath: "/home/gizmo/agents-vxapp/CTOv2",
+        worktreePath: ctoWorkspaceRoot,
         latestTurn: null,
         createdAt: "2026-05-12T00:00:02.000Z",
         updatedAt: "2026-05-12T00:00:03.000Z",
@@ -72,6 +76,11 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
         executiveThreadId: ThreadId.makeUnsafe("external-cto-thread"),
       },
     ],
+  } as const;
+
+  const emptyExternalRoleAuthoritySnapshot = {
+    projects: [],
+    threadSummaries: [],
   } as const;
 
   const ownerBindingAuthority = {
@@ -564,7 +573,7 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
         VALUES (
           'local-stale-cto-project',
           'CTOv2',
-          '/home/gizmo/agents-vxapp/CTOv2',
+          ${ctoWorkspaceRoot},
           'executive',
           'local-stale-cto-thread',
           '{"provider":"codex","model":"gpt-5.4"}',
@@ -604,7 +613,7 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
           'full-access',
           'default',
           NULL,
-          '/home/gizmo/agents-vxapp/CTOv2',
+          ${ctoWorkspaceRoot},
           NULL,
           '2026-05-11T23:00:02.000Z',
           '2026-05-11T23:00:03.000Z',
@@ -671,9 +680,117 @@ projectionBootstrapSummaryLayer("ProjectionBootstrapSummaryQuery", (it) => {
       );
     }).pipe(
       Effect.provideService(AgentsVxappExternalRoleAuthority, {
+        getRuntimePaths: () =>
+          Effect.die("unexpected getRuntimePaths in ProjectionBootstrapSummaryQuery test"),
         getSnapshot: () => Effect.succeed(externalRoleAuthoritySnapshot),
       }),
       Effect.provideService(AgentsVxappControlPlane, vxappControlPlaneMock),
     ),
+  );
+
+  it.effect(
+    "uses owner exports for vxapp-backed bootstrap rows even when the external snapshot is empty",
+    () =>
+      Effect.gen(function* () {
+        const query = yield* ProjectionBootstrapSummaryQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_projects`;
+        yield* sql`DELETE FROM projection_program_notifications`;
+        yield* sql`DELETE FROM projection_programs`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_thread_sessions`;
+        yield* sql`DELETE FROM projection_turns`;
+        yield* sql`DELETE FROM projection_orchestrator_wakes`;
+        yield* sql`DELETE FROM projection_state`;
+
+        yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          kind,
+          current_session_root_thread_id,
+          default_model_selection_json,
+          scripts_json,
+          hooks_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'external-cto-project',
+          'CTOv2',
+          ${ctoWorkspaceRoot},
+          'executive',
+          'local-stale-cto-thread',
+          '{"provider":"codex","model":"gpt-5.4"}',
+          '[]',
+          '[]',
+          '2026-05-11T23:00:00.000Z',
+          '2026-05-11T23:00:01.000Z',
+          NULL
+        )
+      `;
+
+        yield* sql`
+        INSERT INTO projection_program_notifications (
+          notification_id,
+          program_id,
+          executive_project_id,
+          executive_thread_id,
+          orchestrator_thread_id,
+          kind,
+          severity,
+          summary,
+          evidence_json,
+          state,
+          queued_at,
+          delivered_at,
+          consumed_at,
+          dropped_at,
+          consume_reason,
+          drop_reason,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'notif-local',
+          'local-stale-program',
+          'external-cto-project',
+          'local-stale-cto-thread',
+          'local-stale-cto-thread',
+          'status_update',
+          'warning',
+          'Local notification must not win',
+          '{}',
+          'pending',
+          '2026-05-11T23:30:00.000Z',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          '2026-05-11T23:30:00.000Z',
+          '2026-05-11T23:30:01.000Z'
+        )
+      `;
+
+        const readModel = yield* query.getBootstrapSummary();
+
+        assert.equal(readModel.projects[0]?.id, "external-cto-project");
+        assert.equal(
+          readModel.projects[0]?.currentSessionRootThreadId,
+          "binding-authoritative-thread",
+        );
+        assert.deepEqual(readModel.programNotifications, ownerNotificationSummary.notifications);
+      }).pipe(
+        Effect.provideService(AgentsVxappExternalRoleAuthority, {
+          getRuntimePaths: () =>
+            Effect.die("unexpected getRuntimePaths in ProjectionBootstrapSummaryQuery test"),
+          getSnapshot: () => Effect.succeed(emptyExternalRoleAuthoritySnapshot),
+        }),
+        Effect.provideService(AgentsVxappControlPlane, vxappControlPlaneMock),
+      ),
   );
 });

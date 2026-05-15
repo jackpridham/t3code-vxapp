@@ -1024,6 +1024,12 @@ describe("buildOrchestrationSidebarModel", () => {
             parentThreadId: null,
             programId: ProgramId.makeUnsafe("program-1"),
             projectId: ProjectId.makeUnsafe("workspace-project"),
+            roleSession: {
+              role: "jasper",
+              sessionId: "jasper-123",
+              workspacePath:
+                "/home/gizmo/worktrees/.015-1-runtime/role-sessions/jasper/jasper-123/workspace",
+            },
             session: null,
             spawnRole: "orchestrator",
             spawnedBy: "cto",

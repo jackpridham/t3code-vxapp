@@ -1,7 +1,13 @@
 import os from "node:os";
 import path from "node:path";
+import {
+  OrchestrationProgramStatus,
+  type ServerAgentsVxappProgramSnapshot,
+} from "@t3tools/contracts";
+import { Schema } from "effect";
 
 type JsonRecord = Record<string, unknown>;
+const isOrchestrationProgramStatus = Schema.is(OrchestrationProgramStatus);
 
 function asObject(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -35,6 +41,13 @@ export function resolveProgramCurrentStatus(input: {
     asString(input.currentStatus) ??
     asString(input.status)
   );
+}
+
+export function normalizeProgramStatus(
+  value: unknown,
+): ServerAgentsVxappProgramSnapshot["status"] | null {
+  const normalized = asString(value);
+  return normalized !== null && isOrchestrationProgramStatus(normalized) ? normalized : null;
 }
 
 export async function hydrateProgramSnapshotFromCloseoutFile(

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   hydrateProgramSnapshotFromCloseoutFile,
+  normalizeProgramStatus,
   readLifecycleStatusFromCloseout,
   resolveProgramCurrentStatus,
 } from "./programStatus";
@@ -39,6 +40,13 @@ describe("programStatus", () => {
     expect(readLifecycleStatusFromCloseout(null)).toBeNull();
     expect(readLifecycleStatusFromCloseout({ lifecycle: { status: "" } })).toBeNull();
     expect(readLifecycleStatusFromCloseout({ lifecycle: [] })).toBeNull();
+  });
+
+  it("normalizes only contract-backed Program statuses", () => {
+    expect(normalizeProgramStatus("blocked")).toBe("blocked");
+    expect(normalizeProgramStatus("totally_unknown")).toBeNull();
+    expect(normalizeProgramStatus("")).toBeNull();
+    expect(normalizeProgramStatus(null)).toBeNull();
   });
 
   it("hydrates Program status from the fresher closeout file when owner data is stale", async () => {

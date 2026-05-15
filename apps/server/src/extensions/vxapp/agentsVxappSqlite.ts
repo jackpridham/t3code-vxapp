@@ -1,6 +1,13 @@
-export const AGENTS_VXAPP_ROOT = "/home/gizmo/agents-vxapp";
-export const AGENTS_VXAPP_DB_PATH = "/home/gizmo/agents-vxapp/.agents/state/vx_agents.sqlite3";
-export const AGENTS_VXAPP_TODO_ROOT = "/home/gizmo/kb-vxapp/@Todos";
+const DEFAULT_AGENTS_VXAPP_ROOT = "/home/gizmo/agents-vxapp";
+const DEFAULT_AGENTS_VXAPP_DB_PATH = "/home/gizmo/agents-vxapp/.agents/state/vx_agents.sqlite3";
+const DEFAULT_AGENTS_VXAPP_TODO_ROOT = "/home/gizmo/kb-vxapp/@Todos";
+
+export const AGENTS_VXAPP_ROOT =
+  process.env.T3_AGENTS_VXAPP_ROOT?.trim() || DEFAULT_AGENTS_VXAPP_ROOT;
+export const AGENTS_VXAPP_DB_PATH =
+  process.env.T3_AGENTS_VXAPP_DB_PATH?.trim() || DEFAULT_AGENTS_VXAPP_DB_PATH;
+export const AGENTS_VXAPP_TODO_ROOT =
+  process.env.T3_AGENTS_VXAPP_TODO_ROOT?.trim() || DEFAULT_AGENTS_VXAPP_TODO_ROOT;
 
 export type AgentsVxappSqliteRow = Record<string, unknown>;
 export type AgentsVxappSqliteQueryAll = (sql: string) => AgentsVxappSqliteRow[];

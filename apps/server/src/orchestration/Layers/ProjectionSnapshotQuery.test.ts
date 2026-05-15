@@ -9,6 +9,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import path from "node:path";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -19,6 +20,7 @@ import {
 } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
+import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -33,6 +35,8 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.makeUnsafe(value);
+
+const ctoWorkspaceRoot = path.join(AGENTS_VXAPP_ROOT, "CTOv2");
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
@@ -156,7 +160,7 @@ const externalRoleAuthoritySnapshot = {
     {
       id: ProjectId.makeUnsafe("external-cto-project"),
       title: "CTOv2",
-      workspaceRoot: "/home/gizmo/agents-vxapp/CTOv2",
+      workspaceRoot: ctoWorkspaceRoot,
       kind: "executive" as const,
       sidebarParentProjectId: null,
       currentSessionRootThreadId: ThreadId.makeUnsafe("external-cto-thread"),
@@ -178,7 +182,7 @@ const externalRoleAuthoritySnapshot = {
       runtimeMode: "full-access" as const,
       interactionMode: "default" as const,
       branch: null,
-      worktreePath: "/home/gizmo/agents-vxapp/CTOv2",
+      worktreePath: ctoWorkspaceRoot,
       latestTurn: null,
       createdAt: "2026-05-12T00:00:02.000Z",
       updatedAt: "2026-05-12T00:00:03.000Z",
@@ -1070,7 +1074,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         VALUES (
           'local-stale-project',
           'CTOv2',
-          '/home/gizmo/agents-vxapp/CTOv2',
+          ${ctoWorkspaceRoot},
           'local-stale-thread',
           '{"provider":"codex","model":"gpt-5-codex"}',
           '[]',
@@ -1107,7 +1111,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'full-access',
           'default',
           NULL,
-          '/home/gizmo/agents-vxapp/CTOv2',
+          ${ctoWorkspaceRoot},
           NULL,
           '2026-05-11T23:00:02.000Z',
           '2026-05-11T23:00:03.000Z',
@@ -1283,6 +1287,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       ]);
     }).pipe(
       Effect.provideService(AgentsVxappExternalRoleAuthority, {
+        getRuntimePaths: () =>
+          Effect.die("unexpected getRuntimePaths in ProjectionSnapshotQuery test"),
         getSnapshot: () => Effect.succeed(externalRoleAuthoritySnapshot),
       }),
       Effect.provideService(AgentsVxappControlPlane, vxappControlPlaneMock),

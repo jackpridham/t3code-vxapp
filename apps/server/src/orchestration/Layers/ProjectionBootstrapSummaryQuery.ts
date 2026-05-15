@@ -49,6 +49,7 @@ import {
   type AgentsVxappExternalRoleAuthoritySnapshot,
 } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappControlPlane } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
+import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionBootstrapSummaryQuery,
@@ -112,6 +113,10 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
   ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
 ] as const;
+
+function isVxappWorkspaceRoot(workspaceRoot: string): boolean {
+  return workspaceRoot.startsWith(AGENTS_VXAPP_ROOT);
+}
 
 function maxIso(left: string | null, right: string): string {
   if (left === null) {
@@ -634,8 +639,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
           const sessionsByThread = new Map<string, OrchestrationSession>();
           let updatedAt: string | null = null;
-          const vxappBacked =
-            externalSnapshot.projects.length > 0 || externalSnapshot.threadSummaries.length > 0;
+          const vxappBacked = projectRows.some((row) => isVxappWorkspaceRoot(row.workspaceRoot));
           let bindingAuthority: {
             jasper: {
               currentThread: {

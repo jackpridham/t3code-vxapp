@@ -16,6 +16,69 @@ afterEach(() => {
 });
 
 describe("AgentsVxappExternalRoleAuthorityLive", () => {
+  it("loads validated runtime paths from role-session-owner", async () => {
+    mockedRunProcess.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        ok: true,
+        result: {
+          runtime_root: "/runtime",
+          role_sessions_root: "/runtime/role-sessions",
+          role_state_root: "/runtime/role-state",
+          workspace_runtime_metadata_dir: ".agents/runtime",
+          env: {
+            runtime_root: "VX_AGENTS_ROLE_SESSION_RUNTIME_ROOT",
+            state_root: "VX_AGENTS_ROLE_SESSION_STATE_ROOT",
+          },
+          roles: {
+            cto: {
+              generated_workspace_root: "/runtime/role-sessions/cto",
+              reservations_root: "/runtime/role-state/cto/reservations",
+              role: "cto",
+              sessions_root: "/runtime/role-state/cto/sessions",
+              state_root: "/runtime/role-state/cto",
+            },
+            jasper: {
+              generated_workspace_root: "/runtime/role-sessions/jasper",
+              reservations_root: "/runtime/role-state/jasper/reservations",
+              role: "jasper",
+              sessions_root: "/runtime/role-state/jasper/sessions",
+              state_root: "/runtime/role-state/jasper",
+            },
+          },
+        },
+      }),
+      stderr: "",
+      code: 0,
+      signal: null,
+      timedOut: false,
+    });
+
+    const effect = Effect.gen(function* () {
+      const authority = yield* AgentsVxappExternalRoleAuthority;
+      return yield* authority.getRuntimePaths();
+    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
+
+    await expect(Effect.runPromise(effect)).resolves.toMatchObject({
+      runtimeRoot: "/runtime",
+      roleSessionsRoot: "/runtime/role-sessions",
+      roles: {
+        cto: {
+          sessionsRoot: "/runtime/role-state/cto/sessions",
+        },
+        jasper: {
+          reservationsRoot: "/runtime/role-state/jasper/reservations",
+        },
+      },
+    });
+    expect(mockedRunProcess).toHaveBeenCalledWith(
+      expect.stringMatching(/scripts\/tools\/role-session-owner$/),
+      ["runtime-paths"],
+      expect.objectContaining({
+        cwd: expect.any(String),
+      }),
+    );
+  });
+
   it("fails closed when agents-vxapp omits authoritative error presentation fields", async () => {
     mockedRunProcess.mockResolvedValueOnce({
       stdout: JSON.stringify({
@@ -64,6 +127,100 @@ describe("AgentsVxappExternalRoleAuthorityLive", () => {
     await expect(Effect.runPromise(effect)).rejects.toMatchObject({
       operation: "AgentsVxappExternalRoleAuthority.getSnapshot",
       detail: expect.stringContaining("missing authoritative error presentation fields"),
+    });
+  });
+
+  it("fails closed when runtime-paths omits required fields", async () => {
+    mockedRunProcess.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        ok: true,
+        result: {
+          runtime_root: "/runtime",
+        },
+      }),
+      stderr: "",
+      code: 0,
+      signal: null,
+      timedOut: false,
+    });
+
+    const effect = Effect.gen(function* () {
+      const authority = yield* AgentsVxappExternalRoleAuthority;
+      return yield* authority.getRuntimePaths();
+    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
+
+    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
+      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
+      detail: expect.stringContaining("result.role_sessions_root"),
+    });
+  });
+
+  it("fails closed when runtime-paths returns invalid JSON", async () => {
+    mockedRunProcess.mockResolvedValueOnce({
+      stdout: "{not-json",
+      stderr: "",
+      code: 0,
+      signal: null,
+      timedOut: false,
+    });
+
+    const effect = Effect.gen(function* () {
+      const authority = yield* AgentsVxappExternalRoleAuthority;
+      return yield* authority.getRuntimePaths();
+    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
+
+    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
+      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
+      detail: expect.stringContaining("JSON"),
+    });
+  });
+
+  it("fails closed when runtime-paths exits nonzero", async () => {
+    mockedRunProcess.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        error: {
+          message: "owner command failed hard",
+        },
+      }),
+      stderr: "",
+      code: 2,
+      signal: null,
+      timedOut: false,
+    });
+
+    const effect = Effect.gen(function* () {
+      const authority = yield* AgentsVxappExternalRoleAuthority;
+      return yield* authority.getRuntimePaths();
+    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
+
+    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
+      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
+      detail: "owner command failed hard",
+    });
+  });
+
+  it("fails closed when runtime-paths reports ok false", async () => {
+    mockedRunProcess.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        ok: false,
+        error: {
+          message: "owner refused runtime-paths",
+        },
+      }),
+      stderr: "",
+      code: 0,
+      signal: null,
+      timedOut: false,
+    });
+
+    const effect = Effect.gen(function* () {
+      const authority = yield* AgentsVxappExternalRoleAuthority;
+      return yield* authority.getRuntimePaths();
+    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
+
+    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
+      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
+      detail: "owner refused runtime-paths",
     });
   });
 });

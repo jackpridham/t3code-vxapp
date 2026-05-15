@@ -2212,8 +2212,9 @@ describe("WebSocket Server", () => {
     );
   });
 
-  it("returns an unavailable runtime snapshot when a worker thread has no worktree path", async () => {
+  it("falls back to the worker project root when a worker thread has no worktree path", async () => {
     const projectRoot = makeTempDir("t3code-worker-runtime-no-worktree-");
+    const runtimeDir = path.join(projectRoot, ".agents", "runtime");
     server = await createTestServer({ cwd: projectRoot, autoBootstrapProjectFromCwd: true });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
@@ -2250,8 +2251,8 @@ describe("WebSocket Server", () => {
     expect(runtimeResponse.result).toEqual(
       expect.objectContaining({
         threadId: "thread-worker-runtime-no-worktree",
-        worktreePath: null,
-        runtimeDir: null,
+        worktreePath: projectRoot,
+        runtimeDir,
         summary: expect.objectContaining({
           repo: null,
           auditStatus: "missing",
@@ -2259,7 +2260,6 @@ describe("WebSocket Server", () => {
         sourceFiles: expect.objectContaining({
           contextPlan: expect.objectContaining({
             status: "missing",
-            detail: "Thread 'thread-worker-runtime-no-worktree' has no worktree path yet.",
           }),
           dispatchContract: expect.objectContaining({
             status: "missing",

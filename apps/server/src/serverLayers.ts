@@ -145,6 +145,7 @@ export function makeServerRuntimeServicesLayer() {
   const workerRuntimeLayer = WorkerRuntimeLive.pipe(Layer.provideMerge(runtimeServicesBaseLayer));
   const agentRuntimeLayer = AgentRuntimeLive.pipe(
     Layer.provideMerge(workerRuntimeLayer),
+    Layer.provideMerge(vxappRuntimeServicesLayer),
     Layer.provideMerge(runtimeServicesBaseLayer),
   );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(

@@ -14,6 +14,10 @@ import { isThreadRuntimeActive } from "../Sidebar.logic";
 import { collapseThreadToCanonicalProject } from "~/lib/orchestrationMode";
 import type { CtoAttentionItem, ProgramNotification, Project, Thread } from "~/types";
 import { type ProgramCloseoutSummary, summarizeProgramCloseout } from "./programDisplay";
+import {
+  resolveArchivedRoleSessionNameFromPathForDisplay,
+  resolveRoleSessionName,
+} from "./programsTodosModel";
 
 export type SidebarNotificationSection = "attention" | "program-update";
 export type SidebarWorkerWakeState = "pending" | "delivering" | null;
@@ -274,19 +278,6 @@ function stripAgentPrefix(title: string | null | undefined): string | null {
     return null;
   }
   return trimmed.replace(/^(worker|orchestrator)\/[^\s]+\s+/i, "").trim();
-}
-
-function toTitleCase(value: string): string {
-  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
-}
-
-function resolveRoleSessionName(path: string | null | undefined): string | null {
-  if (!path) {
-    return null;
-  }
-  const normalized = path.replaceAll("\\", "/");
-  const match = normalized.match(/\/role-sessions\/([^/]+)\/[^/]+\/workspace$/);
-  return match?.[1] ? toTitleCase(match[1]) : null;
 }
 
 function basename(value: string | null | undefined): string | null {
@@ -752,9 +743,12 @@ function resolveLineageTitle(input: {
     ? (input.projectById.get(input.fallbackThreadLink.projectId)?.name ?? null)
     : null;
   const roleSessionName =
-    resolveRoleSessionName(input.thread?.worktreePath) ??
-    resolveRoleSessionName(input.fallbackThreadLink?.worktreePath) ??
-    resolveRoleSessionName(input.fallbackThreadLink?.workspaceRoot);
+    resolveRoleSessionName({
+      roleSession: input.fallbackThreadLink?.roleSession ?? null,
+    }) ??
+    resolveArchivedRoleSessionNameFromPathForDisplay(input.thread?.worktreePath) ??
+    resolveArchivedRoleSessionNameFromPathForDisplay(input.fallbackThreadLink?.worktreePath) ??
+    resolveArchivedRoleSessionNameFromPathForDisplay(input.fallbackThreadLink?.workspaceRoot);
   const cleanedCurrentTitle = stripAgentPrefix(input.thread?.title);
   const cleanedFallbackTitle = stripAgentPrefix(input.fallbackThreadLink?.title);
 

@@ -11,6 +11,29 @@ export interface AgentsVxappExternalRoleAuthoritySnapshot {
   readonly threadSummaries: readonly OrchestrationThreadSummary[];
 }
 
+export interface AgentsVxappRoleSessionRuntimePathsRoleEntry {
+  readonly role: "cto" | "jasper";
+  readonly generatedWorkspaceRoot: string;
+  readonly stateRoot: string;
+  readonly sessionsRoot: string;
+  readonly reservationsRoot: string;
+}
+
+export interface AgentsVxappRoleSessionRuntimePaths {
+  readonly runtimeRoot: string;
+  readonly roleSessionsRoot: string;
+  readonly roleStateRoot: string;
+  readonly workspaceRuntimeMetadataDir: string;
+  readonly env: {
+    readonly runtimeRoot: string;
+    readonly stateRoot: string;
+  };
+  readonly roles: {
+    readonly cto: AgentsVxappRoleSessionRuntimePathsRoleEntry;
+    readonly jasper: AgentsVxappRoleSessionRuntimePathsRoleEntry;
+  };
+}
+
 export interface AgentsVxappExternalRoleAuthorityIndex {
   readonly projectIds: ReadonlySet<ProjectId>;
   readonly threadIds: ReadonlySet<ThreadId>;
@@ -44,6 +67,10 @@ export class AgentsVxappExternalRoleAuthorityError extends Schema.TaggedErrorCla
 export interface AgentsVxappExternalRoleAuthorityShape {
   readonly getSnapshot: () => Effect.Effect<
     AgentsVxappExternalRoleAuthoritySnapshot,
+    AgentsVxappExternalRoleAuthorityError
+  >;
+  readonly getRuntimePaths: () => Effect.Effect<
+    AgentsVxappRoleSessionRuntimePaths,
     AgentsVxappExternalRoleAuthorityError
   >;
 }

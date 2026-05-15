@@ -25,6 +25,7 @@ const decodeEvidence = (row: ProjectionCtoAttentionDbRow): ProjectionCtoAttentio
 
 const makeProjectionCtoAttentionRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Phase-11 prep note: projection_cto_attention is persistence/mirror state, not vxapp owner authority.
 
   const upsertProjectionCtoAttentionRow = SqlSchema.void({
     Request: ProjectionCtoAttention,

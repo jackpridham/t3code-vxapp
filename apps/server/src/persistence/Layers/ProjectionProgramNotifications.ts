@@ -31,6 +31,7 @@ const decodeEvidence = (row: ProjectionProgramNotificationDbRow): ProjectionProg
 
 const makeProjectionProgramNotificationRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Phase-11 prep note: projection_program_notifications is persistence/mirror state, not vxapp owner authority.
 
   const upsertProjectionProgramNotificationRow = SqlSchema.void({
     Request: ProjectionProgramNotification,

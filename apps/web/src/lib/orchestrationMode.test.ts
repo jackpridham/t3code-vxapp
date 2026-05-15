@@ -437,6 +437,9 @@ describe("filterProjectThreadsForOrchestrationMode", () => {
         orchestratorProjectId: ProjectId.makeUnsafe("project-1"),
         orchestratorThreadId: ThreadId.makeUnsafe("root-current"),
         error: "Worker failed",
+        hasActiveError: true,
+        activeError: "Worker failed",
+        errorPresentationSource: "active_session_last_error",
       }),
       makeThread({
         id: ThreadId.makeUnsafe("worker-ok"),

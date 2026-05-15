@@ -125,7 +125,15 @@ function toTitleCase(value: string): string {
   return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
-export function resolveRoleSessionName(path: string | null | undefined): string | null {
+export function resolveRoleSessionName(input: {
+  roleSession: { role: "cto" | "jasper"; sessionId: string | null } | null;
+}): string | null {
+  return input.roleSession ? toTitleCase(input.roleSession.role) : null;
+}
+
+export function resolveArchivedRoleSessionNameFromPathForDisplay(
+  path: string | null | undefined,
+): string | null {
   if (!path) {
     return null;
   }
@@ -169,6 +177,7 @@ export function resolveOrchestratorOptions(input: {
   threadLinks: readonly {
     threadId: Thread["id"];
     title: string | null;
+    roleSession?: { role: "cto" | "jasper"; sessionId: string | null } | null;
     workspaceRoot: string | null;
     worktreePath: string | null;
     spawnRole: string | null;
@@ -188,7 +197,7 @@ export function resolveOrchestratorOptions(input: {
     if (threadLink.spawnRole === "orchestrator" || candidateThreadIds.has(threadLink.threadId)) {
       const thread = threadById.get(threadLink.threadId) ?? null;
       const label =
-        resolveRoleSessionName(threadLink.worktreePath ?? threadLink.workspaceRoot) ??
+        resolveRoleSessionName({ roleSession: threadLink.roleSession ?? null }) ??
         thread?.title ??
         threadLink.title ??
         threadLink.threadId;

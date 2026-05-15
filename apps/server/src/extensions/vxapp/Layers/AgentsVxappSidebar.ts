@@ -116,6 +116,42 @@ function asStringArrayFromJson(value: unknown): string[] {
   }
 }
 
+function extractPrefixedLabelValue(labels: readonly string[], prefix: string): string | null {
+  const entry = labels.find((label) => label.startsWith(prefix));
+  return entry ? entry.slice(prefix.length) : null;
+}
+
+function mapThreadRoleSession(input: {
+  labels: readonly string[];
+  metadata: Record<string, unknown> | null;
+  workspaceRoot: string | null;
+  worktreePath: string | null;
+}): ServerAgentsVxappSidebarThreadLink["roleSession"] {
+  const metadataRole = asString(input.metadata?.role) ?? asString(input.metadata?.roleSessionRole);
+  const labelRole = extractPrefixedLabelValue(input.labels, "role:");
+  const role =
+    metadataRole === "cto" || metadataRole === "jasper"
+      ? metadataRole
+      : labelRole === "cto" || labelRole === "jasper"
+        ? labelRole
+        : null;
+  if (!role) {
+    return null;
+  }
+  return {
+    role,
+    sessionId:
+      asString(input.metadata?.sessionId) ??
+      asString(input.metadata?.roleSessionId) ??
+      extractPrefixedLabelValue(input.labels, "role-session-id:"),
+    workspacePath:
+      asString(input.metadata?.workspacePath) ??
+      asString(input.metadata?.roleSessionWorkspacePath) ??
+      input.worktreePath ??
+      input.workspaceRoot,
+  };
+}
+
 function normalizeNotificationSeverity(
   value: unknown,
 ): ServerAgentsVxappSidebarProgramNotification["severity"] {
@@ -186,11 +222,21 @@ function mapLatestTurn(row: AgentsVxappSqliteRow): OrchestrationLatestTurn | nul
 
 function mapThreadLink(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarThreadLink {
   const threadId = ThreadId.makeUnsafe(String(row.thread_id));
+  const labels = asStringArrayFromJson(row.labels_json);
+  const metadata = asJsonRecord(row.metadata_json);
+  const workspaceRoot = asString(row.workspace_root);
+  const worktreePath = asString(row.worktree_path);
   return {
     threadId,
     projectId: toProjectIdOrNull(row.project_id),
-    workspaceRoot: asString(row.workspace_root),
-    worktreePath: asString(row.worktree_path),
+    workspaceRoot,
+    worktreePath,
+    roleSession: mapThreadRoleSession({
+      labels,
+      metadata,
+      workspaceRoot,
+      worktreePath,
+    }),
     title: typeof row.title === "string" ? row.title : null,
     spawnRole: asString(row.spawn_role),
     spawnedBy: asString(row.spawned_by),
@@ -200,10 +246,10 @@ function mapThreadLink(row: AgentsVxappSqliteRow): ServerAgentsVxappSidebarThrea
     executiveProjectId: toProjectIdOrNull(row.executive_project_id),
     executiveThreadId: toThreadIdOrNull(row.executive_thread_id),
     orchestratorThreadId: toThreadIdOrNull(row.orchestrator_thread_id),
-    labels: asStringArrayFromJson(row.labels_json),
+    labels,
     session: mapSession(row, threadId),
     latestTurn: mapLatestTurn(row),
-    metadata: asJsonRecord(row.metadata_json),
+    metadata,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     archivedAt: asIsoDateTime(row.archived_at),

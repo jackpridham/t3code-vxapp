@@ -17,6 +17,7 @@ import {
 
 const makeProjectionProgramRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Phase-11 prep note: projection_programs is persistence/mirror state, not vxapp owner authority.
 
   const upsertProjectionProgramRow = SqlSchema.void({
     Request: ProjectionProgram,

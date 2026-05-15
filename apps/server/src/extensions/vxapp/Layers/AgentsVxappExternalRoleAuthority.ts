@@ -25,6 +25,7 @@ import {
   AgentsVxappExternalRoleAuthority,
   AgentsVxappExternalRoleAuthorityError,
   type AgentsVxappExternalRoleAuthorityShape,
+  type AgentsVxappRoleSessionRuntimePaths,
   type AgentsVxappExternalRoleAuthoritySnapshot,
 } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 
@@ -35,6 +36,7 @@ const CONTROL_PLANE_OWNER_PATH = path.join(
 const OWNER_COMMAND_TIMEOUT_MS = 30_000;
 const OWNER_COMMAND_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const isAgentsVxappExternalRoleAuthorityError = Schema.is(AgentsVxappExternalRoleAuthorityError);
+const ROLE_SESSION_OWNER_PATH = path.join(AGENTS_VXAPP_ROOT, "scripts/tools/role-session-owner");
 
 type JsonRecord = Record<string, unknown>;
 
@@ -71,15 +73,17 @@ function parseJsonText(operation: string, raw: string): unknown {
 }
 
 async function runOwnerJsonCommand(input: {
+  commandPath?: string;
   args: readonly string[];
+  cwd?: string;
   operation: string;
 }): Promise<unknown> {
   const result = await runProcess(
-    CONTROL_PLANE_OWNER_PATH,
-    ["--compatibility-mode", "--json", ...input.args],
+    input.commandPath ?? CONTROL_PLANE_OWNER_PATH,
+    input.commandPath ? [...input.args] : ["--compatibility-mode", "--json", ...input.args],
     {
       allowNonZeroExit: true,
-      cwd: AGENTS_VXAPP_ROOT,
+      cwd: input.cwd ?? AGENTS_VXAPP_ROOT,
       maxBufferBytes: OWNER_COMMAND_MAX_BUFFER_BYTES,
       outputMode: "truncate",
       timeoutMs: OWNER_COMMAND_TIMEOUT_MS,
@@ -95,6 +99,97 @@ async function runOwnerJsonCommand(input: {
     });
   }
   return parsed;
+}
+
+function requireNestedString(
+  root: JsonRecord,
+  pathSegments: readonly string[],
+  operation: string,
+): string {
+  let current: unknown = root;
+  for (const segment of pathSegments) {
+    const object = asRecord(current);
+    if (!object || !(segment in object)) {
+      throw new AgentsVxappExternalRoleAuthorityError({
+        operation,
+        detail: `role-session-owner runtime-paths is missing ${pathSegments.join(".")}.`,
+      });
+    }
+    current = object[segment];
+  }
+  const value = asString(current);
+  if (!value) {
+    throw new AgentsVxappExternalRoleAuthorityError({
+      operation,
+      detail: `role-session-owner runtime-paths is missing ${pathSegments.join(".")}.`,
+    });
+  }
+  return value;
+}
+
+function mapRoleRuntimeEntry(input: {
+  payload: JsonRecord;
+  role: "cto" | "jasper";
+  operation: string;
+}) {
+  return {
+    role: input.role,
+    generatedWorkspaceRoot: requireNestedString(
+      input.payload,
+      ["result", "roles", input.role, "generated_workspace_root"],
+      input.operation,
+    ),
+    stateRoot: requireNestedString(
+      input.payload,
+      ["result", "roles", input.role, "state_root"],
+      input.operation,
+    ),
+    sessionsRoot: requireNestedString(
+      input.payload,
+      ["result", "roles", input.role, "sessions_root"],
+      input.operation,
+    ),
+    reservationsRoot: requireNestedString(
+      input.payload,
+      ["result", "roles", input.role, "reservations_root"],
+      input.operation,
+    ),
+  } as const;
+}
+
+function buildRuntimePaths(payload: unknown): AgentsVxappRoleSessionRuntimePaths {
+  const operation = "AgentsVxappExternalRoleAuthority.getRuntimePaths";
+  const root = asRecord(payload);
+  if (!root) {
+    throw new AgentsVxappExternalRoleAuthorityError({
+      operation,
+      detail: "role-session-owner runtime-paths returned a non-object JSON payload.",
+    });
+  }
+  if (root.ok !== true) {
+    throw new AgentsVxappExternalRoleAuthorityError({
+      operation,
+      detail: ownerErrorDetail(payload, "role-session-owner runtime-paths reported ok: false."),
+    });
+  }
+  return {
+    runtimeRoot: requireNestedString(root, ["result", "runtime_root"], operation),
+    roleSessionsRoot: requireNestedString(root, ["result", "role_sessions_root"], operation),
+    roleStateRoot: requireNestedString(root, ["result", "role_state_root"], operation),
+    workspaceRuntimeMetadataDir: requireNestedString(
+      root,
+      ["result", "workspace_runtime_metadata_dir"],
+      operation,
+    ),
+    env: {
+      runtimeRoot: requireNestedString(root, ["result", "env", "runtime_root"], operation),
+      stateRoot: requireNestedString(root, ["result", "env", "state_root"], operation),
+    },
+    roles: {
+      cto: mapRoleRuntimeEntry({ payload: root, role: "cto", operation }),
+      jasper: mapRoleRuntimeEntry({ payload: root, role: "jasper", operation }),
+    },
+  };
 }
 
 function normalizeProviderKind(value: unknown): ProviderKind | null {
@@ -344,6 +439,25 @@ function buildSnapshot(payload: unknown): AgentsVxappExternalRoleAuthoritySnapsh
 }
 
 const makeAgentsVxappExternalRoleAuthority = Effect.succeed({
+  getRuntimePaths: () =>
+    Effect.tryPromise({
+      try: async () =>
+        buildRuntimePaths(
+          await runOwnerJsonCommand({
+            commandPath: ROLE_SESSION_OWNER_PATH,
+            cwd: AGENTS_VXAPP_ROOT,
+            args: ["runtime-paths"],
+            operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
+          }),
+        ),
+      catch: (cause) =>
+        isAgentsVxappExternalRoleAuthorityError(cause)
+          ? cause
+          : new AgentsVxappExternalRoleAuthorityError({
+              operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
+              detail: cause instanceof Error ? cause.message : "Unknown runtime-paths failure.",
+            }),
+    }),
   getSnapshot: () =>
     Effect.tryPromise({
       try: async () =>
