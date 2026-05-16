@@ -58,6 +58,14 @@ describe("cto attention helpers", () => {
     expect(deriveCtoAttentionStateFromProgramNotificationState("dropped")).toBe("dropped");
   });
 
+  it("throws for unknown owner-defined notification lifecycle states", () => {
+    expect(() =>
+      deriveCtoAttentionStateFromProgramNotificationState("owner_defined_future_state" as never),
+    ).toThrowError(
+      "Unsupported program notification state for CTO attention: owner_defined_future_state",
+    );
+  });
+
   it("extracts source details from evidence and falls back to the orchestrator thread", () => {
     expect(
       extractCtoAttentionSource(

@@ -1,18 +1,14 @@
 import type {
+  OrchestrationCheckpointSummary as OrchestrationCheckpointSummaryModel,
   OrchestrationEvent,
   OrchestrationReadModel,
-  ProgramId,
-  ProgramNotificationId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
-  OrchestratorWakeItem,
   OrchestrationSession,
-  OrchestrationProgram,
-  OrchestrationProgramNotification,
   OrchestrationThread,
 } from "@t3tools/contracts";
 import { Effect, Schema } from "effect";
@@ -23,18 +19,6 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
-  ProgramCreatedPayload,
-  ProgramDeletedPayload,
-  ProgramAppValidationUpsertedPayload,
-  ProgramLocalValidationUpsertedPayload,
-  ProgramMetaUpdatedPayload,
-  ProgramNotificationConsumedPayload,
-  ProgramNotificationDroppedPayload,
-  ProgramNotificationUpsertedPayload,
-  ProgramObservedRepoUpsertedPayload,
-  ProgramPostFlightSetPayload,
-  ProgramRepoPrUpsertedPayload,
-  ProgramScopeUpdatedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
@@ -48,34 +32,29 @@ import {
   ThreadSessionSetPayload,
   ThreadTurnCheckpointRecordedPayload,
   ThreadTurnDiffCompletedPayload,
-  ThreadOrchestratorWakeUpsertedPayload,
 } from "./schemas.ts";
-import {
-  acknowledgeCtoAttentionItem,
-  dropCtoAttentionItem,
-  projectCtoAttentionFromProgramNotification,
-  upsertCtoAttentionItemByKey,
-  updateCtoAttentionItemByNotificationId,
-} from "./ctoAttention.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
-type ProgramPatch = Partial<Omit<OrchestrationProgram, "id">>;
-type ProgramNotificationPatch = Partial<Omit<OrchestrationProgramNotification, "notificationId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 
 function checkpointStatusToLatestTurnState(
-  status: "ready" | "missing" | "error",
+  status: OrchestrationCheckpointSummaryModel["status"],
   existingLatestTurn?: OrchestrationThread["latestTurn"],
 ) {
-  if (status === "error") return "error" as const;
-  if (status === "missing") {
-    if (existingLatestTurn?.state === "running") {
-      return "running" as const;
-    }
-    return "interrupted" as const;
+  switch (status) {
+    case "error":
+      return "error" as const;
+    case "missing":
+      if (existingLatestTurn?.state === "running") {
+        return "running" as const;
+      }
+      return "interrupted" as const;
+    case "ready":
+      return "completed" as const;
+    default:
+      throw new Error(`Unsupported checkpoint status for latest turn state: ${status}`);
   }
-  return "completed" as const;
 }
 
 function isCheckpointEventForRunningActiveTurn(
@@ -95,38 +74,6 @@ function updateThread(
   patch: ThreadPatch,
 ): OrchestrationThread[] {
   return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
-}
-
-function updateProgram(
-  programs: ReadonlyArray<OrchestrationProgram>,
-  programId: ProgramId,
-  patch: ProgramPatch,
-): OrchestrationProgram[] {
-  return programs.map((program) => (program.id === programId ? { ...program, ...patch } : program));
-}
-
-function upsertCollectionItemByKey<T>(
-  items: ReadonlyArray<T>,
-  nextItem: T,
-  matches: (item: T) => boolean,
-): T[] {
-  const index = items.findIndex(matches);
-  if (index < 0) {
-    return [...items, nextItem];
-  }
-  const nextItems = items.slice();
-  nextItems[index] = nextItem;
-  return nextItems;
-}
-
-function updateProgramNotification(
-  notifications: ReadonlyArray<OrchestrationProgramNotification>,
-  notificationId: ProgramNotificationId,
-  patch: ProgramNotificationPatch,
-): OrchestrationProgramNotification[] {
-  return notifications.map((notification) =>
-    notification.notificationId === notificationId ? { ...notification, ...patch } : notification,
-  );
 }
 
 function decodeForEvent<A>(
@@ -341,320 +288,18 @@ export function projectEvent(
       );
 
     case "program.created":
-      return Effect.gen(function* () {
-        const payload = yield* decodeForEvent(
-          ProgramCreatedPayload,
-          event.payload,
-          event.type,
-          "payload",
-        );
-        const program: OrchestrationProgram = yield* decodeForEvent(
-          OrchestrationProgram,
-          {
-            id: payload.programId,
-            title: payload.title,
-            objective: payload.objective,
-            status: payload.status,
-            declaredRepos: payload.declaredRepos,
-            affectedAppTargets: payload.affectedAppTargets,
-            requiredLocalSuites: payload.requiredLocalSuites,
-            requiredExternalE2ESuites: payload.requiredExternalE2ESuites,
-            requireDevelopmentDeploy: payload.requireDevelopmentDeploy,
-            requireExternalE2E: payload.requireExternalE2E,
-            requireCleanPostFlight: payload.requireCleanPostFlight,
-            requirePrPerRepo: payload.requirePrPerRepo,
-            executiveProjectId: payload.executiveProjectId,
-            executiveThreadId: payload.executiveThreadId,
-            currentOrchestratorThreadId: payload.currentOrchestratorThreadId,
-            repoPrs: payload.repoPrs,
-            localValidation: payload.localValidation,
-            appValidations: payload.appValidations,
-            observedRepos: payload.observedRepos,
-            postFlight: payload.postFlight,
-            createdAt: payload.createdAt,
-            updatedAt: payload.updatedAt,
-            completedAt: payload.completedAt,
-            cancelReason: payload.cancelReason,
-            cancelledAt: payload.cancelledAt,
-            supersededByProgramId: payload.supersededByProgramId,
-            deletedAt: null,
-          },
-          event.type,
-          "program",
-        );
-        const programs = nextBase.programs ?? [];
-        const existing = programs.find((entry) => entry.id === program.id);
-        return {
-          ...nextBase,
-          programs: existing
-            ? programs.map((entry) => (entry.id === program.id ? program : entry))
-            : [...programs, program],
-        };
-      });
-
     case "program.scope-updated":
-      return decodeForEvent(ProgramScopeUpdatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            ...(payload.declaredRepos !== undefined
-              ? { declaredRepos: payload.declaredRepos }
-              : {}),
-            ...(payload.affectedAppTargets !== undefined
-              ? { affectedAppTargets: payload.affectedAppTargets }
-              : {}),
-            ...(payload.requiredLocalSuites !== undefined
-              ? { requiredLocalSuites: payload.requiredLocalSuites }
-              : {}),
-            ...(payload.requiredExternalE2ESuites !== undefined
-              ? { requiredExternalE2ESuites: payload.requiredExternalE2ESuites }
-              : {}),
-            ...(payload.requireDevelopmentDeploy !== undefined
-              ? { requireDevelopmentDeploy: payload.requireDevelopmentDeploy }
-              : {}),
-            ...(payload.requireExternalE2E !== undefined
-              ? { requireExternalE2E: payload.requireExternalE2E }
-              : {}),
-            ...(payload.requireCleanPostFlight !== undefined
-              ? { requireCleanPostFlight: payload.requireCleanPostFlight }
-              : {}),
-            ...(payload.requirePrPerRepo !== undefined
-              ? { requirePrPerRepo: payload.requirePrPerRepo }
-              : {}),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
     case "program.meta-updated":
-      return decodeForEvent(ProgramMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            ...(payload.title !== undefined ? { title: payload.title } : {}),
-            ...(payload.objective !== undefined ? { objective: payload.objective } : {}),
-            ...(payload.status !== undefined ? { status: payload.status } : {}),
-            ...(payload.executiveProjectId !== undefined
-              ? { executiveProjectId: payload.executiveProjectId }
-              : {}),
-            ...(payload.executiveThreadId !== undefined
-              ? { executiveThreadId: payload.executiveThreadId }
-              : {}),
-            ...(payload.currentOrchestratorThreadId !== undefined
-              ? { currentOrchestratorThreadId: payload.currentOrchestratorThreadId }
-              : {}),
-            ...(payload.completedAt !== undefined ? { completedAt: payload.completedAt } : {}),
-            ...(payload.cancelReason !== undefined ? { cancelReason: payload.cancelReason } : {}),
-            ...(payload.cancelledAt !== undefined ? { cancelledAt: payload.cancelledAt } : {}),
-            ...(payload.supersededByProgramId !== undefined
-              ? { supersededByProgramId: payload.supersededByProgramId }
-              : {}),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
     case "program.repo-pr-upserted":
-      return decodeForEvent(
-        ProgramRepoPrUpsertedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            repoPrs: upsertCollectionItemByKey(
-              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
-                ?.repoPrs ?? [],
-              payload.repoPr,
-              (entry) => entry.repo === payload.repoPr.repo,
-            ),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
     case "program.local-validation-upserted":
-      return decodeForEvent(
-        ProgramLocalValidationUpsertedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            localValidation: upsertCollectionItemByKey(
-              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
-                ?.localValidation ?? [],
-              payload.localValidation,
-              (entry) =>
-                entry.repo === payload.localValidation.repo &&
-                entry.suiteId === payload.localValidation.suiteId &&
-                entry.kind === payload.localValidation.kind,
-            ),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
     case "program.app-validation-upserted":
-      return decodeForEvent(
-        ProgramAppValidationUpsertedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            appValidations: upsertCollectionItemByKey(
-              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
-                ?.appValidations ?? [],
-              payload.appValidation,
-              (entry) =>
-                entry.target === payload.appValidation.target &&
-                entry.suiteId === payload.appValidation.suiteId &&
-                entry.kind === payload.appValidation.kind,
-            ),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
     case "program.observed-repo-upserted":
-      return decodeForEvent(
-        ProgramObservedRepoUpsertedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            observedRepos: upsertCollectionItemByKey(
-              (nextBase.programs ?? []).find((program) => program.id === payload.programId)
-                ?.observedRepos ?? [],
-              payload.observedRepo,
-              (entry) =>
-                entry.repo === payload.observedRepo.repo &&
-                entry.source === payload.observedRepo.source,
-            ),
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
     case "program.post-flight-set":
-      return decodeForEvent(ProgramPostFlightSetPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            postFlight: payload.postFlight,
-            updatedAt: payload.updatedAt,
-          }),
-        })),
-      );
-
     case "program.deleted":
-      return decodeForEvent(ProgramDeletedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programs: updateProgram(nextBase.programs ?? [], payload.programId, {
-            deletedAt: payload.deletedAt,
-            updatedAt: payload.deletedAt,
-          }),
-        })),
-      );
-
     case "program.notification-upserted":
-      return Effect.gen(function* () {
-        const notification = yield* decodeForEvent(
-          ProgramNotificationUpsertedPayload,
-          event.payload,
-          event.type,
-          "payload",
-        );
-        const notifications = nextBase.programNotifications ?? [];
-        const existing = notifications.find(
-          (entry) => entry.notificationId === notification.notificationId,
-        );
-        const nextCtoAttention =
-          projectCtoAttentionFromProgramNotification({
-            ...notification,
-            commandId: event.commandId,
-            correlationId: event.correlationId,
-          }) ?? null;
-        return {
-          ...nextBase,
-          programNotifications: existing
-            ? notifications.map((entry) =>
-                entry.notificationId === notification.notificationId ? notification : entry,
-              )
-            : [...notifications, notification],
-          ctoAttentionItems:
-            nextCtoAttention === null
-              ? (nextBase.ctoAttentionItems ?? [])
-              : upsertCtoAttentionItemByKey(nextBase.ctoAttentionItems ?? [], nextCtoAttention),
-        };
-      });
-
     case "program.notification-consumed":
-      return decodeForEvent(
-        ProgramNotificationConsumedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programNotifications: updateProgramNotification(
-            nextBase.programNotifications ?? [],
-            payload.notificationId,
-            {
-              state: "consumed",
-              consumedAt: payload.consumedAt,
-              ...(payload.consumeReason !== undefined
-                ? { consumeReason: payload.consumeReason }
-                : {}),
-              updatedAt: payload.updatedAt,
-            },
-          ),
-          ctoAttentionItems: updateCtoAttentionItemByNotificationId(
-            nextBase.ctoAttentionItems ?? [],
-            payload.notificationId,
-            (item) => acknowledgeCtoAttentionItem(item, payload.consumedAt, payload.updatedAt),
-          ),
-        })),
-      );
-
     case "program.notification-dropped":
-      return decodeForEvent(
-        ProgramNotificationDroppedPayload,
-        event.payload,
-        event.type,
-        "payload",
-      ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          programNotifications: updateProgramNotification(
-            nextBase.programNotifications ?? [],
-            payload.notificationId,
-            {
-              state: "dropped",
-              droppedAt: payload.droppedAt,
-              ...(payload.dropReason !== undefined ? { dropReason: payload.dropReason } : {}),
-              updatedAt: payload.updatedAt,
-            },
-          ),
-          ctoAttentionItems: updateCtoAttentionItemByNotificationId(
-            nextBase.ctoAttentionItems ?? [],
-            payload.notificationId,
-            (item) => dropCtoAttentionItem(item, payload.droppedAt, payload.updatedAt),
-          ),
-        })),
-      );
+      return Effect.succeed(nextBase);
 
     case "thread.created":
       return Effect.gen(function* () {
@@ -1128,36 +773,7 @@ export function projectEvent(
       );
 
     case "thread.orchestrator-wake-upserted":
-      return Effect.gen(function* () {
-        const payload = yield* decodeForEvent(
-          ThreadOrchestratorWakeUpsertedPayload,
-          event.payload,
-          event.type,
-          "payload",
-        );
-        const wakeItem: OrchestratorWakeItem = yield* decodeForEvent(
-          OrchestratorWakeItem,
-          payload.wakeItem,
-          event.type,
-          "wakeItem",
-        );
-
-        const orchestratorWakeItems = [
-          ...nextBase.orchestratorWakeItems.filter((entry) => entry.wakeId !== wakeItem.wakeId),
-          wakeItem,
-        ].toSorted(
-          (left, right) =>
-            left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId),
-        );
-
-        return {
-          ...nextBase,
-          orchestratorWakeItems,
-          threads: updateThread(nextBase.threads, wakeItem.orchestratorThreadId, {
-            updatedAt: event.occurredAt,
-          }),
-        };
-      });
+      return Effect.succeed(nextBase);
 
     default:
       return Effect.succeed(nextBase);

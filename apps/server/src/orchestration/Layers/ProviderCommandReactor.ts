@@ -4,6 +4,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationThread,
   ProviderKind,
   type OrchestrationSession,
   ThreadId,
@@ -12,7 +13,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { threadHasLiveActiveTurn } from "@t3tools/orchestration-core/command-invariants";
-import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
+import { Cache, Cause, Data, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
@@ -33,6 +34,11 @@ import {
   resolveLocalThreadErrorPresentation,
   type LocalThreadErrorPresentation,
 } from "../localThreadErrorPresentation.ts";
+import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
+import {
+  requestAgentsVxappApprovalResponse,
+  requestAgentsVxappUserInputResponse,
+} from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -50,6 +56,37 @@ type ProviderIntentEvent = Extract<
       | "thread.session-stop-requested";
   }
 >;
+
+function isVxappBackedThread(thread: OrchestrationThread): boolean {
+  return thread.worktreePath !== null && thread.worktreePath.startsWith(AGENTS_VXAPP_ROOT);
+}
+
+function resolveProviderLocalThreadErrorPresentation(input: {
+  readonly thread: OrchestrationThread;
+  readonly latestTurnState: Parameters<
+    typeof resolveLocalThreadErrorPresentation
+  >[0]["latestTurnState"];
+  readonly sessionStatus: Parameters<
+    typeof resolveLocalThreadErrorPresentation
+  >[0]["sessionStatus"];
+  readonly sessionLastError: string | null;
+}): LocalThreadErrorPresentation {
+  if (isVxappBackedThread(input.thread)) {
+    return {
+      hasActiveError: input.thread.hasActiveError,
+      activeError: input.thread.activeError,
+      historicalError: input.thread.historicalError,
+      errorPresentationSource: input.thread.errorPresentationSource,
+    };
+  }
+  return resolveLocalThreadErrorPresentation({
+    archivedAt: input.thread.archivedAt,
+    deletedAt: input.thread.deletedAt,
+    latestTurnState: input.latestTurnState,
+    sessionStatus: input.sessionStatus,
+    sessionLastError: input.sessionLastError,
+  });
+}
 
 type SessionBoundaryFence = {
   readonly session: OrchestrationSession;
@@ -155,6 +192,22 @@ function stalePendingRequestDetail(
 ): string {
   return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
 }
+
+function ownerErrorDetail(error: unknown): string {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "detail" in error &&
+    typeof (error as { detail?: unknown }).detail === "string"
+  ) {
+    return (error as { detail: string }).detail;
+  }
+  return error instanceof Error ? error.message : "agents-vxapp owner command failed.";
+}
+
+class OwnerCommandFailure extends Data.TaggedError("OwnerCommandFailure")<{
+  readonly detail: string;
+}> {}
 
 function isTemporaryWorktreeBranch(branch: string): boolean {
   return TEMP_WORKTREE_BRANCH_PATTERN.test(branch.trim().toLowerCase());
@@ -293,9 +346,8 @@ const make = Effect.gen(function* () {
         providerName,
         runtimeMode,
       },
-      errorPresentation: resolveLocalThreadErrorPresentation({
-        archivedAt: thread.archivedAt,
-        deletedAt: thread.deletedAt,
+      errorPresentation: resolveProviderLocalThreadErrorPresentation({
+        thread,
         latestTurnState: thread.latestTurn?.state ?? null,
         sessionStatus: input.session.status,
         sessionLastError: input.session.lastError,
@@ -408,9 +460,8 @@ const make = Effect.gen(function* () {
           lastError: session.lastError ?? null,
           updatedAt: session.updatedAt,
         },
-        errorPresentation: resolveLocalThreadErrorPresentation({
-          archivedAt: thread.archivedAt,
-          deletedAt: thread.deletedAt,
+        errorPresentation: resolveProviderLocalThreadErrorPresentation({
+          thread,
           latestTurnState: thread.latestTurn?.state ?? null,
           sessionStatus: mapProviderSessionStatusToOrchestrationStatus(session.status),
           sessionLastError: session.lastError ?? null,
@@ -870,6 +921,34 @@ const make = Effect.gen(function* () {
       });
     }
 
+    const ownerAccepted = yield* Effect.tryPromise({
+      try: () =>
+        requestAgentsVxappApprovalResponse({
+          threadId: event.payload.threadId,
+          requestId: event.payload.requestId,
+          decision: event.payload.decision,
+          resolvedAt: event.payload.createdAt,
+        }),
+      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+    }).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.approval.respond.failed",
+          summary: "Provider approval response failed",
+          detail: ownerErrorDetail(error),
+          turnId: null,
+          createdAt: event.payload.createdAt,
+          requestId: event.payload.requestId,
+        }).pipe(Effect.as(false)),
+      ),
+    );
+
+    if (!ownerAccepted) {
+      return;
+    }
+
     yield* providerService
       .respondToRequest({
         threadId: event.payload.threadId,
@@ -915,6 +994,34 @@ const make = Effect.gen(function* () {
         createdAt: event.payload.createdAt,
         requestId: event.payload.requestId,
       });
+    }
+
+    const ownerAccepted = yield* Effect.tryPromise({
+      try: () =>
+        requestAgentsVxappUserInputResponse({
+          threadId: event.payload.threadId,
+          requestId: event.payload.requestId,
+          answers: event.payload.answers,
+          resolvedAt: event.payload.createdAt,
+        }),
+      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+    }).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.user-input.respond.failed",
+          summary: "Provider user input response failed",
+          detail: ownerErrorDetail(error),
+          turnId: null,
+          createdAt: event.payload.createdAt,
+          requestId: event.payload.requestId,
+        }).pipe(Effect.as(false)),
+      ),
+    );
+
+    if (!ownerAccepted) {
+      return;
     }
 
     yield* providerService
@@ -964,9 +1071,8 @@ const make = Effect.gen(function* () {
         lastError: thread.session?.lastError ?? null,
         updatedAt: now,
       },
-      errorPresentation: resolveLocalThreadErrorPresentation({
-        archivedAt: thread.archivedAt,
-        deletedAt: thread.deletedAt,
+      errorPresentation: resolveProviderLocalThreadErrorPresentation({
+        thread,
         latestTurnState: thread.latestTurn?.state ?? null,
         sessionStatus: "stopped",
         sessionLastError: thread.session?.lastError ?? null,
@@ -997,9 +1103,8 @@ const make = Effect.gen(function* () {
           lastError: thread.session?.lastError ?? null,
           updatedAt: archivedAt,
         },
-        errorPresentation: resolveLocalThreadErrorPresentation({
-          archivedAt,
-          deletedAt: thread.deletedAt,
+        errorPresentation: resolveProviderLocalThreadErrorPresentation({
+          thread,
           latestTurnState: thread.latestTurn?.state ?? null,
           sessionStatus: "stopped",
           sessionLastError: thread.session?.lastError ?? null,

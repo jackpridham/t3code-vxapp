@@ -13,7 +13,11 @@ import type {
 import { isThreadRuntimeActive } from "../Sidebar.logic";
 import { collapseThreadToCanonicalProject } from "~/lib/orchestrationMode";
 import type { CtoAttentionItem, ProgramNotification, Project, Thread } from "~/types";
-import { type ProgramCloseoutSummary, summarizeProgramCloseout } from "./programDisplay";
+import {
+  resolveProgramDisplay,
+  type ProgramCloseoutSummary,
+  summarizeProgramCloseout,
+} from "./programDisplay";
 import {
   resolveArchivedRoleSessionNameFromPathForDisplay,
   resolveRoleSessionName,
@@ -45,6 +49,9 @@ export interface SidebarProgramWatchState {
 }
 
 export interface SidebarNotificationItem {
+  displayLabel: string | null;
+  displaySortKey: string | null;
+  displayTone: string | null;
   id: string;
   executiveProjectId: string | null;
   executiveThreadId: string | null;
@@ -52,7 +59,7 @@ export interface SidebarNotificationItem {
   kind: string;
   queuedAt: string | null;
   section: SidebarNotificationSection;
-  severity: "critical" | "warning" | "info";
+  severity: string;
   sourceThreadId: string | null;
   summary: string;
 }
@@ -102,6 +109,11 @@ export interface SidebarProgramNode {
   currentStatus: string | null;
   currentTodo: SidebarProgramCurrentTodo | null;
   currentLane: SidebarProgramLaneNode | null;
+  displayHeading: string;
+  displayLabel: string | null;
+  displaySortKey: string | null;
+  displaySummary: string | null;
+  displayTone: string | null;
   executiveProjectId: string | null;
   executiveThreadId: string | null;
   historicalOrchestratorCount: number;
@@ -324,6 +336,9 @@ function normalizeStoreNotification(
     return null;
   }
   return {
+    displayLabel: null,
+    displaySortKey: null,
+    displayTone: null,
     id: notification.notificationId,
     executiveProjectId: notification.executiveProjectId,
     executiveThreadId: notification.executiveThreadId,
@@ -344,6 +359,9 @@ function normalizeSqliteNotification(
     return null;
   }
   return {
+    displayLabel: null,
+    displaySortKey: null,
+    displayTone: null,
     id: notification.notificationId,
     executiveProjectId: notification.executiveProjectId,
     executiveThreadId: notification.executiveThreadId,
@@ -362,6 +380,9 @@ function normalizeStoreAttention(item: CtoAttentionItem): SidebarNotificationIte
     return null;
   }
   return {
+    displayLabel: null,
+    displaySortKey: null,
+    displayTone: null,
     id: item.attentionId,
     executiveProjectId: item.executiveProjectId,
     executiveThreadId: item.executiveThreadId,
@@ -382,6 +403,9 @@ function normalizeSqliteAttention(
     return null;
   }
   return {
+    displayLabel: null,
+    displaySortKey: null,
+    displayTone: null,
     id: item.attentionId,
     executiveProjectId: item.executiveProjectId,
     executiveThreadId: item.executiveThreadId,
@@ -939,11 +963,12 @@ function sortPrograms(programs: SidebarProgramNode[]): SidebarProgramNode[] {
       compareByRecentActivity({
         leftActive: left.isActiveNow,
         leftActivityAt: left.activityAt,
-        leftTieBreaker: `${left.title}:${left.id}`,
+        leftTieBreaker: `${left.displaySortKey ?? left.title}:${left.id}`,
         rightActive: right.isActiveNow,
         rightActivityAt: right.activityAt,
-        rightTieBreaker: `${right.title}:${right.id}`,
+        rightTieBreaker: `${right.displaySortKey ?? right.title}:${right.id}`,
       }) ||
+      (left.displaySortKey ?? "").localeCompare(right.displaySortKey ?? "") ||
       left.title.localeCompare(right.title) ||
       left.id.localeCompare(right.id),
   );
@@ -982,15 +1007,10 @@ function sortWorkers(workers: SidebarWorkerNode[]): SidebarWorkerNode[] {
 }
 
 function sortNotifications(items: SidebarNotificationItem[]): SidebarNotificationItem[] {
-  const severityRank: Record<SidebarNotificationItem["severity"], number> = {
-    critical: 0,
-    warning: 1,
-    info: 2,
-  };
   return [...items].toSorted((left, right) => {
-    const severityDiff = severityRank[left.severity] - severityRank[right.severity];
-    if (severityDiff !== 0) {
-      return severityDiff;
+    const sortKeyDiff = (left.displaySortKey ?? "").localeCompare(right.displaySortKey ?? "");
+    if (sortKeyDiff !== 0) {
+      return sortKeyDiff;
     }
     return (right.queuedAt ?? "").localeCompare(left.queuedAt ?? "");
   });
@@ -1028,44 +1048,6 @@ function buildProgramWatchById(input: {
       },
     ]),
   );
-}
-
-function summarizeProgramStatusDetail(input: {
-  closeoutSummary: ProgramCloseoutSummary;
-  currentLane: SidebarProgramLaneNode | null;
-  program: ServerAgentsVxappProgramSnapshot;
-  watch: SidebarProgramWatchState | null;
-  workers: readonly SidebarWorkerNode[];
-}): string | null {
-  const missingSummary = input.closeoutSummary.missingItems.slice(0, 2).join(" · ");
-  if (
-    (input.program.status === "blocked" || input.program.status === "closeout_in_progress") &&
-    missingSummary
-  ) {
-    return missingSummary;
-  }
-  if (input.program.status === "founder_review_ready") {
-    return "Ready for founder review.";
-  }
-  if (input.program.status === "awaiting_founder") {
-    return "Waiting for founder input.";
-  }
-  if (input.program.status === "awaiting_external") {
-    return input.watch?.reason ?? "Waiting for external dependency.";
-  }
-  if (input.currentLane === null) {
-    return "No active orchestrator lane.";
-  }
-  if (input.workers.length === 0) {
-    return "No active workers in the current lane.";
-  }
-  if (input.watch?.classification) {
-    return input.watch.classification.replaceAll("_", " ");
-  }
-  if (input.closeoutSummary.postFlightSummary) {
-    return input.closeoutSummary.postFlightSummary;
-  }
-  return null;
 }
 
 export function buildOrchestrationSidebarModel(input: {
@@ -1415,6 +1397,7 @@ export function buildOrchestrationSidebarModel(input: {
             };
           })();
     const closeoutSummary = summarizeProgramCloseout(program);
+    const display = resolveProgramDisplay(program);
     const programActivityAt =
       maxIsoTimestamp([
         program.updatedAt,
@@ -1427,6 +1410,11 @@ export function buildOrchestrationSidebarModel(input: {
       activeWorkerCount: workers.length,
       attentionCount: programItems.filter((item) => item.section === "attention").length,
       currentLane,
+      displayHeading: display.heading,
+      displayLabel: display.label,
+      displaySortKey: display.sortKey,
+      displaySummary: display.summary,
+      displayTone: display.tone,
       executiveProjectId,
       executiveThreadId,
       historicalLanes,
@@ -1457,14 +1445,8 @@ export function buildOrchestrationSidebarModel(input: {
       currentStatus: program.currentStatus,
       currentTodo: currentTodoByProgramId.get(program.id) ?? null,
       status: program.status,
-      statusDetail: summarizeProgramStatusDetail({
-        closeoutSummary,
-        currentLane,
-        program,
-        watch,
-        workers,
-      }),
-      title: program.title,
+      statusDetail: display.summary,
+      title: display.heading,
       watch,
     };
     executive.programs.push(programNode);

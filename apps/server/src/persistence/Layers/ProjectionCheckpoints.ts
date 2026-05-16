@@ -105,6 +105,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
         FROM projection_turns
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count IS NOT NULL
+          AND completed_at IS NOT NULL
         ORDER BY checkpoint_turn_count ASC
       `,
   });
@@ -126,6 +127,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
         FROM projection_turns
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count = ${checkpointTurnCount}
+          AND completed_at IS NOT NULL
       `,
   });
 

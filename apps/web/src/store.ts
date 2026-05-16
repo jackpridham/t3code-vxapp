@@ -3,10 +3,6 @@ import {
   type OrchestrationMessage,
   type OrchestrationProposedPlan,
   type OrchestratorWakeItem,
-  CtoAttentionId,
-  ProgramId,
-  ProgramNotificationId,
-  ProjectId,
   type ProviderKind,
   ThreadId,
   type OrchestrationReadModel,
@@ -32,13 +28,6 @@ import {
   type Thread,
   type TurnDiffSummary,
 } from "./types";
-import {
-  buildCtoAttentionKey,
-  deriveCtoAttentionStateFromProgramNotificationState,
-  extractCtoAttentionSource,
-  isCtoActionableProgramNotificationKind,
-  toCtoAttentionKind,
-} from "@t3tools/shared/ctoAttention";
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -258,51 +247,6 @@ function updateCollectionItemByKey<TItem>(input: {
 
 function mapCtoAttentionItem(item: ReadModelCtoAttentionItem): CtoAttentionItem {
   return { ...item };
-}
-
-function projectCtoAttentionFromProgramNotification(
-  notification: ReadModelProgramNotification,
-): CtoAttentionItem | null {
-  const attentionKind = toCtoAttentionKind(notification.kind);
-  if (!attentionKind || !isCtoActionableProgramNotificationKind(attentionKind)) {
-    return null;
-  }
-
-  const source = extractCtoAttentionSource(
-    notification.evidence,
-    notification.orchestratorThreadId,
-  );
-  const attentionKey = buildCtoAttentionKey({
-    programId: notification.programId,
-    kind: attentionKind,
-    sourceThreadId: source.sourceThreadId,
-    sourceRole: source.sourceRole,
-    evidence: notification.evidence,
-    notificationId: notification.notificationId,
-  });
-  const state = deriveCtoAttentionStateFromProgramNotificationState(notification.state);
-
-  return {
-    attentionId: CtoAttentionId.makeUnsafe(attentionKey),
-    attentionKey,
-    notificationId: ProgramNotificationId.makeUnsafe(String(notification.notificationId)),
-    programId: ProgramId.makeUnsafe(String(notification.programId)),
-    executiveProjectId: ProjectId.makeUnsafe(String(notification.executiveProjectId)),
-    executiveThreadId: ThreadId.makeUnsafe(String(notification.executiveThreadId)),
-    sourceThreadId: source.sourceThreadId,
-    sourceRole: source.sourceRole,
-    kind: attentionKind,
-    severity: notification.severity,
-    summary: notification.summary,
-    evidence: notification.evidence,
-    state,
-    queuedAt: notification.queuedAt,
-    acknowledgedAt: state === "acknowledged" ? notification.consumedAt : null,
-    resolvedAt: null,
-    droppedAt: state === "dropped" ? notification.droppedAt : null,
-    createdAt: notification.createdAt,
-    updatedAt: notification.updatedAt,
-  };
 }
 
 function normalizeModelSelection<T extends { provider: "codex" | "claudeAgent"; model: string }>(
@@ -580,7 +524,7 @@ function isPartialReadModel(readModel: OrchestrationReadModel): boolean {
 }
 
 function checkpointStatusToLatestTurnState(
-  status: "ready" | "missing" | "error",
+  status: string,
   existingLatestTurn?: Thread["latestTurn"],
 ) {
   if (status === "error") {
@@ -591,6 +535,9 @@ function checkpointStatusToLatestTurnState(
       return "running" as const;
     }
     return "interrupted" as const;
+  }
+  if (status !== "ready") {
+    throw new Error(`Unsupported checkpoint status: ${status}`);
   }
   return "completed" as const;
 }
@@ -790,6 +737,8 @@ function toLegacySessionStatus(
     case "idle":
     case "stopped":
       return "closed";
+    default:
+      throw new Error(`Unsupported orchestration session status: ${status}`);
   }
 }
 
@@ -1139,29 +1088,11 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         nextItem: nextNotification,
         getKey: (notification) => String(notification.notificationId),
       });
-      const currentAttentionItems = state.ctoAttentionItems ?? [];
-      const nextCtoAttentionItem = projectCtoAttentionFromProgramNotification(event.payload);
-      const ctoAttentionItems =
-        nextCtoAttentionItem === null
-          ? currentAttentionItems.filter(
-              (attentionItem) =>
-                String(attentionItem.notificationId) !== String(nextNotification.notificationId),
-            )
-          : upsertCollectionItemByKey({
-              existing: currentAttentionItems.filter(
-                (attentionItem) =>
-                  String(attentionItem.notificationId) !==
-                  String(nextCtoAttentionItem.notificationId),
-              ),
-              nextItem: nextCtoAttentionItem,
-              getKey: (attentionItem) => attentionItem.attentionKey,
-            });
-      return { ...state, programNotifications, ctoAttentionItems };
+      return { ...state, programNotifications };
     }
 
     case "program.notification-consumed": {
       const currentNotifications = state.programNotifications ?? [];
-      const currentAttentionItems = state.ctoAttentionItems ?? [];
       const programNotifications = updateCollectionItemByKey({
         existing: currentNotifications,
         key: String(event.payload.notificationId),
@@ -1174,29 +1105,14 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           updatedAt: event.payload.updatedAt,
         }),
       });
-      const ctoAttentionItems = updateCollectionItemByKey({
-        existing: state.ctoAttentionItems ?? [],
-        key: String(event.payload.notificationId),
-        getKey: (attentionItem) => String(attentionItem.notificationId),
-        updater: (attentionItem) => ({
-          ...attentionItem,
-          state: "acknowledged" as const,
-          acknowledgedAt: event.payload.consumedAt,
-          updatedAt: event.payload.updatedAt,
-        }),
-      });
-      if (
-        programNotifications === currentNotifications &&
-        ctoAttentionItems === currentAttentionItems
-      ) {
+      if (programNotifications === currentNotifications) {
         return state;
       }
-      return { ...state, programNotifications, ctoAttentionItems };
+      return { ...state, programNotifications };
     }
 
     case "program.notification-dropped": {
       const currentNotifications = state.programNotifications ?? [];
-      const currentAttentionItems = state.ctoAttentionItems ?? [];
       const programNotifications = updateCollectionItemByKey({
         existing: currentNotifications,
         key: String(event.payload.notificationId),
@@ -1209,24 +1125,10 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
           updatedAt: event.payload.updatedAt,
         }),
       });
-      const ctoAttentionItems = updateCollectionItemByKey({
-        existing: state.ctoAttentionItems ?? [],
-        key: String(event.payload.notificationId),
-        getKey: (attentionItem) => String(attentionItem.notificationId),
-        updater: (attentionItem) => ({
-          ...attentionItem,
-          state: "dropped" as const,
-          droppedAt: event.payload.droppedAt,
-          updatedAt: event.payload.updatedAt,
-        }),
-      });
-      if (
-        programNotifications === currentNotifications &&
-        ctoAttentionItems === currentAttentionItems
-      ) {
+      if (programNotifications === currentNotifications) {
         return state;
       }
-      return { ...state, programNotifications, ctoAttentionItems };
+      return { ...state, programNotifications };
     }
 
     case "thread.created": {
@@ -1702,9 +1604,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
               ? null
               : {
                   turnId: latestCheckpoint.turnId,
-                  state: checkpointStatusToLatestTurnState(
-                    (latestCheckpoint.status ?? "ready") as "ready" | "missing" | "error",
-                  ),
+                  state: checkpointStatusToLatestTurnState(latestCheckpoint.status ?? "ready"),
                   requestedAt: latestCheckpoint.completedAt,
                   startedAt: latestCheckpoint.completedAt,
                   completedAt: latestCheckpoint.completedAt,

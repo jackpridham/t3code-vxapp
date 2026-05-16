@@ -1,0 +1,60 @@
+import fs from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+const vxappServerRoot = path.resolve(import.meta.dirname, "../../..");
+const ownerClientPath = path.resolve(import.meta.dirname, "agentsVxappOwnerClient.ts");
+const ownerClientSource = fs.readFileSync(ownerClientPath, "utf8");
+
+function listTsFiles(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const absolutePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return listTsFiles(absolutePath);
+    }
+    return entry.isFile() && absolutePath.endsWith(".ts") ? [absolutePath] : [];
+  });
+}
+
+describe("agents-vxapp owner authority boundary", () => {
+  it("centralizes vxapp owner process routes in agentsVxappOwnerClient.ts", () => {
+    const offenders = listTsFiles(vxappServerRoot)
+      .filter((filePath) => !filePath.endsWith(".test.ts"))
+      .filter((filePath) => path.resolve(filePath) !== ownerClientPath)
+      .flatMap((filePath) => {
+        const source = fs.readFileSync(filePath, "utf8");
+        const matches = [
+          "scripts/tools/t3-control-plane-owner",
+          "scripts/tools/role-session-owner",
+          "--compatibility-mode",
+        ].filter((needle) => source.includes(needle));
+        return matches.map((needle) => ({ filePath, needle }));
+      });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps owner command literals and the bootstrap manifest route centralized in the owner client", () => {
+    const ownerCommandLiterals =
+      ownerClientSource.match(/["']t3code-[a-z0-9-]+["']/g)?.map((value) => value.slice(1, -1)) ??
+      [];
+
+    expect(new Set(ownerCommandLiterals)).toEqual(
+      new Set([
+        "t3code-contract-manifest",
+        "t3code-thread-status",
+        "t3code-thread-event-ingest",
+        "t3code-approval-request",
+        "t3code-approval-respond",
+        "t3code-user-input-respond",
+      ]),
+    );
+
+    const offenders = listTsFiles(vxappServerRoot)
+      .filter((filePath) => !filePath.endsWith(".test.ts"))
+      .filter((filePath) => path.resolve(filePath) !== ownerClientPath)
+      .filter((filePath) => /["']t3code-[a-z0-9-]+["']/.test(fs.readFileSync(filePath, "utf8")));
+
+    expect(offenders).toEqual([]);
+  });
+});

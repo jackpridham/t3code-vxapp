@@ -1,226 +1,83 @@
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../processRunner.ts", () => ({
-  runProcess: vi.fn(),
+vi.mock("../agentsVxappOwnerClient.ts", () => ({
+  fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
+  fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
 }));
 
-import { runProcess } from "../../../processRunner.ts";
+import {
+  fetchAgentsVxappControlPlaneSnapshot,
+  fetchAgentsVxappRoleSessionRuntimePaths,
+} from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappExternalRoleAuthorityLive } from "./AgentsVxappExternalRoleAuthority.ts";
 
-const mockedRunProcess = vi.mocked(runProcess);
+const mockedControlPlaneSnapshot = vi.mocked(fetchAgentsVxappControlPlaneSnapshot);
+const mockedRuntimePaths = vi.mocked(fetchAgentsVxappRoleSessionRuntimePaths);
 
 afterEach(() => {
-  mockedRunProcess.mockReset();
+  vi.resetAllMocks();
 });
 
 describe("AgentsVxappExternalRoleAuthorityLive", () => {
-  it("loads validated runtime paths from role-session-owner", async () => {
-    mockedRunProcess.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        ok: true,
-        result: {
-          runtime_root: "/runtime",
-          role_sessions_root: "/runtime/role-sessions",
-          role_state_root: "/runtime/role-state",
-          workspace_runtime_metadata_dir: ".agents/runtime",
-          env: {
-            runtime_root: "VX_AGENTS_ROLE_SESSION_RUNTIME_ROOT",
-            state_root: "VX_AGENTS_ROLE_SESSION_STATE_ROOT",
-          },
-          roles: {
-            cto: {
-              generated_workspace_root: "/runtime/role-sessions/cto",
-              reservations_root: "/runtime/role-state/cto/reservations",
-              role: "cto",
-              sessions_root: "/runtime/role-state/cto/sessions",
-              state_root: "/runtime/role-state/cto",
-            },
-            jasper: {
-              generated_workspace_root: "/runtime/role-sessions/jasper",
-              reservations_root: "/runtime/role-state/jasper/reservations",
-              role: "jasper",
-              sessions_root: "/runtime/role-state/jasper/sessions",
-              state_root: "/runtime/role-state/jasper",
-            },
-          },
-        },
-      }),
-      stderr: "",
-      code: 0,
-      signal: null,
-      timedOut: false,
+  it("loads snapshot authority through the owner client", async () => {
+    mockedControlPlaneSnapshot.mockResolvedValueOnce({
+      externalRoleAuthority: {
+        projects: [{ id: "project-owner", workspaceRoot: "/tmp/owner" }],
+        threadSummaries: [{ id: "thread-owner", worktreePath: "/tmp/owner" }],
+      },
     });
 
-    const effect = Effect.gen(function* () {
-      const authority = yield* AgentsVxappExternalRoleAuthority;
-      return yield* authority.getRuntimePaths();
-    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
+    const snapshot = await Effect.runPromise(
+      Effect.gen(function* () {
+        const authority = yield* AgentsVxappExternalRoleAuthority;
+        return yield* authority.getSnapshot();
+      }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive)),
+    );
 
-    await expect(Effect.runPromise(effect)).resolves.toMatchObject({
+    expect(snapshot.projects).toHaveLength(1);
+    expect(snapshot.threadSummaries).toHaveLength(1);
+    expect(mockedControlPlaneSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads role-session runtime paths through the owner client", async () => {
+    const runtimePaths = {
       runtimeRoot: "/runtime",
       roleSessionsRoot: "/runtime/role-sessions",
+      roleStateRoot: "/runtime/role-state",
+      workspaceRuntimeMetadataDir: ".agents/runtime",
+      env: {
+        runtimeRoot: "VX_AGENTS_ROLE_SESSION_RUNTIME_ROOT",
+        stateRoot: "VX_AGENTS_ROLE_SESSION_STATE_ROOT",
+      },
       roles: {
         cto: {
+          role: "cto" as const,
+          generatedWorkspaceRoot: "/runtime/role-sessions/cto",
+          stateRoot: "/runtime/role-state/cto",
           sessionsRoot: "/runtime/role-state/cto/sessions",
+          reservationsRoot: "/runtime/role-state/cto/reservations",
         },
         jasper: {
+          role: "jasper" as const,
+          generatedWorkspaceRoot: "/runtime/role-sessions/jasper",
+          stateRoot: "/runtime/role-state/jasper",
+          sessionsRoot: "/runtime/role-state/jasper/sessions",
           reservationsRoot: "/runtime/role-state/jasper/reservations",
         },
       },
-    });
-    expect(mockedRunProcess).toHaveBeenCalledWith(
-      expect.stringMatching(/scripts\/tools\/role-session-owner$/),
-      ["runtime-paths"],
-      expect.objectContaining({
-        cwd: expect.any(String),
-      }),
+    };
+    mockedRuntimePaths.mockResolvedValueOnce(runtimePaths);
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const authority = yield* AgentsVxappExternalRoleAuthority;
+        return yield* authority.getRuntimePaths();
+      }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive)),
     );
-  });
 
-  it("fails closed when agents-vxapp omits authoritative error presentation fields", async () => {
-    mockedRunProcess.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        result: {
-          cto: {
-            workspaceRoot: "/home/gizmo/agents-vxapp/CTOv2",
-            project: {
-              id: "external-cto-project",
-              title: "CTOv2",
-              workspaceRoot: "/home/gizmo/agents-vxapp/CTOv2",
-              kind: "executive",
-              createdAt: "2026-05-12T00:00:00.000Z",
-              updatedAt: "2026-05-12T00:00:01.000Z",
-            },
-            currentThread: {
-              id: "external-cto-thread",
-              projectId: "external-cto-project",
-              title: "Review Jasper blocker and yacht watch",
-              labels: ["cto-autonomous"],
-              createdAt: "2026-05-12T00:00:02.000Z",
-              updatedAt: "2026-05-12T00:00:03.000Z",
-              archivedAt: null,
-              deletedAt: null,
-              session: {
-                status: "ready",
-                providerName: "codex",
-                activeTurnId: null,
-                lastError: "raw external session error",
-                updatedAt: "2026-05-12T00:00:03.000Z",
-              },
-            },
-          },
-        },
-      }),
-      stderr: "",
-      code: 0,
-      signal: null,
-      timedOut: false,
-    });
-
-    const effect = Effect.gen(function* () {
-      const authority = yield* AgentsVxappExternalRoleAuthority;
-      return yield* authority.getSnapshot();
-    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
-
-    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
-      operation: "AgentsVxappExternalRoleAuthority.getSnapshot",
-      detail: expect.stringContaining("missing authoritative error presentation fields"),
-    });
-  });
-
-  it("fails closed when runtime-paths omits required fields", async () => {
-    mockedRunProcess.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        ok: true,
-        result: {
-          runtime_root: "/runtime",
-        },
-      }),
-      stderr: "",
-      code: 0,
-      signal: null,
-      timedOut: false,
-    });
-
-    const effect = Effect.gen(function* () {
-      const authority = yield* AgentsVxappExternalRoleAuthority;
-      return yield* authority.getRuntimePaths();
-    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
-
-    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
-      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
-      detail: expect.stringContaining("result.role_sessions_root"),
-    });
-  });
-
-  it("fails closed when runtime-paths returns invalid JSON", async () => {
-    mockedRunProcess.mockResolvedValueOnce({
-      stdout: "{not-json",
-      stderr: "",
-      code: 0,
-      signal: null,
-      timedOut: false,
-    });
-
-    const effect = Effect.gen(function* () {
-      const authority = yield* AgentsVxappExternalRoleAuthority;
-      return yield* authority.getRuntimePaths();
-    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
-
-    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
-      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
-      detail: expect.stringContaining("JSON"),
-    });
-  });
-
-  it("fails closed when runtime-paths exits nonzero", async () => {
-    mockedRunProcess.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        error: {
-          message: "owner command failed hard",
-        },
-      }),
-      stderr: "",
-      code: 2,
-      signal: null,
-      timedOut: false,
-    });
-
-    const effect = Effect.gen(function* () {
-      const authority = yield* AgentsVxappExternalRoleAuthority;
-      return yield* authority.getRuntimePaths();
-    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
-
-    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
-      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
-      detail: "owner command failed hard",
-    });
-  });
-
-  it("fails closed when runtime-paths reports ok false", async () => {
-    mockedRunProcess.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        ok: false,
-        error: {
-          message: "owner refused runtime-paths",
-        },
-      }),
-      stderr: "",
-      code: 0,
-      signal: null,
-      timedOut: false,
-    });
-
-    const effect = Effect.gen(function* () {
-      const authority = yield* AgentsVxappExternalRoleAuthority;
-      return yield* authority.getRuntimePaths();
-    }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive));
-
-    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
-      operation: "AgentsVxappExternalRoleAuthority.getRuntimePaths",
-      detail: "owner refused runtime-paths",
-    });
+    expect(result).toBe(runtimePaths);
+    expect(mockedRuntimePaths).toHaveBeenCalledTimes(1);
   });
 });

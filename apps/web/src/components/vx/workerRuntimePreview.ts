@@ -115,12 +115,8 @@ type WorkerRuntimeInstructionStackAuditFixture = {
   status?: string | null;
 };
 
-export type PreviewWorkerRuntimeAuditStatus = "clean" | "warning" | "error" | "missing";
-export type PreviewWorkerRuntimeSourceFileStatus =
-  | "loaded"
-  | "missing"
-  | "invalid-json"
-  | "schema-error";
+export type PreviewWorkerRuntimeAuditStatus = string;
+export type PreviewWorkerRuntimeSourceFileStatus = string;
 
 export type PreviewWorkerRuntimeFixtureId =
   | "api-services-ledger-hardening-r1"
@@ -206,18 +202,6 @@ function getCatalogFixture(fixtureId: PreviewWorkerRuntimeFixtureId): WorkerRunt
     throw new Error(`Missing worker runtime catalog fixture: ${fixtureId}`);
   }
   return fixture;
-}
-
-function resolveAuditStatus(status: string): PreviewWorkerRuntimeAuditStatus {
-  switch (status) {
-    case "clean":
-    case "warning":
-    case "error":
-    case "missing":
-      return status;
-    default:
-      return "missing";
-  }
 }
 
 function normalizeStringList(input: readonly string[] | undefined): readonly string[] {
@@ -319,11 +303,10 @@ function buildPreviewWorkerRuntimeSnapshot(
       contextPlan.allowedCapabilities,
     ),
     auditFindings: normalizeAuditFindings(instructionStackAudit.findings),
-    auditStatus: resolveAuditStatus(
+    auditStatus:
       typeof instructionStackAudit.status === "string"
         ? instructionStackAudit.status
         : catalogFixture.auditStatus,
-    ),
     closeoutAuthority:
       normalizeNullableString(contextPlan.closeoutAuthority) ??
       normalizeNullableString(dispatchContract.closeoutAuthority) ??

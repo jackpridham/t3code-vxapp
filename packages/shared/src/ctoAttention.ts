@@ -126,6 +126,8 @@ export function deriveCtoAttentionStateFromProgramNotificationState(
       return "acknowledged";
     case "dropped":
       return "dropped";
+    default:
+      throw new Error(`Unsupported program notification state for CTO attention: ${state}`);
   }
 }
 

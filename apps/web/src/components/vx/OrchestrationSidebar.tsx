@@ -34,12 +34,7 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { useThreadSelectionStore } from "~/threadSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { Thread } from "~/types";
-import {
-  buildCopyThreadIdErrorDescription,
-  getSidebarCtoAttentionKindLabel,
-  getSidebarProgramNotificationKindLabel,
-  resolveThreadStatusPill,
-} from "../Sidebar.logic";
+import { buildCopyThreadIdErrorDescription, resolveThreadStatusPill } from "../Sidebar.logic";
 import { SidebarBrandHeader } from "../sidebar/SidebarBrandHeader";
 import { ThreadStatusLabel, type SidebarThreadStatus } from "../sidebar/SidebarThreadRow";
 import { Badge } from "../ui/badge";
@@ -72,7 +67,6 @@ import {
   type SidebarProgramLaneNode,
   type SidebarProgramNode,
 } from "./orchestrationSidebarModel";
-import { formatProgramStatusLabel, programStatusTone } from "./programDisplay";
 import { ProgramInfoDialog } from "./ProgramInfoDialog";
 import { ProgramTodosDialog } from "./ProgramTodosDialog";
 import { deriveAgentRuntimeDialogState } from "./agentRuntimeDialogState";
@@ -83,162 +77,21 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 } as const;
 
 const CHIP_CLASSNAME =
-  "h-4 shrink-0 px-1 text-[8px] font-medium leading-none text-muted-foreground/80";
-
-function severityOrder(severity: SidebarNotificationItem["severity"]) {
-  switch (severity) {
-    case "critical":
-      return 0;
-    case "warning":
-      return 1;
-    case "info":
-      return 2;
-  }
-}
-
-function notificationSeverityClasses(severity: SidebarNotificationItem["severity"]) {
-  switch (severity) {
-    case "critical":
-      return {
-        badge: "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300",
-        icon: "text-red-600 dark:text-red-300",
-        surface: "border-red-500/20 bg-red-500/5",
-      };
-    case "warning":
-      return {
-        badge: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-        icon: "text-amber-600 dark:text-amber-300",
-        surface: "border-amber-500/20 bg-amber-500/5",
-      };
-    case "info":
-      return {
-        badge: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
-        icon: "text-sky-600 dark:text-sky-300",
-        surface: "border-sky-500/20 bg-sky-500/5",
-      };
-  }
-}
-
-function notificationBellClasses(notifications: readonly SidebarNotificationItem[]) {
-  const highestSeverity = notifications
-    .map((notification) => notification.severity)
-    .toSorted((left, right) => severityOrder(left) - severityOrder(right))[0];
-  if (highestSeverity === "critical") {
-    return {
-      badge: "bg-red-500 text-white dark:bg-red-400 dark:text-red-950",
-      button:
-        "text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-400/10 dark:hover:text-red-200",
-    };
-  }
-  if (highestSeverity === "warning") {
-    return {
-      badge: "bg-amber-500 text-amber-950 dark:bg-amber-400 dark:text-amber-950",
-      button:
-        "text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-300 dark:hover:bg-amber-400/10 dark:hover:text-amber-200",
-    };
-  }
-  if (highestSeverity === "info") {
-    return {
-      badge: "bg-sky-500 text-white dark:bg-sky-400 dark:text-sky-950",
-      button:
-        "text-sky-600 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-300 dark:hover:bg-sky-400/10 dark:hover:text-sky-200",
-    };
-  }
-  return {
-    badge: "bg-muted text-muted-foreground",
-    button: "text-muted-foreground hover:bg-accent hover:text-foreground",
-  };
-}
-
-function compactStatusLabel(value: string) {
-  return formatProgramStatusLabel(value).replace(/\b\w/g, (match) => match.toUpperCase());
-}
+  "h-4 shrink-0 border border-border/70 bg-background/70 px-1 text-[8px] font-medium leading-none text-foreground/80";
 
 function WakeBadge({ state }: { state: "pending" | "delivering" | null }) {
   if (state === null) {
     return null;
   }
-  const className =
-    state === "delivering"
-      ? "bg-sky-500/12 text-sky-700 dark:text-sky-300"
-      : "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-  return <Badge className={cn(CHIP_CLASSNAME, "border-0", className)}>{state}</Badge>;
+  return <Badge className={CHIP_CLASSNAME}>{state}</Badge>;
 }
 
-function runtimeSourceBadgeClasses(status: "loaded" | "missing" | "invalid-json" | "schema-error") {
-  return status === "loaded"
-    ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
-    : status === "missing"
-      ? "bg-muted text-muted-foreground"
-      : status === "invalid-json"
-        ? "bg-red-500/12 text-red-700 dark:text-red-300"
-        : "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-}
-
-function RuntimeSourceBadge({
-  label,
-  status,
-}: {
-  label: string;
-  status: "loaded" | "missing" | "invalid-json" | "schema-error";
-}) {
+function RuntimeSourceBadge({ label }: { label: string; status: string }) {
   return (
-    <Badge
-      className={cn(
-        "h-5 border-0 px-1.5 text-[10px] font-medium",
-        runtimeSourceBadgeClasses(status),
-      )}
-    >
+    <Badge className="h-5 border border-border/70 bg-background/70 px-1.5 text-[10px] font-medium">
       {label}
     </Badge>
   );
-}
-
-function runtimeAuditBadgeClasses(status: "clean" | "warning" | "error" | "missing") {
-  switch (status) {
-    case "clean":
-      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-    case "warning":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-    case "error":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "missing":
-      return "bg-muted text-muted-foreground";
-  }
-}
-
-function formatRuntimeSourceStatus(status: "loaded" | "missing" | "invalid-json" | "schema-error") {
-  switch (status) {
-    case "loaded":
-      return "Loaded";
-    case "missing":
-      return "Missing";
-    case "invalid-json":
-      return "Invalid JSON";
-    case "schema-error":
-      return "Schema error";
-  }
-}
-
-function formatRuntimeResolutionKind(kind: string) {
-  switch (kind) {
-    case "thread-worktree":
-      return "Thread worktree";
-    case "project-workspace-root":
-      return "Project workspace";
-    case "input-worktree-fallback":
-      return "Input fallback";
-    case "canonical-role-root":
-      return "Canonical role root";
-    case "latest-role-session":
-      return "Latest role session";
-    case "role-session-thread-worktree":
-      return "Role-session worktree";
-    case "repo-role-root":
-      return "Repo role root";
-    default:
-      return compactStatusLabel(kind);
-  }
 }
 
 function formatGeneratedAge(value: string | null) {
@@ -379,15 +232,7 @@ function AgentRuntimeInlineBadges({
           </Badge>
         ) : null}
         {snapshot.workerDetails ? (
-          <Badge
-            className={cn(
-              CHIP_CLASSNAME,
-              "border-0",
-              runtimeAuditBadgeClasses(snapshot.workerDetails.auditStatus),
-            )}
-          >
-            audit {snapshot.workerDetails.auditStatus}
-          </Badge>
+          <Badge className={CHIP_CLASSNAME}>audit {snapshot.workerDetails.auditStatus}</Badge>
         ) : null}
         {snapshot.workerDetails?.validationProfile ? (
           <Badge variant="outline" className={CHIP_CLASSNAME}>
@@ -569,7 +414,7 @@ function AgentRuntimePopover({
                     Resolution
                   </p>
                   <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                    {formatRuntimeResolutionKind(runtimeQuery.data.workspaceResolution.kind)}
+                    {runtimeQuery.data.workspaceResolution.kind}
                   </Badge>
                 </div>
                 <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
@@ -599,7 +444,7 @@ function AgentRuntimePopover({
                           variant="outline"
                           className="h-4 px-1 text-[9px] text-muted-foreground/80"
                         >
-                          {formatRuntimeSourceStatus(sourceFile.status)}
+                          {sourceFile.status}
                         </Badge>
                         <span className="truncate text-[11px] font-medium text-foreground/90">
                           {sourceFile.fileName}
@@ -681,14 +526,7 @@ function AgentRuntimePopover({
                         Audit
                       </p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Badge
-                          className={cn(
-                            "h-5 border-0 px-1.5 text-[10px] font-medium",
-                            runtimeAuditBadgeClasses(
-                              runtimeQuery.data.workerDetails?.auditStatus ?? "missing",
-                            ),
-                          )}
-                        >
+                        <Badge className="h-5 border border-border/70 bg-background/70 px-1.5 text-[10px] font-medium">
                           {runtimeQuery.data.workerDetails?.auditStatus ?? "missing"}
                         </Badge>
                         <Badge
@@ -910,7 +748,6 @@ function ExecutiveNotificationsPopover({
 }: {
   notifications: readonly SidebarNotificationItem[];
 }) {
-  const bellClasses = notificationBellClasses(notifications);
   const attention = notifications.filter((notification) => notification.section === "attention");
   const updates = notifications.filter((notification) => notification.section === "program-update");
 
@@ -921,7 +758,7 @@ function ExecutiveNotificationsPopover({
           <SidebarMenuAction
             type="button"
             aria-label="Open executive notifications"
-            className={cn("right-1 top-1 size-6 cursor-pointer rounded-md", bellClasses.button)}
+            className="right-1 top-1 size-6 cursor-pointer rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={(event) => {
               event.stopPropagation();
             }}
@@ -934,7 +771,7 @@ function ExecutiveNotificationsPopover({
             <span
               className={cn(
                 "absolute left-full top-0 inline-flex h-3 min-w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full px-0.5 text-[7px] font-semibold leading-none shadow-sm",
-                bellClasses.badge,
+                "bg-secondary text-foreground",
               )}
             >
               {notifications.length > 9 ? "9+" : notifications.length}
@@ -976,21 +813,15 @@ function ExecutiveNotificationsPopover({
               ) : (
                 <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
                   {items.map((notification) => {
-                    const classes = notificationSeverityClasses(notification.severity);
-                    const kindLabel =
-                      notification.section === "attention"
-                        ? getSidebarCtoAttentionKindLabel(notification.kind as never)
-                        : getSidebarProgramNotificationKindLabel(notification.kind as never);
-
                     return (
                       <div
                         key={notification.id}
-                        className={cn("rounded-lg border px-2.5 py-2", classes.surface)}
+                        className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2"
                       >
                         <div className="flex items-center gap-1.5">
                           <Badge
                             variant="outline"
-                            className={cn("h-4 px-1 text-[9px]", classes.badge)}
+                            className="h-4 border border-border/70 bg-background/70 px-1 text-[9px]"
                           >
                             {notification.severity}
                           </Badge>
@@ -998,7 +829,7 @@ function ExecutiveNotificationsPopover({
                             variant="outline"
                             className="h-4 px-1 text-[9px] text-muted-foreground/80"
                           >
-                            {kindLabel}
+                            {notification.displayLabel ?? notification.kind}
                           </Badge>
                           <span className="ml-auto text-[10px] text-muted-foreground/60">
                             {notification.queuedAt
@@ -1814,10 +1645,10 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                       const programLanes = getProgramLanes(program);
                       const baseStatusLabel =
                         program.baseStatus && program.baseStatus !== program.currentStatus
-                          ? compactStatusLabel(program.baseStatus)
+                          ? program.baseStatus
                           : null;
                       const watchLabel = program.watch?.classification
-                        ? compactStatusLabel(program.watch.classification)
+                        ? program.watch.classification
                         : null;
                       const missingCount = program.closeoutSummary.missingItems.length;
 
@@ -1841,16 +1672,12 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                               <div className="min-w-0 flex-1 text-left">
                                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                                   <span className="truncate text-[11px] font-medium text-foreground/90">
-                                    {program.title}
+                                    {program.displayHeading}
                                   </span>
                                   <Badge
-                                    className={cn(
-                                      CHIP_CLASSNAME,
-                                      "border-0",
-                                      programStatusTone(program.status),
-                                    )}
+                                    className={cn(CHIP_CLASSNAME, program.displayTone ?? undefined)}
                                   >
-                                    {compactStatusLabel(program.status)}
+                                    {program.displayLabel ?? program.status}
                                   </Badge>
                                   {baseStatusLabel ? (
                                     <Badge variant="outline" className={CHIP_CLASSNAME}>
@@ -1899,7 +1726,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                                   <Badge
                                     variant="outline"
-                                    title={program.closeoutSummary.scopeSummary}
+                                    title={program.closeoutSummary.scopeSummary ?? undefined}
                                     className={CHIP_CLASSNAME}
                                   >
                                     scope

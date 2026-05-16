@@ -14,7 +14,32 @@ import {
   ModelSelection,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Option, Schema } from "effect";
+import { Effect, Exit, Option, Schema } from "effect";
+import { vi } from "vitest";
+
+vi.mock("../src/extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
+  bootstrapAgentsVxappOwnerManifest: vi.fn().mockResolvedValue({
+    ownerCommandManifest: [],
+  }),
+  fetchAgentsVxappAgentRuntimeSnapshot: vi.fn().mockResolvedValue({}),
+  fetchAgentsVxappBootstrapSidebarSnapshot: vi.fn().mockResolvedValue({}),
+  fetchAgentsVxappControlPlaneSnapshot: vi.fn().mockResolvedValue({}),
+  fetchAgentsVxappProgramsTodosSnapshot: vi.fn().mockResolvedValue({}),
+  fetchAgentsVxappRoleSessionRuntimePaths: vi.fn().mockResolvedValue({
+    workspaceRoot: null,
+    worktreePath: null,
+    currentBranch: null,
+  }),
+  fetchAgentsVxappWorkerRuntimeSnapshot: vi.fn().mockResolvedValue({}),
+  requestAgentsVxappApprovalRequest: vi.fn().mockResolvedValue({}),
+  requestAgentsVxappApprovalResponse: vi.fn().mockResolvedValue({}),
+  requestAgentsVxappProgramMutation: vi.fn().mockResolvedValue({}),
+  requestAgentsVxappThreadEventIngest: vi.fn().mockResolvedValue({}),
+  requestAgentsVxappThreadStatus: vi.fn().mockResolvedValue({}),
+  requestAgentsVxappTodoMutation: vi.fn().mockResolvedValue({}),
+  requestAgentsVxappUserInputResponse: vi.fn().mockResolvedValue({}),
+  resetAgentsVxappOwnerManifestForTests: vi.fn(),
+}));
 
 import type { TestTurnResponse } from "./TestProviderAdapter.integration.ts";
 import {
@@ -528,7 +553,7 @@ it.live("runs multi-turn file edits and persists checkpoint diffs", () =>
   ),
 );
 
-it.live("tracks approval requests and resolves pending approvals on user response", () =>
+it.live("surfaces approval request activity without relying on local pending approval truth", () =>
   withHarness((harness) =>
     Effect.gen(function* () {
       yield* seedProjectAndThread(harness);
@@ -574,37 +599,6 @@ it.live("tracks approval requests and resolves pending approvals on user respons
         thread.activities.some((activity) => activity.kind === "approval.requested"),
         true,
       );
-
-      const pendingRow = yield* harness.waitForPendingApproval(
-        "req-approval-1",
-        (row) => row.status === "pending" && row.decision === null,
-      );
-      assert.equal(pendingRow.status, "pending");
-
-      yield* harness.engine.dispatch({
-        type: "thread.approval.respond",
-        commandId: CommandId.makeUnsafe("cmd-approval-respond"),
-        threadId: THREAD_ID,
-        requestId: APPROVAL_REQUEST_ID,
-        decision: "accept",
-        createdAt: nowIso(),
-      });
-
-      const resolvedRow = yield* harness.waitForPendingApproval(
-        "req-approval-1",
-        (row) => row.status === "resolved" && row.decision === "accept",
-      );
-      assert.equal(resolvedRow.status, "resolved");
-      assert.equal(resolvedRow.decision, "accept");
-
-      const approvalResponses = yield* waitForSync(
-        () => harness.adapterHarness!.getApprovalResponses(THREAD_ID),
-        (responses) => responses.length === 1,
-        "provider approval response",
-      );
-      assert.equal(approvalResponses.length, 1);
-      assert.equal(approvalResponses[0]?.requestId, "req-approval-1");
-      assert.equal(approvalResponses[0]?.decision, "accept");
     }),
   ),
 );
@@ -1075,7 +1069,7 @@ it.live("recovers claudeAgent sessions after provider stopAll using persisted re
   ),
 );
 
-it.live("forwards claudeAgent approval responses to the provider session", () =>
+it.live("rejects local claudeAgent approval response commands at the owner boundary", () =>
   withHarness(
     (harness) =>
       Effect.gen(function* () {
@@ -1124,26 +1118,20 @@ it.live("forwards claudeAgent approval responses to the provider session", () =>
         );
         assert.equal(thread.session?.threadId, "thread-1");
 
-        yield* harness.engine.dispatch({
-          type: "thread.approval.respond",
-          commandId: CommandId.makeUnsafe("cmd-claude-approval-respond"),
-          threadId: THREAD_ID,
-          requestId: APPROVAL_REQUEST_ID,
-          decision: "accept",
-          createdAt: nowIso(),
-        });
-
-        yield* harness.waitForPendingApproval(
-          "req-approval-1",
-          (row) => row.status === "resolved" && row.decision === "accept",
+        const exit = yield* Effect.exit(
+          harness.engine.dispatch({
+            type: "thread.approval.respond",
+            commandId: CommandId.makeUnsafe("cmd-claude-approval-respond"),
+            threadId: THREAD_ID,
+            requestId: APPROVAL_REQUEST_ID,
+            decision: "accept",
+            createdAt: nowIso(),
+          }),
         );
-
-        const approvalResponses = yield* waitForSync(
-          () => harness.adapterHarness!.getApprovalResponses(THREAD_ID),
-          (responses) => responses.length === 1,
-          "claude provider approval response",
-        );
-        assert.equal(approvalResponses[0]?.decision, "accept");
+        assert.equal(Exit.isFailure(exit), true);
+        if (Exit.isFailure(exit)) {
+          assert.equal(String(exit.cause).includes("owned by agents-vxapp"), true);
+        }
       }),
     "claudeAgent",
   ),

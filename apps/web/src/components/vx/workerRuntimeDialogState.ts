@@ -57,31 +57,6 @@ export function deriveWorkerRuntimeDialogState(input: {
     };
   }
 
-  const sourceFiles = Object.values(input.data.sourceFiles);
-  const invalidSourceFile = sourceFiles.find(
-    (sourceFile) => sourceFile.status === "invalid-json" || sourceFile.status === "schema-error",
-  );
-  if (invalidSourceFile) {
-    return {
-      mode: "invalid",
-      message:
-        invalidSourceFile.detail?.trim() ||
-        `Runtime file '${invalidSourceFile.fileName}' is invalid.`,
-    };
-  }
-
-  const missingSourceFile = sourceFiles.find(
-    (sourceFile) => sourceFile.status === "missing" && sourceFile.detail?.trim(),
-  );
-  if (sourceFiles.every((sourceFile) => sourceFile.status === "missing")) {
-    return {
-      mode: "missing",
-      message:
-        missingSourceFile?.detail?.trim() ??
-        "Runtime details are not available for this worker yet.",
-    };
-  }
-
   return {
     mode: "ready",
     message: null,

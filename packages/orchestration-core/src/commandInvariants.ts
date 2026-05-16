@@ -10,11 +10,42 @@ import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./errors.ts";
 
+const AGENTS_VXAPP_OWNER_BOUNDARY_DETAIL =
+  "This command domain is owned by agents-vxapp. Use the Phase 08 agentsVxappOwnerClient path with manifest-owned owner command names instead of deciding it in orchestration-core.";
+
+const AGENTS_VXAPP_OWNED_COMMAND_TYPES = new Set<OrchestrationCommand["type"]>([
+  "program.create",
+  "program.scope.update",
+  "program.meta.update",
+  "program.repo-pr.upsert",
+  "program.local-validation.upsert",
+  "program.app-validation.upsert",
+  "program.observed-repo.upsert",
+  "program.post-flight.set",
+  "program.delete",
+  "program.notification.upsert",
+  "program.notification.consume",
+  "program.notification.drop",
+  "thread.approval.respond",
+  "thread.user-input.respond",
+  "thread.orchestrator-wake.upsert",
+]);
+
 function invariantError(commandType: string, detail: string): OrchestrationCommandInvariantError {
   return new OrchestrationCommandInvariantError({
     commandType,
     detail,
   });
+}
+
+export function isAgentsVxappOwnedCommandType(commandType: OrchestrationCommand["type"]): boolean {
+  return AGENTS_VXAPP_OWNED_COMMAND_TYPES.has(commandType);
+}
+
+export function rejectAgentsVxappOwnedCommand(input: {
+  readonly command: OrchestrationCommand;
+}): Effect.Effect<never, OrchestrationCommandInvariantError> {
+  return Effect.fail(invariantError(input.command.type, AGENTS_VXAPP_OWNER_BOUNDARY_DETAIL));
 }
 
 export function findThreadById(

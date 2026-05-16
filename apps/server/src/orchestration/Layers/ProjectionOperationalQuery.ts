@@ -339,6 +339,50 @@ function mapOwnerCtoAttentionItem(row: Record<string, unknown>): OrchestrationCt
   };
 }
 
+function mapOwnerProgram(program: {
+  readonly id: ProgramId;
+  readonly title: string;
+  readonly objective: string | null;
+  readonly status: string;
+  readonly executiveProjectId: ProjectId | null;
+  readonly executiveThreadId: ThreadId | null;
+  readonly currentOrchestratorThreadId: ThreadId | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+  readonly deletedAt: string | null;
+}): OrchestrationProgram {
+  return {
+    id: program.id,
+    title: program.title,
+    objective: program.objective,
+    status: program.status,
+    declaredRepos: [],
+    affectedAppTargets: [],
+    requiredLocalSuites: [],
+    requiredExternalE2ESuites: [],
+    requireDevelopmentDeploy: false,
+    requireExternalE2E: false,
+    requireCleanPostFlight: false,
+    requirePrPerRepo: false,
+    executiveProjectId: program.executiveProjectId ?? ProjectId.makeUnsafe("agents-vxapp-owner"),
+    executiveThreadId: program.executiveThreadId ?? ThreadId.makeUnsafe("agents-vxapp-owner"),
+    currentOrchestratorThreadId: program.currentOrchestratorThreadId,
+    repoPrs: [],
+    localValidation: [],
+    appValidations: [],
+    observedRepos: [],
+    postFlight: null,
+    createdAt: program.createdAt,
+    updatedAt: program.updatedAt,
+    completedAt: program.completedAt,
+    cancelReason: null,
+    cancelledAt: null,
+    supersededByProgramId: null,
+    deletedAt: program.deletedAt,
+  };
+}
+
 function applyBindingCurrentThreadToProjects(
   projects: ReadonlyArray<OrchestrationReadModel["projects"][number]>,
   bindingAuthority: { jasper: { currentThread: { id: string; projectId: string } } } | null,
@@ -509,15 +553,13 @@ function mergeProjectSummariesWithExternal(
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
-  ORCHESTRATION_PROJECTOR_NAMES.programs,
-  ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
   ORCHESTRATION_PROJECTOR_NAMES.threads,
   ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
-  ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
+  ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
 ] as const;
 
 function computeSnapshotSequence(
@@ -589,40 +631,48 @@ function mapThreadSummaryRows(input: {
     });
   }
 
-  return input.threads.map((row) => ({
-    ...resolveLocalThreadErrorPresentation({
-      archivedAt: row.archivedAt,
-      deletedAt: row.deletedAt,
-      latestTurnState: latestTurnByThreadId.get(row.threadId)?.state,
-      sessionStatus: sessionByThreadId.get(row.threadId)?.status,
-      sessionLastError: sessionByThreadId.get(row.threadId)?.lastError,
-    }),
-    id: row.threadId,
-    projectId: row.projectId,
-    title: row.title,
-    labels: row.labels,
-    modelSelection: row.modelSelection,
-    runtimeMode: row.runtimeMode,
-    interactionMode: row.interactionMode,
-    branch: row.branch,
-    worktreePath: row.worktreePath,
-    latestTurn: latestTurnByThreadId.get(row.threadId) ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    archivedAt: row.archivedAt ?? null,
-    deletedAt: row.deletedAt ?? null,
-    session: sessionByThreadId.get(row.threadId) ?? null,
-    orchestratorProjectId: row.orchestratorProjectId ?? undefined,
-    orchestratorThreadId: row.orchestratorThreadId ?? undefined,
-    parentThreadId: row.parentThreadId ?? undefined,
-    spawnRole: row.spawnRole ?? undefined,
-    spawnedBy: row.spawnedBy ?? undefined,
-    workflowId: row.workflowId ?? undefined,
-    programId: row.programId ?? undefined,
-    executiveProjectId: row.executiveProjectId ?? undefined,
-    executiveThreadId: row.executiveThreadId ?? undefined,
-    sessionWorkerThreadCount: row.sessionWorkerThreadCount ?? undefined,
-  }));
+  const providerLocalThreads = input.threads.filter(
+    (row) => row.worktreePath === null || !isVxappWorkspaceRoot(row.worktreePath),
+  );
+
+  return providerLocalThreads.map((row) =>
+    Object.assign(
+      resolveLocalThreadErrorPresentation({
+        archivedAt: row.archivedAt,
+        deletedAt: row.deletedAt,
+        latestTurnState: latestTurnByThreadId.get(row.threadId)?.state,
+        sessionStatus: sessionByThreadId.get(row.threadId)?.status,
+        sessionLastError: sessionByThreadId.get(row.threadId)?.lastError,
+      }),
+      {
+        id: row.threadId,
+        projectId: row.projectId,
+        title: row.title,
+        labels: row.labels,
+        modelSelection: row.modelSelection,
+        runtimeMode: row.runtimeMode,
+        interactionMode: row.interactionMode,
+        branch: row.branch,
+        worktreePath: row.worktreePath,
+        latestTurn: latestTurnByThreadId.get(row.threadId) ?? null,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        archivedAt: row.archivedAt ?? null,
+        deletedAt: row.deletedAt ?? null,
+        session: sessionByThreadId.get(row.threadId) ?? null,
+        orchestratorProjectId: row.orchestratorProjectId ?? undefined,
+        orchestratorThreadId: row.orchestratorThreadId ?? undefined,
+        parentThreadId: row.parentThreadId ?? undefined,
+        spawnRole: row.spawnRole ?? undefined,
+        spawnedBy: row.spawnedBy ?? undefined,
+        workflowId: row.workflowId ?? undefined,
+        programId: row.programId ?? undefined,
+        executiveProjectId: row.executiveProjectId ?? undefined,
+        executiveThreadId: row.executiveThreadId ?? undefined,
+        sessionWorkerThreadCount: row.sessionWorkerThreadCount ?? undefined,
+      },
+    ),
+  );
 }
 
 function emptyThreadCoverage() {
@@ -1869,6 +1919,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
         FROM projection_turns
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count IS NOT NULL
+          AND completed_at IS NOT NULL
         ORDER BY checkpoint_turn_count ASC
       `,
   });
@@ -1977,14 +2028,6 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             ),
           );
           const externalSnapshot = yield* getExternalSnapshot();
-          const programRows = yield* listProgramRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionOperationalQuery.getCurrentState:listPrograms:query",
-                "ProjectionOperationalQuery.getCurrentState:listPrograms:decodeRows",
-              ),
-            ),
-          );
           const vxappBacked = hasVxappBackedProjectRows(projectRows);
           let bindingAuthority: {
             jasper: {
@@ -1996,6 +2039,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           } | null = null;
           let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
           let ctoAttentionRows: ReadonlyArray<OrchestrationCtoAttentionItem> = [];
+          let programs: ReadonlyArray<OrchestrationProgram> = [];
           if (vxappBacked) {
             const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
               Effect.flatMap((controlPlaneOption) =>
@@ -2008,12 +2052,17 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
                 }),
               ),
             );
-            const [bindingAuthorityExport, notificationSummaryExport, attentionSummaryExport] =
-              yield* Effect.all([
-                controlPlane.getBindingAuthorityExport(),
-                controlPlane.getNotificationSummaryExport(),
-                controlPlane.getAttentionSummaryExport(),
-              ]);
+            const [
+              bindingAuthorityExport,
+              notificationSummaryExport,
+              attentionSummaryExport,
+              ownerSnapshot,
+            ] = yield* Effect.all([
+              controlPlane.getBindingAuthorityExport(),
+              controlPlane.getNotificationSummaryExport(),
+              controlPlane.getAttentionSummaryExport(),
+              controlPlane.getSnapshot({}),
+            ]);
             bindingAuthority = {
               jasper: {
                 currentThread: {
@@ -2028,7 +2077,16 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             ctoAttentionRows = selectOperationalCtoAttentionItems(
               attentionSummaryExport.attention.map(mapOwnerCtoAttentionItem),
             );
+            programs = ownerSnapshot.programs.map(mapOwnerProgram);
           } else {
+            const programRows = yield* listProgramRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionOperationalQuery.getCurrentState:listPrograms:query",
+                  "ProjectionOperationalQuery.getCurrentState:listPrograms:decodeRows",
+                ),
+              ),
+            );
             const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
               Effect.mapError(
                 toPersistenceSqlOrDecodeError(
@@ -2066,6 +2124,9 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               updatedAt: row.updatedAt,
             }));
             ctoAttentionRows = selectOperationalCtoAttentionItems(localCtoAttentionRows);
+            programs = programRows.map((row) =>
+              toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
+            );
           }
 
           const threadRows = yield* listCurrentThreadRows(undefined).pipe(
@@ -2093,8 +2154,23 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             ),
           );
 
+          const vxappBackedProjectIds = new Set(
+            projectRows
+              .filter((row) => isVxappWorkspaceRoot(row.workspaceRoot))
+              .map((row) => row.projectId),
+          );
+          const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
+          const localCurrentAuthorityThreadRows = vxappBacked
+            ? threadRows.filter(
+                (row) =>
+                  !vxappBackedProjectIds.has(row.projectId) &&
+                  !externalIndex.threadIds.has(row.threadId) &&
+                  !(row.worktreePath !== null && externalIndex.worktreePaths.has(row.worktreePath)),
+              )
+            : threadRows;
+
           const threadSummaries = mapThreadSummaryRows({
-            threads: threadRows,
+            threads: localCurrentAuthorityThreadRows,
             sessions: sessionRows,
             latestTurns: latestTurnRows,
           });
@@ -2110,7 +2186,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           const updatedAt =
             [
               ...mergedProjects.map((project) => project.updatedAt),
-              ...programRows.map((row) => row.updatedAt),
+              ...programs.map((program) => program.updatedAt),
               ...programNotificationRows.map((row) => row.updatedAt),
               ...ctoAttentionRows.map((row) => row.updatedAt),
               ...stateRows.map((row) => row.updatedAt),
@@ -2132,10 +2208,6 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             ]
               .toSorted()
               .at(-1) ?? new Date(0).toISOString();
-
-          const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) =>
-            toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
-          );
 
           const readModel = {
             snapshotSequence: computeSnapshotSequence(stateRows),

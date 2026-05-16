@@ -178,6 +178,34 @@ export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedErrorC
   }
 }
 
+function toCodexCommandApprovalDecision(
+  decision: ProviderApprovalDecision,
+): EffectCodexSchema.CommandExecutionRequestApprovalResponse__CommandExecutionApprovalDecision {
+  switch (decision) {
+    case "accept":
+    case "acceptForSession":
+    case "decline":
+    case "cancel":
+      return decision;
+    default:
+      throw new Error(`Unsupported command approval decision: ${decision}`);
+  }
+}
+
+function toCodexFileChangeApprovalDecision(
+  decision: ProviderApprovalDecision,
+): EffectCodexSchema.FileChangeRequestApprovalResponse__FileChangeApprovalDecision {
+  switch (decision) {
+    case "accept":
+    case "acceptForSession":
+    case "decline":
+    case "cancel":
+      return decision;
+    default:
+      throw new Error(`Unsupported file-change approval decision: ${decision}`);
+  }
+}
+
 interface PendingApproval {
   readonly requestId: ApprovalRequestId;
   readonly jsonRpcId: string;
@@ -939,7 +967,7 @@ export const makeCodexSessionRuntime = (
           ),
         );
         return {
-          decision: resolved,
+          decision: toCodexCommandApprovalDecision(resolved),
         } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
       }),
     );
@@ -995,7 +1023,7 @@ export const makeCodexSessionRuntime = (
           ),
         );
         return {
-          decision: resolved,
+          decision: toCodexFileChangeApprovalDecision(resolved),
         } satisfies EffectCodexSchema.FileChangeRequestApprovalResponse;
       }),
     );

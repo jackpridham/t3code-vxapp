@@ -35,6 +35,7 @@ import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
+import type { ProjectionPendingApproval } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
 import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
@@ -184,20 +185,9 @@ export interface OrchestrationIntegrationHarness {
   ) => Effect.Effect<ReadonlyArray<OrchestrationEvent>, never>;
   readonly waitForPendingApproval: (
     requestId: string,
-    predicate: (row: {
-      readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-      readonly resolvedAt: string | null;
-    }) => boolean,
+    predicate: (row: ProjectionPendingApproval) => boolean,
     timeoutMs?: number,
-  ) => Effect.Effect<
-    {
-      readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-      readonly resolvedAt: string | null;
-    },
-    never
-  >;
+  ) => Effect.Effect<ProjectionPendingApproval, never>;
   readonly waitForReceipt: {
     (
       predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
@@ -425,31 +415,14 @@ export const makeOrchestrationIntegrationHarness = (
             Effect.map((row) =>
               Option.match(row, {
                 onNone: () => null,
-                onSome: (value) => ({
-                  status: value.status,
-                  decision: value.decision,
-                  resolvedAt: value.resolvedAt,
-                }),
+                onSome: (value) => value,
               }),
             ),
           ),
-        (
-          row,
-        ): row is {
-          readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-          readonly resolvedAt: string | null;
-        } => row !== null && predicate(row),
+        (row): row is ProjectionPendingApproval => row !== null && predicate(row),
         `pending approval '${requestId}'`,
         timeoutMs,
-      ) as Effect.Effect<
-        {
-          readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-          readonly resolvedAt: string | null;
-        },
-        never
-      >;
+      ) as Effect.Effect<ProjectionPendingApproval, never>;
 
     function waitForReceipt(
       predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,

@@ -23,6 +23,7 @@ import {
   resolveProgramOrchestratorLabel,
 } from "./programsTodosModel";
 import { ProgramOverviewCard } from "./ProgramOverviewCard";
+import { resolveProgramDisplay } from "./programDisplay";
 
 const EMPTY_PROGRAMS = [] as const;
 const EMPTY_TODOS = [] as const;
@@ -84,6 +85,7 @@ export function ProgramInfoDialog(props: {
 
   const program = programs.find((entry) => entry.id === props.programId) ?? null;
   const todoCount = todos.filter((todo) => todo.programId === props.programId).length;
+  const programDisplay = program ? resolveProgramDisplay(program) : null;
 
   return (
     <Dialog onOpenChange={props.onOpenChange} open={props.open}>
@@ -118,12 +120,14 @@ export function ProgramInfoDialog(props: {
           ) : (
             <ProgramOverviewCard
               currentTodoId={currentTodoByProgramId.get(program.id) ?? null}
-              description={program.objective ?? null}
+              description={programDisplay?.summary ?? null}
               executiveLabel={resolveProgramExecutiveLabel(program, executiveOptions)}
               orchestratorLabel={resolveProgramOrchestratorLabel(program, orchestratorOptions)}
               scopeSummary={readProgramScopeSummary(program)}
-              status={program.status}
-              title={program.title}
+              status={
+                programDisplay ? { label: programDisplay.label, tone: programDisplay.tone } : null
+              }
+              title={programDisplay?.heading ?? program.title}
               totalTodoCount={todoCount}
               verdict={readProgramCloseoutVerdict(program)}
             />

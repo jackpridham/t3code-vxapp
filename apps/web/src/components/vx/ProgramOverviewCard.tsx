@@ -9,9 +9,9 @@ import {
   CardTitle,
 } from "~/components/ui/card";
 import { cn } from "~/lib/utils";
-import { formatProgramStatusLabel, programStatusTone } from "./programDisplay";
+import type { ProgramDisplayFields } from "./programDisplay";
 
-export { formatProgramStatusLabel, programStatusTone } from "./programDisplay";
+export type ProgramStatusBadge = Pick<ProgramDisplayFields, "label" | "tone">;
 
 export type ProgramOverviewCardProps = {
   action?: ReactNode;
@@ -21,7 +21,7 @@ export type ProgramOverviewCardProps = {
   executiveLabel: string | null;
   orchestratorLabel: string | null;
   scopeSummary: string | null;
-  status: string | null;
+  status: ProgramStatusBadge | null;
   title: string;
   totalTodoCount: number;
   verdict: string | null;
@@ -46,9 +46,14 @@ export function ProgramOverviewCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <CardTitle>{title}</CardTitle>
-            {status ? (
-              <Badge className={cn("h-5 border-0 px-1.5 text-[10px]", programStatusTone(status))}>
-                {formatProgramStatusLabel(status)}
+            {status?.label ? (
+              <Badge
+                className={cn(
+                  "h-5 border px-1.5 text-[10px]",
+                  status.tone ?? "border-border/70 bg-background/70 text-foreground/85",
+                )}
+              >
+                {status.label}
               </Badge>
             ) : null}
             <Badge variant="outline" className="h-5 px-1.5 text-[10px]">

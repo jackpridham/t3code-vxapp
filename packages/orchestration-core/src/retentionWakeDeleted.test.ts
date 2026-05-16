@@ -191,7 +191,7 @@ describe("orchestration core retention, wake, and deleted edge cases", () => {
     expect(thread.activities[0]?.id).toBe(EventId.makeUnsafe("activity-0005"));
   });
 
-  it("upserts wake items by id, orders them by queue time, and touches the orchestrator thread", async () => {
+  it("does not rebuild wake current truth from local wake events after the owner cutover", async () => {
     const projectId = ProjectId.makeUnsafe("project-retention");
     const orchestratorThreadId = ThreadId.makeUnsafe("thread-retention");
     let model = await fixtureModel();
@@ -270,17 +270,11 @@ describe("orchestration core retention, wake, and deleted edge cases", () => {
       },
     });
 
-    expect(model.orchestratorWakeItems.map((item) => item.wakeId)).toEqual([
-      "wake-earlier",
-      "wake-later",
-    ]);
-    expect(model.orchestratorWakeItems[1]).toMatchObject({
-      wakeId: "wake-later",
-      state: "consumed",
-      summary: "Later consumed",
-      consumeReason: "worker_rechecked",
+    expect(model.orchestratorWakeItems).toEqual([]);
+    expect(model.threads[0]).toMatchObject({
+      id: orchestratorThreadId,
+      title: "Retention Thread",
     });
-    expect(model.threads[0]?.updatedAt).toBe(now);
   });
 
   it("rejects commands against deleted projects and threads while preserving soft-delete id reservations", async () => {

@@ -441,7 +441,37 @@ describe("orchestration projector", () => {
     expect(placeholder.threads[0]?.latestTurn).toEqual(ready.threads[0]?.latestTurn);
   });
 
-  it("projects program notifications into CTO attention and mirrors consume/drop updates", async () => {
+  it("throws for unknown owner-defined checkpoint statuses", async () => {
+    const now = "2026-04-22T00:00:00.000Z";
+    const threadId = ThreadId.makeUnsafe("thread-checkpoint-unknown");
+    const turnId = TurnId.makeUnsafe("turn-checkpoint-unknown");
+    const model = await modelWithProjectAndThread({ now, threadId });
+
+    await expect(
+      applyEvent(model, {
+        sequence: 3,
+        type: "thread.turn-diff-completed",
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: "cmd-unknown-checkpoint",
+        payload: {
+          threadId,
+          turnId,
+          checkpointTurnCount: 1,
+          checkpointRef: "checkpoint-owner-defined",
+          status: "owner_defined_future_status",
+          files: [],
+          assistantMessageId: null,
+          completedAt: now,
+        },
+      }),
+    ).rejects.toThrowError(
+      "Unsupported checkpoint status for latest turn state: owner_defined_future_status",
+    );
+  });
+
+  it("does not project Program, notification, or CTO attention owner truth locally", async () => {
     const now = "2026-04-22T00:00:00.000Z";
     const projectId = ProjectId.makeUnsafe("project-program");
     const executiveThreadId = ThreadId.makeUnsafe("thread-executive");
@@ -495,13 +525,9 @@ describe("orchestration projector", () => {
       },
     });
 
-    expect(withNotification.programNotifications).toHaveLength(1);
-    expect(withNotification.ctoAttentionItems).toHaveLength(1);
-    expect(withNotification.ctoAttentionItems![0]).toMatchObject({
-      notificationId,
-      state: "required",
-      kind: "blocked",
-    });
+    expect(withNotification.programs).toEqual([]);
+    expect(withNotification.programNotifications).toEqual([]);
+    expect(withNotification.ctoAttentionItems).toEqual([]);
 
     const consumedAt = "2026-04-22T00:01:00.000Z";
     const consumed = await applyEvent(withNotification, {
@@ -520,15 +546,8 @@ describe("orchestration projector", () => {
       },
     });
 
-    expect(consumed.programNotifications![0]).toMatchObject({
-      state: "consumed",
-      consumedAt,
-      consumeReason: "handled",
-    });
-    expect(consumed.ctoAttentionItems![0]).toMatchObject({
-      state: "acknowledged",
-      acknowledgedAt: consumedAt,
-    });
+    expect(consumed.programNotifications).toEqual([]);
+    expect(consumed.ctoAttentionItems).toEqual([]);
 
     const droppedAt = "2026-04-22T00:02:00.000Z";
     const dropped = await applyEvent(consumed, {
@@ -547,14 +566,7 @@ describe("orchestration projector", () => {
       },
     });
 
-    expect(dropped.programNotifications![0]).toMatchObject({
-      state: "dropped",
-      droppedAt,
-      dropReason: "superseded",
-    });
-    expect(dropped.ctoAttentionItems![0]).toMatchObject({
-      state: "dropped",
-      droppedAt,
-    });
+    expect(dropped.programNotifications).toEqual([]);
+    expect(dropped.ctoAttentionItems).toEqual([]);
   });
 });

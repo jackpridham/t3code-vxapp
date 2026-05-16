@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   MessageId,
   CommandId,
@@ -133,6 +134,12 @@ const messageSendCommand: OrchestrationCommand = {
 };
 
 describe("commandInvariants", () => {
+  it("keeps approval and user-input authority outside local invariants", () => {
+    const source = readFileSync(new URL("./commandInvariants.ts", import.meta.url), "utf8");
+    expect(source).not.toContain("approval");
+    expect(source).not.toContain("user-input");
+  });
+
   it("finds threads by id and project", () => {
     expect(findThreadById(readModel, ThreadId.makeUnsafe("thread-1"))?.projectId).toBe("project-a");
     expect(findThreadById(readModel, ThreadId.makeUnsafe("missing"))).toBeUndefined();

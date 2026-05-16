@@ -25,6 +25,7 @@ import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlError } from "effect/unstable/sql";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -91,6 +92,13 @@ function now() {
 }
 
 describe("OrchestrationEngine", () => {
+  it("keeps command receipts as plumbing instead of importing owner approval authority", () => {
+    const source = readFileSync(new URL("./OrchestrationEngine.ts", import.meta.url), "utf8");
+    expect(source).not.toContain("requestAgentsVxappApprovalRequest");
+    expect(source).not.toContain("requestAgentsVxappApprovalResponse");
+    expect(source).not.toContain("requestAgentsVxappUserInputResponse");
+  });
+
   it("hydrates startup read model from projections without replaying the full event store", async () => {
     let readAllCalls = 0;
     const eventStore: OrchestrationEventStoreShape = {

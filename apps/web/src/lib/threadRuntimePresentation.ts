@@ -2,11 +2,7 @@ type ThreadErrorPresentation = {
   hasActiveError: boolean;
   activeError: string | null | undefined;
   historicalError: string | null | undefined;
-  errorPresentationSource:
-    | "none"
-    | "active_session_last_error"
-    | "active_runtime_failure"
-    | "historical_session_last_error";
+  errorPresentationSource: string;
 };
 
 function requireThreadErrorPresentation(input: ThreadErrorPresentation): asserts input is {

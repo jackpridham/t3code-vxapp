@@ -1,236 +1,98 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
-import { Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { Effect } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
-import { OrchestrationProjectionOperationalQueryLive } from "../../orchestration/Layers/ProjectionOperationalQuery.ts";
+vi.mock("../../extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
+  fetchAgentsVxappWorkerRuntimeSnapshot: vi.fn(),
+}));
+
+import { fetchAgentsVxappWorkerRuntimeSnapshot } from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 import { WorkerRuntime } from "../Services/WorkerRuntime.ts";
 import { WorkerRuntimeLive } from "./WorkerRuntime.ts";
 
-const workerRuntimeLayer = it.layer(
-  WorkerRuntimeLive.pipe(
-    Layer.provideMerge(
-      OrchestrationProjectionOperationalQueryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-    ),
-    Layer.provideMerge(NodeServices.layer),
-  ),
-);
+const mockedWorkerSnapshot = vi.mocked(fetchAgentsVxappWorkerRuntimeSnapshot);
 
-workerRuntimeLayer("WorkerRuntime", (it) => {
-  it.effect(
-    "falls back to the worker project's workspace root when thread worktreePath is null",
-    () =>
+const ownerWorkerSnapshot = {
+  threadId: ThreadId.makeUnsafe("thread-worker"),
+  worktreePath: "/tmp/owner-worktree",
+  runtimeDir: "/tmp/owner-worktree/.agents/runtime",
+  sourceFiles: {
+    contextPlan: {
+      fileName: "context-plan.json",
+      absolutePath: "/tmp/owner-worktree/.agents/runtime/context-plan.json",
+      status: "loaded",
+      detail: null,
+    },
+    dispatchContract: {
+      fileName: "dispatch-contract.json",
+      absolutePath: "/tmp/owner-worktree/.agents/runtime/dispatch-contract.json",
+      status: "loaded",
+      detail: null,
+    },
+    installedPacks: {
+      fileName: "installed-packs.json",
+      absolutePath: "/tmp/owner-worktree/.agents/runtime/installed-packs.json",
+      status: "loaded",
+      detail: null,
+    },
+    instructionStackAudit: {
+      fileName: "instruction-stack-audit.json",
+      absolutePath: "/tmp/owner-worktree/.agents/runtime/instruction-stack-audit.json",
+      status: "loaded",
+      detail: null,
+    },
+  },
+  summary: {
+    repo: "owner-repo",
+    taskClass: "owner-task-class",
+    contextMode: "owner-context-mode",
+    closeoutAuthority: "owner-closeout-authority",
+    validationProfile: null,
+    selectedPacks: [],
+    allowedCapabilities: [],
+    forbiddenCapabilities: [],
+    conflicts: [],
+    warnings: [],
+    repoClaude: null,
+    legacyGlobalSkills: null,
+    workspace: "/tmp/owner-worktree",
+    runtimeDir: "/tmp/owner-worktree/.agents/runtime",
+    skillsDir: null,
+    agentsSkillsDir: null,
+    auditStatus: "clean",
+    auditFindings: [],
+    packAuditStatus: null,
+    packAuditIssueCount: 0,
+    packCount: 0,
+  },
+  packs: [],
+  raw: {
+    contextPlan: null,
+    dispatchContract: null,
+    installedPacks: null,
+    instructionStackAudit: null,
+  },
+};
+
+afterEach(() => {
+  mockedWorkerSnapshot.mockReset();
+});
+
+describe("WorkerRuntimeLive", () => {
+  it("uses owner runtime snapshot results instead of direct runtime-file reads", async () => {
+    mockedWorkerSnapshot.mockResolvedValueOnce(ownerWorkerSnapshot);
+
+    const snapshot = await Effect.runPromise(
       Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
         const workerRuntime = yield* WorkerRuntime;
-        const worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-worker-project-root-"));
-        const runtimeDir = path.join(worktreePath, ".agents", "runtime");
-        fs.mkdirSync(runtimeDir, { recursive: true });
-        fs.writeFileSync(
-          path.join(runtimeDir, "dispatch-contract.json"),
-          JSON.stringify({
-            schema_version: "1.0.0",
-            repo: "project-root-repo",
-            taskClass: "source-editing-implementation",
-            contextMode: "isolated",
-            closeoutAuthority: "code_tests",
-            validationProfile: null,
-            selectedPacks: [],
-            allowedCapabilities: [],
-            forbiddenCapabilities: [],
-            conflicts: [],
-            warnings: [],
-          }),
-          "utf8",
-        );
+        return yield* workerRuntime.getSnapshot({ threadId: ThreadId.makeUnsafe("thread-worker") });
+      }).pipe(Effect.provide(WorkerRuntimeLive)),
+    );
 
-        yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          hooks_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-worker-runtime-root',
-          'Worker Runtime Project Root',
-          ${worktreePath},
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '[]',
-          '2026-05-10T00:00:00.000Z',
-          '2026-05-10T00:00:01.000Z',
-          NULL
-        )
-      `;
-
-        yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          labels_json,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          spawn_role,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-worker-runtime-root',
-          'project-worker-runtime-root',
-          'Worker Runtime Thread',
-          '[]',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
-          NULL,
-          'worker',
-          '2026-05-10T00:00:02.000Z',
-          '2026-05-10T00:00:03.000Z',
-          NULL,
-          NULL
-        )
-      `;
-
-        const snapshot = yield* workerRuntime.getSnapshot({
-          threadId: ThreadId.makeUnsafe("thread-worker-runtime-root"),
-        });
-
-        assert.equal(snapshot.worktreePath, worktreePath);
-        assert.equal(snapshot.summary.repo, "project-root-repo");
-        assert.equal(snapshot.sourceFiles.dispatchContract.status, "loaded");
-      }),
-  );
-
-  it.effect("prefers the dispatch contract repo over the context plan repo", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const workerRuntime = yield* WorkerRuntime;
-      const worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-worker-runtime-"));
-      const runtimeDir = path.join(worktreePath, ".agents", "runtime");
-      fs.mkdirSync(runtimeDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(runtimeDir, "context-plan.json"),
-        JSON.stringify({
-          schema_version: "1.0.0",
-          repo: "context-plan-repo",
-          taskClass: "source-editing-implementation",
-          contextMode: "isolated",
-          closeoutAuthority: "code_tests",
-          selectedPacks: [],
-          allowedCapabilities: [],
-          forbiddenCapabilities: [],
-          conflicts: [],
-          warnings: [],
-        }),
-        "utf8",
-      );
-      fs.writeFileSync(
-        path.join(runtimeDir, "dispatch-contract.json"),
-        JSON.stringify({
-          schema_version: "1.0.0",
-          repo: "dispatch-contract-repo",
-          taskClass: "source-editing-implementation",
-          contextMode: "isolated",
-          closeoutAuthority: "code_tests",
-          validationProfile: null,
-          selectedPacks: [],
-          allowedCapabilities: [],
-          forbiddenCapabilities: [],
-          conflicts: [],
-          warnings: [],
-        }),
-        "utf8",
-      );
-
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          hooks_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-worker-runtime',
-          'Worker Runtime Project',
-          ${worktreePath},
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '[]',
-          '2026-05-10T00:00:00.000Z',
-          '2026-05-10T00:00:01.000Z',
-          NULL
-        )
-      `;
-
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          labels_json,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          spawn_role,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-worker-runtime',
-          'project-worker-runtime',
-          'Worker Runtime Thread',
-          '[]',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          ${worktreePath},
-          NULL,
-          'worker',
-          '2026-05-10T00:00:02.000Z',
-          '2026-05-10T00:00:03.000Z',
-          NULL,
-          NULL
-        )
-      `;
-
-      const snapshot = yield* workerRuntime.getSnapshot({
-        threadId: ThreadId.makeUnsafe("thread-worker-runtime"),
-      });
-
-      assert.equal(snapshot.summary.repo, "dispatch-contract-repo");
-      assert.equal(snapshot.sourceFiles.contextPlan.status, "loaded");
-      assert.equal(snapshot.sourceFiles.dispatchContract.status, "loaded");
-    }),
-  );
+    expect(mockedWorkerSnapshot).toHaveBeenCalledWith({
+      threadId: ThreadId.makeUnsafe("thread-worker"),
+    });
+    expect(snapshot.summary.repo).toBe("owner-repo");
+    expect(snapshot.worktreePath).toBe("/tmp/owner-worktree");
+  });
 });

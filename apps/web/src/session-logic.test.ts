@@ -145,6 +145,41 @@ describe("derivePendingApprovals", () => {
     expect(derivePendingApprovals(activities)).toEqual([]);
   });
 
+  it("does not clear pending approvals on ordinary provider failure noise", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "approval-open-noise",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Command approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-noise-approval",
+          requestKind: "command",
+        },
+      }),
+      makeActivity({
+        id: "approval-failed-noise",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "provider.approval.respond.failed",
+        summary: "Provider approval response failed",
+        tone: "error",
+        payload: {
+          requestId: "req-noise-approval",
+          detail: "Owner command failed before provider dispatch.",
+        },
+      }),
+    ];
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: "req-noise-approval",
+        requestKind: "command",
+        createdAt: "2026-02-23T00:00:01.000Z",
+      },
+    ]);
+  });
+
   it("clears stale pending approvals when the backend marks them stale after restart", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -301,6 +336,65 @@ describe("derivePendingUserInputs", () => {
     ];
 
     expect(derivePendingUserInputs(activities)).toEqual([]);
+  });
+
+  it("does not clear pending user-input prompts on ordinary provider failure noise", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "user-input-open-noise",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {
+          requestId: "req-user-input-noise",
+          questions: [
+            {
+              id: "sandbox_mode",
+              header: "Sandbox",
+              question: "Which mode should be used?",
+              options: [
+                {
+                  label: "workspace-write",
+                  description: "Allow workspace writes only",
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      makeActivity({
+        id: "user-input-failed-noise",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "provider.user-input.respond.failed",
+        summary: "Provider user input response failed",
+        tone: "error",
+        payload: {
+          requestId: "req-user-input-noise",
+          detail: "Owner command failed before provider dispatch.",
+        },
+      }),
+    ];
+
+    expect(derivePendingUserInputs(activities)).toEqual([
+      {
+        requestId: "req-user-input-noise",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        questions: [
+          {
+            id: "sandbox_mode",
+            header: "Sandbox",
+            question: "Which mode should be used?",
+            options: [
+              {
+                label: "workspace-write",
+                description: "Allow workspace writes only",
+              },
+            ],
+          },
+        ],
+      },
+    ]);
   });
 });
 

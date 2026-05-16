@@ -4,8 +4,6 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
-  ProgramId,
-  ProgramNotificationId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -72,7 +70,6 @@ describe("orchestration core command/projection roundtrips", () => {
     let readModel = createEmptyReadModel(now);
     const projectId = ProjectId.makeUnsafe("project-roundtrip");
     const threadId = ThreadId.makeUnsafe("thread-roundtrip");
-    const programId = ProgramId.makeUnsafe("program-roundtrip");
 
     ({ model: readModel } = await dispatch(readModel, {
       type: "project.create",
@@ -139,40 +136,8 @@ describe("orchestration core command/projection roundtrips", () => {
       createdAt: now,
     }));
 
-    ({ model: readModel } = await dispatch(readModel, {
-      type: "program.create",
-      commandId: CommandId.makeUnsafe("cmd-program-create"),
-      programId,
-      title: "Roundtrip Program",
-      objective: "Coordinate the work.",
-      declaredRepos: ["t3code-vxapp"],
-      affectedAppTargets: ["web"],
-      requiredLocalSuites: [],
-      requiredExternalE2ESuites: [],
-      requireDevelopmentDeploy: false,
-      requireExternalE2E: false,
-      requireCleanPostFlight: true,
-      requirePrPerRepo: true,
-      executiveProjectId: projectId,
-      executiveThreadId: threadId,
-      currentOrchestratorThreadId: threadId,
-      createdAt: now,
-    }));
-
-    ({ model: readModel } = await dispatch(readModel, {
-      type: "program.notification.upsert",
-      commandId: CommandId.makeUnsafe("cmd-program-notify"),
-      notificationId: ProgramNotificationId.makeUnsafe("notification-roundtrip"),
-      programId,
-      kind: "blocked",
-      severity: "critical",
-      summary: "Worker is blocked.",
-      evidence: { workerThreadId: "thread-worker" },
-      createdAt: now,
-    }));
-
     expect(readModel).toMatchObject({
-      snapshotSequence: 8,
+      snapshotSequence: 6,
       projects: [
         {
           id: projectId,
@@ -182,39 +147,9 @@ describe("orchestration core command/projection roundtrips", () => {
           deletedAt: null,
         },
       ],
-      programs: [
-        {
-          id: programId,
-          title: "Roundtrip Program",
-          status: "active",
-          declaredRepos: ["t3code-vxapp"],
-          requireCleanPostFlight: true,
-          requirePrPerRepo: true,
-          executiveProjectId: projectId,
-          executiveThreadId: threadId,
-          currentOrchestratorThreadId: threadId,
-          deletedAt: null,
-        },
-      ],
-      programNotifications: [
-        {
-          notificationId: ProgramNotificationId.makeUnsafe("notification-roundtrip"),
-          programId,
-          kind: "blocked",
-          severity: "critical",
-          state: "pending",
-        },
-      ],
-      ctoAttentionItems: [
-        {
-          notificationId: ProgramNotificationId.makeUnsafe("notification-roundtrip"),
-          programId,
-          kind: "blocked",
-          state: "required",
-          sourceThreadId: "thread-worker",
-          sourceRole: "worker",
-        },
-      ],
+      programs: [],
+      programNotifications: [],
+      ctoAttentionItems: [],
       threads: [
         {
           id: threadId,

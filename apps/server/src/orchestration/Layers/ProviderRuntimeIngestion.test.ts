@@ -42,6 +42,8 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
+import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
+import * as agentsVxappOwnerClient from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
@@ -137,6 +139,18 @@ function createProviderServiceHarness() {
   };
 }
 
+function ensureDefaultOwnerHelperSpies(): void {
+  if (!vi.isMockFunction(agentsVxappOwnerClient.requestAgentsVxappApprovalRequest)) {
+    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalRequest").mockResolvedValue({});
+  }
+  if (!vi.isMockFunction(agentsVxappOwnerClient.requestAgentsVxappThreadEventIngest)) {
+    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadEventIngest").mockResolvedValue({});
+  }
+  if (!vi.isMockFunction(agentsVxappOwnerClient.requestAgentsVxappThreadStatus)) {
+    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadStatus").mockResolvedValue({});
+  }
+}
+
 async function waitForThread(
   engine: OrchestrationEngineShape,
   predicate: (thread: ProviderRuntimeTestThread) => boolean,
@@ -181,6 +195,7 @@ describe("ProviderRuntimeIngestion", () => {
   }
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (scope) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
@@ -198,7 +213,9 @@ describe("ProviderRuntimeIngestion", () => {
     serverSettings?: Partial<ServerSettings>;
     projectHooksLayer?: Layer.Layer<ProjectHooksService, never>;
     autoStart?: boolean;
+    vxappBacked?: boolean;
   }) {
+    ensureDefaultOwnerHelperSpies();
     const workspaceRoot = makeTempDir("t3-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
@@ -256,8 +273,10 @@ describe("ProviderRuntimeIngestion", () => {
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
-        branch: null,
-        worktreePath: null,
+        branch: options?.vxappBacked ? "t3code/test-thread-1" : null,
+        worktreePath: options?.vxappBacked
+          ? path.join(AGENTS_VXAPP_ROOT, "worktrees/thread-1")
+          : null,
         createdAt,
       }),
     );
@@ -725,6 +744,66 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("ready");
     expect(thread.session?.lastError).toBeNull();
+  });
+
+  it("checks owner thread status before vxapp-backed lifecycle updates become authoritative", async () => {
+    const threadStatusSpy = vi
+      .spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadStatus")
+      .mockResolvedValue({});
+    const harness = await createHarness({ vxappBacked: true });
+    const waitingAt = new Date().toISOString();
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-session-state-owner-sync"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: waitingAt,
+      payload: {
+        state: "waiting",
+        reason: "awaiting approval",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "running" && entry.session?.activeTurnId === null,
+    );
+
+    expect(threadStatusSpy).toHaveBeenCalledWith({ threadId: "thread-1" });
+    expect(thread.session?.status).toBe("running");
+  });
+
+  it("surfaces owner thread-status failures instead of applying vxapp-backed lifecycle state", async () => {
+    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadStatus").mockRejectedValue(
+      new Error("owner thread status failed"),
+    );
+    const harness = await createHarness({ vxappBacked: true });
+    const waitingAt = new Date().toISOString();
+
+    harness.emit({
+      type: "session.state.changed",
+      eventId: asEventId("evt-session-state-owner-sync-fail"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: waitingAt,
+      payload: {
+        state: "waiting",
+        reason: "awaiting approval",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.kind === "provider.thread.status.sync.failed",
+      ),
+    );
+
+    expect(thread.session?.status).toBe("ready");
+    expect(
+      thread.activities.some((activity) => activity.kind === "provider.thread.status.sync.failed"),
+    ).toBe(true);
   });
 
   it("does not clear active turn when session/thread started arrives mid-turn", async () => {
@@ -2101,6 +2180,78 @@ describe("ProviderRuntimeIngestion", () => {
     expect(resolvedPayload?.requestType).toBe("command_execution_approval");
   });
 
+  it("routes pending approval callbacks through the owner helper before local pending state appears", async () => {
+    const approvalRequestSpy = vi
+      .spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalRequest")
+      .mockResolvedValue({});
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "request.opened",
+      eventId: asEventId("evt-request-opened-owner"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: ApprovalRequestId.makeUnsafe("req-owner-approval"),
+      payload: {
+        requestType: "command_execution_approval",
+        detail: "pwd",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "approval.requested",
+      ),
+    );
+
+    expect(approvalRequestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-1",
+        requestId: "req-owner-approval",
+        requestType: "command_execution_approval",
+        state: "pending",
+      }),
+    );
+    expect(thread.activities.some((activity) => activity.kind === "approval.requested")).toBe(true);
+  });
+
+  it("surfaces owner approval failures instead of creating local pending approval truth", async () => {
+    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalRequest").mockRejectedValue(
+      new Error("owner approval request failed"),
+    );
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "request.opened",
+      eventId: asEventId("evt-request-opened-owner-fail"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      requestId: ApprovalRequestId.makeUnsafe("req-owner-approval-fail"),
+      payload: {
+        requestType: "command_execution_approval",
+        detail: "pwd",
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.kind === "provider.approval.request.failed",
+      ),
+    );
+
+    expect(thread.activities.some((activity) => activity.kind === "approval.requested")).toBe(
+      false,
+    );
+    expect(
+      thread.activities.some((activity) => activity.kind === "provider.approval.request.failed"),
+    ).toBe(true);
+  });
+
   it("maps runtime.error into errored session state", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -2822,6 +2973,94 @@ describe("ProviderRuntimeIngestion", () => {
     expect(resolvedPayload?.answers).toEqual({
       sandbox_mode: "workspace-write",
     });
+  });
+
+  it("routes pending user-input callbacks through the owner helper before local pending state appears", async () => {
+    const threadEventIngestSpy = vi
+      .spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadEventIngest")
+      .mockResolvedValue({});
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "user-input.requested",
+      eventId: asEventId("evt-user-input-requested-owner"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-user-input-owner"),
+      requestId: ApprovalRequestId.makeUnsafe("req-user-input-owner"),
+      payload: {
+        questions: [
+          {
+            id: "sandbox_mode",
+            header: "Sandbox",
+            question: "Which mode should be used?",
+            options: [{ label: "workspace-write", description: "Allow workspace writes only" }],
+          },
+        ],
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "user-input.requested",
+      ),
+    );
+
+    expect(threadEventIngestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-1",
+        requestId: "req-user-input-owner",
+        requestType: "tool_user_input",
+        state: "pending",
+      }),
+    );
+    expect(thread.activities.some((activity) => activity.kind === "user-input.requested")).toBe(
+      true,
+    );
+  });
+
+  it("surfaces owner user-input failures instead of creating local pending prompts", async () => {
+    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadEventIngest").mockRejectedValue(
+      new Error("owner user input request failed"),
+    );
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "user-input.requested",
+      eventId: asEventId("evt-user-input-requested-owner-fail"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-user-input-owner-fail"),
+      requestId: ApprovalRequestId.makeUnsafe("req-user-input-owner-fail"),
+      payload: {
+        questions: [
+          {
+            id: "sandbox_mode",
+            header: "Sandbox",
+            question: "Which mode should be used?",
+            options: [{ label: "workspace-write", description: "Allow workspace writes only" }],
+          },
+        ],
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.kind === "provider.user-input.request.failed",
+      ),
+    );
+
+    expect(thread.activities.some((activity) => activity.kind === "user-input.requested")).toBe(
+      false,
+    );
+    expect(
+      thread.activities.some((activity) => activity.kind === "provider.user-input.request.failed"),
+    ).toBe(true);
   });
 
   it("continues processing runtime events after a single event handler failure", async () => {

@@ -103,15 +103,13 @@ const ProjectionStateDbRowSchema = ProjectionState;
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
-  ORCHESTRATION_PROJECTOR_NAMES.programs,
-  ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
   ORCHESTRATION_PROJECTOR_NAMES.threads,
   ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
-  ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
+  ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
 ] as const;
 
 function isVxappWorkspaceRoot(workspaceRoot: string): boolean {
@@ -304,6 +302,50 @@ function mapOwnerProgramNotification(
     dropReason: typeof row.dropReason === "string" ? row.dropReason : undefined,
     createdAt: requireOwnerString(row.createdAt ?? row.queuedAt ?? row.updatedAt, "createdAt"),
     updatedAt: requireOwnerString(row.updatedAt ?? row.createdAt ?? row.queuedAt, "updatedAt"),
+  };
+}
+
+function mapOwnerProgram(program: {
+  readonly id: ProgramId;
+  readonly title: string;
+  readonly objective: string | null;
+  readonly status: string;
+  readonly executiveProjectId: ProjectId | null;
+  readonly executiveThreadId: ThreadId | null;
+  readonly currentOrchestratorThreadId: ThreadId | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+  readonly deletedAt: string | null;
+}): OrchestrationProgram {
+  return {
+    id: program.id,
+    title: program.title,
+    objective: program.objective,
+    status: program.status,
+    declaredRepos: [],
+    affectedAppTargets: [],
+    requiredLocalSuites: [],
+    requiredExternalE2ESuites: [],
+    requireDevelopmentDeploy: false,
+    requireExternalE2E: false,
+    requireCleanPostFlight: false,
+    requirePrPerRepo: false,
+    executiveProjectId: program.executiveProjectId ?? ProjectId.makeUnsafe("agents-vxapp-owner"),
+    executiveThreadId: program.executiveThreadId ?? ThreadId.makeUnsafe("agents-vxapp-owner"),
+    currentOrchestratorThreadId: program.currentOrchestratorThreadId,
+    repoPrs: [],
+    localValidation: [],
+    appValidations: [],
+    observedRepos: [],
+    postFlight: null,
+    createdAt: program.createdAt,
+    updatedAt: program.updatedAt,
+    completedAt: program.completedAt,
+    cancelReason: null,
+    cancelledAt: null,
+    supersededByProgramId: null,
+    deletedAt: program.deletedAt,
   };
 }
 
@@ -649,6 +691,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             };
           } | null = null;
           let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
+          let ownerPrograms: ReadonlyArray<OrchestrationProgram> | null = null;
           if (vxappBacked) {
             const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
               Effect.flatMap((controlPlaneOption) =>
@@ -661,10 +704,12 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 }),
               ),
             );
-            const [bindingAuthorityExport, notificationSummaryExport] = yield* Effect.all([
-              controlPlane.getBindingAuthorityExport(),
-              controlPlane.getNotificationSummaryExport(),
-            ]);
+            const [bindingAuthorityExport, notificationSummaryExport, ownerSnapshot] =
+              yield* Effect.all([
+                controlPlane.getBindingAuthorityExport(),
+                controlPlane.getNotificationSummaryExport(),
+                controlPlane.getSnapshot({}),
+              ]);
             bindingAuthority = {
               jasper: {
                 currentThread: {
@@ -676,6 +721,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             programNotificationRows = notificationSummaryExport.notifications.map(
               mapOwnerProgramNotification,
             );
+            ownerPrograms = ownerSnapshot.programs.map(mapOwnerProgram);
           } else {
             const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
               Effect.mapError(
@@ -752,7 +798,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           for (const row of projectRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
-          for (const row of programRows) {
+          for (const row of ownerPrograms ?? programRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
           for (const row of programNotificationRows) {
@@ -792,88 +838,106 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             bindingAuthority,
           );
 
-          const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) =>
-            toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
-          );
+          const programs: ReadonlyArray<OrchestrationProgram> =
+            ownerPrograms ??
+            programRows.map((row) => toOrchestrationProgram(decodeProjectionProgramDbRow(row)));
 
           const programNotifications = programNotificationRows;
 
-          const localThreads: ReadonlyArray<OrchestrationThread> = threadRows.map(
-            (row) =>
-              Object.assign(
-                {
-                  ...resolveLocalThreadErrorPresentation({
+          const vxappBackedProjectIds = new Set(
+            projectRows
+              .filter((row) => isVxappWorkspaceRoot(row.workspaceRoot))
+              .map((row) => row.projectId),
+          );
+          const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
+          const localCurrentAuthorityThreadRows = vxappBacked
+            ? threadRows.filter(
+                (row) =>
+                  !vxappBackedProjectIds.has(row.projectId) &&
+                  !externalIndex.threadIds.has(row.threadId) &&
+                  !(row.worktreePath !== null && externalIndex.worktreePaths.has(row.worktreePath)),
+              )
+            : threadRows;
+
+          const localThreads: ReadonlyArray<OrchestrationThread> =
+            localCurrentAuthorityThreadRows.map(
+              (row) =>
+                Object.assign(
+                  {
+                    ...resolveLocalThreadErrorPresentation({
+                      archivedAt: row.archivedAt,
+                      deletedAt: row.deletedAt,
+                      latestTurnState: latestTurnByThread.get(row.threadId)?.state,
+                      sessionStatus: sessionsByThread.get(row.threadId)?.status,
+                      sessionLastError: sessionsByThread.get(row.threadId)?.lastError,
+                    }),
+                    id: row.threadId,
+                    projectId: row.projectId,
+                    title: row.title,
+                    labels: row.labels,
+                    modelSelection: row.modelSelection,
+                    runtimeMode: row.runtimeMode,
+                    interactionMode: row.interactionMode,
+                    branch: row.branch,
+                    worktreePath: row.worktreePath,
+                    latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt,
                     archivedAt: row.archivedAt,
                     deletedAt: row.deletedAt,
-                    latestTurnState: latestTurnByThread.get(row.threadId)?.state,
-                    sessionStatus: sessionsByThread.get(row.threadId)?.status,
-                    sessionLastError: sessionsByThread.get(row.threadId)?.lastError,
-                  }),
-                  id: row.threadId,
-                  projectId: row.projectId,
-                  title: row.title,
-                  labels: row.labels,
-                  modelSelection: row.modelSelection,
-                  runtimeMode: row.runtimeMode,
-                  interactionMode: row.interactionMode,
-                  branch: row.branch,
-                  worktreePath: row.worktreePath,
-                  latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                  archivedAt: row.archivedAt,
-                  deletedAt: row.deletedAt,
-                  messages: [],
-                  proposedPlans: [],
-                  activities: [],
-                  checkpoints: [],
-                  session: sessionsByThread.get(row.threadId) ?? null,
-                },
-                row.orchestratorProjectId !== null
-                  ? { orchestratorProjectId: row.orchestratorProjectId }
-                  : undefined,
-                row.orchestratorThreadId !== null
-                  ? { orchestratorThreadId: row.orchestratorThreadId }
-                  : undefined,
-                row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
-                row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
-                row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
-                row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
-                row.programId !== null ? { programId: row.programId } : undefined,
-                row.executiveProjectId !== null
-                  ? { executiveProjectId: row.executiveProjectId }
-                  : undefined,
-                row.executiveThreadId !== null
-                  ? { executiveThreadId: row.executiveThreadId }
-                  : undefined,
-              ) satisfies OrchestrationThread,
-          );
+                    messages: [],
+                    proposedPlans: [],
+                    activities: [],
+                    checkpoints: [],
+                    session: sessionsByThread.get(row.threadId) ?? null,
+                  },
+                  row.orchestratorProjectId !== null
+                    ? { orchestratorProjectId: row.orchestratorProjectId }
+                    : undefined,
+                  row.orchestratorThreadId !== null
+                    ? { orchestratorThreadId: row.orchestratorThreadId }
+                    : undefined,
+                  row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
+                  row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
+                  row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
+                  row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+                  row.programId !== null ? { programId: row.programId } : undefined,
+                  row.executiveProjectId !== null
+                    ? { executiveProjectId: row.executiveProjectId }
+                    : undefined,
+                  row.executiveThreadId !== null
+                    ? { executiveThreadId: row.executiveThreadId }
+                    : undefined,
+                ) satisfies OrchestrationThread,
+            );
           const threads = mergeThreadsWithExternal({ localThreads, externalSnapshot });
 
-          const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> = wakeRows.map((row) =>
-            Object.assign(
-              {
-                wakeId: row.wakeId,
-                orchestratorThreadId: row.orchestratorThreadId,
-                orchestratorProjectId: row.orchestratorProjectId,
-                workerThreadId: row.workerThreadId,
-                workerProjectId: row.workerProjectId,
-                workerTurnId: row.workerTurnId,
-                workerTitleSnapshot: row.workerTitleSnapshot,
-                outcome: row.outcome,
-                summary: row.summary,
-                queuedAt: row.queuedAt,
-                state: row.state,
-                deliveredAt: row.deliveredAt,
-                consumedAt: row.consumedAt,
-              },
-              row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
-              row.deliveryMessageId !== null
-                ? { deliveryMessageId: row.deliveryMessageId }
-                : undefined,
-              row.consumeReason !== null ? { consumeReason: row.consumeReason } : undefined,
-            ),
-          );
+          const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> = vxappBacked
+            ? []
+            : wakeRows.map((row) =>
+                Object.assign(
+                  {
+                    wakeId: row.wakeId,
+                    orchestratorThreadId: row.orchestratorThreadId,
+                    orchestratorProjectId: row.orchestratorProjectId,
+                    workerThreadId: row.workerThreadId,
+                    workerProjectId: row.workerProjectId,
+                    workerTurnId: row.workerTurnId,
+                    workerTitleSnapshot: row.workerTitleSnapshot,
+                    outcome: row.outcome,
+                    summary: row.summary,
+                    queuedAt: row.queuedAt,
+                    state: row.state,
+                    deliveredAt: row.deliveredAt,
+                    consumedAt: row.consumedAt,
+                  },
+                  row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+                  row.deliveryMessageId !== null
+                    ? { deliveryMessageId: row.deliveryMessageId }
+                    : undefined,
+                  row.consumeReason !== null ? { consumeReason: row.consumeReason } : undefined,
+                ),
+              );
 
           return yield* decodeReadModel({
             snapshotSequence: computeSnapshotSequence(stateRows),

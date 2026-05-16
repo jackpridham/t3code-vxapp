@@ -13,31 +13,7 @@ import { CircleDotIcon, ListTodoIcon } from "lucide-react";
 import { agentsVxappControlPlaneSnapshotQueryOptions } from "~/lib/agentsVxappControlPlaneReactQuery";
 import { cn } from "~/lib/utils";
 
-function todoStatusTone(status: string): string {
-  switch (status) {
-    case "ready":
-      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-    case "blocked":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "paused":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-    case "completed":
-      return "bg-sky-500/12 text-sky-700 dark:text-sky-300";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
-
-function priorityTone(priority: string): string {
-  switch (priority) {
-    case "p0":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "high":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
+const NEUTRAL_BADGE_CLASSNAME = "h-5 border border-border/70 bg-background/70 px-1.5 text-[10px]";
 
 export function ProgramTodosDialog(props: {
   open: boolean;
@@ -106,22 +82,8 @@ export function ProgramTodosDialog(props: {
                               Current
                             </Badge>
                           ) : null}
-                          <Badge
-                            className={cn(
-                              "h-5 border-0 px-1.5 text-[10px]",
-                              todoStatusTone(todo.status),
-                            )}
-                          >
-                            {todo.status}
-                          </Badge>
-                          <Badge
-                            className={cn(
-                              "h-5 border-0 px-1.5 text-[10px]",
-                              priorityTone(todo.priority),
-                            )}
-                          >
-                            {todo.priority}
-                          </Badge>
+                          <Badge className={cn(NEUTRAL_BADGE_CLASSNAME)}>{todo.status}</Badge>
+                          <Badge className={cn(NEUTRAL_BADGE_CLASSNAME)}>{todo.priority}</Badge>
                           <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
                             {todo.agent}
                           </Badge>

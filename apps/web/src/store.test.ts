@@ -1313,14 +1313,7 @@ describe("lineage metadata mapping", () => {
     );
 
     expect(second.programNotifications).toHaveLength(1);
-    expect(second.ctoAttentionItems).toHaveLength(1);
-    expect(second.ctoAttentionItems?.[0]).toMatchObject({
-      notificationId: "notif-cto",
-      attentionKey:
-        "program:program-cto|kind:blocked|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
-      summary: "The task is still blocked.",
-      state: "required",
-    });
+    expect(second.ctoAttentionItems).toEqual([]);
   });
 
   it("keeps passive program notifications out of CTO attention", () => {
@@ -1357,9 +1350,19 @@ describe("lineage metadata mapping", () => {
     expect(next.ctoAttentionItems).toEqual([]);
   });
 
-  it("updates CTO attention state when actionable notifications are consumed or dropped", () => {
+  it("preserves owner-backed CTO attention items when notification events are consumed or dropped", () => {
+    const initialAttentionItem = makeCtoAttentionItem({
+      notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
+      state: "required",
+      summary: "Owner-backed attention item",
+    });
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      programNotifications: [],
+      ctoAttentionItems: [initialAttentionItem],
+    };
     const upserted = applyOrchestrationEvent(
-      { ...makeState(makeThread()), programNotifications: [], ctoAttentionItems: [] },
+      initialState,
       makeEvent(
         "program.notification-upserted",
         {
@@ -1405,11 +1408,13 @@ describe("lineage metadata mapping", () => {
       ),
     );
 
-    expect(consumed.ctoAttentionItems?.[0]).toMatchObject({
+    expect(consumed.programNotifications?.[0]).toMatchObject({
       notificationId: "notif-cto",
-      state: "acknowledged",
-      acknowledgedAt: "2026-04-20T00:02:00.000Z",
+      state: "consumed",
+      consumedAt: "2026-04-20T00:02:00.000Z",
+      consumeReason: "reviewed",
     });
+    expect(consumed.ctoAttentionItems).toEqual([initialAttentionItem]);
 
     const dropped = applyOrchestrationEvent(
       consumed,
@@ -1429,11 +1434,13 @@ describe("lineage metadata mapping", () => {
       ),
     );
 
-    expect(dropped.ctoAttentionItems?.[0]).toMatchObject({
+    expect(dropped.programNotifications?.[0]).toMatchObject({
       notificationId: "notif-cto",
       state: "dropped",
       droppedAt: "2026-04-20T00:03:00.000Z",
+      dropReason: "superseded",
     });
+    expect(dropped.ctoAttentionItems).toEqual([initialAttentionItem]);
   });
 
   it("thread.meta-updated can set lineage fields on a thread that had none", () => {

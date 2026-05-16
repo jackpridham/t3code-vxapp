@@ -1,5 +1,4 @@
 import {
-  CtoAttentionId,
   type OrchestrationCtoAttentionItem,
   type OrchestrationProgramNotificationSeverity,
   type OrchestrationProgramNotificationState,
@@ -9,15 +8,6 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import {
-  buildCtoAttentionKey,
-  deriveCtoAttentionStateFromProgramNotificationState,
-  extractCtoAttentionSource,
-  isCtoActionableProgramNotificationKind,
-  toCtoAttentionKind,
-} from "@t3tools/shared/ctoAttention";
-
-type CtoAttentionBase = Omit<OrchestrationCtoAttentionItem, "attentionId" | "kind" | "state">;
 
 export interface ProgramNotificationCtoAttentionInput {
   readonly notificationId: ProgramNotificationId | string;
@@ -41,50 +31,9 @@ export interface ProgramNotificationCtoAttentionInput {
 }
 
 export function projectCtoAttentionFromProgramNotification(
-  input: ProgramNotificationCtoAttentionInput,
+  _input: ProgramNotificationCtoAttentionInput,
 ): OrchestrationCtoAttentionItem | null {
-  const attentionKind = toCtoAttentionKind(input.kind);
-  if (!attentionKind || !isCtoActionableProgramNotificationKind(attentionKind)) {
-    return null;
-  }
-
-  const source = extractCtoAttentionSource(input.evidence, input.orchestratorThreadId);
-  const correlationId = String(input.notificationId);
-  const attentionKey = buildCtoAttentionKey({
-    programId: input.programId,
-    kind: attentionKind,
-    sourceThreadId: source.sourceThreadId,
-    sourceRole: source.sourceRole,
-    evidence: input.evidence,
-    correlationId,
-    notificationId: input.notificationId,
-  });
-  const state = deriveCtoAttentionStateFromProgramNotificationState(input.state);
-  const base: CtoAttentionBase = {
-    attentionKey,
-    notificationId: ProgramNotificationId.makeUnsafe(String(input.notificationId)),
-    programId: ProgramId.makeUnsafe(String(input.programId)),
-    executiveProjectId: ProjectId.makeUnsafe(String(input.executiveProjectId)),
-    executiveThreadId: ThreadId.makeUnsafe(String(input.executiveThreadId)),
-    sourceThreadId: source.sourceThreadId,
-    sourceRole: source.sourceRole,
-    severity: input.severity,
-    summary: input.summary,
-    evidence: input.evidence,
-    queuedAt: input.queuedAt,
-    acknowledgedAt: input.state === "consumed" ? input.consumedAt : null,
-    resolvedAt: null,
-    droppedAt: input.state === "dropped" ? input.droppedAt : null,
-    createdAt: input.createdAt,
-    updatedAt: input.updatedAt,
-  };
-
-  return {
-    attentionId: CtoAttentionId.makeUnsafe(attentionKey),
-    ...base,
-    kind: attentionKind,
-    state,
-  };
+  return null;
 }
 
 export function acknowledgeCtoAttentionItem(

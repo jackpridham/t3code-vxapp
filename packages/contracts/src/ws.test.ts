@@ -1,3 +1,6 @@
+import assertNode from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { assert, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
@@ -10,6 +13,38 @@ const decodeWebSocketRequest = Schema.decodeUnknownEffect(WebSocketRequest as ne
 const decodeWsResponse = Schema.decodeUnknownEffect(WsResponse as never) as (
   input: unknown,
 ) => Effect.Effect<Schema.Schema.Type<typeof WsResponse>, Schema.SchemaError, never>;
+
+function assertNoForbiddenSchemaLiterals(filePath: string, schemaNames: readonly string[]) {
+  const source = fs.readFileSync(filePath, "utf8");
+
+  for (const schemaName of schemaNames) {
+    const escaped = schemaName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const literalPattern = new RegExp(
+      `(?:export\\s+)?const\\s+${escaped}\\s*=\\s*Schema\\.Literal[s]?\\(`,
+      "m",
+    );
+    assertNode.ok(
+      !literalPattern.test(source),
+      `forbidden Schema literal declaration for ${schemaName} found in ${filePath}`,
+    );
+    const typeLiteralUnionPattern = new RegExp(
+      `(?:export\\s+)?type\\s+${escaped}\\s*=\\s*(?!typeof\\b)[^;]*["'][^"']+["'][^;]*;`,
+      "m",
+    );
+    assertNode.ok(
+      !typeLiteralUnionPattern.test(source),
+      `forbidden TypeScript literal-union declaration for ${schemaName} found in ${filePath}`,
+    );
+    const schemaCastPattern = new RegExp(
+      `(?:export\\s+)?const\\s+${escaped}\\s*=\\s*.+as\\s+Schema\\.Schema<${escaped}>`,
+      "m",
+    );
+    assertNode.ok(
+      !schemaCastPattern.test(source),
+      `forbidden schema cast declaration for ${schemaName} found in ${filePath}`,
+    );
+  }
+}
 
 it.effect("accepts getTurnDiff requests when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -141,6 +176,27 @@ it.effect("accepts git.preparePullRequestThread requests", () =>
   }),
 );
 
+it.effect("accepts transport-only owner mutation request strings on websocket routes", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-owner-mutation-1",
+      body: {
+        _tag: WS_METHODS.serverSetAgentsVxappProgramLifecycle,
+        programId: "program-1",
+        action: "owner-action/custom",
+        nextStatus: "owner-status/custom",
+        reason: "Owner-defined lifecycle transition",
+      },
+    });
+
+    assert.strictEqual(parsed.body._tag, WS_METHODS.serverSetAgentsVxappProgramLifecycle);
+    if (parsed.body._tag === WS_METHODS.serverSetAgentsVxappProgramLifecycle) {
+      assert.strictEqual(parsed.body.action, "owner-action/custom");
+      assert.strictEqual(parsed.body.nextStatus, "owner-status/custom");
+    }
+  }),
+);
+
 it.effect("accepts typed websocket push envelopes with sequence", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWsResponse({
@@ -223,3 +279,9 @@ it.effect("rejects push envelopes when channel payload does not match the channe
     assert.strictEqual(result._tag, "Failure");
   }),
 );
+
+it("does not define forbidden agentic Schema literal values in server.ts", () => {
+  assertNoForbiddenSchemaLiterals(path.resolve(import.meta.dirname, "server.ts"), [
+    "ServerSetAgentsVxappProgramLifecycleInput",
+  ]);
+});

@@ -13,7 +13,7 @@ export const makeVxappRuntimeServicesLayer = <A, E, R>(
   Layer.mergeAll(
     AgentsVxappControlPlaneLive,
     AgentsVxappExternalRoleAuthorityLive,
-    AgentsVxappSidebarLive,
+    AgentsVxappSidebarLive.pipe(Layer.provideMerge(AgentsVxappExternalRoleAuthorityLive)),
     ProjectHooksLive.pipe(Layer.provideMerge(runtimeServicesBaseLayer)),
     VortexAppsLive,
   );

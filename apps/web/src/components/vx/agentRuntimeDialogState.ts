@@ -54,30 +54,6 @@ export function deriveAgentRuntimeDialogState(input: {
     };
   }
 
-  const invalidSourceFile = input.data.sourceFiles.find(
-    (sourceFile) => sourceFile.status === "invalid-json" || sourceFile.status === "schema-error",
-  );
-  if (invalidSourceFile) {
-    return {
-      mode: "invalid",
-      message:
-        invalidSourceFile.detail?.trim() ||
-        `Runtime file '${invalidSourceFile.fileName}' is invalid.`,
-    };
-  }
-
-  const missingSourceFile = input.data.sourceFiles.find(
-    (sourceFile) => sourceFile.status === "missing" && sourceFile.detail?.trim(),
-  );
-  if (input.data.sourceFiles.every((sourceFile) => sourceFile.status === "missing")) {
-    return {
-      mode: "missing",
-      message:
-        missingSourceFile?.detail?.trim() ??
-        "Runtime details are not available for this agent yet.",
-    };
-  }
-
   return {
     mode: "ready",
     message: null,

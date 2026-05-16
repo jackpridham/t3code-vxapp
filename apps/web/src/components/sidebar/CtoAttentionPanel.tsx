@@ -1,21 +1,7 @@
 import { TriangleAlertIcon } from "lucide-react";
-import { cn } from "../../lib/utils";
-import { getSidebarCtoAttentionKindLabel, type SidebarCtoAttentionGroup } from "../Sidebar.logic";
+import { type SidebarCtoAttentionGroup } from "../Sidebar.logic";
 import { Badge } from "../ui/badge";
 import { SidebarGroup } from "../ui/sidebar";
-
-function severityClassName(
-  severity: SidebarCtoAttentionGroup["attentionItems"][number]["severity"],
-) {
-  switch (severity) {
-    case "critical":
-      return "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300";
-    case "warning":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-    case "info":
-      return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
-  }
-}
 
 export function CtoAttentionPanel({ groups }: { groups: readonly SidebarCtoAttentionGroup[] }) {
   const totalCount = groups.reduce((count, group) => count + group.attentionItems.length, 0);
@@ -61,12 +47,9 @@ export function CtoAttentionPanel({ groups }: { groups: readonly SidebarCtoAtten
                   <div className="flex min-w-0 items-center gap-1.5">
                     <Badge
                       variant="outline"
-                      className={cn(
-                        "h-4 shrink-0 px-1 text-[9px] font-medium leading-none",
-                        severityClassName(attentionItem.severity),
-                      )}
+                      className="h-4 shrink-0 border border-border/70 bg-background/70 px-1 text-[9px] font-medium leading-none"
                     >
-                      {getSidebarCtoAttentionKindLabel(attentionItem.kind)}
+                      {attentionItem.kind}
                     </Badge>
                     <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground/90">
                       {attentionItem.summary}

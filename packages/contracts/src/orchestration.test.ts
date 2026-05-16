@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
@@ -39,55 +41,48 @@ import {
   ThreadTurnStartRequestedPayload,
 } from "./orchestration";
 
-const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
-const decodeFileDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFileDiffInput);
-const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
-const decodeFileDiffResult = Schema.decodeUnknownEffect(OrchestrationGetFileDiffResult);
-const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand);
-const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
-const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
-const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
-const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
-  ThreadTurnStartRequestedPayload,
-);
-const decodeOrchestrationGetBootstrapSummaryResult = Schema.decodeUnknownEffect(
+const decodeEffect = <TSchema extends Schema.Schema<any>>(schema: TSchema) =>
+  Schema.decodeUnknownEffect(schema as never) as (
+    input: unknown,
+  ) => Effect.Effect<Schema.Schema.Type<TSchema>, Schema.SchemaError, never>;
+
+const decodeTurnDiffInput = decodeEffect(OrchestrationGetTurnDiffInput);
+const decodeFileDiffInput = decodeEffect(OrchestrationGetFileDiffInput);
+const decodeThreadTurnDiff = decodeEffect(ThreadTurnDiff);
+const decodeFileDiffResult = decodeEffect(OrchestrationGetFileDiffResult);
+const decodeProjectCreateCommand = decodeEffect(ProjectCreateCommand);
+const decodeProjectCreatedPayload = decodeEffect(ProjectCreatedPayload);
+const decodeProjectMetaUpdatedPayload = decodeEffect(ProjectMetaUpdatedPayload);
+const decodeThreadTurnStartCommand = decodeEffect(ThreadTurnStartCommand);
+const decodeThreadTurnStartRequestedPayload = decodeEffect(ThreadTurnStartRequestedPayload);
+const decodeOrchestrationGetBootstrapSummaryResult = decodeEffect(
   OrchestrationGetBootstrapSummaryResult,
 );
-const decodeOrchestrationGetSnapshotInput = Schema.decodeUnknownEffect(
-  OrchestrationGetSnapshotInput,
-);
-const decodeOrchestrationGetReadinessResult = Schema.decodeUnknownEffect(
-  OrchestrationGetReadinessResult,
-);
-const decodeOrchestrationGetProjectByWorkspaceResult = Schema.decodeUnknownEffect(
+const decodeOrchestrationGetSnapshotInput = decodeEffect(OrchestrationGetSnapshotInput);
+const decodeOrchestrationGetReadinessResult = decodeEffect(OrchestrationGetReadinessResult);
+const decodeOrchestrationGetProjectByWorkspaceResult = decodeEffect(
   OrchestrationGetProjectByWorkspaceResult,
 );
-const decodeOrchestrationListProjectThreadsResult = Schema.decodeUnknownEffect(
+const decodeOrchestrationListProjectThreadsResult = decodeEffect(
   OrchestrationListProjectThreadsResult,
 );
-const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
-const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
-const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
-const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
-const decodeOrchestrationProgram = Schema.decodeUnknownEffect(OrchestrationProgram);
-const decodeOrchestrationProgramNotification = Schema.decodeUnknownEffect(
-  OrchestrationProgramNotification,
-);
-const decodeOrchestrationCtoAttentionItem = Schema.decodeUnknownEffect(
-  OrchestrationCtoAttentionItem,
-);
-const decodeOrchestrationReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
-const decodeOrchestratorWakeItem = Schema.decodeUnknownEffect(OrchestratorWakeItem);
-const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
-const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
-const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
-const decodeProgramCreateCommand = Schema.decodeUnknownEffect(ProgramCreateCommand);
-const decodeProgramCreatedPayload = Schema.decodeUnknownEffect(ProgramCreatedPayload);
-const decodeProgramNotificationUpsertedPayload = Schema.decodeUnknownEffect(
-  ProgramNotificationUpsertedPayload,
-);
-const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
-const decodeThreadOrchestratorWakeUpsertedPayload = Schema.decodeUnknownEffect(
+const decodeOrchestrationLatestTurn = decodeEffect(OrchestrationLatestTurn);
+const decodeOrchestrationProposedPlan = decodeEffect(OrchestrationProposedPlan);
+const decodeOrchestrationSession = decodeEffect(OrchestrationSession);
+const decodeOrchestrationThread = decodeEffect(OrchestrationThread);
+const decodeOrchestrationProgram = decodeEffect(OrchestrationProgram);
+const decodeOrchestrationProgramNotification = decodeEffect(OrchestrationProgramNotification);
+const decodeOrchestrationCtoAttentionItem = decodeEffect(OrchestrationCtoAttentionItem);
+const decodeOrchestrationReadModel = decodeEffect(OrchestrationReadModel);
+const decodeOrchestratorWakeItem = decodeEffect(OrchestratorWakeItem);
+const decodeThreadCreatedPayload = decodeEffect(ThreadCreatedPayload);
+const decodeOrchestrationCommand = decodeEffect(OrchestrationCommand);
+const decodeOrchestrationEvent = decodeEffect(OrchestrationEvent);
+const decodeProgramCreateCommand = decodeEffect(ProgramCreateCommand);
+const decodeProgramCreatedPayload = decodeEffect(ProgramCreatedPayload);
+const decodeProgramNotificationUpsertedPayload = decodeEffect(ProgramNotificationUpsertedPayload);
+const decodeThreadMetaUpdatedPayload = decodeEffect(ThreadMetaUpdatedPayload);
+const decodeThreadOrchestratorWakeUpsertedPayload = decodeEffect(
   ThreadOrchestratorWakeUpsertedPayload,
 );
 
@@ -120,6 +115,60 @@ const THREAD_NO_ERROR_PRESENTATION = {
   historicalError: null,
   errorPresentationSource: "none",
 } as const;
+
+const FORBIDDEN_AGENTIC_LITERAL_SCHEMAS = [
+  "ProviderApprovalDecision",
+  "OrchestrationProgramStatus",
+  "ProgramAppValidationKind",
+  "OrchestrationProgramNotificationKind",
+  "OrchestrationCtoAttentionKind",
+  "OrchestrationCtoAttentionState",
+  "OrchestrationProgramNotificationSeverity",
+  "OrchestrationProgramNotificationState",
+  "OrchestrationSessionStatus",
+  "OrchestrationThreadErrorPresentationSource",
+  "OrchestrationCheckpointStatus",
+  "OrchestrationThreadActivityTone",
+  "OrchestrationLatestTurnState",
+  "OrchestratorWakeOutcome",
+  "OrchestratorWakeState",
+  "OrchestratorWakeConsumeReason",
+  "ProjectionThreadTurnStatus",
+  "ProjectionPendingApprovalStatus",
+];
+
+function assertNoForbiddenSchemaLiterals(filePath: string) {
+  const source = fs.readFileSync(filePath, "utf8");
+
+  for (const schemaName of FORBIDDEN_AGENTIC_LITERAL_SCHEMAS) {
+    const escaped = schemaName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const declarationNamePattern = `${escaped}[A-Za-z0-9_]*`;
+    const literalPattern = new RegExp(
+      `(?:export\\s+)?const\\s+${declarationNamePattern}\\s*=\\s*Schema\\.Literal[s]?\\(`,
+      "m",
+    );
+    assert.ok(
+      !literalPattern.test(source),
+      `forbidden Schema literal declaration for ${schemaName} or suffixed variants found in ${filePath}`,
+    );
+    const typeLiteralUnionPattern = new RegExp(
+      `(?:export\\s+)?type\\s+${declarationNamePattern}\\s*=\\s*(?!typeof\\b)[^;]*["'][^"']+["'][^;]*;`,
+      "m",
+    );
+    assert.ok(
+      !typeLiteralUnionPattern.test(source),
+      `forbidden TypeScript literal-union declaration for ${schemaName} or suffixed variants found in ${filePath}`,
+    );
+    const schemaCastPattern = new RegExp(
+      `(?:export\\s+)?const\\s+${declarationNamePattern}\\s*=\\s*.+as\\s+Schema\\.Schema<${escaped}[A-Za-z0-9_]*>`,
+      "m",
+    );
+    assert.ok(
+      !schemaCastPattern.test(source),
+      `forbidden schema cast declaration for ${schemaName} or suffixed variants found in ${filePath}`,
+    );
+  }
+}
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -1364,18 +1413,9 @@ it.effect("rejects program.create with empty declaredRepos", () =>
   }),
 );
 
-it.effect("accepts the expanded program status set", () =>
+it.effect("accepts owner-defined transport strings for agentic orchestration fields", () =>
   Effect.gen(function* () {
-    for (const status of [
-      "active",
-      "blocked",
-      "awaiting_founder",
-      "awaiting_external",
-      "closeout_in_progress",
-      "founder_review_ready",
-      "completed",
-      "cancelled",
-    ] as const) {
+    for (const status of ["owner-status/alpha", "owner-status/beta"] as const) {
       const command = yield* decodeProgramCreateCommand({
         type: "program.create",
         commandId: `cmd-program-${status}`,
@@ -1389,6 +1429,65 @@ it.effect("accepts the expanded program status set", () =>
       });
       assert.strictEqual(command.status, status);
     }
+
+    const wake = yield* decodeOrchestratorWakeItem({
+      wakeId: "wake-1",
+      orchestratorThreadId: "thread-orch-1",
+      orchestratorProjectId: "project-orch-1",
+      workerThreadId: "thread-worker-1",
+      workerProjectId: "project-worker-1",
+      workerTurnId: "turn-1",
+      workerTitleSnapshot: "Worker One",
+      outcome: "wake-outcome/custom",
+      summary: "Custom wake outcome",
+      queuedAt: "2026-04-05T10:00:00.000Z",
+      state: "wake-state/custom",
+      consumeReason: "wake-reason/custom",
+    });
+
+    const notification = yield* decodeOrchestrationProgramNotification({
+      notificationId: "notif-1",
+      programId: "program-1",
+      executiveProjectId: "project-1",
+      executiveThreadId: "thread-1",
+      orchestratorThreadId: null,
+      kind: "notification-kind/custom",
+      severity: "severity/custom",
+      summary: "Custom owner notification",
+      evidence: {},
+      state: "notification-state/custom",
+      queuedAt: "2026-04-05T10:00:00.000Z",
+      createdAt: "2026-04-05T10:00:00.000Z",
+      updatedAt: "2026-04-05T10:00:00.000Z",
+    });
+
+    const attention = yield* decodeOrchestrationCtoAttentionItem({
+      attentionId: "attention-1",
+      attentionKey: "attention-key/custom",
+      notificationId: "notif-1",
+      programId: "program-1",
+      executiveProjectId: "project-1",
+      executiveThreadId: "thread-1",
+      sourceThreadId: null,
+      sourceRole: "owner-role/custom",
+      kind: "attention-kind/custom",
+      severity: "severity/custom",
+      summary: "Custom owner attention",
+      evidence: {},
+      state: "attention-state/custom",
+      queuedAt: "2026-04-05T10:00:00.000Z",
+      createdAt: "2026-04-05T10:00:00.000Z",
+      updatedAt: "2026-04-05T10:00:00.000Z",
+    });
+
+    assert.strictEqual(wake.outcome, "wake-outcome/custom");
+    assert.strictEqual(wake.state, "wake-state/custom");
+    assert.strictEqual(wake.consumeReason, "wake-reason/custom");
+    assert.strictEqual(notification.kind, "notification-kind/custom");
+    assert.strictEqual(notification.severity, "severity/custom");
+    assert.strictEqual(notification.state, "notification-state/custom");
+    assert.strictEqual(attention.kind, "attention-kind/custom");
+    assert.strictEqual(attention.state, "attention-state/custom");
   }),
 );
 
@@ -1400,3 +1499,7 @@ it.effect("rejects invalid snapshot profiles", () =>
     assert.strictEqual(result._tag, "Failure");
   }),
 );
+
+it("does not define forbidden agentic Schema literal values in orchestration.ts", () => {
+  assertNoForbiddenSchemaLiterals(path.resolve(import.meta.dirname, "orchestration.ts"));
+});

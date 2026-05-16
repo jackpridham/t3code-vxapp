@@ -1,9 +1,10 @@
 import type {
+  ServerGetAgentsVxappControlPlaneSnapshotResult,
   ServerAgentsVxappProgramSnapshot,
   ServerAgentsVxappTodoSnapshot,
 } from "@t3tools/contracts";
 import type { Project, Thread } from "~/types";
-import { readProgramScope } from "./programDisplay";
+import { readProgramScope, resolveProgramDisplay } from "./programDisplay";
 export {
   readProgramCloseoutVerdict,
   readProgramScope,
@@ -21,6 +22,14 @@ export type ExecutiveOption = {
 export type OrchestratorOption = {
   label: string;
   threadId: string;
+};
+
+export type OwnerDisplayOption = {
+  action: string | null;
+  label: string;
+  sortKey: string | null;
+  tone: string | null;
+  value: string;
 };
 
 export type ProgramTodoGroup =
@@ -115,6 +124,76 @@ function baseProgramScopeTemplate(): JsonRecord {
     requiredExternalE2ESuites: [],
     requiredLocalSuites: [],
   };
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asObject(value: unknown): JsonRecord | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : null;
+}
+
+function toOwnerDisplayOption(value: unknown): OwnerDisplayOption | null {
+  if (typeof value === "string") {
+    return {
+      action: null,
+      label: value,
+      sortKey: null,
+      tone: null,
+      value,
+    };
+  }
+
+  const record = asObject(value);
+  const resolvedValue =
+    asString(record?.value) ??
+    asString(record?.status) ??
+    asString(record?.id) ??
+    asString(record?.key);
+  if (!resolvedValue) {
+    return null;
+  }
+  const display = asObject(record?.display);
+  return {
+    action: asString(record?.action),
+    label: asString(display?.label) ?? asString(record?.label) ?? resolvedValue,
+    sortKey: asString(display?.sortKey) ?? asString(record?.sortKey),
+    tone: asString(display?.tone) ?? asString(record?.tone),
+    value: resolvedValue,
+  };
+}
+
+function readOwnerOptionArray(input: {
+  keys: readonly string[];
+  source: unknown;
+}): OwnerDisplayOption[] {
+  const record = asObject(input.source);
+  if (!record) {
+    return [];
+  }
+
+  for (const key of input.keys) {
+    const candidate = record[key];
+    if (!Array.isArray(candidate)) {
+      continue;
+    }
+    const options = candidate.flatMap((entry) => {
+      const option = toOwnerDisplayOption(entry);
+      return option ? [option] : [];
+    });
+    if (options.length > 0) {
+      return options.toSorted(
+        (left, right) =>
+          (left.sortKey ?? "").localeCompare(right.sortKey ?? "") ||
+          left.label.localeCompare(right.label),
+      );
+    }
+  }
+
+  return [];
 }
 
 export function makeExecutiveKey(projectId: string, threadId: string): string {
@@ -334,6 +413,33 @@ export function chooseCreateProgramScopeTemplate(
   };
 }
 
+export function resolveProgramLifecycleOptions(
+  snapshot: ServerGetAgentsVxappControlPlaneSnapshotResult | null | undefined,
+): OwnerDisplayOption[] {
+  return readOwnerOptionArray({
+    keys: ["programLifecycleOptions", "lifecycleOptions"],
+    source: asObject(snapshot)?.options ?? snapshot,
+  });
+}
+
+export function resolveTodoStatusOptions(
+  snapshot: ServerGetAgentsVxappControlPlaneSnapshotResult | null | undefined,
+): OwnerDisplayOption[] {
+  return readOwnerOptionArray({
+    keys: ["todoStatusOptions", "statusOptions"],
+    source: asObject(snapshot)?.options ?? snapshot,
+  });
+}
+
+export function resolveTodoPriorityOptions(
+  snapshot: ServerGetAgentsVxappControlPlaneSnapshotResult | null | undefined,
+): OwnerDisplayOption[] {
+  return readOwnerOptionArray({
+    keys: ["todoPriorityOptions", "priorityOptions"],
+    source: asObject(snapshot)?.options ?? snapshot,
+  });
+}
+
 export function buildProgramTodoGroups(input: {
   currentTodoByProgramId: ReadonlyMap<string, string>;
   programs: readonly ServerAgentsVxappProgramSnapshot[];
@@ -355,17 +461,19 @@ export function buildProgramTodoGroups(input: {
   const groups: ProgramTodoGroup[] = input.programs.map((program) => {
     const todos = todosByProgramId.get(program.id) ?? [];
     todosByProgramId.delete(program.id);
+    const display = resolveProgramDisplay(program);
     return {
       currentTodoId: input.currentTodoByProgramId.get(program.id) ?? null,
-      description: program.objective ?? null,
+      description: display.summary,
       key: `program:${program.id}`,
       kind: "program",
-      label: program.title,
+      label: display.heading,
       program,
       programId: program.id,
       searchText: [
-        program.title,
-        program.objective ?? "",
+        display.heading,
+        display.label ?? "",
+        display.summary ?? "",
         ...todos.flatMap((todo) => [
           todo.title,
           todo.summary ?? "",

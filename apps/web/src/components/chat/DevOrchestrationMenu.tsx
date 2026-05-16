@@ -31,6 +31,8 @@ function formatWakeStateLabel(state: OrchestratorWakeItem["state"]): string {
       return "consumed";
     case "dropped":
       return "dropped";
+    default:
+      return state;
   }
 }
 

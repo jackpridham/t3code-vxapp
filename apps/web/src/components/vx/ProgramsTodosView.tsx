@@ -86,18 +86,18 @@ import {
   readProgramScope,
   readProgramCloseoutVerdict,
   readProgramScopeSummary,
+  resolveProgramLifecycleOptions,
   resolveExecutiveOptions,
   resolveOrchestratorOptions,
   resolveProgramExecutiveLabel,
   resolveProgramOrchestratorLabel,
+  resolveTodoPriorityOptions,
+  resolveTodoStatusOptions,
   type ProgramTodoGroup,
   validateProgramScope,
 } from "./programsTodosModel";
-import {
-  formatProgramStatusLabel,
-  programStatusTone,
-  ProgramOverviewCard,
-} from "./ProgramOverviewCard";
+import { ProgramOverviewCard } from "./ProgramOverviewCard";
+import { resolveProgramDisplay } from "./programDisplay";
 
 type ProgramEditorMode = "create" | "edit";
 type TodoEditorMode = "create" | "edit";
@@ -142,7 +142,7 @@ type GroupCardView = {
   group: ProgramTodoGroup;
   orchestratorLabel: string | null;
   scopeSummary: string | null;
-  status: string | null;
+  status: { label: string | null; tone: string | null } | null;
   verdict: string | null;
 };
 
@@ -185,33 +185,7 @@ function makeEditablePlanLink(input: Partial<Omit<EditablePlanLink, "id">> = {})
   };
 }
 
-function todoStatusTone(status: string): string {
-  switch (status) {
-    case "ready":
-      return "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300";
-    case "active":
-      return "bg-sky-500/12 text-sky-700 dark:text-sky-300";
-    case "blocked":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "paused":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-    case "completed":
-      return "bg-cyan-500/12 text-cyan-700 dark:text-cyan-300";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
-
-function priorityTone(priority: string): string {
-  switch (priority) {
-    case "p0":
-      return "bg-red-500/12 text-red-700 dark:text-red-300";
-    case "high":
-      return "bg-amber-500/12 text-amber-700 dark:text-amber-300";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
+const NEUTRAL_BADGE_CLASSNAME = "h-5 border border-border/70 bg-background/70 px-1.5 text-[10px]";
 
 function parseScopeJson(value: string): Record<string, unknown> | undefined {
   if (value.trim().length === 0) {
@@ -257,6 +231,10 @@ function defaultProgramFormState(input: {
 function defaultTodoFormState(
   todo: ServerAgentsVxappTodoSnapshot | null,
   agents: readonly string[],
+  optionDefaults?: {
+    priority: string | null;
+    status: string | null;
+  },
 ): TodoFormState {
   return {
     agent: todo?.agent ?? agents[0] ?? "jasper",
@@ -270,9 +248,9 @@ function defaultTodoFormState(
           step: link.step ?? null,
         }),
       ) ?? [],
-    priority: todo?.priority ?? "normal",
+    priority: todo?.priority ?? optionDefaults?.priority ?? "",
     programId: todo?.programId ?? "",
-    status: todo?.status ?? "ready",
+    status: todo?.status ?? optionDefaults?.status ?? "",
     summary: todo?.summary ?? "",
     title: todo?.title ?? "",
     todoId: todo?.todoId ?? "",
@@ -281,9 +259,10 @@ function defaultTodoFormState(
 
 function defaultLifecycleState(
   program: ServerAgentsVxappProgramSnapshot | null,
+  fallbackStatus?: string | null,
 ): ProgramLifecycleState {
   return {
-    nextStatus: program?.status ?? "active",
+    nextStatus: program?.status ?? fallbackStatus ?? "",
     reason: "",
     supersededByProgramId: "",
   };
@@ -446,14 +425,11 @@ const ProgramGroupsPane = memo(function ProgramGroupsPane(props: {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <CardTitle className="truncate text-base">{card.group.label}</CardTitle>
-                        {card.status ? (
+                        {card.status?.label ? (
                           <Badge
-                            className={cn(
-                              "h-5 border-0 px-1.5 text-[10px]",
-                              programStatusTone(card.status),
-                            )}
+                            className={cn(NEUTRAL_BADGE_CLASSNAME, card.status.tone ?? undefined)}
                           >
-                            {formatProgramStatusLabel(card.status)}
+                            {card.status.label}
                           </Badge>
                         ) : null}
                         <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
@@ -677,22 +653,8 @@ const SelectedGroupPane = memo(function SelectedGroupPane(props: {
                               Current
                             </Badge>
                           ) : null}
-                          <Badge
-                            className={cn(
-                              "h-5 border-0 px-1.5 text-[10px]",
-                              todoStatusTone(todo.status),
-                            )}
-                          >
-                            {todo.status}
-                          </Badge>
-                          <Badge
-                            className={cn(
-                              "h-5 border-0 px-1.5 text-[10px]",
-                              priorityTone(todo.priority),
-                            )}
-                          >
-                            {todo.priority}
-                          </Badge>
+                          <Badge className={cn(NEUTRAL_BADGE_CLASSNAME)}>{todo.status}</Badge>
+                          <Badge className={cn(NEUTRAL_BADGE_CLASSNAME)}>{todo.priority}</Badge>
                           <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
                             {todo.agent}
                           </Badge>
@@ -798,14 +760,19 @@ export function ProgramsTodosView() {
   );
   const [lifecycleDialogOpen, setLifecycleDialogOpen] = useState(false);
   const [lifecycleForm, setLifecycleForm] = useState<ProgramLifecycleState>(
-    defaultLifecycleState(null),
+    defaultLifecycleState(null, null),
   );
   const [programDeleteTarget, setProgramDeleteTarget] =
     useState<ServerAgentsVxappProgramSnapshot | null>(null);
   const [todoDialogMode, setTodoDialogMode] = useState<TodoEditorMode>("create");
   const [editingTodo, setEditingTodo] = useState<ServerAgentsVxappTodoSnapshot | null>(null);
   const [todoDialogOpen, setTodoDialogOpen] = useState(false);
-  const [todoForm, setTodoForm] = useState<TodoFormState>(defaultTodoFormState(null, EMPTY_AGENTS));
+  const [todoForm, setTodoForm] = useState<TodoFormState>(
+    defaultTodoFormState(null, EMPTY_AGENTS, {
+      priority: null,
+      status: null,
+    }),
+  );
   const [todoDeleteTarget, setTodoDeleteTarget] = useState<ServerAgentsVxappTodoSnapshot | null>(
     null,
   );
@@ -899,7 +866,9 @@ export function ProgramsTodosView() {
           group,
           orchestratorLabel: resolveProgramOrchestratorLabel(group.program, orchestratorOptions),
           scopeSummary: readProgramScopeSummary(group.program),
-          status: group.program.status,
+          status: ((display) => ({ label: display.label, tone: display.tone }))(
+            resolveProgramDisplay(group.program),
+          ),
           verdict: readProgramCloseoutVerdict(group.program),
         };
       }),
@@ -963,24 +932,31 @@ export function ProgramsTodosView() {
     });
   }, [agentFilter, deferredTodoSearch, selectedGroupCard, todoStatusFilter]);
 
+  const programLifecycleOptions = useMemo(
+    () => resolveProgramLifecycleOptions(snapshotQuery.data),
+    [snapshotQuery.data],
+  );
+  const todoStatusOptions = useMemo(
+    () => resolveTodoStatusOptions(snapshotQuery.data),
+    [snapshotQuery.data],
+  );
+  const todoPriorityOptions = useMemo(
+    () => resolveTodoPriorityOptions(snapshotQuery.data),
+    [snapshotQuery.data],
+  );
   const todoStatuses = useMemo(
     () =>
-      [
-        ...new Set([
-          "ready",
-          "active",
-          "open",
-          "blocked",
-          "paused",
-          "completed",
-          ...todos.map((todo) => todo.status),
-        ]),
-      ].toSorted(),
-    [todos],
+      todoStatusOptions.length > 0
+        ? todoStatusOptions.map((option) => option.value)
+        : [...new Set(todos.map((todo) => todo.status))].toSorted(),
+    [todoStatusOptions, todos],
   );
   const todoPriorities = useMemo(
-    () => [...new Set(["normal", "high", "p0", ...todos.map((todo) => todo.priority)])].toSorted(),
-    [todos],
+    () =>
+      todoPriorityOptions.length > 0
+        ? todoPriorityOptions.map((option) => option.value)
+        : [...new Set(todos.map((todo) => todo.priority))].toSorted(),
+    [todoPriorityOptions, todos],
   );
 
   const createScopeTemplate = useMemo(() => {
@@ -1063,32 +1039,43 @@ export function ProgramsTodosView() {
     [executiveOptions],
   );
 
-  const openLifecycleDialog = useCallback((program: ServerAgentsVxappProgramSnapshot) => {
-    setLifecycleProgram(program);
-    setLifecycleForm(defaultLifecycleState(program));
-    setLifecycleDialogOpen(true);
-  }, []);
+  const openLifecycleDialog = useCallback(
+    (program: ServerAgentsVxappProgramSnapshot) => {
+      setLifecycleProgram(program);
+      setLifecycleForm(defaultLifecycleState(program, programLifecycleOptions[0]?.value ?? null));
+      setLifecycleDialogOpen(true);
+    },
+    [programLifecycleOptions],
+  );
 
   const openCreateTodoDialog = useCallback(
     (programId?: string) => {
       setTodoDialogMode("create");
       setEditingTodo(null);
-      const next = defaultTodoFormState(null, agents);
+      const next = defaultTodoFormState(null, agents, {
+        priority: todoPriorityOptions[0]?.value ?? null,
+        status: todoStatusOptions[0]?.value ?? null,
+      });
       next.programId = programId ?? "";
       setTodoForm(next);
       setTodoDialogOpen(true);
     },
-    [agents],
+    [agents, todoPriorityOptions, todoStatusOptions],
   );
 
   const openEditTodoDialog = useCallback(
     (todo: ServerAgentsVxappTodoSnapshot) => {
       setTodoDialogMode("edit");
       setEditingTodo(todo);
-      setTodoForm(defaultTodoFormState(todo, agents));
+      setTodoForm(
+        defaultTodoFormState(todo, agents, {
+          priority: todoPriorityOptions[0]?.value ?? null,
+          status: todoStatusOptions[0]?.value ?? null,
+        }),
+      );
       setTodoDialogOpen(true);
     },
-    [agents],
+    [agents, todoPriorityOptions, todoStatusOptions],
   );
 
   useEffect(() => {
@@ -1602,18 +1589,22 @@ export function ProgramsTodosView() {
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectPopup>
-                    {[
-                      "active",
-                      "blocked",
-                      "awaiting_founder",
-                      "awaiting_external",
-                      "closeout_in_progress",
-                      "founder_review_ready",
-                      "completed",
-                      "cancelled",
-                    ].map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {formatProgramStatusLabel(status)}
+                    {(programLifecycleOptions.length > 0
+                      ? programLifecycleOptions
+                      : lifecycleProgram
+                        ? [
+                            {
+                              action: null,
+                              label: lifecycleProgram.status,
+                              sortKey: null,
+                              tone: null,
+                              value: lifecycleProgram.status,
+                            },
+                          ]
+                        : []
+                    ).map((status) => (
+                      <SelectItem key={status.value} value={status.value}>
+                        {status.label}
                       </SelectItem>
                     ))}
                   </SelectPopup>
@@ -1758,9 +1749,18 @@ export function ProgramsTodosView() {
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectPopup>
-                      {todoStatuses.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status}
+                      {(todoStatusOptions.length > 0
+                        ? todoStatusOptions
+                        : todoStatuses.map((status) => ({
+                            action: null,
+                            label: status,
+                            sortKey: null,
+                            tone: null,
+                            value: status,
+                          }))
+                      ).map((status) => (
+                        <SelectItem key={status.value} value={status.value}>
+                          {status.label}
                         </SelectItem>
                       ))}
                     </SelectPopup>
@@ -1778,9 +1778,18 @@ export function ProgramsTodosView() {
                       <SelectValue placeholder="Priority" />
                     </SelectTrigger>
                     <SelectPopup>
-                      {todoPriorities.map((priority) => (
-                        <SelectItem key={priority} value={priority}>
-                          {priority}
+                      {(todoPriorityOptions.length > 0
+                        ? todoPriorityOptions
+                        : todoPriorities.map((priority) => ({
+                            action: null,
+                            label: priority,
+                            sortKey: null,
+                            tone: null,
+                            value: priority,
+                          }))
+                      ).map((priority) => (
+                        <SelectItem key={priority.value} value={priority.value}>
+                          {priority.label}
                         </SelectItem>
                       ))}
                     </SelectPopup>

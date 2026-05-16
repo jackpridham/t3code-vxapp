@@ -63,6 +63,20 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   turnId?: TurnId | null;
 }
 
+function toWorkLogTone(tone: OrchestrationThreadActivity["tone"]): WorkLogEntry["tone"] {
+  switch (tone) {
+    case "thinking":
+    case "tool":
+    case "info":
+    case "error":
+      return tone;
+    case "approval":
+      return "info";
+    default:
+      throw new Error(`Unsupported work log tone: ${tone}`);
+  }
+}
+
 export interface PendingApproval {
   requestId: ApprovalRequestId;
   requestKind: "command" | "file-read" | "file-change";
@@ -611,7 +625,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     id: activity.id,
     createdAt: activity.createdAt,
     label: activity.summary,
-    tone: activity.tone === "approval" ? "info" : activity.tone,
+    tone: toWorkLogTone(activity.tone),
     activityKind: activity.kind,
     turnId: activity.turnId,
   };

@@ -42,583 +42,187 @@ function makeEvent(input: {
 }
 
 describe("orchestration projector", () => {
-  it("applies program.created events", async () => {
-    const now = new Date().toISOString();
-    const model = createEmptyReadModel(now);
-
-    const next = await Effect.runPromise(
-      projectEvent(
-        model,
-        makeEvent({
-          sequence: 1,
-          type: "program.created",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: now,
-          commandId: "cmd-program-create",
-          payload: {
-            programId: "program-1",
-            title: "CTO program",
-            objective: "Ship the web-operated CTO layer.",
-            status: "active",
-            executiveProjectId: "project-cto",
-            executiveThreadId: "thread-cto",
-            currentOrchestratorThreadId: "thread-jasper",
-            createdAt: now,
-            updatedAt: now,
-            completedAt: null,
-          },
-        }),
-      ),
-    );
-
-    expect(next.programs).toMatchObject([
-      {
-        id: "program-1",
-        title: "CTO program",
-        objective: "Ship the web-operated CTO layer.",
-        status: "active",
-        declaredRepos: [],
-        affectedAppTargets: [],
-        requiredLocalSuites: [],
-        requiredExternalE2ESuites: [],
-        requireDevelopmentDeploy: false,
-        requireExternalE2E: false,
-        requireCleanPostFlight: false,
-        requirePrPerRepo: false,
-        executiveProjectId: "project-cto",
-        executiveThreadId: "thread-cto",
-        currentOrchestratorThreadId: "thread-jasper",
-        repoPrs: [],
-        localValidation: [],
-        appValidations: [],
-        observedRepos: [],
-        postFlight: null,
-        createdAt: now,
-        updatedAt: now,
-        completedAt: null,
-        cancelReason: null,
-        cancelledAt: null,
-        supersededByProgramId: null,
-        deletedAt: null,
-      },
-    ]);
-  });
-
-  it("applies program.meta-updated and program.deleted events", async () => {
+  it("ignores owner-backed Program envelope and evidence events instead of rebuilding local truth", async () => {
     const now = new Date().toISOString();
     const later = new Date(Date.parse(now) + 1_000).toISOString();
-    const created = await Effect.runPromise(
-      projectEvent(
-        createEmptyReadModel(now),
-        makeEvent({
-          sequence: 1,
-          type: "program.created",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: now,
-          commandId: "cmd-program-create",
-          payload: {
-            programId: "program-1",
-            title: "CTO program",
-            objective: null,
-            status: "active",
-            executiveProjectId: "project-cto",
-            executiveThreadId: "thread-cto",
-            currentOrchestratorThreadId: null,
-            createdAt: now,
-            updatedAt: now,
-            completedAt: null,
-          },
-        }),
-      ),
-    );
 
-    const updated = await Effect.runPromise(
-      projectEvent(
-        created,
-        makeEvent({
-          sequence: 2,
-          type: "program.meta-updated",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-update",
-          payload: {
-            programId: "program-1",
-            objective: "Founder-to-CTO task envelope",
-            status: "completed",
-            currentOrchestratorThreadId: "thread-jasper",
-            completedAt: later,
+    const afterEvents = await [
+      makeEvent({
+        sequence: 1,
+        type: "program.created",
+        aggregateKind: "program",
+        aggregateId: "program-1",
+        occurredAt: now,
+        commandId: "cmd-program-create",
+        payload: {
+          programId: "program-1",
+          title: "CTO program",
+          objective: "Ship the web-operated CTO layer.",
+          status: "active",
+          executiveProjectId: "project-cto",
+          executiveThreadId: "thread-cto",
+          currentOrchestratorThreadId: "thread-jasper",
+          createdAt: now,
+          updatedAt: now,
+          completedAt: null,
+        },
+      }),
+      makeEvent({
+        sequence: 2,
+        type: "program.meta-updated",
+        aggregateKind: "program",
+        aggregateId: "program-1",
+        occurredAt: later,
+        commandId: "cmd-program-update",
+        payload: {
+          programId: "program-1",
+          objective: "Founder-to-CTO task envelope",
+          status: "completed",
+          currentOrchestratorThreadId: "thread-jasper",
+          completedAt: later,
+          updatedAt: later,
+        },
+      }),
+      makeEvent({
+        sequence: 3,
+        type: "program.scope-updated",
+        aggregateKind: "program",
+        aggregateId: "program-1",
+        occurredAt: later,
+        commandId: "cmd-program-scope",
+        payload: {
+          programId: "program-1",
+          declaredRepos: ["t3code-vxapp"],
+          affectedAppTargets: ["web"],
+          requirePrPerRepo: true,
+          updatedAt: later,
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        type: "program.repo-pr-upserted",
+        aggregateKind: "program",
+        aggregateId: "program-1",
+        occurredAt: later,
+        commandId: "cmd-program-pr",
+        payload: {
+          programId: "program-1",
+          repoPr: {
+            repo: "t3code-vxapp",
+            url: "https://github.com/t3tools/t3code-vxapp/pull/42",
+            number: 42,
+            state: "OPEN",
+            isDraft: false,
+            reviewDecision: "APPROVED",
+            mergeStateStatus: "CLEAN",
+            headRefName: "feature/program-closeout",
+            baseRefName: "main",
             updatedAt: later,
           },
-        }),
-      ),
+          updatedAt: later,
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        type: "program.deleted",
+        aggregateKind: "program",
+        aggregateId: "program-1",
+        occurredAt: later,
+        commandId: "cmd-program-delete",
+        payload: {
+          programId: "program-1",
+          deletedAt: later,
+        },
+      }),
+    ].reduce(
+      async (previous, event) => Effect.runPromise(projectEvent(await previous, event)),
+      Promise.resolve(createEmptyReadModel(now)),
     );
 
-    expect((updated.programs ?? [])[0]).toMatchObject({
-      id: "program-1",
-      objective: "Founder-to-CTO task envelope",
-      status: "completed",
-      currentOrchestratorThreadId: "thread-jasper",
-      completedAt: later,
-      updatedAt: later,
-      deletedAt: null,
-    });
-
-    const deleted = await Effect.runPromise(
-      projectEvent(
-        updated,
-        makeEvent({
-          sequence: 3,
-          type: "program.deleted",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-delete",
-          payload: {
-            programId: "program-1",
-            deletedAt: later,
-          },
-        }),
-      ),
-    );
-    expect((deleted.programs ?? [])[0]?.deletedAt).toBe(later);
+    expect(afterEvents.snapshotSequence).toBe(5);
+    expect(afterEvents.programs).toEqual([]);
   });
 
-  it("applies scope and evidence program events", async () => {
+  it("ignores owner-backed notification and attention events instead of rebuilding local truth", async () => {
     const now = new Date().toISOString();
     const later = new Date(Date.parse(now) + 1_000).toISOString();
-    const created = await Effect.runPromise(
-      projectEvent(
-        createEmptyReadModel(now),
-        makeEvent({
-          sequence: 1,
-          type: "program.created",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: now,
-          commandId: "cmd-program-create",
-          payload: {
-            programId: "program-1",
-            title: "CTO program",
-            objective: null,
-            status: "active",
-            executiveProjectId: "project-cto",
-            executiveThreadId: "thread-cto",
-            currentOrchestratorThreadId: null,
-            createdAt: now,
-            updatedAt: now,
-            completedAt: null,
-          },
-        }),
-      ),
-    );
 
-    const scoped = await Effect.runPromise(
-      projectEvent(
-        created,
-        makeEvent({
-          sequence: 2,
-          type: "program.scope-updated",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-scope",
-          payload: {
-            programId: "program-1",
-            declaredRepos: ["t3code-vxapp"],
-            affectedAppTargets: ["web"],
-            requirePrPerRepo: true,
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    const withRepoPr = await Effect.runPromise(
-      projectEvent(
-        scoped,
-        makeEvent({
-          sequence: 3,
-          type: "program.repo-pr-upserted",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-pr",
-          payload: {
-            programId: "program-1",
-            repoPr: {
-              repo: "t3code-vxapp",
-              url: "https://github.com/t3tools/t3code-vxapp/pull/42",
-              number: 42,
-              state: "OPEN",
-              isDraft: false,
-              reviewDecision: "APPROVED",
-              mergeStateStatus: "CLEAN",
-              headRefName: "feature/program-closeout",
-              baseRefName: "main",
-              updatedAt: later,
-            },
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    const withLocalValidation = await Effect.runPromise(
-      projectEvent(
-        withRepoPr,
-        makeEvent({
-          sequence: 4,
-          type: "program.local-validation-upserted",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-local",
-          payload: {
-            programId: "program-1",
-            localValidation: {
-              repo: "t3code-vxapp",
-              suiteId: "lint",
-              kind: "bun_lint",
-              status: "passed",
-              summary: "bun lint passed",
-              command: "bun lint",
-              recordedAt: later,
-            },
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    const withAppValidation = await Effect.runPromise(
-      projectEvent(
-        withLocalValidation,
-        makeEvent({
-          sequence: 5,
-          type: "program.app-validation-upserted",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-app",
-          payload: {
-            programId: "program-1",
-            appValidation: {
-              target: "web",
-              kind: "external_e2e",
-              suiteId: "founder-e2e",
-              status: "passed",
-              summary: "Founder E2E passed",
-              command: "vx apps web --test founder-e2e",
-              url: "https://web.dev.example.test",
-              recordedAt: later,
-            },
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    const withObservedRepo = await Effect.runPromise(
-      projectEvent(
-        withAppValidation,
-        makeEvent({
-          sequence: 6,
-          type: "program.observed-repo-upserted",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-observed",
-          payload: {
-            programId: "program-1",
-            observedRepo: {
-              repo: "t3code-vxapp",
-              source: "git-status",
-              observedAt: later,
-            },
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    const settled = await Effect.runPromise(
-      projectEvent(
-        withObservedRepo,
-        makeEvent({
-          sequence: 7,
-          type: "program.post-flight-set",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-program-post-flight",
-          payload: {
-            programId: "program-1",
-            postFlight: {
-              status: "clean",
-              summary: "Worktree clean after closeout",
-              recordedAt: later,
-            },
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    expect(settled.programs?.[0]).toMatchObject({
-      id: "program-1",
-      declaredRepos: ["t3code-vxapp"],
-      affectedAppTargets: ["web"],
-      requirePrPerRepo: true,
-      repoPrs: [
-        {
-          repo: "t3code-vxapp",
-          number: 42,
+    const afterEvents = await [
+      makeEvent({
+        sequence: 1,
+        type: "program.notification-upserted",
+        aggregateKind: "program",
+        aggregateId: "program-1",
+        occurredAt: now,
+        commandId: "cmd-notify",
+        payload: {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
+          programId: "program-1",
+          executiveProjectId: "project-cto",
+          executiveThreadId: "thread-cto",
+          orchestratorThreadId: "thread-jasper",
+          kind: "blocked",
+          severity: "critical",
+          summary: "The task is blocked.",
+          evidence: { workerThreadId: "thread-worker" },
+          state: "pending",
+          queuedAt: now,
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: now,
+          updatedAt: now,
         },
-      ],
-      localValidation: [
-        {
-          repo: "t3code-vxapp",
-          suiteId: "lint",
-          kind: "bun_lint",
+      }),
+      makeEvent({
+        sequence: 2,
+        type: "program.notification-consumed",
+        aggregateKind: "program",
+        aggregateId: "program-1",
+        occurredAt: later,
+        commandId: "cmd-notify-consume",
+        payload: {
+          programId: "program-1",
+          notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
+          consumedAt: later,
+          consumeReason: "reviewed",
+          updatedAt: later,
         },
-      ],
-      appValidations: [
-        {
-          target: "web",
-          suiteId: "founder-e2e",
-          kind: "external_e2e",
+      }),
+      makeEvent({
+        sequence: 3,
+        type: "program.notification-upserted",
+        aggregateKind: "program",
+        aggregateId: "program-cto",
+        occurredAt: later,
+        commandId: "cmd-attention-upsert",
+        payload: {
+          notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
+          programId: "program-cto",
+          executiveProjectId: "project-cto",
+          executiveThreadId: "thread-cto",
+          orchestratorThreadId: "thread-jasper",
+          kind: "final_review_ready",
+          severity: "info",
+          summary: "The review is ready.",
+          evidence: { workerThreadId: "thread-worker" },
+          state: "pending",
+          queuedAt: later,
+          deliveredAt: null,
+          consumedAt: null,
+          droppedAt: null,
+          createdAt: later,
+          updatedAt: later,
         },
-      ],
-      observedRepos: [
-        {
-          repo: "t3code-vxapp",
-          source: "git-status",
-        },
-      ],
-      postFlight: {
-        status: "clean",
-        summary: "Worktree clean after closeout",
-        recordedAt: later,
-      },
-    });
-  });
-
-  it("applies program notification lifecycle events", async () => {
-    const now = new Date().toISOString();
-    const later = new Date(Date.parse(now) + 1_000).toISOString();
-    const created = await Effect.runPromise(
-      projectEvent(
-        createEmptyReadModel(now),
-        makeEvent({
-          sequence: 1,
-          type: "program.notification-upserted",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: now,
-          commandId: "cmd-notify",
-          payload: {
-            notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
-            programId: "program-1",
-            executiveProjectId: "project-cto",
-            executiveThreadId: "thread-cto",
-            orchestratorThreadId: "thread-jasper",
-            kind: "blocked",
-            severity: "critical",
-            summary: "The task is blocked.",
-            evidence: { workerThreadId: "thread-worker" },
-            state: "pending",
-            queuedAt: now,
-            deliveredAt: null,
-            consumedAt: null,
-            droppedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          },
-        }),
-      ),
+      }),
+    ].reduce(
+      async (previous, event) => Effect.runPromise(projectEvent(await previous, event)),
+      Promise.resolve(createEmptyReadModel(now)),
     );
 
-    expect(created.programNotifications).toEqual([
-      {
-        notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
-        programId: "program-1",
-        executiveProjectId: "project-cto",
-        executiveThreadId: "thread-cto",
-        orchestratorThreadId: "thread-jasper",
-        kind: "blocked",
-        severity: "critical",
-        summary: "The task is blocked.",
-        evidence: { workerThreadId: "thread-worker" },
-        state: "pending",
-        queuedAt: now,
-        deliveredAt: null,
-        consumedAt: null,
-        droppedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
-
-    const consumed = await Effect.runPromise(
-      projectEvent(
-        created,
-        makeEvent({
-          sequence: 2,
-          type: "program.notification-consumed",
-          aggregateKind: "program",
-          aggregateId: "program-1",
-          occurredAt: later,
-          commandId: "cmd-notify-consume",
-          payload: {
-            programId: "program-1",
-            notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
-            consumedAt: later,
-            consumeReason: "reviewed",
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    expect((consumed.programNotifications ?? [])[0]).toMatchObject({
-      notificationId: ProgramNotificationId.makeUnsafe("notif-1"),
-      state: "consumed",
-      consumedAt: later,
-      consumeReason: "reviewed",
-      updatedAt: later,
-    });
-  });
-
-  it("projects actionable CTO attention and ignores passive notification kinds", async () => {
-    const now = new Date().toISOString();
-    const later = new Date(Date.parse(now) + 1_000).toISOString();
-    const actionable = await Effect.runPromise(
-      projectEvent(
-        createEmptyReadModel(now),
-        makeEvent({
-          sequence: 1,
-          type: "program.notification-upserted",
-          aggregateKind: "program",
-          aggregateId: "program-cto",
-          occurredAt: now,
-          commandId: "cmd-attention-upsert",
-          payload: {
-            notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
-            programId: "program-cto",
-            executiveProjectId: "project-cto",
-            executiveThreadId: "thread-cto",
-            orchestratorThreadId: "thread-jasper",
-            kind: "final_review_ready",
-            severity: "info",
-            summary: "The review is ready.",
-            evidence: { workerThreadId: "thread-worker" },
-            state: "pending",
-            queuedAt: now,
-            deliveredAt: null,
-            consumedAt: null,
-            droppedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          },
-        }),
-      ),
-    );
-
-    expect(actionable.ctoAttentionItems).toEqual([
-      {
-        attentionId:
-          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-attention",
-        attentionKey:
-          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-attention",
-        notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
-        programId: "program-cto",
-        executiveProjectId: "project-cto",
-        executiveThreadId: "thread-cto",
-        sourceThreadId: "thread-worker",
-        sourceRole: "worker",
-        kind: "final_review_ready",
-        severity: "info",
-        summary: "The review is ready.",
-        evidence: { workerThreadId: "thread-worker" },
-        state: "required",
-        queuedAt: now,
-        acknowledgedAt: null,
-        resolvedAt: null,
-        droppedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ]);
-
-    const consumed = await Effect.runPromise(
-      projectEvent(
-        actionable,
-        makeEvent({
-          sequence: 2,
-          type: "program.notification-consumed",
-          aggregateKind: "program",
-          aggregateId: "program-cto",
-          occurredAt: later,
-          commandId: "cmd-attention-consume",
-          payload: {
-            programId: "program-cto",
-            notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
-            consumedAt: later,
-            consumeReason: "reviewed",
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    const consumedAttentionItems = consumed.ctoAttentionItems ?? [];
-    expect(consumedAttentionItems[0]).toMatchObject({
-      notificationId: ProgramNotificationId.makeUnsafe("notif-attention"),
-      state: "acknowledged",
-      acknowledgedAt: later,
-      updatedAt: later,
-    });
-
-    const withPassive = await Effect.runPromise(
-      projectEvent(
-        consumed,
-        makeEvent({
-          sequence: 3,
-          type: "program.notification-upserted",
-          aggregateKind: "program",
-          aggregateId: "program-cto",
-          occurredAt: later,
-          commandId: "cmd-passive",
-          payload: {
-            notificationId: ProgramNotificationId.makeUnsafe("notif-passive"),
-            programId: "program-cto",
-            executiveProjectId: "project-cto",
-            executiveThreadId: "thread-cto",
-            orchestratorThreadId: "thread-jasper",
-            kind: "status_update",
-            severity: "info",
-            summary: "FYI only.",
-            evidence: {},
-            state: "pending",
-            queuedAt: later,
-            deliveredAt: null,
-            consumedAt: null,
-            droppedAt: null,
-            createdAt: later,
-            updatedAt: later,
-          },
-        }),
-      ),
-    );
-
-    const passiveAttentionItems = withPassive.ctoAttentionItems ?? [];
-    expect(passiveAttentionItems).toHaveLength(1);
-    expect(passiveAttentionItems[0]?.notificationId).toBe(
-      ProgramNotificationId.makeUnsafe("notif-attention"),
-    );
+    expect(afterEvents.snapshotSequence).toBe(3);
+    expect(afterEvents.programNotifications).toEqual([]);
+    expect(afterEvents.ctoAttentionItems).toEqual([]);
   });
 
   it("applies thread.created events", async () => {

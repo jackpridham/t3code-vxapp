@@ -1,4 +1,4 @@
-import { Option, Schema, SchemaIssue, Struct } from "effect";
+import { Option, Schema, SchemaIssue, SchemaTransformation, Struct } from "effect";
 import { ClaudeModelOptions, CodexModelOptions } from "./model";
 import { ProjectHooks } from "./projectHooks";
 import {
@@ -92,12 +92,19 @@ export const ProviderRequestKind = Schema.Literals(["command", "file-read", "fil
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);
 export type AssistantDeliveryMode = typeof AssistantDeliveryMode.Type;
-export const ProviderApprovalDecision = Schema.Literals([
-  "accept",
-  "acceptForSession",
-  "decline",
-  "cancel",
-]);
+
+const openStringToDecodedSchema = <T>() =>
+  TrimmedNonEmptyString.pipe(
+    Schema.decodeTo(
+      Schema.declare<T>((value): value is T => typeof value === "string"),
+      SchemaTransformation.transform({
+        decode: (value) => value as T,
+        encode: (value) => value as string,
+      }),
+    ),
+  );
+
+export const ProviderApprovalDecision = openStringToDecodedSchema<string>();
 export type ProviderApprovalDecision = typeof ProviderApprovalDecision.Type;
 export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unknown);
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
@@ -174,16 +181,7 @@ export type ThreadLabels = typeof ThreadLabels.Type;
 export const OrchestrationProjectKind = Schema.Literals(["project", "orchestrator", "executive"]);
 export type OrchestrationProjectKind = typeof OrchestrationProjectKind.Type;
 
-export const OrchestrationProgramStatus = Schema.Literals([
-  "active",
-  "blocked",
-  "awaiting_founder",
-  "awaiting_external",
-  "closeout_in_progress",
-  "founder_review_ready",
-  "completed",
-  "cancelled",
-]);
+export const OrchestrationProgramStatus = openStringToDecodedSchema<string>();
 export type OrchestrationProgramStatus = typeof OrchestrationProgramStatus.Type;
 
 export const ProgramDeclaredRepos = Schema.Array(TrimmedNonEmptyString);
@@ -232,7 +230,7 @@ export const ProgramLocalValidation = Schema.Struct({
 });
 export type ProgramLocalValidation = typeof ProgramLocalValidation.Type;
 
-export const ProgramAppValidationKind = Schema.Literals(["development_deploy", "external_e2e"]);
+export const ProgramAppValidationKind = openStringToDecodedSchema<string>();
 export type ProgramAppValidationKind = typeof ProgramAppValidationKind.Type;
 
 export const ProgramAppValidation = Schema.Struct({
@@ -339,58 +337,20 @@ const ProgramTerminalMetadataUpdateFields = {
   supersededByProgramId: Schema.optional(Schema.NullOr(ProgramId)),
 } as const;
 
-export const OrchestrationProgramNotificationKind = Schema.Literals([
-  "decision_required",
-  "blocked",
-  "milestone_completed",
-  "closeout_ready",
-  "risk_escalated",
-  "founder_update_required",
-  "final_review_ready",
-  "program_completed",
-  "worker_started",
-  "worker_progress",
-  "worker_completed",
-  "routine_status",
-  "test_retry",
-  "implementation_progress",
-  "status_update",
-]);
+export const OrchestrationProgramNotificationKind = openStringToDecodedSchema<string>();
 export type OrchestrationProgramNotificationKind = typeof OrchestrationProgramNotificationKind.Type;
 
-export const OrchestrationCtoAttentionKind = Schema.Literals([
-  "decision_required",
-  "blocked",
-  "risk_escalated",
-  "founder_update_required",
-  "final_review_ready",
-  "program_completed",
-]);
+export const OrchestrationCtoAttentionKind = openStringToDecodedSchema<string>();
 export type OrchestrationCtoAttentionKind = typeof OrchestrationCtoAttentionKind.Type;
 
-export const OrchestrationCtoAttentionState = Schema.Literals([
-  "required",
-  "acknowledged",
-  "resolved",
-  "dropped",
-]);
+export const OrchestrationCtoAttentionState = openStringToDecodedSchema<string>();
 export type OrchestrationCtoAttentionState = typeof OrchestrationCtoAttentionState.Type;
 
-export const OrchestrationProgramNotificationSeverity = Schema.Literals([
-  "info",
-  "warning",
-  "critical",
-]);
+export const OrchestrationProgramNotificationSeverity = openStringToDecodedSchema<string>();
 export type OrchestrationProgramNotificationSeverity =
   typeof OrchestrationProgramNotificationSeverity.Type;
 
-export const OrchestrationProgramNotificationState = Schema.Literals([
-  "pending",
-  "delivering",
-  "delivered",
-  "consumed",
-  "dropped",
-]);
+export const OrchestrationProgramNotificationState = openStringToDecodedSchema<string>();
 export type OrchestrationProgramNotificationState =
   typeof OrchestrationProgramNotificationState.Type;
 
@@ -523,15 +483,7 @@ const SourceProposedPlanReference = Schema.Struct({
   planId: OrchestrationProposedPlanId,
 });
 
-export const OrchestrationSessionStatus = Schema.Literals([
-  "idle",
-  "starting",
-  "running",
-  "ready",
-  "interrupted",
-  "stopped",
-  "error",
-]);
+export const OrchestrationSessionStatus = openStringToDecodedSchema<string>();
 export type OrchestrationSessionStatus = typeof OrchestrationSessionStatus.Type;
 
 export const OrchestrationSession = Schema.Struct({
@@ -545,12 +497,7 @@ export const OrchestrationSession = Schema.Struct({
 });
 export type OrchestrationSession = typeof OrchestrationSession.Type;
 
-export const OrchestrationThreadErrorPresentationSource = Schema.Literals([
-  "none",
-  "active_session_last_error",
-  "active_runtime_failure",
-  "historical_session_last_error",
-]);
+export const OrchestrationThreadErrorPresentationSource = openStringToDecodedSchema<string>();
 export type OrchestrationThreadErrorPresentationSource =
   typeof OrchestrationThreadErrorPresentationSource.Type;
 
@@ -576,7 +523,7 @@ export const OrchestrationCheckpointFile = Schema.Struct({
 });
 export type OrchestrationCheckpointFile = typeof OrchestrationCheckpointFile.Type;
 
-export const OrchestrationCheckpointStatus = Schema.Literals(["ready", "missing", "error"]);
+export const OrchestrationCheckpointStatus = openStringToDecodedSchema<string>();
 export type OrchestrationCheckpointStatus = typeof OrchestrationCheckpointStatus.Type;
 
 export const OrchestrationCheckpointSummary = Schema.Struct({
@@ -590,13 +537,7 @@ export const OrchestrationCheckpointSummary = Schema.Struct({
 });
 export type OrchestrationCheckpointSummary = typeof OrchestrationCheckpointSummary.Type;
 
-export const OrchestrationThreadActivityTone = Schema.Literals([
-  "thinking",
-  "info",
-  "tool",
-  "approval",
-  "error",
-]);
+export const OrchestrationThreadActivityTone = openStringToDecodedSchema<string>();
 export type OrchestrationThreadActivityTone = typeof OrchestrationThreadActivityTone.Type;
 
 export const OrchestrationThreadActivity = Schema.Struct({
@@ -611,12 +552,7 @@ export const OrchestrationThreadActivity = Schema.Struct({
 });
 export type OrchestrationThreadActivity = typeof OrchestrationThreadActivity.Type;
 
-const OrchestrationLatestTurnState = Schema.Literals([
-  "running",
-  "interrupted",
-  "completed",
-  "error",
-]);
+const OrchestrationLatestTurnState = openStringToDecodedSchema<string>();
 export type OrchestrationLatestTurnState = typeof OrchestrationLatestTurnState.Type;
 
 export const OrchestrationLatestTurn = Schema.Struct({
@@ -756,29 +692,13 @@ export const OrchestrationReadinessSummary = Schema.Struct({
 });
 export type OrchestrationReadinessSummary = typeof OrchestrationReadinessSummary.Type;
 
-export const OrchestratorWakeOutcome = Schema.Literals(["completed", "failed", "interrupted"]);
+export const OrchestratorWakeOutcome = openStringToDecodedSchema<string>();
 export type OrchestratorWakeOutcome = typeof OrchestratorWakeOutcome.Type;
 
-export const OrchestratorWakeState = Schema.Literals([
-  "pending",
-  "delivering",
-  "delivered",
-  "consumed",
-  "dropped",
-]);
+export const OrchestratorWakeState = openStringToDecodedSchema<string>();
 export type OrchestratorWakeState = typeof OrchestratorWakeState.Type;
 
-export const OrchestratorWakeConsumeReason = Schema.Literals([
-  "worker_rechecked",
-  "worker_superseded_by_new_turn",
-  "worker_deleted",
-  "worker_reparented",
-  "orchestrator_missing",
-  "orchestrator_deleted",
-  "orchestrator_mismatch",
-  "duplicate",
-  "manual_dismiss",
-]);
+export const OrchestratorWakeConsumeReason = openStringToDecodedSchema<string>();
 export type OrchestratorWakeConsumeReason = typeof OrchestratorWakeConsumeReason.Type;
 
 export const OrchestratorWakeItem = Schema.Struct({
@@ -1907,12 +1827,7 @@ export const ProviderSessionRuntimeStatus = Schema.Literals([
 ]);
 export type ProviderSessionRuntimeStatus = typeof ProviderSessionRuntimeStatus.Type;
 
-const ProjectionThreadTurnStatus = Schema.Literals([
-  "running",
-  "completed",
-  "interrupted",
-  "error",
-]);
+const ProjectionThreadTurnStatus = openStringToDecodedSchema<string>();
 export type ProjectionThreadTurnStatus = typeof ProjectionThreadTurnStatus.Type;
 
 const ProjectionCheckpointRow = Schema.Struct({
@@ -1927,7 +1842,7 @@ const ProjectionCheckpointRow = Schema.Struct({
 });
 export type ProjectionCheckpointRow = typeof ProjectionCheckpointRow.Type;
 
-export const ProjectionPendingApprovalStatus = Schema.Literals(["pending", "resolved"]);
+export const ProjectionPendingApprovalStatus = openStringToDecodedSchema<string>();
 export type ProjectionPendingApprovalStatus = typeof ProjectionPendingApprovalStatus.Type;
 
 export const ProjectionPendingApprovalDecision = Schema.NullOr(ProviderApprovalDecision);

@@ -4,23 +4,16 @@ import {
   MessageId,
   type OrchestratorWakeItem,
   type OrchestrationEvent,
-  type OrchestrationProgramNotificationKind,
   type OrchestrationReadModel,
   type OrchestrationThread,
-  ProgramNotificationId,
   type ProviderRuntimeEvent,
   ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { Cause, Effect, FileSystem, Layer, Stream } from "effect";
+import { Cause, Effect, FileSystem, Layer } from "effect";
 
-import { ProjectionOrchestratorWakeRepositoryLive } from "../../persistence/Layers/ProjectionOrchestratorWakes.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
-import {
-  ProjectionOrchestratorWake,
-  ProjectionOrchestratorWakeRepository,
-} from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import {
   type ProjectionTurn,
   ProjectionTurnRepository,
@@ -124,21 +117,21 @@ function resolveActiveRejectedWakeNotificationTarget(input: {
   return singleThreadCandidates[0] ?? null;
 }
 
-function normalizeWakeOutcome(
-  state: "completed" | "failed" | "interrupted" | "cancelled",
-): "completed" | "failed" | "interrupted" | null {
+function normalizeWakeOutcome(state: string): "completed" | "failed" | "interrupted" | null {
   switch (state) {
     case "completed":
     case "failed":
     case "interrupted":
       return state;
-    default:
+    case "cancelled":
       return null;
+    default:
+      throw new Error(`Unsupported wake outcome: ${state}`);
   }
 }
 
 function wakeOutcomeFromCheckpoint(input: {
-  readonly status: "ready" | "missing" | "error";
+  readonly status: string;
   readonly files: ReadonlyArray<unknown>;
 }): "failed" | "interrupted" | null {
   if (input.files.length === 0) {
@@ -151,6 +144,8 @@ function wakeOutcomeFromCheckpoint(input: {
       return "interrupted";
     case "ready":
       return null;
+    default:
+      throw new Error(`Unsupported checkpoint status for wake outcome: ${input.status}`);
   }
 }
 
@@ -272,25 +267,6 @@ function resolveProgramForWorkerWake(input: {
     return null;
   }
   return strongest.program;
-}
-
-function programNotificationKindForWakeOutcome(
-  outcome: OrchestratorWakeItem["outcome"],
-): OrchestrationProgramNotificationKind {
-  return outcome === "completed" ? "worker_completed" : "status_update";
-}
-
-function programNotificationSeverityForWakeOutcome(
-  outcome: OrchestratorWakeItem["outcome"],
-): "info" | "warning" | "critical" {
-  switch (outcome) {
-    case "completed":
-      return "info";
-    case "interrupted":
-      return "warning";
-    case "failed":
-      return "critical";
-  }
 }
 
 function isOrchestratorInactive(thread: OrchestrationThread): boolean {
@@ -436,34 +412,6 @@ function buildOrchestratorWakePrompt(input: {
   ].join("\n");
 }
 
-function projectionWakeRowToWakeItem(wake: ProjectionOrchestratorWake): OrchestratorWakeItem {
-  return {
-    wakeId: wake.wakeId,
-    orchestratorThreadId: wake.orchestratorThreadId,
-    orchestratorProjectId: wake.orchestratorProjectId,
-    workerThreadId: wake.workerThreadId,
-    workerProjectId: wake.workerProjectId,
-    workerTurnId: wake.workerTurnId,
-    ...(wake.workflowId !== null ? { workflowId: wake.workflowId } : {}),
-    workerTitleSnapshot: wake.workerTitleSnapshot,
-    outcome: wake.outcome,
-    summary: wake.summary,
-    queuedAt: wake.queuedAt,
-    state: wake.state,
-    ...(wake.deliveryMessageId !== null ? { deliveryMessageId: wake.deliveryMessageId } : {}),
-    deliveredAt: wake.deliveredAt,
-    consumedAt: wake.consumedAt,
-    ...(wake.consumeReason !== null ? { consumeReason: wake.consumeReason } : {}),
-  };
-}
-
-function compareProjectionWakeRows(
-  left: ProjectionOrchestratorWake,
-  right: ProjectionOrchestratorWake,
-): number {
-  return left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId);
-}
-
 function compareWakeItems(left: OrchestratorWakeItem, right: OrchestratorWakeItem): number {
   return left.queuedAt.localeCompare(right.queuedAt) || left.wakeId.localeCompare(right.wakeId);
 }
@@ -515,38 +463,48 @@ function findSupersedingTurnRequestedAt(input: {
   return supersedingRequestedAts[0] ?? null;
 }
 
-function partitionPendingWakeRowsForDelivery(rows: readonly ProjectionOrchestratorWake[]): {
-  readonly deliverableRows: ReadonlyArray<ProjectionOrchestratorWake>;
-  readonly duplicateRows: ReadonlyArray<ProjectionOrchestratorWake>;
+function partitionPendingWakeItemsForDelivery(items: readonly OrchestratorWakeItem[]): {
+  readonly deliverableItems: ReadonlyArray<OrchestratorWakeItem>;
+  readonly duplicateItems: ReadonlyArray<OrchestratorWakeItem>;
 } {
-  const latestByWorkerThreadId = new Map<string, ProjectionOrchestratorWake>();
+  const latestByWorkerThreadId = new Map<string, OrchestratorWakeItem>();
 
-  for (const row of rows) {
-    const current = latestByWorkerThreadId.get(row.workerThreadId);
-    if (!current || compareProjectionWakeRows(current, row) <= 0) {
-      latestByWorkerThreadId.set(row.workerThreadId, row);
+  for (const item of items) {
+    const current = latestByWorkerThreadId.get(item.workerThreadId);
+    if (!current || compareWakeItems(current, item) <= 0) {
+      latestByWorkerThreadId.set(item.workerThreadId, item);
     }
   }
 
-  const deliverableWakeIds = new Set([...latestByWorkerThreadId.values()].map((row) => row.wakeId));
+  const deliverableWakeIds = new Set(
+    [...latestByWorkerThreadId.values()].map((item) => item.wakeId),
+  );
 
   return {
-    deliverableRows: rows
-      .filter((row) => deliverableWakeIds.has(row.wakeId))
-      .toSorted(compareProjectionWakeRows),
-    duplicateRows: rows.filter((row) => !deliverableWakeIds.has(row.wakeId)),
+    deliverableItems: items
+      .filter((item) => deliverableWakeIds.has(item.wakeId))
+      .toSorted(compareWakeItems),
+    duplicateItems: items.filter((item) => !deliverableWakeIds.has(item.wakeId)),
   };
 }
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
-  const providerService = yield* ProviderService;
+  const _providerService = yield* ProviderService;
   const serverSettingsService = yield* ServerSettingsService;
-  const wakeRepository = yield* ProjectionOrchestratorWakeRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const fileSystem = yield* FileSystem.FileSystem;
   const drainingOrchestratorThreadIds = new Set<string>();
   const explicitlyInterruptedTurnKeys = new Set<string>();
+
+  const listWakeItemsForOrchestrator = Effect.fn("listWakeItemsForOrchestrator")(function* (
+    orchestratorThreadId: ThreadId,
+  ) {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    return readModel.orchestratorWakeItems
+      .filter((item) => item.orchestratorThreadId === orchestratorThreadId)
+      .toSorted(compareWakeItems);
+  });
 
   const appendWakeRejectedActivity = Effect.fn("appendWakeRejectedActivity")(function* (input: {
     readonly readModel: OrchestrationReadModel;
@@ -661,15 +619,12 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* orchestrationEngine
-      .dispatch({
-        type: "thread.orchestrator-wake.upsert",
-        commandId: serverCommandId(input.commandTag),
-        threadId: aggregateThreadId,
-        wakeItem: input.wakeItem,
-        createdAt: input.createdAt,
-      })
-      .pipe(Effect.asVoid);
+    yield* Effect.logDebug("orchestrator wake upsert delegated to agents-vxapp authority", {
+      wakeId: input.wakeItem.wakeId,
+      commandTag: input.commandTag,
+      aggregateThreadId,
+      targetState: input.wakeItem.state,
+    });
   });
 
   const syncProgramRelationshipAndNotifyForWake = Effect.fn(
@@ -708,49 +663,11 @@ const make = Effect.gen(function* () {
         .pipe(Effect.asVoid);
     }
 
-    if (
-      input.workerThread.orchestratorThreadId !== undefined &&
-      program.currentOrchestratorThreadId !== input.workerThread.orchestratorThreadId
-    ) {
-      yield* orchestrationEngine
-        .dispatch({
-          type: "program.meta.update",
-          commandId: serverCommandId("program-orchestrator-sync"),
-          programId: program.id,
-          currentOrchestratorThreadId: input.workerThread.orchestratorThreadId,
-        })
-        .pipe(Effect.asVoid);
-    }
-
-    yield* orchestrationEngine
-      .dispatch({
-        type: "program.notification.upsert",
-        commandId: serverCommandId("program-wake-notify"),
-        notificationId: ProgramNotificationId.makeUnsafe(`program-status:${program.id}`),
-        programId: program.id,
-        executiveProjectId: program.executiveProjectId,
-        executiveThreadId: program.executiveThreadId,
-        orchestratorThreadId:
-          input.workerThread.orchestratorThreadId ?? program.currentOrchestratorThreadId,
-        kind: programNotificationKindForWakeOutcome(input.wakeItem.outcome),
-        severity: programNotificationSeverityForWakeOutcome(input.wakeItem.outcome),
-        summary: input.wakeItem.summary,
-        evidence: {
-          sourceThreadId: input.workerThread.id,
-          sourceRole: "worker",
-          workerThreadId: input.workerThread.id,
-          workerTurnId: input.wakeItem.workerTurnId,
-          orchestratorThreadId:
-            input.workerThread.orchestratorThreadId ?? program.currentOrchestratorThreadId,
-          programId: program.id,
-          wakeId: input.wakeItem.wakeId,
-          outcome: input.wakeItem.outcome,
-          workflowId: input.wakeItem.workflowId ?? null,
-        },
-        queuedAt: input.createdAt,
-        createdAt: input.createdAt,
-      })
-      .pipe(Effect.asVoid);
+    yield* Effect.logDebug("program wake notification delegated to agents-vxapp authority", {
+      programId: program.id,
+      workerThreadId: input.workerThread.id,
+      wakeId: input.wakeItem.wakeId,
+    });
   });
 
   const enqueueWakeFromCompletedTurn = Effect.fn("enqueueWakeFromCompletedTurn")(function* (
@@ -1290,11 +1207,9 @@ const make = Effect.gen(function* () {
   const finalizeDeliveringWakeItemsForOrchestrator = Effect.fn(
     "finalizeDeliveringWakeItemsForOrchestrator",
   )(function* (input: { readonly orchestratorThreadId: ThreadId; readonly settledAt: string }) {
-    const rows = yield* wakeRepository.listByOrchestratorThreadId({
-      orchestratorThreadId: input.orchestratorThreadId,
-    });
-    const deliveringRows = rows.filter((row) => row.state === "delivering");
-    if (deliveringRows.length === 0) {
+    const wakeItems = yield* listWakeItemsForOrchestrator(input.orchestratorThreadId);
+    const deliveringItems = wakeItems.filter((item) => item.state === "delivering");
+    if (deliveringItems.length === 0) {
       return;
     }
 
@@ -1303,14 +1218,14 @@ const make = Effect.gen(function* () {
     });
 
     yield* Effect.forEach(
-      deliveringRows,
-      (row) => {
+      deliveringItems,
+      (wakeItem) => {
         const deliveryTurn = findTerminalDeliveryTurn({
           turns,
-          deliveryMessageId: row.deliveryMessageId,
+          deliveryMessageId: wakeItem.deliveryMessageId,
         });
         const deliveredAt =
-          row.deliveredAt ??
+          wakeItem.deliveredAt ??
           deliveryTurn?.completedAt ??
           deliveryTurn?.startedAt ??
           input.settledAt;
@@ -1318,7 +1233,7 @@ const make = Effect.gen(function* () {
         return dispatchWakeUpsert({
           preferredThreadId: input.orchestratorThreadId,
           wakeItem: {
-            ...projectionWakeRowToWakeItem(row),
+            ...wakeItem,
             state: deliveryTurn ? "consumed" : "delivered",
             deliveredAt,
             consumedAt: deliveryTurn ? input.settledAt : null,
@@ -1335,13 +1250,11 @@ const make = Effect.gen(function* () {
   const consumeReviewedDeliveredWakeItemsForOrchestrator = Effect.fn(
     "consumeReviewedDeliveredWakeItemsForOrchestrator",
   )(function* (input: { readonly orchestratorThreadId: ThreadId; readonly consumedAt: string }) {
-    const rows = yield* wakeRepository.listByOrchestratorThreadId({
-      orchestratorThreadId: input.orchestratorThreadId,
-    });
-    const deliveredRows = rows.filter(
-      (row) => row.state === "delivered" && row.consumedAt === null,
+    const wakeItems = yield* listWakeItemsForOrchestrator(input.orchestratorThreadId);
+    const deliveredItems = wakeItems.filter(
+      (item) => item.state === "delivered" && item.consumedAt === null,
     );
-    if (deliveredRows.length === 0) {
+    if (deliveredItems.length === 0) {
       return;
     }
 
@@ -1350,11 +1263,11 @@ const make = Effect.gen(function* () {
     });
 
     yield* Effect.forEach(
-      deliveredRows,
-      (row) => {
+      deliveredItems,
+      (wakeItem) => {
         const deliveryTurn = findTerminalDeliveryTurn({
           turns,
-          deliveryMessageId: row.deliveryMessageId,
+          deliveryMessageId: wakeItem.deliveryMessageId,
         });
         if (!deliveryTurn) {
           return Effect.void;
@@ -1363,9 +1276,9 @@ const make = Effect.gen(function* () {
         return dispatchWakeUpsert({
           preferredThreadId: input.orchestratorThreadId,
           wakeItem: {
-            ...projectionWakeRowToWakeItem(row),
+            ...wakeItem,
             state: "consumed",
-            deliveredAt: row.deliveredAt ?? deliveryTurn.completedAt ?? deliveryTurn.startedAt,
+            deliveredAt: wakeItem.deliveredAt ?? deliveryTurn.completedAt ?? deliveryTurn.startedAt,
             consumedAt: input.consumedAt,
             consumeReason: "worker_rechecked",
           },
@@ -1382,23 +1295,23 @@ const make = Effect.gen(function* () {
   )(function* (orchestratorThreadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
     const orchestratorThread = readModel.threads.find((entry) => entry.id === orchestratorThreadId);
-    const rows = yield* wakeRepository.listByOrchestratorThreadId({
-      orchestratorThreadId,
-    });
-    const deliveringRows = rows.filter((row) => row.state === "delivering");
-    if (deliveringRows.length === 0) {
+    const wakeItems = readModel.orchestratorWakeItems
+      .filter((item) => item.orchestratorThreadId === orchestratorThreadId)
+      .toSorted(compareWakeItems);
+    const deliveringItems = wakeItems.filter((item) => item.state === "delivering");
+    if (deliveringItems.length === 0) {
       return;
     }
 
     if (!orchestratorThread || orchestratorThread.deletedAt !== null) {
       const consumedAt = new Date().toISOString();
       yield* Effect.forEach(
-        deliveringRows,
-        (row) =>
+        deliveringItems,
+        (wakeItem) =>
           dispatchWakeUpsert({
-            preferredThreadId: row.orchestratorThreadId,
+            preferredThreadId: wakeItem.orchestratorThreadId,
             wakeItem: {
-              ...projectionWakeRowToWakeItem(row),
+              ...wakeItem,
               state: "dropped",
               consumedAt,
               consumeReason: orchestratorThread ? "orchestrator_deleted" : "orchestrator_missing",
@@ -1420,16 +1333,16 @@ const make = Effect.gen(function* () {
     });
 
     yield* Effect.forEach(
-      deliveringRows,
-      (row) =>
+      deliveringItems,
+      (wakeItem) =>
         Effect.gen(function* () {
           const deliveryTurn =
-            row.deliveryMessageId === null
+            wakeItem.deliveryMessageId === undefined
               ? undefined
               : turns.find(
                   (turn) =>
                     turn.turnId !== null &&
-                    turn.pendingMessageId === row.deliveryMessageId &&
+                    turn.pendingMessageId === wakeItem.deliveryMessageId &&
                     (turn.state === "completed" ||
                       turn.state === "error" ||
                       turn.state === "interrupted"),
@@ -1439,7 +1352,7 @@ const make = Effect.gen(function* () {
             yield* dispatchWakeUpsert({
               preferredThreadId: orchestratorThreadId,
               wakeItem: {
-                ...projectionWakeRowToWakeItem(row),
+                ...wakeItem,
                 state: "consumed",
                 deliveredAt:
                   deliveryTurn.completedAt ??
@@ -1454,7 +1367,6 @@ const make = Effect.gen(function* () {
             return;
           }
 
-          const wakeItem = projectionWakeRowToWakeItem(row);
           const { deliveryMessageId: _deliveryMessageId, ...wakeWithoutDeliveryMessageId } =
             wakeItem;
           yield* dispatchWakeUpsert({
@@ -1482,26 +1394,26 @@ const make = Effect.gen(function* () {
 
     const readModel = yield* orchestrationEngine.getReadModel();
     const orchestratorThread = readModel.threads.find((entry) => entry.id === orchestratorThreadId);
-    const allRows = yield* wakeRepository.listByOrchestratorThreadId({
-      orchestratorThreadId,
-    });
-    const pendingRows = allRows.filter((row) => row.state === "pending");
-    if (pendingRows.length === 0) {
+    const allItems = readModel.orchestratorWakeItems
+      .filter((item) => item.orchestratorThreadId === orchestratorThreadId)
+      .toSorted(compareWakeItems);
+    const pendingItems = allItems.filter((item) => item.state === "pending");
+    if (pendingItems.length === 0) {
       return;
     }
 
-    if (allRows.some((row) => row.state === "delivering")) {
+    if (allItems.some((item) => item.state === "delivering")) {
       return;
     }
 
     if (!orchestratorThread || orchestratorThread.deletedAt !== null) {
       yield* Effect.forEach(
-        pendingRows,
-        (row) =>
+        pendingItems,
+        (wakeItem) =>
           dispatchWakeUpsert({
-            preferredThreadId: row.orchestratorThreadId,
+            preferredThreadId: wakeItem.orchestratorThreadId,
             wakeItem: {
-              ...projectionWakeRowToWakeItem(row),
+              ...wakeItem,
               state: "dropped",
               consumedAt: new Date().toISOString(),
               consumeReason: orchestratorThread ? "orchestrator_deleted" : "orchestrator_missing",
@@ -1537,31 +1449,31 @@ const make = Effect.gen(function* () {
       const refreshedOrchestratorThread = refreshedReadModel.threads.find(
         (entry) => entry.id === orchestratorThreadId,
       );
-      const refreshedRows = yield* wakeRepository.listByOrchestratorThreadId({
-        orchestratorThreadId,
-      });
-      const refreshedPendingRows = refreshedRows.filter((row) => row.state === "pending");
+      const refreshedItems = refreshedReadModel.orchestratorWakeItems
+        .filter((item) => item.orchestratorThreadId === orchestratorThreadId)
+        .toSorted(compareWakeItems);
+      const refreshedPendingItems = refreshedItems.filter((item) => item.state === "pending");
       if (
         !refreshedOrchestratorThread ||
         refreshedOrchestratorThread.deletedAt !== null ||
         refreshedOrchestratorThread.archivedAt !== null ||
         !isOrchestratorInactive(refreshedOrchestratorThread) ||
-        refreshedRows.some((row) => row.state === "delivering")
+        refreshedItems.some((item) => item.state === "delivering")
       ) {
         return;
       }
 
-      const { deliverableRows, duplicateRows } =
-        partitionPendingWakeRowsForDelivery(refreshedPendingRows);
+      const { deliverableItems, duplicateItems } =
+        partitionPendingWakeItemsForDelivery(refreshedPendingItems);
 
-      if (duplicateRows.length > 0) {
+      if (duplicateItems.length > 0) {
         yield* Effect.forEach(
-          duplicateRows,
-          (row) =>
+          duplicateItems,
+          (wakeItem) =>
             dispatchWakeUpsert({
               preferredThreadId: orchestratorThreadId,
               wakeItem: {
-                ...projectionWakeRowToWakeItem(row),
+                ...wakeItem,
                 state: "consumed",
                 consumedAt: now,
                 consumeReason: "duplicate",
@@ -1573,12 +1485,11 @@ const make = Effect.gen(function* () {
         ).pipe(Effect.asVoid);
       }
 
-      const batchRows = deliverableRows.slice(0, MAX_WAKE_BATCH_SIZE);
-      if (batchRows.length === 0) {
+      const batch = deliverableItems.slice(0, MAX_WAKE_BATCH_SIZE);
+      if (batch.length === 0) {
         return;
       }
 
-      const batch = batchRows.map(projectionWakeRowToWakeItem);
       yield* Effect.forEach(
         batch,
         (wakeItem) =>
@@ -1724,7 +1635,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  const _worker = yield* makeDrainableWorker(processInputSafely);
 
   const shouldSuppressStartupWakeReconciliation = Effect.gen(function* () {
     if (isTruthyEnv(process.env[SUPPRESS_STARTUP_WAKE_ENV])) {
@@ -1751,7 +1662,7 @@ const make = Effect.gen(function* () {
     return true;
   });
 
-  const reconcileWakesOnStart = Effect.gen(function* () {
+  const _reconcileWakesOnStart = Effect.gen(function* () {
     const suppressStartupReconciliation = yield* shouldSuppressStartupWakeReconciliation;
     if (suppressStartupReconciliation) {
       yield* Effect.logInfo("orchestrator wake startup reconciliation suppressed");
@@ -1783,39 +1694,7 @@ const make = Effect.gen(function* () {
   );
 
   const start: OrchestratorWakeReactorShape["start"] = () =>
-    Effect.gen(function* () {
-      yield* Effect.forkScoped(
-        Stream.runForEach(providerService.streamEvents, (event) => {
-          if (event.type !== "turn.completed") {
-            return Effect.void;
-          }
-          return worker.enqueue({ source: "runtime", event });
-        }),
-      );
-      yield* Effect.forkScoped(
-        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-          if (
-            event.type !== "thread.archived" &&
-            event.type !== "thread.deleted" &&
-            event.type !== "thread.turn-start-requested" &&
-            event.type !== "thread.turn-diff-completed" &&
-            event.type !== "thread.turn-interrupt-requested" &&
-            event.type !== "thread.session-set" &&
-            event.type !== "thread.unarchived" &&
-            event.type !== "thread.orchestrator-wake-upserted"
-          ) {
-            return Effect.void;
-          }
-          return worker.enqueue({ source: "domain", event });
-        }),
-      );
-      yield* Effect.forkScoped(
-        Effect.gen(function* () {
-          yield* Effect.yieldNow;
-          yield* reconcileWakesOnStart;
-        }),
-      );
-    });
+    Effect.logDebug("orchestrator wake reactor is delegated to agents-vxapp authority");
 
   return {
     start,
@@ -1823,6 +1702,5 @@ const make = Effect.gen(function* () {
 });
 
 export const OrchestratorWakeReactorLive = Layer.effect(OrchestratorWakeReactor, make).pipe(
-  Layer.provideMerge(ProjectionOrchestratorWakeRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
 );

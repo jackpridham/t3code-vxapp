@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
 import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 
 const WorkerRuntimeStringList = Schema.Array(TrimmedNonEmptyString).pipe(
@@ -6,6 +6,17 @@ const WorkerRuntimeStringList = Schema.Array(TrimmedNonEmptyString).pipe(
 );
 
 const WorkerRuntimeRecord = Schema.Record(Schema.String, Schema.Unknown);
+
+const openStringToDecodedSchema = <T>() =>
+  TrimmedNonEmptyString.pipe(
+    Schema.decodeTo(
+      Schema.declare<T>((value): value is T => typeof value === "string"),
+      SchemaTransformation.transform({
+        decode: (value) => value as T,
+        encode: (value) => value as string,
+      }),
+    ),
+  );
 
 export const WorkerRuntimeContextPlan = Schema.Struct({
   schema_version: TrimmedNonEmptyString,
@@ -103,12 +114,7 @@ export const WorkerRuntimeInstructionStackAudit = Schema.Struct({
 });
 export type WorkerRuntimeInstructionStackAudit = typeof WorkerRuntimeInstructionStackAudit.Type;
 
-export const WorkerRuntimeSourceFileStatus = Schema.Literals([
-  "loaded",
-  "missing",
-  "invalid-json",
-  "schema-error",
-]);
+export const WorkerRuntimeSourceFileStatus = openStringToDecodedSchema<string>();
 export type WorkerRuntimeSourceFileStatus = typeof WorkerRuntimeSourceFileStatus.Type;
 
 export const WorkerRuntimeSourceFile = Schema.Struct({
@@ -127,7 +133,7 @@ export const WorkerRuntimeSourceFiles = Schema.Struct({
 });
 export type WorkerRuntimeSourceFiles = typeof WorkerRuntimeSourceFiles.Type;
 
-export const WorkerRuntimeAuditStatus = Schema.Literals(["clean", "warning", "error", "missing"]);
+export const WorkerRuntimeAuditStatus = openStringToDecodedSchema<string>();
 export type WorkerRuntimeAuditStatus = typeof WorkerRuntimeAuditStatus.Type;
 
 export const WorkerRuntimePackSummary = Schema.Struct({

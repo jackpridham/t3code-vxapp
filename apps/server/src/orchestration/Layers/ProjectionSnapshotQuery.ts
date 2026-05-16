@@ -160,15 +160,13 @@ const SnapshotScopedWakeRowsRequest = Schema.Struct({
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
-  ORCHESTRATION_PROJECTOR_NAMES.programs,
-  ORCHESTRATION_PROJECTOR_NAMES.programNotifications,
   ORCHESTRATION_PROJECTOR_NAMES.threads,
   ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
-  ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes,
+  ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
 ] as const;
 
 function requireOwnerString(value: unknown, field: string): string {
@@ -284,6 +282,50 @@ function mapOwnerCtoAttentionItem(row: Record<string, unknown>): OrchestrationCt
     droppedAt: typeof row.droppedAt === "string" ? row.droppedAt : null,
     createdAt: requireOwnerString(row.createdAt ?? row.queuedAt ?? row.updatedAt, "createdAt"),
     updatedAt: requireOwnerString(row.updatedAt ?? row.createdAt ?? row.queuedAt, "updatedAt"),
+  };
+}
+
+function mapOwnerProgram(program: {
+  readonly id: ProgramId;
+  readonly title: string;
+  readonly objective: string | null;
+  readonly status: string;
+  readonly executiveProjectId: ProjectId | null;
+  readonly executiveThreadId: ThreadId | null;
+  readonly currentOrchestratorThreadId: ThreadId | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+  readonly deletedAt: string | null;
+}): OrchestrationProgram {
+  return {
+    id: program.id,
+    title: program.title,
+    objective: program.objective,
+    status: program.status,
+    declaredRepos: [],
+    affectedAppTargets: [],
+    requiredLocalSuites: [],
+    requiredExternalE2ESuites: [],
+    requireDevelopmentDeploy: false,
+    requireExternalE2E: false,
+    requireCleanPostFlight: false,
+    requirePrPerRepo: false,
+    executiveProjectId: program.executiveProjectId ?? ProjectId.makeUnsafe("agents-vxapp-owner"),
+    executiveThreadId: program.executiveThreadId ?? ThreadId.makeUnsafe("agents-vxapp-owner"),
+    currentOrchestratorThreadId: program.currentOrchestratorThreadId,
+    repoPrs: [],
+    localValidation: [],
+    appValidations: [],
+    observedRepos: [],
+    postFlight: null,
+    createdAt: program.createdAt,
+    updatedAt: program.updatedAt,
+    completedAt: program.completedAt,
+    cancelReason: null,
+    cancelledAt: null,
+    supersededByProgramId: null,
+    deletedAt: program.deletedAt,
   };
 }
 
@@ -1131,6 +1173,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           FROM projection_turns turns
           INNER JOIN projection_threads t ON t.thread_id = turns.thread_id
           WHERE turns.checkpoint_turn_count IS NOT NULL
+            AND turns.completed_at IS NOT NULL
             AND (${requestedThreadId} IS NULL OR turns.thread_id = ${requestedThreadId})
             AND (${includeArchived} = 1 OR t.archived_at IS NULL)
           ORDER BY turns.thread_id ASC, turns.checkpoint_turn_count ASC
@@ -1163,6 +1206,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           FROM projection_turns turns
           INNER JOIN projection_threads t ON t.thread_id = turns.thread_id
           WHERE turns.checkpoint_turn_count IS NOT NULL
+            AND turns.completed_at IS NOT NULL
             AND (${requestedThreadId} IS NULL OR turns.thread_id = ${requestedThreadId})
             AND (${includeArchived} = 1 OR t.archived_at IS NULL)
         )
@@ -1457,6 +1501,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             yield* getBindingAuthorityForVxappProjects(vxappBackedProjectRows);
           let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
           let ctoAttentionRows: ReadonlyArray<OrchestrationCtoAttentionItem> = [];
+          let ownerPrograms: ReadonlyArray<OrchestrationProgram> | null = null;
           if (vxappBackedProjectRows.length > 0) {
             const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
               Effect.flatMap((controlPlaneOption) =>
@@ -1469,16 +1514,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 }),
               ),
             );
-            const [notificationSummaryExport, attentionSummaryExport] = yield* Effect.all([
-              controlPlane.getNotificationSummaryExport(),
-              controlPlane.getAttentionSummaryExport(),
-            ]);
+            const [notificationSummaryExport, attentionSummaryExport, ownerSnapshot] =
+              yield* Effect.all([
+                controlPlane.getNotificationSummaryExport(),
+                controlPlane.getAttentionSummaryExport(),
+                controlPlane.getSnapshot({}),
+              ]);
             programNotificationRows = notificationSummaryExport.notifications.map(
               mapOwnerProgramNotification,
             );
             ctoAttentionRows = selectSnapshotCtoAttentionItems(
               attentionSummaryExport.attention.map(mapOwnerCtoAttentionItem),
             );
+            ownerPrograms = ownerSnapshot.programs.map(mapOwnerProgram);
           } else {
             const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
               Effect.mapError(
@@ -1547,7 +1595,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             }
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
-          for (const row of programRows) {
+          for (const row of ownerPrograms ?? programRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
           for (const row of scopedThreadRows) {
@@ -1689,7 +1737,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             });
           }
 
-          for (const row of orchestratorWakeRows) {
+          for (const row of vxappBackedProjectRows.length > 0 ? [] : orchestratorWakeRows) {
             updatedAt = maxIso(updatedAt, row.queuedAt);
             if (row.deliveredAt !== null) {
               updatedAt = maxIso(updatedAt, row.deliveredAt);
@@ -1722,7 +1770,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           const boundedWakeItems = takeTailBounded(
             orchestratorWakeItems,
             bounds.wakeItemLimit,
-            orchestratorWakeCountRow.count,
+            vxappBackedProjectRows.length > 0 ? 0 : orchestratorWakeCountRow.count,
           );
 
           const localProjects: ReadonlyArray<OrchestrationProject> = projectRows
@@ -1755,9 +1803,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               : localProjects;
           const boundProjects = applyBindingCurrentThreadToProjects(projects, bindingAuthority);
 
-          const programs: ReadonlyArray<OrchestrationProgram> = programRows.map((row) =>
-            toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
-          );
+          const programs: ReadonlyArray<OrchestrationProgram> =
+            ownerPrograms ??
+            programRows.map((row) => toOrchestrationProgram(decodeProjectionProgramDbRow(row)));
 
           const programNotifications: ReadonlyArray<OrchestrationProgramNotification> =
             programNotificationRows.map((row) => ({
@@ -1780,112 +1828,126 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
             }));
-          const ctoAttentionItems: ReadonlyArray<OrchestrationCtoAttentionItem> =
-            selectSnapshotCtoAttentionItems(ctoAttentionRows);
+          const ctoAttentionItems: ReadonlyArray<OrchestrationCtoAttentionItem> = ctoAttentionRows;
 
-          const localThreads: ReadonlyArray<OrchestrationThread> = scopedThreadRows.map((row) => {
-            const boundedMessages = takeTailBounded(
-              messagesByThread.get(row.threadId) ?? [],
-              bounds.messageLimit,
-              messageCountByThread.get(row.threadId) ?? 0,
-            );
-            const boundedProposedPlans = takeTailBounded(
-              proposedPlansByThread.get(row.threadId) ?? [],
-              bounds.proposedPlanLimit,
-              proposedPlanCountByThread.get(row.threadId) ?? 0,
-            );
-            const boundedActivities = takeTailBounded(
-              activitiesByThread.get(row.threadId) ?? [],
-              bounds.activityLimit,
-              activityCountByThread.get(row.threadId) ?? 0,
-            );
-            const boundedCheckpoints = takeTailBounded(
-              checkpointsByThread.get(row.threadId) ?? [],
-              bounds.checkpointLimit,
-              checkpointCountByThread.get(row.threadId) ?? 0,
-            );
-            const coverageWarnings = [
-              ...snapshotCoverageWarnings({
-                label: `thread ${row.threadId} message`,
-                totalCount: boundedMessages.totalCount,
-              }),
-              ...snapshotCoverageWarnings({
-                label: `thread ${row.threadId} proposed plan`,
-                totalCount: boundedProposedPlans.totalCount,
-              }),
-              ...snapshotCoverageWarnings({
-                label: `thread ${row.threadId} activity`,
-                totalCount: boundedActivities.totalCount,
-              }),
-              ...snapshotCoverageWarnings({
-                label: `thread ${row.threadId} checkpoint`,
-                totalCount: boundedCheckpoints.totalCount,
-              }),
-            ];
+          const vxappBackedProjectIds = new Set(vxappBackedProjectRows.map((row) => row.projectId));
+          const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
+          const localCurrentAuthorityThreadRows =
+            vxappBackedProjectRows.length > 0
+              ? scopedThreadRows.filter(
+                  (row) =>
+                    !vxappBackedProjectIds.has(row.projectId) &&
+                    !externalIndex.threadIds.has(row.threadId) &&
+                    !(
+                      row.worktreePath !== null && externalIndex.worktreePaths.has(row.worktreePath)
+                    ),
+                )
+              : scopedThreadRows;
 
-            return Object.assign(
-              {
-                ...resolveLocalThreadErrorPresentation({
+          const localThreads: ReadonlyArray<OrchestrationThread> =
+            localCurrentAuthorityThreadRows.map((row) => {
+              const boundedMessages = takeTailBounded(
+                messagesByThread.get(row.threadId) ?? [],
+                bounds.messageLimit,
+                messageCountByThread.get(row.threadId) ?? 0,
+              );
+              const boundedProposedPlans = takeTailBounded(
+                proposedPlansByThread.get(row.threadId) ?? [],
+                bounds.proposedPlanLimit,
+                proposedPlanCountByThread.get(row.threadId) ?? 0,
+              );
+              const boundedActivities = takeTailBounded(
+                activitiesByThread.get(row.threadId) ?? [],
+                bounds.activityLimit,
+                activityCountByThread.get(row.threadId) ?? 0,
+              );
+              const boundedCheckpoints = takeTailBounded(
+                checkpointsByThread.get(row.threadId) ?? [],
+                bounds.checkpointLimit,
+                checkpointCountByThread.get(row.threadId) ?? 0,
+              );
+              const coverageWarnings = [
+                ...snapshotCoverageWarnings({
+                  label: `thread ${row.threadId} message`,
+                  totalCount: boundedMessages.totalCount,
+                }),
+                ...snapshotCoverageWarnings({
+                  label: `thread ${row.threadId} proposed plan`,
+                  totalCount: boundedProposedPlans.totalCount,
+                }),
+                ...snapshotCoverageWarnings({
+                  label: `thread ${row.threadId} activity`,
+                  totalCount: boundedActivities.totalCount,
+                }),
+                ...snapshotCoverageWarnings({
+                  label: `thread ${row.threadId} checkpoint`,
+                  totalCount: boundedCheckpoints.totalCount,
+                }),
+              ];
+
+              return Object.assign(
+                {
+                  ...resolveLocalThreadErrorPresentation({
+                    archivedAt: row.archivedAt,
+                    deletedAt: row.deletedAt,
+                    latestTurnState: latestTurnByThread.get(row.threadId)?.state,
+                    sessionStatus: sessionsByThread.get(row.threadId)?.status,
+                    sessionLastError: sessionsByThread.get(row.threadId)?.lastError,
+                  }),
+                  id: row.threadId,
+                  projectId: row.projectId,
+                  title: row.title,
+                  labels: row.labels,
+                  modelSelection: row.modelSelection,
+                  runtimeMode: row.runtimeMode,
+                  interactionMode: row.interactionMode,
+                  branch: row.branch,
+                  worktreePath: row.worktreePath,
+                  latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
                   archivedAt: row.archivedAt,
                   deletedAt: row.deletedAt,
-                  latestTurnState: latestTurnByThread.get(row.threadId)?.state,
-                  sessionStatus: sessionsByThread.get(row.threadId)?.status,
-                  sessionLastError: sessionsByThread.get(row.threadId)?.lastError,
-                }),
-                id: row.threadId,
-                projectId: row.projectId,
-                title: row.title,
-                labels: row.labels,
-                modelSelection: row.modelSelection,
-                runtimeMode: row.runtimeMode,
-                interactionMode: row.interactionMode,
-                branch: row.branch,
-                worktreePath: row.worktreePath,
-                latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                archivedAt: row.archivedAt,
-                deletedAt: row.deletedAt,
-                messages: boundedMessages.values,
-                proposedPlans: boundedProposedPlans.values,
-                activities: boundedActivities.values,
-                checkpoints: boundedCheckpoints.values,
-                snapshotCoverage: {
-                  messageCount: boundedMessages.totalCount,
-                  messageLimit: bounds.messageLimit,
-                  messagesTruncated: boundedMessages.truncated,
-                  proposedPlanCount: boundedProposedPlans.totalCount,
-                  proposedPlanLimit: bounds.proposedPlanLimit,
-                  proposedPlansTruncated: boundedProposedPlans.truncated,
-                  activityCount: boundedActivities.totalCount,
-                  activityLimit: bounds.activityLimit,
-                  activitiesTruncated: boundedActivities.truncated,
-                  checkpointCount: boundedCheckpoints.totalCount,
-                  checkpointLimit: bounds.checkpointLimit,
-                  checkpointsTruncated: boundedCheckpoints.truncated,
-                  warnings: coverageWarnings,
+                  messages: boundedMessages.values,
+                  proposedPlans: boundedProposedPlans.values,
+                  activities: boundedActivities.values,
+                  checkpoints: boundedCheckpoints.values,
+                  snapshotCoverage: {
+                    messageCount: boundedMessages.totalCount,
+                    messageLimit: bounds.messageLimit,
+                    messagesTruncated: boundedMessages.truncated,
+                    proposedPlanCount: boundedProposedPlans.totalCount,
+                    proposedPlanLimit: bounds.proposedPlanLimit,
+                    proposedPlansTruncated: boundedProposedPlans.truncated,
+                    activityCount: boundedActivities.totalCount,
+                    activityLimit: bounds.activityLimit,
+                    activitiesTruncated: boundedActivities.truncated,
+                    checkpointCount: boundedCheckpoints.totalCount,
+                    checkpointLimit: bounds.checkpointLimit,
+                    checkpointsTruncated: boundedCheckpoints.truncated,
+                    warnings: coverageWarnings,
+                  },
+                  session: sessionsByThread.get(row.threadId) ?? null,
                 },
-                session: sessionsByThread.get(row.threadId) ?? null,
-              },
-              row.orchestratorProjectId !== null
-                ? { orchestratorProjectId: row.orchestratorProjectId }
-                : undefined,
-              row.orchestratorThreadId !== null
-                ? { orchestratorThreadId: row.orchestratorThreadId }
-                : undefined,
-              row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
-              row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
-              row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
-              row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
-              row.programId !== null ? { programId: row.programId } : undefined,
-              row.executiveProjectId !== null
-                ? { executiveProjectId: row.executiveProjectId }
-                : undefined,
-              row.executiveThreadId !== null
-                ? { executiveThreadId: row.executiveThreadId }
-                : undefined,
-            ) satisfies OrchestrationThread;
-          });
+                row.orchestratorProjectId !== null
+                  ? { orchestratorProjectId: row.orchestratorProjectId }
+                  : undefined,
+                row.orchestratorThreadId !== null
+                  ? { orchestratorThreadId: row.orchestratorThreadId }
+                  : undefined,
+                row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
+                row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
+                row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
+                row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+                row.programId !== null ? { programId: row.programId } : undefined,
+                row.executiveProjectId !== null
+                  ? { executiveProjectId: row.executiveProjectId }
+                  : undefined,
+                row.executiveThreadId !== null
+                  ? { executiveThreadId: row.executiveThreadId }
+                  : undefined,
+              ) satisfies OrchestrationThread;
+            });
           const threads =
             vxappBackedProjectRows.length > 0
               ? mergeThreadsWithExternal({ localThreads, externalSnapshot })

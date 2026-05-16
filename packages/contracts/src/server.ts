@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
+import { AgentsVxappMutationResult } from "./agentsVxappAuthority";
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
 import { GetAgentRuntimeSnapshotInput, GetAgentRuntimeSnapshotResult } from "./agentRuntime";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
@@ -33,6 +34,17 @@ export const ServerConfigIssue = Schema.Union([
 export type ServerConfigIssue = typeof ServerConfigIssue.Type;
 
 const ServerConfigIssues = Schema.Array(ServerConfigIssue);
+
+const openStringToDecodedSchema = <T>() =>
+  TrimmedNonEmptyString.pipe(
+    Schema.decodeTo(
+      Schema.declare<T>((value): value is T => typeof value === "string"),
+      SchemaTransformation.transform({
+        decode: (value) => value as T,
+        encode: (value) => value as string,
+      }),
+    ),
+  );
 
 export const ServerProviderState = Schema.Literals(["ready", "warning", "error", "disabled"]);
 export type ServerProviderState = typeof ServerProviderState.Type;
@@ -428,7 +440,9 @@ export type ServerDeleteAgentsVxappProgramInput = typeof ServerDeleteAgentsVxapp
 
 export const ServerSetAgentsVxappProgramLifecycleInput = Schema.Struct({
   programId: ProgramId,
-  action: Schema.Literals(["set-status", "founder-review-ready", "complete", "cancel"]),
+  action: openStringToDecodedSchema<
+    "set-status" | "founder-review-ready" | "complete" | "cancel"
+  >(),
   nextStatus: Schema.optional(OrchestrationProgramStatus),
   reason: Schema.optional(Schema.String),
   supersededByProgramId: Schema.optional(Schema.NullOr(ProgramId)),
@@ -468,5 +482,8 @@ export const ServerDeleteAgentsVxappTodoInput = Schema.Struct({
 });
 export type ServerDeleteAgentsVxappTodoInput = typeof ServerDeleteAgentsVxappTodoInput.Type;
 
-export const ServerAgentsVxappOwnerMutationResult = JsonRecord;
+export const ServerAgentsVxappOwnerMutationResult = Schema.Union([
+  AgentsVxappMutationResult,
+  JsonRecord,
+]);
 export type ServerAgentsVxappOwnerMutationResult = typeof ServerAgentsVxappOwnerMutationResult.Type;

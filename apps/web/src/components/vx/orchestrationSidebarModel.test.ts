@@ -447,10 +447,8 @@ describe("buildOrchestrationSidebarModel", () => {
         reason: "Waiting for vendor callback proof.",
       },
     });
-    expect(model.executives[0]?.programs[0]?.closeoutSummary.missingItems).toEqual(
-      expect.arrayContaining(["PR missing", "post-flight", "1 local suite"]),
-    );
-    expect(model.executives[0]?.programs[0]?.statusDetail).toContain("PR missing");
+    expect(model.executives[0]?.programs[0]?.closeoutSummary.missingItems).toEqual(["PR missing"]);
+    expect(model.executives[0]?.programs[0]?.statusDetail).toBeNull();
   });
 
   it("keeps programs with null roots in an explicit empty orchestrator state", () => {

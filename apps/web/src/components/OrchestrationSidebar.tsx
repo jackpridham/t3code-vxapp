@@ -148,6 +148,7 @@ import {
 } from "./sidebar/SidebarThreadRow";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useSidebarProjectController } from "./sidebar/useSidebarProjectController";
+import { buildSidebarWakeBadge } from "./sidebar/sidebarWakeBadge";
 import { buildSidebarWakeSummaryByThreadId } from "./sidebar/sidebarWakeSummary";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
@@ -1841,9 +1842,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
       const threadLabels = getSidebarThreadLabels(thread.labels);
       const jumpLabel = threadJumpLabelById.get(thread.id) ?? null;
       const wakeSummary = orchestratorWakeSummaryByThreadId.get(thread.id) ?? null;
-      const orchestratorWakeBadgeCount =
-        (wakeSummary?.pendingCount ?? 0) + (wakeSummary?.deliveringCount ?? 0);
-      const workerWakeState = wakeSummary?.workerState ?? null;
+      const wakeBadge = buildSidebarWakeBadge(wakeSummary?.openWakeCount);
       const threadStatus = threadStatuses.get(thread.id) ?? null;
       const isThreadRunning =
         threadStatus?.label === "Working" || threadStatus?.label === "Connecting";
@@ -2007,25 +2006,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
                   </Badge>
                 ))}
               </div>
-              {orchestratorWakeBadgeCount > 0 ? (
-                <Badge className="h-4 shrink-0 border-0 bg-amber-500/12 px-1 text-[9px] font-medium leading-none text-amber-600 dark:text-amber-300">
-                  {wakeSummary?.deliveringCount
-                    ? `${orchestratorWakeBadgeCount} active`
-                    : `${orchestratorWakeBadgeCount} waiting`}
-                </Badge>
-              ) : null}
-              {workerWakeState !== null ? (
-                <Badge
-                  className={cn(
-                    "h-4 shrink-0 border-0 px-1 text-[9px] font-medium leading-none",
-                    workerWakeState === "delivering"
-                      ? "bg-sky-500/12 text-sky-600 dark:text-sky-300"
-                      : "bg-emerald-500/12 text-emerald-600 dark:text-emerald-300",
-                  )}
-                >
-                  {workerWakeState === "delivering" ? "waking" : "queued"}
-                </Badge>
-              ) : null}
+              {wakeBadge ? <Badge className={wakeBadge.className}>{wakeBadge.label}</Badge> : null}
             </>
           ) : (
             <>
@@ -2057,25 +2038,7 @@ export default function OrchestrationSidebar({ mode = "app" }: { mode?: "app" | 
                   {thread.spawnRole}
                 </Badge>
               )}
-              {orchestratorWakeBadgeCount > 0 ? (
-                <Badge className="h-4 shrink-0 border-0 bg-amber-500/12 px-1 text-[9px] font-medium leading-none text-amber-600 dark:text-amber-300">
-                  {wakeSummary?.deliveringCount
-                    ? `${orchestratorWakeBadgeCount} active`
-                    : `${orchestratorWakeBadgeCount} waiting`}
-                </Badge>
-              ) : null}
-              {workerWakeState !== null ? (
-                <Badge
-                  className={cn(
-                    "h-4 shrink-0 border-0 px-1 text-[9px] font-medium leading-none",
-                    workerWakeState === "delivering"
-                      ? "bg-sky-500/12 text-sky-600 dark:text-sky-300"
-                      : "bg-emerald-500/12 text-emerald-600 dark:text-emerald-300",
-                  )}
-                >
-                  {workerWakeState === "delivering" ? "waking" : "queued"}
-                </Badge>
-              ) : null}
+              {wakeBadge ? <Badge className={wakeBadge.className}>{wakeBadge.label}</Badge> : null}
             </>
           )}
         </SidebarThreadRow>

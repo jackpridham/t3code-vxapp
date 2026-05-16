@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ProgramId,
   ThreadId,
+  type ServerGetAgentsVxappControlPlaneSnapshotResult,
   type ServerAgentsVxappProgramSnapshot,
   type ServerAgentsVxappTodoSnapshot,
 } from "@t3tools/contracts";
@@ -9,8 +10,11 @@ import {
   buildProgramTodoGroups,
   chooseCreateProgramScopeTemplate,
   readProgramScope,
+  resolveProgramLifecycleOptions,
   resolveOrchestratorOptions,
   resolveProgramOrchestratorLabel,
+  resolveTodoPriorityOptions,
+  resolveTodoStatusOptions,
   validateProgramScope,
 } from "./programsTodosModel";
 
@@ -61,6 +65,19 @@ function makeTodo(
     updatedAt: "2026-05-10T00:00:00.000Z",
     ...rest,
   };
+}
+
+function makeControlPlaneSnapshotWithOptions(options: Record<string, unknown>) {
+  return {
+    fetchedAt: "2026-05-10T00:00:00.000Z",
+    dbPath: "/tmp/vx_agents.sqlite3",
+    todoRootPath: "/tmp/todos",
+    agents: [],
+    programs: [],
+    todos: [],
+    currentTodos: [],
+    options,
+  } as ServerGetAgentsVxappControlPlaneSnapshotResult & { options: Record<string, unknown> };
 }
 
 describe("programsTodosModel", () => {
@@ -203,5 +220,127 @@ describe("programsTodosModel", () => {
     });
 
     expect(resolveProgramOrchestratorLabel(program, options)).toBe("Jasper");
+  });
+
+  it("reads Program lifecycle options directly from owner option arrays", () => {
+    const snapshot = makeControlPlaneSnapshotWithOptions({
+      programLifecycleOptions: [
+        {
+          value: "awaiting_external",
+          display: {
+            label: "Awaiting External Approval",
+            sortKey: "20",
+            tone: "warning",
+          },
+          action: "set-awaiting-external",
+        },
+        {
+          value: "completed",
+          display: {
+            label: "Ship Complete",
+            sortKey: "90",
+            tone: "success",
+          },
+          action: "mark-complete",
+        },
+      ],
+    });
+
+    expect(resolveProgramLifecycleOptions(snapshot)).toEqual([
+      {
+        action: "set-awaiting-external",
+        label: "Awaiting External Approval",
+        sortKey: "20",
+        tone: "warning",
+        value: "awaiting_external",
+      },
+      {
+        action: "mark-complete",
+        label: "Ship Complete",
+        sortKey: "90",
+        tone: "success",
+        value: "completed",
+      },
+    ]);
+  });
+
+  it("reads TODO status options directly from owner option arrays", () => {
+    const snapshot = makeControlPlaneSnapshotWithOptions({
+      todoStatusOptions: [
+        {
+          value: "needs_triage",
+          display: {
+            label: "Needs Triage",
+            sortKey: "10",
+            tone: "warning",
+          },
+        },
+        {
+          value: "blocked_on_owner",
+          display: {
+            label: "Blocked on Owner",
+            sortKey: "40",
+            tone: "critical",
+          },
+        },
+      ],
+    });
+
+    expect(resolveTodoStatusOptions(snapshot)).toEqual([
+      {
+        action: null,
+        label: "Needs Triage",
+        sortKey: "10",
+        tone: "warning",
+        value: "needs_triage",
+      },
+      {
+        action: null,
+        label: "Blocked on Owner",
+        sortKey: "40",
+        tone: "critical",
+        value: "blocked_on_owner",
+      },
+    ]);
+  });
+
+  it("reads TODO priority options directly from owner option arrays", () => {
+    const snapshot = makeControlPlaneSnapshotWithOptions({
+      todoPriorityOptions: [
+        {
+          value: "rush",
+          display: {
+            label: "Rush Queue",
+            sortKey: "05",
+            tone: "critical",
+          },
+        },
+        {
+          value: "background",
+          display: {
+            label: "Background",
+            sortKey: "80",
+            tone: "muted",
+          },
+        },
+      ],
+    });
+
+    expect(resolveTodoPriorityOptions(snapshot)).toEqual([
+      {
+        action: null,
+        label: "Rush Queue",
+        sortKey: "05",
+        tone: "critical",
+        value: "rush",
+      },
+      {
+        action: null,
+        label: "Background",
+        sortKey: "80",
+        tone: "muted",
+        value: "background",
+      },
+    ]);
   });
 });

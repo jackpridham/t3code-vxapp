@@ -73,13 +73,13 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Completed: 1,
 };
 
-const PROGRAM_NOTIFICATION_SEVERITY_PRIORITY: Record<ProgramNotification["severity"], number> = {
+const PROGRAM_NOTIFICATION_SEVERITY_PRIORITY: Record<string, number> = {
   critical: 3,
   warning: 2,
   info: 1,
 };
 
-const PROGRAM_NOTIFICATION_KIND_LABELS: Record<ProgramNotification["kind"], string> = {
+const PROGRAM_NOTIFICATION_KIND_LABELS: Record<string, string> = {
   decision_required: "Decision",
   blocked: "Blocked",
   milestone_completed: "Milestone",
@@ -96,6 +96,18 @@ const PROGRAM_NOTIFICATION_KIND_LABELS: Record<ProgramNotification["kind"], stri
   implementation_progress: "Implementation progress",
   status_update: "Status update",
 };
+
+function getProgramNotificationSeverityPriority(severity: ProgramNotification["severity"]): number {
+  return PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[severity] ?? 0;
+}
+
+function isVisibleProgramNotificationState(state: ProgramNotification["state"]): boolean {
+  return state === "pending" || state === "delivering";
+}
+
+function isVisibleCtoAttentionState(state: CtoAttentionItem["state"]): boolean {
+  return state === "required";
+}
 
 type ThreadStatusInput = Pick<
   Thread,
@@ -224,11 +236,11 @@ export function buildCopyThreadIdErrorDescription(input: {
 }
 
 export function getSidebarProgramNotificationKindLabel(kind: ProgramNotification["kind"]): string {
-  return PROGRAM_NOTIFICATION_KIND_LABELS[kind];
+  return PROGRAM_NOTIFICATION_KIND_LABELS[kind] ?? kind;
 }
 
 export function getSidebarCtoAttentionKindLabel(kind: CtoAttentionItem["kind"]): string {
-  return PROGRAM_NOTIFICATION_KIND_LABELS[kind];
+  return PROGRAM_NOTIFICATION_KIND_LABELS[kind] ?? kind;
 }
 
 function buildSidebarProgramItemGroups<
@@ -262,8 +274,8 @@ function buildSidebarProgramItemGroups<
         programTitle: program?.title ?? `Program ${String(programId).slice(0, 8)}`,
         items: items.toSorted(
           (left, right) =>
-            PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[right.severity] -
-              PROGRAM_NOTIFICATION_SEVERITY_PRIORITY[left.severity] ||
+            getProgramNotificationSeverityPriority(right.severity) -
+              getProgramNotificationSeverityPriority(left.severity) ||
             right.queuedAt.localeCompare(left.queuedAt) ||
             input.getSortKey(left).localeCompare(input.getSortKey(right)),
         ),
@@ -288,7 +300,7 @@ export function buildSidebarProgramNotificationGroups(input: {
     programs: input.programs,
     items: input.notifications.filter(
       (notification) =>
-        (notification.state === "pending" || notification.state === "delivering") &&
+        isVisibleProgramNotificationState(notification.state) &&
         !isCtoActionableProgramNotificationKind(notification.kind),
     ),
     getSortKey: (notification) => String(notification.notificationId),
@@ -307,7 +319,9 @@ export function buildSidebarCtoAttentionGroups(input: {
 }): SidebarCtoAttentionGroup[] {
   return buildSidebarProgramItemGroups({
     programs: input.programs,
-    items: input.ctoAttentionItems.filter((attentionItem) => attentionItem.state === "required"),
+    items: input.ctoAttentionItems.filter((attentionItem) =>
+      isVisibleCtoAttentionState(attentionItem.state),
+    ),
     getSortKey: (attentionItem) => String(attentionItem.attentionKey),
   }).map((group) => ({
     programId: group.programId,

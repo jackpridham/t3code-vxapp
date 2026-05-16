@@ -16,6 +16,25 @@ import {
   Stream,
 } from "effect";
 import { describe, expect, it, afterEach, vi } from "vitest";
+
+vi.mock("./extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
+  bootstrapAgentsVxappOwnerManifest: vi.fn(),
+  fetchAgentsVxappAgentRuntimeSnapshot: vi.fn(),
+  fetchAgentsVxappBootstrapSidebarSnapshot: vi.fn(),
+  fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
+  fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
+  fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
+  fetchAgentsVxappWorkerRuntimeSnapshot: vi.fn(),
+  requestAgentsVxappApprovalRequest: vi.fn(),
+  requestAgentsVxappApprovalResponse: vi.fn(),
+  requestAgentsVxappProgramMutation: vi.fn(),
+  requestAgentsVxappThreadEventIngest: vi.fn(),
+  requestAgentsVxappThreadStatus: vi.fn(),
+  requestAgentsVxappTodoMutation: vi.fn(),
+  requestAgentsVxappUserInputResponse: vi.fn(),
+  resetAgentsVxappOwnerManifestForTests: vi.fn(),
+}));
+
 import { createServer } from "./wsServer";
 import WebSocket from "ws";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "./config";
@@ -66,6 +85,12 @@ import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import {
+  fetchAgentsVxappControlPlaneSnapshot,
+  fetchAgentsVxappProgramsTodosSnapshot,
+  fetchAgentsVxappRoleSessionRuntimePaths,
+  fetchAgentsVxappWorkerRuntimeSnapshot,
+} from "./extensions/vxapp/agentsVxappOwnerClient.ts";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -75,6 +100,54 @@ const workerRuntimeFixturesRoot = path.resolve(
   import.meta.dirname,
   "../../web/src/lib/workerRuntime/__fixtures__/snapshots",
 );
+const mockedControlPlaneSnapshot = vi.mocked(fetchAgentsVxappControlPlaneSnapshot);
+const mockedProgramsTodosSnapshot = vi.mocked(fetchAgentsVxappProgramsTodosSnapshot);
+const mockedRuntimePaths = vi.mocked(fetchAgentsVxappRoleSessionRuntimePaths);
+const mockedWorkerRuntimeSnapshot = vi.mocked(fetchAgentsVxappWorkerRuntimeSnapshot);
+
+const emptyOwnerControlPlaneSnapshot = {
+  externalRoleAuthority: {
+    projects: [],
+    threadSummaries: [],
+  },
+} as Awaited<ReturnType<typeof fetchAgentsVxappControlPlaneSnapshot>>;
+
+const emptyOwnerProgramsTodosSnapshot = {
+  fetchedAt: "2026-05-16T00:00:00.000Z",
+  dbPath: "owner-db",
+  todoRootPath: "owner-todos",
+  agents: [],
+  programs: [],
+  todos: [],
+  currentTodos: [],
+} as Awaited<ReturnType<typeof fetchAgentsVxappProgramsTodosSnapshot>>;
+
+const defaultOwnerRuntimePaths = {
+  runtimeRoot: "/runtime",
+  roleSessionsRoot: "/runtime/role-sessions",
+  roleStateRoot: "/runtime/role-state",
+  workspaceRuntimeMetadataDir: ".agents/runtime",
+  env: {
+    runtimeRoot: "VX_AGENTS_ROLE_SESSION_RUNTIME_ROOT",
+    stateRoot: "VX_AGENTS_ROLE_SESSION_STATE_ROOT",
+  },
+  roles: {
+    cto: {
+      role: "cto",
+      generatedWorkspaceRoot: "/runtime/role-sessions/cto",
+      stateRoot: "/runtime/role-state/cto",
+      sessionsRoot: "/runtime/role-state/cto/sessions",
+      reservationsRoot: "/runtime/role-state/cto/reservations",
+    },
+    jasper: {
+      role: "jasper",
+      generatedWorkspaceRoot: "/runtime/role-sessions/jasper",
+      stateRoot: "/runtime/role-state/jasper",
+      sessionsRoot: "/runtime/role-state/jasper/sessions",
+      reservationsRoot: "/runtime/role-state/jasper/reservations",
+    },
+  },
+} as Awaited<ReturnType<typeof fetchAgentsVxappRoleSessionRuntimePaths>>;
 
 const defaultOpenService: OpenShape = {
   openBrowser: () => Effect.void,
@@ -526,6 +599,10 @@ describe("WebSocket Server", () => {
       throw new Error("Test server is already running");
     }
 
+    mockedControlPlaneSnapshot.mockResolvedValue(emptyOwnerControlPlaneSnapshot);
+    mockedProgramsTodosSnapshot.mockResolvedValue(emptyOwnerProgramsTodosSnapshot);
+    mockedRuntimePaths.mockResolvedValue(defaultOwnerRuntimePaths);
+
     const baseDir = options.baseDir ?? makeTempDir("t3code-ws-base-");
     const devUrl = options.devUrl ? new URL(options.devUrl) : undefined;
     const derivedPaths = deriveServerPathsSync(baseDir, devUrl);
@@ -733,6 +810,10 @@ describe("WebSocket Server", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
     vi.restoreAllMocks();
+    mockedControlPlaneSnapshot.mockReset();
+    mockedProgramsTodosSnapshot.mockReset();
+    mockedRuntimePaths.mockReset();
+    mockedWorkerRuntimeSnapshot.mockReset();
   });
 
   it("sends welcome message on connect", async () => {
@@ -2045,6 +2126,68 @@ describe("WebSocket Server", () => {
     });
     expect(createThreadResponse.error).toBeUndefined();
 
+    mockedWorkerRuntimeSnapshot.mockResolvedValueOnce({
+      threadId: asThreadId("thread-worker-runtime"),
+      worktreePath,
+      runtimeDir,
+      sourceFiles: {
+        contextPlan: {
+          fileName: "context-plan.json",
+          absolutePath: path.join(runtimeDir, "context-plan.json"),
+          status: "loaded",
+          detail: null,
+        },
+        dispatchContract: {
+          fileName: "dispatch-contract.json",
+          absolutePath: path.join(runtimeDir, "dispatch-contract.json"),
+          status: "loaded",
+          detail: null,
+        },
+        installedPacks: {
+          fileName: "installed-packs.json",
+          absolutePath: path.join(runtimeDir, "installed-packs.json"),
+          status: "loaded",
+          detail: null,
+        },
+        instructionStackAudit: {
+          fileName: "instruction-stack-audit.json",
+          absolutePath: path.join(runtimeDir, "instruction-stack-audit.json"),
+          status: "loaded",
+          detail: null,
+        },
+      },
+      summary: {
+        repo: "vue-vxapp",
+        taskClass: "review-only",
+        contextMode: "isolated",
+        closeoutAuthority: "code_tests",
+        validationProfile: null,
+        selectedPacks: [],
+        allowedCapabilities: [],
+        forbiddenCapabilities: [],
+        conflicts: [],
+        warnings: [],
+        repoClaude: null,
+        legacyGlobalSkills: null,
+        workspace: worktreePath,
+        runtimeDir,
+        skillsDir: null,
+        agentsSkillsDir: null,
+        auditStatus: "error",
+        auditFindings: [],
+        packAuditStatus: null,
+        packAuditIssueCount: 0,
+        packCount: 0,
+      },
+      packs: [],
+      raw: {
+        contextPlan: null,
+        dispatchContract: null,
+        installedPacks: null,
+        instructionStackAudit: null,
+      },
+    } as Awaited<ReturnType<typeof fetchAgentsVxappWorkerRuntimeSnapshot>>);
+
     const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
       threadId: "thread-worker-runtime",
     });
@@ -2117,6 +2260,68 @@ describe("WebSocket Server", () => {
     });
     expect(createThreadResponse.error).toBeUndefined();
 
+    mockedWorkerRuntimeSnapshot.mockResolvedValueOnce({
+      threadId: asThreadId("thread-worker-runtime-partial"),
+      worktreePath,
+      runtimeDir,
+      sourceFiles: {
+        contextPlan: {
+          fileName: "context-plan.json",
+          absolutePath: path.join(runtimeDir, "context-plan.json"),
+          status: "loaded",
+          detail: null,
+        },
+        dispatchContract: {
+          fileName: "dispatch-contract.json",
+          absolutePath: path.join(runtimeDir, "dispatch-contract.json"),
+          status: "missing",
+          detail: null,
+        },
+        installedPacks: {
+          fileName: "installed-packs.json",
+          absolutePath: path.join(runtimeDir, "installed-packs.json"),
+          status: "missing",
+          detail: null,
+        },
+        instructionStackAudit: {
+          fileName: "instruction-stack-audit.json",
+          absolutePath: path.join(runtimeDir, "instruction-stack-audit.json"),
+          status: "missing",
+          detail: null,
+        },
+      },
+      summary: {
+        repo: "vue-vxapp",
+        taskClass: "review-only",
+        contextMode: "isolated",
+        closeoutAuthority: "code_tests",
+        validationProfile: null,
+        selectedPacks: [],
+        allowedCapabilities: [],
+        forbiddenCapabilities: [],
+        conflicts: [],
+        warnings: [],
+        repoClaude: null,
+        legacyGlobalSkills: null,
+        workspace: worktreePath,
+        runtimeDir,
+        skillsDir: null,
+        agentsSkillsDir: null,
+        auditStatus: "missing",
+        auditFindings: [],
+        packAuditStatus: null,
+        packAuditIssueCount: 0,
+        packCount: 0,
+      },
+      packs: [],
+      raw: {
+        contextPlan: null,
+        dispatchContract: null,
+        installedPacks: null,
+        instructionStackAudit: null,
+      },
+    } as Awaited<ReturnType<typeof fetchAgentsVxappWorkerRuntimeSnapshot>>);
+
     const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
       threadId: "thread-worker-runtime-partial",
     });
@@ -2183,6 +2388,68 @@ describe("WebSocket Server", () => {
     });
     expect(createThreadResponse.error).toBeUndefined();
 
+    mockedWorkerRuntimeSnapshot.mockResolvedValueOnce({
+      threadId: asThreadId("thread-orchestrator-runtime"),
+      worktreePath,
+      runtimeDir: null,
+      sourceFiles: {
+        contextPlan: {
+          fileName: "context-plan.json",
+          absolutePath: path.join(runtimeDir, "context-plan.json"),
+          status: "missing",
+          detail: "Thread 'thread-orchestrator-runtime' is not a worker thread.",
+        },
+        dispatchContract: {
+          fileName: "dispatch-contract.json",
+          absolutePath: path.join(runtimeDir, "dispatch-contract.json"),
+          status: "missing",
+          detail: null,
+        },
+        installedPacks: {
+          fileName: "installed-packs.json",
+          absolutePath: path.join(runtimeDir, "installed-packs.json"),
+          status: "missing",
+          detail: null,
+        },
+        instructionStackAudit: {
+          fileName: "instruction-stack-audit.json",
+          absolutePath: path.join(runtimeDir, "instruction-stack-audit.json"),
+          status: "missing",
+          detail: null,
+        },
+      },
+      summary: {
+        repo: null,
+        taskClass: null,
+        contextMode: null,
+        closeoutAuthority: null,
+        validationProfile: null,
+        selectedPacks: [],
+        allowedCapabilities: [],
+        forbiddenCapabilities: [],
+        conflicts: [],
+        warnings: [],
+        repoClaude: null,
+        legacyGlobalSkills: null,
+        workspace: worktreePath,
+        runtimeDir: null,
+        skillsDir: null,
+        agentsSkillsDir: null,
+        auditStatus: "missing",
+        auditFindings: [],
+        packAuditStatus: null,
+        packAuditIssueCount: 0,
+        packCount: 0,
+      },
+      packs: [],
+      raw: {
+        contextPlan: null,
+        dispatchContract: null,
+        installedPacks: null,
+        instructionStackAudit: null,
+      },
+    } as Awaited<ReturnType<typeof fetchAgentsVxappWorkerRuntimeSnapshot>>);
+
     const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
       threadId: "thread-orchestrator-runtime",
     });
@@ -2243,6 +2510,68 @@ describe("WebSocket Server", () => {
       createdAt: new Date().toISOString(),
     });
     expect(createThreadResponse.error).toBeUndefined();
+
+    mockedWorkerRuntimeSnapshot.mockResolvedValueOnce({
+      threadId: asThreadId("thread-worker-runtime-no-worktree"),
+      worktreePath: projectRoot,
+      runtimeDir,
+      sourceFiles: {
+        contextPlan: {
+          fileName: "context-plan.json",
+          absolutePath: path.join(runtimeDir, "context-plan.json"),
+          status: "missing",
+          detail: null,
+        },
+        dispatchContract: {
+          fileName: "dispatch-contract.json",
+          absolutePath: path.join(runtimeDir, "dispatch-contract.json"),
+          status: "missing",
+          detail: null,
+        },
+        installedPacks: {
+          fileName: "installed-packs.json",
+          absolutePath: path.join(runtimeDir, "installed-packs.json"),
+          status: "missing",
+          detail: null,
+        },
+        instructionStackAudit: {
+          fileName: "instruction-stack-audit.json",
+          absolutePath: path.join(runtimeDir, "instruction-stack-audit.json"),
+          status: "missing",
+          detail: null,
+        },
+      },
+      summary: {
+        repo: null,
+        taskClass: null,
+        contextMode: null,
+        closeoutAuthority: null,
+        validationProfile: null,
+        selectedPacks: [],
+        allowedCapabilities: [],
+        forbiddenCapabilities: [],
+        conflicts: [],
+        warnings: [],
+        repoClaude: null,
+        legacyGlobalSkills: null,
+        workspace: projectRoot,
+        runtimeDir,
+        skillsDir: null,
+        agentsSkillsDir: null,
+        auditStatus: "missing",
+        auditFindings: [],
+        packAuditStatus: null,
+        packAuditIssueCount: 0,
+        packCount: 0,
+      },
+      packs: [],
+      raw: {
+        contextPlan: null,
+        dispatchContract: null,
+        installedPacks: null,
+        instructionStackAudit: null,
+      },
+    } as Awaited<ReturnType<typeof fetchAgentsVxappWorkerRuntimeSnapshot>>);
 
     const runtimeResponse = await sendRequest(ws, WS_METHODS.serverGetWorkerRuntimeSnapshot, {
       threadId: "thread-worker-runtime-no-worktree",
@@ -2434,7 +2763,7 @@ describe("WebSocket Server", () => {
     expect(response.error?.message).toContain("Workspace root does not exist:");
   });
 
-  it("accepts thread.orchestrator-wake.upsert over dispatchCommand", async () => {
+  it("rejects thread.orchestrator-wake.upsert over dispatchCommand at the local boundary", async () => {
     server = await createTestServer({ cwd: "/test" });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
@@ -2496,27 +2825,8 @@ describe("WebSocket Server", () => {
       },
       createdAt,
     });
-    expect(wakeUpsertResponse.error).toBeUndefined();
-    expect((wakeUpsertResponse.result as { sequence?: number } | undefined)?.sequence).toEqual(
-      expect.any(Number),
-    );
-
-    const push = await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (candidate) => {
-      const event = candidate.data as { type?: string };
-      return event.type === "thread.orchestrator-wake-upserted";
-    });
-    expect(push.data).toEqual(
-      expect.objectContaining({
-        type: "thread.orchestrator-wake-upserted",
-        payload: expect.objectContaining({
-          threadId: "thread-orch",
-          wakeItem: expect.objectContaining({
-            wakeId: "wake:thread-worker:turn-1:completed",
-            state: "pending",
-          }),
-        }),
-      }),
-    );
+    expect(wakeUpsertResponse.result).toBeUndefined();
+    expect(wakeUpsertResponse.error?.message).toContain("owned by agents-vxapp");
   });
 
   it("keeps orchestration domain push behavior for provider runtime events", async () => {

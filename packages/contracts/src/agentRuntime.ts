@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
 import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import {
   WorkerRuntimeAuditFinding,
@@ -11,10 +11,21 @@ const AgentRuntimeStringList = Schema.Array(TrimmedNonEmptyString).pipe(
   Schema.withDecodingDefault(() => []),
 );
 
-export const AgentRuntimeAgentKind = Schema.Literals(["worker", "orchestrator", "executive"]);
+const openStringToDecodedSchema = <T>() =>
+  TrimmedNonEmptyString.pipe(
+    Schema.decodeTo(
+      Schema.declare<T>((value): value is T => typeof value === "string"),
+      SchemaTransformation.transform({
+        decode: (value) => value as T,
+        encode: (value) => value as string,
+      }),
+    ),
+  );
+
+export const AgentRuntimeAgentKind = openStringToDecodedSchema<string>();
 export type AgentRuntimeAgentKind = typeof AgentRuntimeAgentKind.Type;
 
-export const AgentRuntimeSnapshotKind = Schema.Literals(["worker-contract", "role-runtime"]);
+export const AgentRuntimeSnapshotKind = openStringToDecodedSchema<string>();
 export type AgentRuntimeSnapshotKind = typeof AgentRuntimeSnapshotKind.Type;
 
 export const AgentRuntimeSourceFile = Schema.Struct({
@@ -44,15 +55,7 @@ export const AgentRuntimeSummary = Schema.Struct({
 });
 export type AgentRuntimeSummary = typeof AgentRuntimeSummary.Type;
 
-export const AgentRuntimeWorkspaceResolutionKind = Schema.Literals([
-  "thread-worktree",
-  "project-workspace-root",
-  "input-worktree-fallback",
-  "canonical-role-root",
-  "latest-role-session",
-  "role-session-thread-worktree",
-  "repo-role-root",
-]);
+export const AgentRuntimeWorkspaceResolutionKind = openStringToDecodedSchema<string>();
 export type AgentRuntimeWorkspaceResolutionKind = typeof AgentRuntimeWorkspaceResolutionKind.Type;
 
 export const AgentRuntimeWorkspaceResolution = Schema.Struct({

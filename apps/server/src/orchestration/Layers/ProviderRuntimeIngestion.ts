@@ -2,10 +2,12 @@ import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
+  EventId,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationProposedPlanId,
+  type OrchestrationThread,
   CheckpointRef,
   isToolLifecycleItemType,
   ThreadId,
@@ -14,7 +16,7 @@ import {
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
-import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
+import { Cache, Cause, Data, Duration, Effect, Layer, Option, Stream } from "effect";
 import { projectThinkingActivitiesFromRuntimeEvent } from "@t3tools/orchestration-core/provider-thinking-activities";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -35,6 +37,12 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
 import { notifyOrchestratorChatMessage } from "../orchestratorNotify.ts";
 import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
+import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
+import {
+  requestAgentsVxappApprovalRequest,
+  requestAgentsVxappThreadEventIngest,
+  requestAgentsVxappThreadStatus,
+} from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -48,6 +56,37 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
+
+function isVxappBackedThread(thread: OrchestrationThread): boolean {
+  return thread.worktreePath !== null && thread.worktreePath.startsWith(AGENTS_VXAPP_ROOT);
+}
+
+function resolveProviderLocalThreadErrorPresentation(input: {
+  readonly thread: OrchestrationThread;
+  readonly latestTurnState: Parameters<
+    typeof resolveLocalThreadErrorPresentation
+  >[0]["latestTurnState"];
+  readonly sessionStatus: Parameters<
+    typeof resolveLocalThreadErrorPresentation
+  >[0]["sessionStatus"];
+  readonly sessionLastError: string | null;
+}) {
+  if (isVxappBackedThread(input.thread)) {
+    return {
+      hasActiveError: input.thread.hasActiveError,
+      activeError: input.thread.activeError,
+      historicalError: input.thread.historicalError,
+      errorPresentationSource: input.thread.errorPresentationSource,
+    };
+  }
+  return resolveLocalThreadErrorPresentation({
+    archivedAt: input.thread.archivedAt,
+    deletedAt: input.thread.deletedAt,
+    latestTurnState: input.latestTurnState,
+    sessionStatus: input.sessionStatus,
+    sessionLastError: input.sessionLastError,
+  });
+}
 
 type TurnStartRequestedDomainEvent = Extract<
   OrchestrationEvent,
@@ -138,6 +177,22 @@ function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
+function ownerErrorDetail(error: unknown): string {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "detail" in error &&
+    typeof (error as { detail?: unknown }).detail === "string"
+  ) {
+    return (error as { detail: string }).detail;
+  }
+  return error instanceof Error ? error.message : "agents-vxapp owner command failed.";
+}
+
+class OwnerCommandFailure extends Data.TaggedError("OwnerCommandFailure")<{
+  readonly detail: string;
+}> {}
+
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
@@ -204,12 +259,20 @@ function orchestrationSessionStatusFromRuntimeState(
   }
 }
 
-function isSettledSessionStatus(
-  status: "idle" | "starting" | "running" | "ready" | "interrupted" | "stopped" | "error",
-): boolean {
-  return (
-    status === "ready" || status === "interrupted" || status === "stopped" || status === "error"
-  );
+function isSettledSessionStatus(status: string): boolean {
+  switch (status) {
+    case "idle":
+    case "starting":
+    case "running":
+      return false;
+    case "ready":
+    case "interrupted":
+    case "stopped":
+    case "error":
+      return true;
+    default:
+      throw new Error(`Unsupported orchestration session status: ${status}`);
+  }
 }
 
 function requestKindFromCanonicalRequestType(
@@ -570,6 +633,132 @@ const make = Effect.fn("make")(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const projectHooksService = yield* ProjectHooksService;
+
+  const appendProviderFailureActivity = (input: {
+    readonly threadId: ThreadId;
+    readonly kind:
+      | "provider.approval.request.failed"
+      | "provider.user-input.request.failed"
+      | "provider.thread.status.sync.failed";
+    readonly summary: string;
+    readonly detail: string;
+    readonly turnId: TurnId | null;
+    readonly createdAt: string;
+    readonly requestId?: string;
+  }) =>
+    orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: CommandId.makeUnsafe(`provider:${crypto.randomUUID()}:failure-activity`),
+      threadId: input.threadId,
+      activity: {
+        id: EventId.makeUnsafe(crypto.randomUUID()),
+        tone: "error",
+        kind: input.kind,
+        summary: input.summary,
+        payload: {
+          detail: input.detail,
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+        },
+        turnId: input.turnId,
+        createdAt: input.createdAt,
+      },
+      createdAt: input.createdAt,
+    });
+
+  const synchronizeOwnerApprovalRequest = Effect.fnUntraced(function* (
+    thread: OrchestrationThread,
+    event: Extract<ProviderRuntimeEvent, { type: "request.opened" }>,
+  ) {
+    if (event.payload.requestType === "tool_user_input") {
+      return true;
+    }
+    const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType);
+    return yield* Effect.tryPromise({
+      try: () =>
+        requestAgentsVxappApprovalRequest({
+          threadId: thread.id,
+          eventId: event.eventId,
+          requestId: event.requestId ?? null,
+          turnId: event.turnId ?? null,
+          createdAt: event.createdAt,
+          requestType: event.payload.requestType,
+          state: "pending",
+          ...(requestKind ? { requestKind } : {}),
+          ...(event.payload.detail ? { detail: event.payload.detail } : {}),
+        }),
+      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+    }).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        appendProviderFailureActivity({
+          threadId: thread.id,
+          kind: "provider.approval.request.failed",
+          summary: "Provider approval request failed",
+          detail: ownerErrorDetail(error),
+          turnId: toTurnId(event.turnId) ?? null,
+          createdAt: event.createdAt,
+          ...(event.requestId ? { requestId: event.requestId } : {}),
+        }).pipe(Effect.as(false)),
+      ),
+    );
+  });
+
+  const synchronizeOwnerPendingUserInput = Effect.fnUntraced(function* (
+    thread: OrchestrationThread,
+    event: Extract<ProviderRuntimeEvent, { type: "user-input.requested" }>,
+  ) {
+    return yield* Effect.tryPromise({
+      try: () =>
+        requestAgentsVxappThreadEventIngest({
+          threadId: thread.id,
+          providerEvent: event,
+          requestId: event.requestId ?? null,
+          requestType: "tool_user_input",
+          state: "pending",
+          ...(event.turnId ? { turnId: event.turnId } : {}),
+          questions: event.payload.questions,
+        }),
+      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+    }).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        appendProviderFailureActivity({
+          threadId: thread.id,
+          kind: "provider.user-input.request.failed",
+          summary: "Provider user input request failed",
+          detail: ownerErrorDetail(error),
+          turnId: toTurnId(event.turnId) ?? null,
+          createdAt: event.createdAt,
+          ...(event.requestId ? { requestId: event.requestId } : {}),
+        }).pipe(Effect.as(false)),
+      ),
+    );
+  });
+
+  const synchronizeVxappThreadStatus = Effect.fnUntraced(function* (
+    thread: OrchestrationThread,
+    event: ProviderRuntimeEvent,
+  ) {
+    if (!isVxappBackedThread(thread)) {
+      return true;
+    }
+    return yield* Effect.tryPromise({
+      try: () => requestAgentsVxappThreadStatus({ threadId: thread.id }),
+      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+    }).pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        appendProviderFailureActivity({
+          threadId: thread.id,
+          kind: "provider.thread.status.sync.failed",
+          summary: "Provider thread status sync failed",
+          detail: ownerErrorDetail(error),
+          turnId: toTurnId(event.turnId) ?? null,
+          createdAt: event.createdAt,
+        }).pipe(Effect.as(false)),
+      ),
+    );
+  });
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -1018,6 +1207,35 @@ const make = Effect.fn("make")(function* () {
         ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
         : null;
 
+    if (event.type === "request.opened") {
+      const ownerAccepted = yield* synchronizeOwnerApprovalRequest(thread, event);
+      if (!ownerAccepted) {
+        return;
+      }
+    }
+
+    if (event.type === "user-input.requested") {
+      const ownerAccepted = yield* synchronizeOwnerPendingUserInput(thread, event);
+      if (!ownerAccepted) {
+        return;
+      }
+    }
+
+    if (
+      event.type === "session.started" ||
+      event.type === "session.state.changed" ||
+      event.type === "session.exited" ||
+      event.type === "thread.started" ||
+      event.type === "turn.started" ||
+      event.type === "turn.completed" ||
+      event.type === "runtime.error"
+    ) {
+      const ownerAccepted = yield* synchronizeVxappThreadStatus(thread, event);
+      if (!ownerAccepted) {
+        return;
+      }
+    }
+
     if (
       event.type === "session.started" ||
       event.type === "session.state.changed" ||
@@ -1070,9 +1288,8 @@ const make = Effect.fn("make")(function* () {
               : "running";
 
       if (shouldApplyThreadLifecycle) {
-        const errorPresentation = resolveLocalThreadErrorPresentation({
-          archivedAt: thread.archivedAt,
-          deletedAt: thread.deletedAt,
+        const errorPresentation = resolveProviderLocalThreadErrorPresentation({
+          thread,
           latestTurnState: status === "error" ? "error" : null,
           sessionStatus: status,
           sessionLastError: lastError,

@@ -1,97 +1,100 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
+import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mockedOwnerRoot = vi.hoisted(() => "/tmp/t3-vxapp-owner-mock");
+vi.mock("../agentsVxappOwnerClient.ts", () => ({
+  fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
+  fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
+  requestAgentsVxappProgramMutation: vi.fn(),
+  requestAgentsVxappTodoMutation: vi.fn(),
+}));
 
-vi.mock("../agentsVxappSqlite.ts", async () => {
-  const actual =
-    await vi.importActual<typeof import("../agentsVxappSqlite.ts")>("../agentsVxappSqlite.ts");
-  return {
-    ...actual,
-    AGENTS_VXAPP_ROOT: mockedOwnerRoot,
-  };
-});
-
+import {
+  fetchAgentsVxappProgramsTodosSnapshot,
+  requestAgentsVxappProgramMutation,
+  requestAgentsVxappTodoMutation,
+} from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappControlPlane } from "../Services/AgentsVxappControlPlane.ts";
 import { AgentsVxappControlPlaneLive } from "./AgentsVxappControlPlane.ts";
 
-const OWNER_EXPORT_PATH_ENV = "T3_AGENTS_VXAPP_OWNER_EXPORT_PATH";
-const priorOwnerExportPath = process.env[OWNER_EXPORT_PATH_ENV];
+const mockedProgramsTodos = vi.mocked(fetchAgentsVxappProgramsTodosSnapshot);
+const mockedProgramMutation = vi.mocked(requestAgentsVxappProgramMutation);
+const mockedTodoMutation = vi.mocked(requestAgentsVxappTodoMutation);
+
+const emptySnapshot = {
+  fetchedAt: "2026-05-16T00:00:00.000Z",
+  dbPath: "owner-db",
+  todoRootPath: "owner-todos",
+  agents: [],
+  programs: [],
+  todos: [],
+  currentTodos: [],
+};
 
 afterEach(() => {
-  if (priorOwnerExportPath === undefined) {
-    delete process.env[OWNER_EXPORT_PATH_ENV];
-    return;
-  }
-  process.env[OWNER_EXPORT_PATH_ENV] = priorOwnerExportPath;
+  vi.resetAllMocks();
 });
 
 describe("AgentsVxappControlPlaneLive", () => {
-  const missingExportCases = [
-    [
-      "bindingAuthority",
-      "ownerProjectionAuthority.bindingAuthority.getSnapshot",
-      "binding-authority.json",
-    ],
-    [
-      "programAuthority",
-      "ownerProjectionAuthority.programAuthority.getSnapshot",
-      "program-authority.json",
-    ],
-    [
-      "attentionSummary",
-      "ownerProjectionAuthority.attentionSummary.getSnapshot",
-      "attention-summary.json",
-    ],
-    [
-      "notificationSummary",
-      "ownerProjectionAuthority.notificationSummary.getSnapshot",
-      "notification-summary.json",
-    ],
-    ["watchSummary", "ownerProjectionAuthority.watchSummary.getSnapshot", "watch-summary.json"],
-  ] as const;
+  it("fetches Program and TODO snapshots through the owner client", async () => {
+    mockedProgramsTodos.mockResolvedValueOnce(emptySnapshot);
 
-  for (const [label, operation, filename] of missingExportCases) {
-    it(`fails explicitly when ${label} is missing`, async () => {
-      const effect = Effect.gen(function* () {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
         const controlPlane = yield* AgentsVxappControlPlane;
-        switch (label) {
-          case "bindingAuthority":
-            return yield* controlPlane.getBindingAuthorityExport();
-          case "programAuthority":
-            return yield* controlPlane.getProgramAuthorityExport();
-          case "attentionSummary":
-            return yield* controlPlane.getAttentionSummaryExport();
-          case "notificationSummary":
-            return yield* controlPlane.getNotificationSummaryExport();
-          case "watchSummary":
-            return yield* controlPlane.getWatchSummaryExport();
-        }
-      }).pipe(
-        Effect.provide(AgentsVxappControlPlaneLive.pipe(Layer.provideMerge(NodeServices.layer))),
-      );
-
-      await expect(Effect.runPromise(effect)).rejects.toMatchObject({
-        operation,
-        detail: expect.stringContaining(filename),
-      });
-    });
-  }
-
-  it("fails explicitly when the compatibility export path is not configured", async () => {
-    delete process.env[OWNER_EXPORT_PATH_ENV];
-
-    const effect = Effect.gen(function* () {
-      const controlPlane = yield* AgentsVxappControlPlane;
-      return yield* controlPlane.getProjectionAuthoritySnapshot();
-    }).pipe(
-      Effect.provide(AgentsVxappControlPlaneLive.pipe(Layer.provideMerge(NodeServices.layer))),
+        return yield* controlPlane.getSnapshot({});
+      }).pipe(Effect.provide(AgentsVxappControlPlaneLive)),
     );
 
-    await expect(Effect.runPromise(effect)).rejects.toMatchObject({
-      operation: "ownerProjectionAuthority.getSnapshot",
-      detail: expect.stringContaining(OWNER_EXPORT_PATH_ENV),
+    expect(result).toEqual(emptySnapshot);
+    expect(mockedProgramsTodos).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes Program mutations through owner-client calls", async () => {
+    mockedProgramMutation.mockResolvedValueOnce({ ok: true, action: "create" });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const controlPlane = yield* AgentsVxappControlPlane;
+        return yield* controlPlane.createProgram({
+          title: "Owner program",
+          executiveProjectId: ProjectId.makeUnsafe("project-owner"),
+          executiveThreadId: ThreadId.makeUnsafe("thread-owner"),
+        });
+      }).pipe(Effect.provide(AgentsVxappControlPlaneLive)),
+    );
+
+    expect(mockedProgramMutation).toHaveBeenCalledWith({
+      action: "create",
+      input: {
+        title: "Owner program",
+        executiveProjectId: "project-owner",
+        executiveThreadId: "thread-owner",
+      },
+    });
+  });
+
+  it("routes TODO mutations through owner-client calls", async () => {
+    mockedTodoMutation.mockResolvedValueOnce({ ok: true, action: "update" });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const controlPlane = yield* AgentsVxappControlPlane;
+        return yield* controlPlane.updateTodo({
+          agent: "jasper",
+          todoId: "todo-1",
+          title: "Owner TODO",
+        });
+      }).pipe(Effect.provide(AgentsVxappControlPlaneLive)),
+    );
+
+    expect(mockedTodoMutation).toHaveBeenCalledWith({
+      action: "update",
+      input: {
+        agent: "jasper",
+        todoId: "todo-1",
+        title: "Owner TODO",
+      },
     });
   });
 });

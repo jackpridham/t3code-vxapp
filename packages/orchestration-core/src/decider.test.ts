@@ -1,7 +1,11 @@
 import {
+  ApprovalRequestId,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
+  OrchestrationCommand as OrchestrationCommandSchema,
+  ProgramId,
+  ProgramNotificationId,
   ProjectId,
   ThreadId,
   TurnId,
@@ -9,7 +13,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { decideOrchestrationCommand } from "./decider.ts";
@@ -23,6 +27,156 @@ async function decide(
   return (Array.isArray(result) ? result : [result]) as ReadonlyArray<
     Omit<OrchestrationEvent, "sequence">
   >;
+}
+
+const ownerBoundaryDetail = "owned by agents-vxapp";
+
+function schemaDecode(command: unknown): OrchestrationCommand {
+  return Schema.decodeUnknownSync(OrchestrationCommandSchema)(command);
+}
+
+function ownerOwnedCommands(now: string): ReadonlyArray<OrchestrationCommand> {
+  const programId = ProgramId.makeUnsafe("program-owner-boundary");
+  const notificationId = ProgramNotificationId.makeUnsafe("notification-owner-boundary");
+  const projectId = ProjectId.makeUnsafe("project-owner-boundary");
+  const threadId = ThreadId.makeUnsafe("thread-owner-boundary");
+  const base = {
+    commandId: CommandId.makeUnsafe("cmd-owner-boundary"),
+    programId,
+  };
+  const commands: ReadonlyArray<unknown> = [
+    {
+      type: "program.create",
+      ...base,
+      title: "Owner Boundary",
+      objective: null,
+      declaredRepos: ["repo"],
+      affectedAppTargets: [],
+      requiredLocalSuites: [],
+      requiredExternalE2ESuites: [],
+      requireDevelopmentDeploy: false,
+      requireExternalE2E: false,
+      requireCleanPostFlight: false,
+      requirePrPerRepo: false,
+      executiveProjectId: projectId,
+      executiveThreadId: threadId,
+      createdAt: now,
+    },
+    { type: "program.scope.update", ...base, declaredRepos: ["repo"] },
+    { type: "program.meta.update", ...base, title: "Updated Owner Boundary" },
+    {
+      type: "program.repo-pr.upsert",
+      ...base,
+      repoPr: {
+        repo: "repo",
+        url: "https://example.invalid/pull/1",
+        number: 1,
+        state: "open",
+        isDraft: false,
+        reviewDecision: "approved",
+        mergeStateStatus: "clean",
+        headRefName: "feature",
+        baseRefName: "main",
+        updatedAt: now,
+      },
+    },
+    {
+      type: "program.local-validation.upsert",
+      ...base,
+      localValidation: {
+        repo: "repo",
+        suiteId: "lint",
+        kind: "local",
+        status: "passed",
+        summary: "passed",
+        command: "bun lint",
+        recordedAt: now,
+      },
+    },
+    {
+      type: "program.app-validation.upsert",
+      ...base,
+      appValidation: {
+        target: "web",
+        kind: "external_e2e",
+        suiteId: "smoke",
+        status: "passed",
+        summary: "passed",
+        command: "smoke",
+        url: "https://example.invalid",
+        recordedAt: now,
+      },
+    },
+    {
+      type: "program.observed-repo.upsert",
+      ...base,
+      observedRepo: { repo: "repo", source: "owner", observedAt: now },
+    },
+    {
+      type: "program.post-flight.set",
+      ...base,
+      postFlight: { status: "clean", summary: "clean", recordedAt: now },
+    },
+    { type: "program.delete", ...base },
+    {
+      type: "program.notification.upsert",
+      ...base,
+      notificationId,
+      kind: "blocked",
+      summary: "Blocked by owner boundary",
+      createdAt: now,
+    },
+    {
+      type: "program.notification.consume",
+      ...base,
+      notificationId,
+      consumedAt: now,
+    },
+    {
+      type: "program.notification.drop",
+      ...base,
+      notificationId,
+      droppedAt: now,
+    },
+    {
+      type: "thread.approval.respond",
+      commandId: CommandId.makeUnsafe("cmd-approval-owner-boundary"),
+      threadId,
+      requestId: ApprovalRequestId.makeUnsafe("approval-owner-boundary"),
+      decision: "accept",
+      createdAt: now,
+    },
+    {
+      type: "thread.user-input.respond",
+      commandId: CommandId.makeUnsafe("cmd-user-input-owner-boundary"),
+      threadId,
+      requestId: ApprovalRequestId.makeUnsafe("user-input-owner-boundary"),
+      answers: {},
+      createdAt: now,
+    },
+    {
+      type: "thread.orchestrator-wake.upsert",
+      commandId: CommandId.makeUnsafe("cmd-wake-owner-boundary"),
+      threadId,
+      wakeItem: {
+        wakeId: "wake-owner-boundary",
+        orchestratorThreadId: threadId,
+        orchestratorProjectId: projectId,
+        workerThreadId: ThreadId.makeUnsafe("worker-thread-owner-boundary"),
+        workerProjectId: ProjectId.makeUnsafe("worker-project-owner-boundary"),
+        workerTurnId: TurnId.makeUnsafe("turn-owner-boundary"),
+        workerTitleSnapshot: "Worker",
+        outcome: "completed",
+        summary: "Done",
+        queuedAt: now,
+        state: "pending",
+        deliveredAt: null,
+        consumedAt: null,
+      },
+      createdAt: now,
+    },
+  ];
+  return commands.map(schemaDecode);
 }
 
 async function projectSequence(
@@ -86,6 +240,17 @@ function threadCreateCommand(input: {
 }
 
 describe("orchestration decider", () => {
+  it("rejects schema-decodable agents-vxapp owned command domains at the local boundary", async () => {
+    const now = "2026-04-22T00:00:00.000Z";
+    const readModel = createEmptyReadModel(now);
+
+    for (const command of ownerOwnedCommands(now)) {
+      await expect(
+        Effect.runPromise(decideOrchestrationCommand({ command, readModel })),
+      ).rejects.toThrow(ownerBoundaryDetail);
+    }
+  });
+
   it("decides project creation from an empty read model", async () => {
     const now = "2026-04-22T00:00:00.000Z";
     const projectId = ProjectId.makeUnsafe("project-decider");

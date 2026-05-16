@@ -28,7 +28,7 @@ function makeWakeItem(
 }
 
 describe("buildSidebarWakeSummaryByThreadId", () => {
-  it("aggregates orchestrator totals and worker wake state", () => {
+  it("counts only open wakes for both orchestrator and worker thread ids", () => {
     const orchestratorThreadId = ThreadId.makeUnsafe("thread-orch-1");
     const workerThreadId = ThreadId.makeUnsafe("thread-worker-1");
 
@@ -48,28 +48,52 @@ describe("buildSidebarWakeSummaryByThreadId", () => {
     ]);
 
     expect(summary.get(orchestratorThreadId)).toEqual({
-      pendingCount: 1,
-      deliveringCount: 1,
-      workerState: null,
+      openWakeCount: 2,
     });
     expect(summary.get(workerThreadId)).toEqual({
-      pendingCount: 0,
-      deliveringCount: 0,
-      workerState: "delivering",
+      openWakeCount: 2,
     });
   });
 
-  it("ignores wake items that are no longer pending delivery", () => {
+  it("excludes closed and non-open wakes from the neutral count-only summary", () => {
     const orchestratorThreadId = ThreadId.makeUnsafe("thread-orch-1");
+    const workerThreadId = ThreadId.makeUnsafe("thread-worker-1");
 
     const summary = buildSidebarWakeSummaryByThreadId([
       makeWakeItem({
         wakeId: "wake-1",
         orchestratorThreadId,
+        workerThreadId,
+        state: "delivered",
+      }),
+      makeWakeItem({
+        wakeId: "wake-2",
+        orchestratorThreadId,
+        workerThreadId,
         state: "consumed",
+      }),
+      makeWakeItem({
+        wakeId: "wake-3",
+        orchestratorThreadId,
+        workerThreadId,
+        state: "dropped",
       }),
     ]);
 
     expect(summary.has(orchestratorThreadId)).toBe(false);
+    expect(summary.has(workerThreadId)).toBe(false);
+  });
+
+  it("returns a neutral count-only shape with no state-derived fields", () => {
+    const summary = buildSidebarWakeSummaryByThreadId([
+      makeWakeItem({
+        wakeId: "wake-1",
+        state: "pending",
+      }),
+    ]);
+
+    expect(summary.get(ThreadId.makeUnsafe("thread-orch-1"))).toEqual({
+      openWakeCount: 1,
+    });
   });
 });

@@ -110,8 +110,8 @@ describe("deriveWorkerRuntimeDialogState", () => {
     });
 
     expect(state).toEqual({
-      mode: "missing",
-      message: "Worker thread 'worker-thread' has no worktree path yet.",
+      mode: "ready",
+      message: null,
     });
   });
 
@@ -136,8 +136,8 @@ describe("deriveWorkerRuntimeDialogState", () => {
     });
 
     expect(state).toEqual({
-      mode: "invalid",
-      message: "Schema validation failed.",
+      mode: "ready",
+      message: null,
     });
   });
 

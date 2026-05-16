@@ -75,7 +75,7 @@ export const DEV_ORCHESTRATOR_WAKE_OPTIONS: ReadonlyArray<{
   { outcome: "failed", label: "Failed" },
 ] as const;
 
-const DEV_NOTIFICATION_SEVERITY_BY_KIND = {
+const DEV_NOTIFICATION_SEVERITY_BY_KIND: Record<string, "info" | "warning" | "critical"> = {
   decision_required: "warning",
   blocked: "critical",
   milestone_completed: "info",
@@ -91,7 +91,7 @@ const DEV_NOTIFICATION_SEVERITY_BY_KIND = {
   test_retry: "warning",
   implementation_progress: "info",
   status_update: "info",
-} as const satisfies Record<OrchestrationProgramNotificationKind, "info" | "warning" | "critical">;
+};
 
 function addRole(roles: Set<DevThreadRole>, role: DevThreadRole, enabled: boolean) {
   if (enabled) {
@@ -323,7 +323,7 @@ export function buildDevProgramNotificationCommand(input: {
     executiveThreadId: input.target.executiveThreadId,
     orchestratorThreadId: input.target.orchestratorThreadId,
     kind: input.kind,
-    severity: DEV_NOTIFICATION_SEVERITY_BY_KIND[input.kind],
+    severity: DEV_NOTIFICATION_SEVERITY_BY_KIND[input.kind] ?? "info",
     summary: `[DEV] ${label} from ${input.sourceThread.title}`,
     evidence: {
       devMenu: true,
