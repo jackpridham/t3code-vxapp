@@ -61,6 +61,16 @@ export class AgentsVxappExternalRoleAuthorityError extends Schema.TaggedErrorCla
   {
     detail: Schema.String,
     operation: Schema.String,
+    ownerCommand: Schema.optional(Schema.String),
+    authoritySurface: Schema.optional(Schema.String),
+    ownerErrorCode: Schema.optional(Schema.NullOr(Schema.String)),
+    authorityStore: Schema.optional(Schema.NullOr(Schema.String)),
+    authoritySource: Schema.optional(Schema.NullOr(Schema.String)),
+    contractFamily: Schema.optional(Schema.NullOr(Schema.String)),
+    contractVersion: Schema.optional(Schema.NullOr(Schema.String)),
+    exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
+    stdout: Schema.optional(Schema.String),
+    stderr: Schema.optional(Schema.String),
   },
 ) {}
 

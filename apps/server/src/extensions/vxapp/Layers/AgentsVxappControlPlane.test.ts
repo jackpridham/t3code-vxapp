@@ -2,12 +2,16 @@ import { Effect } from "effect";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../agentsVxappOwnerClient.ts", () => ({
-  fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
-  fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
-  requestAgentsVxappProgramMutation: vi.fn(),
-  requestAgentsVxappTodoMutation: vi.fn(),
-}));
+vi.mock("../agentsVxappOwnerClient.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agentsVxappOwnerClient.ts")>();
+  return {
+    ...actual,
+    fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
+    fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
+    requestAgentsVxappProgramMutation: vi.fn(),
+    requestAgentsVxappTodoMutation: vi.fn(),
+  };
+});
 
 import {
   fetchAgentsVxappProgramsTodosSnapshot,
@@ -15,6 +19,7 @@ import {
   requestAgentsVxappTodoMutation,
 } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappControlPlane } from "../Services/AgentsVxappControlPlane.ts";
+import { AgentsVxappOwnerClientError } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappControlPlaneLive } from "./AgentsVxappControlPlane.ts";
 
 const mockedProgramsTodos = vi.mocked(fetchAgentsVxappProgramsTodosSnapshot);
@@ -95,6 +100,43 @@ describe("AgentsVxappControlPlaneLive", () => {
         todoId: "todo-1",
         title: "Owner TODO",
       },
+    });
+  });
+
+  it("preserves owner diagnostics when the control-plane layer maps owner failures", async () => {
+    mockedProgramsTodos.mockRejectedValueOnce(
+      new AgentsVxappOwnerClientError({
+        message: "owner refused snapshot",
+        ownerCommand: "t3code-programs-todos-snapshot",
+        authoritySurface: "programs_todos_snapshot",
+        ownerErrorCode: "owner_snapshot_failed",
+        authorityStore: "sqlite",
+        authoritySource: "owner-command",
+        contractFamily: "agents-vxapp-t3code-authority",
+        contractVersion: "v1",
+        exitCode: 12,
+        stdout: '{"ok":false}',
+        stderr: "stderr detail",
+      }),
+    );
+
+    await expect(
+      Effect.gen(function* () {
+        const controlPlane = yield* AgentsVxappControlPlane;
+        return yield* controlPlane.getSnapshot({});
+      }).pipe(Effect.provide(AgentsVxappControlPlaneLive), Effect.runPromise),
+    ).rejects.toMatchObject({
+      detail: "owner refused snapshot",
+      ownerCommand: "t3code-programs-todos-snapshot",
+      authoritySurface: "programs_todos_snapshot",
+      ownerErrorCode: "owner_snapshot_failed",
+      authorityStore: "sqlite",
+      authoritySource: "owner-command",
+      contractFamily: "agents-vxapp-t3code-authority",
+      contractVersion: "v1",
+      exitCode: 12,
+      stdout: '{"ok":false}',
+      stderr: "stderr detail",
     });
   });
 });

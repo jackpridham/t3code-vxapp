@@ -10,6 +10,7 @@ import {
 import {
   fetchAgentsVxappControlPlaneSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
+  AgentsVxappOwnerClientError,
 } from "../agentsVxappOwnerClient.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -29,6 +30,22 @@ function asArray(value: unknown): readonly unknown[] {
 function mapError(operation: string, cause: unknown): AgentsVxappExternalRoleAuthorityError {
   if (isAgentsVxappExternalRoleAuthorityError(cause)) {
     return cause;
+  }
+  if (cause instanceof AgentsVxappOwnerClientError) {
+    return new AgentsVxappExternalRoleAuthorityError({
+      operation,
+      detail: cause.message,
+      ownerCommand: cause.ownerCommand,
+      authoritySurface: cause.authoritySurface,
+      ownerErrorCode: cause.ownerErrorCode,
+      authorityStore: cause.authorityStore,
+      authoritySource: cause.authoritySource,
+      contractFamily: cause.contractFamily,
+      contractVersion: cause.contractVersion,
+      exitCode: cause.exitCode,
+      stdout: cause.stdout,
+      stderr: cause.stderr,
+    });
   }
   return new AgentsVxappExternalRoleAuthorityError({
     operation,

@@ -9,6 +9,7 @@ import { runProcess } from "../../processRunner.ts";
 import {
   bootstrapAgentsVxappOwnerManifest,
   fetchAgentsVxappWorkerRuntimeSnapshot,
+  fetchAgentsVxappRoleSessionRuntimePaths,
   requestAgentsVxappApprovalRequest,
   requestAgentsVxappApprovalResponse,
   requestAgentsVxappThreadEventIngest,
@@ -19,32 +20,119 @@ import {
 
 const mockedRunProcess = vi.mocked(runProcess);
 
+const FULL_MANIFEST_ROWS = `
+t3code-contract-manifest	contract_manifest
+t3code-bootstrap-snapshot	bootstrap_snapshot
+t3code-control-plane-snapshot	control_plane_snapshot
+t3code-programs-todos-snapshot	programs_todos_snapshot
+t3code-cto-status	cto
+t3code-cto-ensure	cto
+t3code-cto-request-orchestration	cto
+t3code-cto-attention-list	cto
+t3code-cto-attention-lifecycle	cto
+t3code-cto-notifications-list	cto
+t3code-cto-notification-lifecycle	cto
+t3code-cto-validate-first-task	cto
+t3code-cto-operate-status	cto_operate
+t3code-cto-operate-once	cto_operate
+t3code-cto-operate-schedule	cto_operate
+t3code-cto-operate-action-result	cto_operate
+t3code-cto-yacht-watch-status	cto_yacht_watch
+t3code-cto-yacht-watch-inspect	cto_yacht_watch
+t3code-cto-yacht-watch-enable	cto_yacht_watch
+t3code-cto-yacht-watch-disable	cto_yacht_watch
+t3code-cto-yacht-watch-periodic-check	cto_yacht_watch
+programs-selection	program_selection
+programs-autocontinue-context	program_autocontinue_context
+programs-todo-view	program_todo_view
+programs-runtime-view	program_runtime_view
+t3code-program-mutate	programs
+t3code-todo-mutate	todos
+t3code-notification-mutate	notifications
+t3code-attention-mutate	attention
+t3code-wake-mutate	wakes
+t3code-program-notifications-snapshot	program_residuals
+t3code-program-attention-snapshot	program_residuals
+t3code-program-runtime-allocations	program_residuals
+t3code-program-role-session-context	program_residuals
+t3code-program-autocontinue-run	program_residuals
+t3code-program-autocontinue-all-run	program_residuals
+programs-review-refresh	program_review_refresh
+t3code-thread-status	threads
+t3code-thread-event-ingest	threads
+t3code-threads-list	threads
+t3code-threads-current	threads
+t3code-threads-watch	threads
+t3code-threads-create	threads
+t3code-threads-start	threads
+t3code-threads-interrupt	threads
+t3code-threads-stop	threads
+t3code-threads-revert	threads
+t3code-threads-archive	threads
+t3code-threads-delete	threads
+t3code-threads-lineage-update	threads
+t3code-threads-evidence-links	threads
+t3code-threads-diff-request	threads
+t3code-approval-request	approvals
+t3code-approval-respond	approvals
+t3code-user-input-respond	user_input
+t3code-projects-list	projects
+t3code-projects-inspect	projects
+t3code-projects-resolve	projects
+t3code-projects-ensure	projects
+t3code-projects-create	projects
+t3code-projects-update	projects
+t3code-projects-delete	projects
+t3code-projects-alias	projects
+t3code-agent-runtime-snapshot	agent_runtime
+t3code-worker-runtime-snapshot	worker_runtime
+t3code-worker-context-plan	workers
+t3code-worker-context-audit	workers
+t3code-worker-prepare-context	workers
+t3code-worker-prompt	workers
+t3code-worker-model-selection	workers
+t3code-worker-dispatch	workers
+t3code-worker-continue	workers
+t3code-worker-doctor	workers
+t3code-worker-recover	workers
+t3code-supervision-snapshot	supervision
+t3code-supervision-recheck	supervision
+t3code-supervision-recover	supervision
+t3code-rate-limit-classify	supervision
+t3code-stall-detect	supervision
+t3code-model-tracker-status	supervision
+t3code-model-tracker-record	supervision
+t3code-provider-snapshot-request	provider_transport
+t3code-provider-events-request	provider_transport
+t3code-provider-ws-request	provider_transport
+t3code-provider-git-request	provider_transport
+t3code-provider-workspace-request	provider_transport
+t3code-orchestrator-status	orchestrator_dashboard
+t3code-orchestrator-branch-status	orchestrator_dashboard
+t3code-workspace-sync-status	workspace_sync
+t3code-workspace-sync-next-actions	workspace_sync
+t3code-agent-thread-context	agent_utilities
+t3code-artifact-linkage-validate	agent_utilities
+t3code-plan-linkage-validate	agent_utilities
+t3code-knowledge-thread-export-request	agent_utilities
+t3code-legacy-agent-retired	agent_utilities
+t3code-worker-prompt-template	prompt_templates
+t3code-provider-model-resolve	provider_model
+`.trim();
+
 function manifestPayload() {
+  const ownerCommandManifest = FULL_MANIFEST_ROWS.split("\n").map((line) => {
+    const [command = "", surface = ""] = line.split("\t");
+    return { command, surface, implemented: true };
+  });
   return {
-    ownerCommandManifest: [
-      { command: "owner-bootstrap", surface: "bootstrap_snapshot", implemented: true },
-      { command: "owner-control", surface: "control_plane_snapshot", implemented: true },
-      {
-        command: "owner-programs-todos",
-        surface: "programs_todos_snapshot",
-        implemented: true,
-      },
-      { command: "owner-program-mutate", surface: "programs", implemented: true },
-      { command: "owner-todo-mutate", surface: "todos", implemented: true },
-      { command: "owner-agent-runtime", surface: "agent_runtime", implemented: true },
-      { command: "owner-worker-runtime", surface: "worker_runtime", implemented: true },
-      {
-        command: "owner-role-paths",
-        surface: "role_session_runtime_paths",
-        implemented: true,
-        tool: "role-session",
-      },
-      { command: "t3code-thread-status", surface: "threads", implemented: true },
-      { command: "t3code-thread-event-ingest", surface: "threads", implemented: true },
-      { command: "t3code-approval-request", surface: "approvals", implemented: true },
-      { command: "t3code-approval-respond", surface: "approvals", implemented: true },
-      { command: "t3code-user-input-respond", surface: "user_input", implemented: true },
-    ],
+    ownerCommandManifest,
+    callerContractManifest: ownerCommandManifest.map(({ command, surface }) => ({
+      command,
+      surface,
+      toolFamily: "control-plane",
+      wrapperKey: command.replace(/^t3code-/, "").replaceAll("-", "_"),
+    })),
   };
 }
 
@@ -84,7 +172,7 @@ afterEach(() => {
 });
 
 describe("agentsVxappOwnerClient", () => {
-  it("parses ownerCommandManifest arrays and keeps commands addressable by command name", async () => {
+  it("parses owner and caller contract manifest arrays and keeps commands addressable by name", async () => {
     mockedRunProcess.mockResolvedValueOnce(
       processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
     );
@@ -93,6 +181,12 @@ describe("agentsVxappOwnerClient", () => {
 
     expect([...manifest.commandsByName.keys()]).toEqual(
       expect.arrayContaining([
+        "t3code-contract-manifest",
+        "t3code-cto-status",
+        "t3code-projects-list",
+        "t3code-worker-dispatch",
+        "t3code-provider-ws-request",
+        "t3code-orchestrator-status",
         "t3code-thread-status",
         "t3code-thread-event-ingest",
         "t3code-approval-request",
@@ -102,6 +196,10 @@ describe("agentsVxappOwnerClient", () => {
     );
     expect(manifest.commandsByName.get("t3code-thread-status")?.surface).toBe("threads");
     expect(manifest.commandsByName.get("t3code-thread-event-ingest")?.surface).toBe("threads");
+    expect(manifest.commandsByName.get("t3code-contract-manifest")?.surface).toBe(
+      "contract_manifest",
+    );
+    expect(manifest.commandsByName.get("t3code-worker-dispatch")?.surface).toBe("workers");
   });
 
   it("bootstraps the manifest before later owner commands", async () => {
@@ -111,7 +209,7 @@ describe("agentsVxappOwnerClient", () => {
       )
       .mockResolvedValueOnce(
         processResult(
-          envelope("owner-worker-runtime", "worker_runtime", {
+          envelope("t3code-worker-runtime-snapshot", "worker_runtime", {
             threadId: "thread-worker",
             worktreePath: "/tmp/worktree",
             runtimeDir: "/tmp/worktree/.agents/runtime",
@@ -187,7 +285,7 @@ describe("agentsVxappOwnerClient", () => {
       2,
       expect.stringMatching(/t3-control-plane-owner$/),
       [
-        "owner-worker-runtime",
+        "t3code-worker-runtime-snapshot",
         "--json",
         "--payload-json",
         expect.stringContaining("thread-worker"),
@@ -284,6 +382,29 @@ describe("agentsVxappOwnerClient", () => {
     );
   });
 
+  it("keeps role-session runtime paths on the separate role-session owner surface", async () => {
+    mockedRunProcess.mockResolvedValueOnce(
+      processResult(
+        envelope("runtime-paths", "role_session_runtime_paths", {
+          runtimeRoot: "/runtime",
+          roleSessionsRoot: "/runtime/role-sessions",
+        }),
+      ),
+    );
+
+    const payload = await fetchAgentsVxappRoleSessionRuntimePaths<Record<string, unknown>>();
+
+    expect(payload).toMatchObject({
+      runtimeRoot: "/runtime",
+      roleSessionsRoot: "/runtime/role-sessions",
+    });
+    expect(mockedRunProcess).toHaveBeenCalledWith(
+      expect.stringMatching(/role-session-owner$/),
+      ["runtime-paths", "--json"],
+      expect.objectContaining({ allowNonZeroExit: true }),
+    );
+  });
+
   it("rejects invalid manifests, command mismatches, legacy fallback, and failed owner commands", async () => {
     mockedRunProcess.mockResolvedValueOnce(processResult("{not-json"));
     await expect(bootstrapAgentsVxappOwnerManifest()).rejects.toMatchObject({
@@ -324,11 +445,47 @@ describe("agentsVxappOwnerClient", () => {
     resetAgentsVxappOwnerManifestForTests();
     mockedRunProcess.mockReset();
     mockedRunProcess.mockResolvedValueOnce(
+      processResult({
+        ok: true,
+        contract_family: "agents-vxapp-t3code-authority",
+        contract_version: "v1",
+        command: "t3code-contract-manifest",
+        result: {
+          contractFamily: "agents-vxapp-t3code-authority",
+          contractVersion: "v1",
+          authorityStore: "owner-store",
+          authoritySource: "owner-source",
+          legacyFallbackUsed: false,
+          surface: "contract_manifest",
+          payload: {
+            commands: {
+              "t3code-thread-status": {
+                command: "t3code-thread-status",
+                surface: "threads",
+                implemented: true,
+              },
+            },
+          },
+        },
+      }),
+    );
+    await expect(bootstrapAgentsVxappOwnerManifest()).rejects.toMatchObject({
+      message: "Owner manifest must provide ownerCommandManifest[].",
+      authorityStore: "owner-store",
+      authoritySource: "owner-source",
+      contractFamily: "agents-vxapp-t3code-authority",
+      contractVersion: "v1",
+    });
+
+    resetAgentsVxappOwnerManifestForTests();
+    mockedRunProcess.mockReset();
+    mockedRunProcess.mockResolvedValueOnce(
       processResult(
         envelope("t3code-contract-manifest", "contract_manifest", {
-          ownerCommandManifest: [
-            { command: "t3code-thread-status", surface: "approvals", implemented: true },
-          ],
+          ...manifestPayload(),
+          callerContractManifest: manifestPayload().callerContractManifest.map((entry) =>
+            entry.command === "t3code-thread-status" ? { ...entry, surface: "approvals" } : entry,
+          ),
         }),
       ),
     );
@@ -341,6 +498,7 @@ describe("agentsVxappOwnerClient", () => {
     mockedRunProcess.mockResolvedValueOnce(
       processResult(
         envelope("t3code-contract-manifest", "contract_manifest", {
+          ...manifestPayload(),
           ownerCommandManifest: [
             { command: "t3code-thread-status", surface: "threads", implemented: true },
             { command: "t3code-thread-status", surface: "threads", implemented: true },
@@ -350,6 +508,24 @@ describe("agentsVxappOwnerClient", () => {
     );
     await expect(bootstrapAgentsVxappOwnerManifest()).rejects.toMatchObject({
       message: expect.stringContaining("duplicate command"),
+    });
+
+    resetAgentsVxappOwnerManifestForTests();
+    mockedRunProcess.mockReset();
+    mockedRunProcess.mockResolvedValueOnce(
+      processResult(
+        envelope("t3code-contract-manifest", "contract_manifest", {
+          ...manifestPayload(),
+          ownerCommandManifest: manifestPayload().ownerCommandManifest.map((entry) =>
+            entry.command === "t3code-thread-status"
+              ? { command: entry.command, surface: "threads" }
+              : entry,
+          ),
+        }),
+      ),
+    );
+    await expect(bootstrapAgentsVxappOwnerManifest()).rejects.toMatchObject({
+      message: expect.stringContaining("invalid ownerCommandManifest entry"),
     });
 
     resetAgentsVxappOwnerManifestForTests();
@@ -382,7 +558,7 @@ describe("agentsVxappOwnerClient", () => {
       );
     await expect(requestAgentsVxappThreadStatus({ threadId: "thread-1" })).rejects.toMatchObject({
       message: expect.stringContaining("did not match"),
-      ownerCommand: "t3code-thread-status",
+      ownerCommand: "wrong-command",
     });
 
     resetAgentsVxappOwnerManifestForTests();
@@ -408,6 +584,7 @@ describe("agentsVxappOwnerClient", () => {
     ).rejects.toMatchObject({
       message: "owner failure",
       ownerCommand: "t3code-approval-request",
+      ownerErrorCode: null,
     });
   });
 });

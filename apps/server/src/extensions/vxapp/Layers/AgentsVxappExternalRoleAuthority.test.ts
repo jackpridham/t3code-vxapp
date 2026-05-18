@@ -1,16 +1,21 @@
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../agentsVxappOwnerClient.ts", () => ({
-  fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
-  fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
-}));
+vi.mock("../agentsVxappOwnerClient.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agentsVxappOwnerClient.ts")>();
+  return {
+    ...actual,
+    fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
+    fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
+  };
+});
 
 import {
   fetchAgentsVxappControlPlaneSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
 } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
+import { AgentsVxappOwnerClientError } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappExternalRoleAuthorityLive } from "./AgentsVxappExternalRoleAuthority.ts";
 
 const mockedControlPlaneSnapshot = vi.mocked(fetchAgentsVxappControlPlaneSnapshot);
@@ -79,5 +84,42 @@ describe("AgentsVxappExternalRoleAuthorityLive", () => {
 
     expect(result).toBe(runtimePaths);
     expect(mockedRuntimePaths).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves owner diagnostics when the external-role layer maps owner failures", async () => {
+    mockedRuntimePaths.mockRejectedValueOnce(
+      new AgentsVxappOwnerClientError({
+        message: "role-session owner failed",
+        ownerCommand: "runtime-paths",
+        authoritySurface: "role_session_runtime_paths",
+        ownerErrorCode: "runtime_paths_missing",
+        authorityStore: "role-session-runtime",
+        authoritySource: "role-session-owner",
+        contractFamily: "agents-vxapp-role-session-authority",
+        contractVersion: "v1",
+        exitCode: 4,
+        stdout: '{"ok":false}',
+        stderr: "stderr detail",
+      }),
+    );
+
+    await expect(
+      Effect.gen(function* () {
+        const authority = yield* AgentsVxappExternalRoleAuthority;
+        return yield* authority.getRuntimePaths();
+      }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive), Effect.runPromise),
+    ).rejects.toMatchObject({
+      detail: "role-session owner failed",
+      ownerCommand: "runtime-paths",
+      authoritySurface: "role_session_runtime_paths",
+      ownerErrorCode: "runtime_paths_missing",
+      authorityStore: "role-session-runtime",
+      authoritySource: "role-session-owner",
+      contractFamily: "agents-vxapp-role-session-authority",
+      contractVersion: "v1",
+      exitCode: 4,
+      stdout: '{"ok":false}',
+      stderr: "stderr detail",
+    });
   });
 });

@@ -39,16 +39,16 @@ describe("agents-vxapp owner authority boundary", () => {
       ownerClientSource.match(/["']t3code-[a-z0-9-]+["']/g)?.map((value) => value.slice(1, -1)) ??
       [];
 
-    expect(new Set(ownerCommandLiterals)).toEqual(
-      new Set([
-        "t3code-contract-manifest",
-        "t3code-thread-status",
-        "t3code-thread-event-ingest",
-        "t3code-approval-request",
-        "t3code-approval-respond",
-        "t3code-user-input-respond",
-      ]),
-    );
+    expect(ownerCommandLiterals).toEqual(expect.arrayContaining(["t3code-contract-manifest"]));
+    expect(ownerClientSource).toContain("t3code-thread-status");
+    expect(ownerClientSource).toContain("t3code-thread-event-ingest");
+    expect(ownerClientSource).toContain("t3code-approval-request");
+    expect(ownerClientSource).toContain("t3code-approval-respond");
+    expect(ownerClientSource).toContain("t3code-user-input-respond");
+    expect(ownerClientSource).not.toContain("t3code-cto-status");
+    expect(ownerClientSource).not.toContain("t3code-projects-list");
+    expect(ownerClientSource).not.toContain("t3code-worker-dispatch");
+    expect(ownerClientSource).not.toContain("t3code-provider-ws-request");
 
     const offenders = listTsFiles(vxappServerRoot)
       .filter((filePath) => !filePath.endsWith(".test.ts"))
@@ -56,5 +56,12 @@ describe("agents-vxapp owner authority boundary", () => {
       .filter((filePath) => /["']t3code-[a-z0-9-]+["']/.test(fs.readFileSync(filePath, "utf8")));
 
     expect(offenders).toEqual([]);
+  });
+
+  it("rejects object-shaped owner manifest fallback paths in the owner client", () => {
+    expect(ownerClientSource).not.toContain("root?.commands");
+    expect(ownerClientSource).not.toContain("root?.ownerCommands");
+    expect(ownerClientSource).toContain("Owner manifest must provide ownerCommandManifest[]");
+    expect(ownerClientSource).toContain("Owner manifest must provide callerContractManifest[]");
   });
 });

@@ -20,6 +20,16 @@ export class AgentsVxappControlPlaneError extends Schema.TaggedErrorClass<Agents
     operation: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect),
+    ownerCommand: Schema.optional(Schema.String),
+    authoritySurface: Schema.optional(Schema.String),
+    ownerErrorCode: Schema.optional(Schema.NullOr(Schema.String)),
+    authorityStore: Schema.optional(Schema.NullOr(Schema.String)),
+    authoritySource: Schema.optional(Schema.NullOr(Schema.String)),
+    contractFamily: Schema.optional(Schema.NullOr(Schema.String)),
+    contractVersion: Schema.optional(Schema.NullOr(Schema.String)),
+    exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
+    stdout: Schema.optional(Schema.String),
+    stderr: Schema.optional(Schema.String),
   },
 ) {}
 

@@ -16,6 +16,7 @@ import {
   fetchAgentsVxappProgramsTodosSnapshot,
   requestAgentsVxappProgramMutation,
   requestAgentsVxappTodoMutation,
+  AgentsVxappOwnerClientError,
 } from "../agentsVxappOwnerClient.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -39,6 +40,23 @@ function nowIso(): string {
 function mapOwnerError(operation: string, cause: unknown): AgentsVxappControlPlaneError {
   if (isAgentsVxappControlPlaneError(cause)) {
     return cause;
+  }
+  if (cause instanceof AgentsVxappOwnerClientError) {
+    return new AgentsVxappControlPlaneError({
+      operation,
+      detail: cause.message,
+      cause,
+      ownerCommand: cause.ownerCommand,
+      authoritySurface: cause.authoritySurface,
+      ownerErrorCode: cause.ownerErrorCode,
+      authorityStore: cause.authorityStore,
+      authoritySource: cause.authoritySource,
+      contractFamily: cause.contractFamily,
+      contractVersion: cause.contractVersion,
+      exitCode: cause.exitCode,
+      stdout: cause.stdout,
+      stderr: cause.stderr,
+    });
   }
   return new AgentsVxappControlPlaneError({
     operation,
