@@ -17,11 +17,12 @@ import type {
 } from "@t3tools/contracts";
 
 import { runProcess, type ProcessRunResult } from "../../processRunner.ts";
-import { AGENTS_VXAPP_ROOT } from "./agentsVxappSqlite.ts";
+import { AGENTS_VXAPP_REPO_ROOT } from "./agentsVxappRepoRoot.ts";
 
 const BOOTSTRAP_MANIFEST_COMMAND = "t3code-contract-manifest";
 const ROLE_SESSION_RUNTIME_PATHS_COMMAND = "runtime-paths";
-const CONTROL_PLANE_OWNER_RELATIVE_PATH = "scripts/tools/t3-control-plane-owner";
+const CONTROL_PLANE_OWNER_RELATIVE_PATH =
+  "scripts/tools/t3-control-plane-owner";
 const ROLE_SESSION_OWNER_RELATIVE_PATH = "scripts/tools/role-session-owner";
 const OWNER_COMMAND_TIMEOUT_MS = 30_000;
 const OWNER_COMMAND_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
@@ -119,8 +120,10 @@ function asBoolean(value: unknown): boolean | null {
 
 function ownerPath(tool: OwnerTool): string {
   return path.join(
-    AGENTS_VXAPP_ROOT,
-    tool === "role-session" ? ROLE_SESSION_OWNER_RELATIVE_PATH : CONTROL_PLANE_OWNER_RELATIVE_PATH,
+    AGENTS_VXAPP_REPO_ROOT,
+    tool === "role-session"
+      ? ROLE_SESSION_OWNER_RELATIVE_PATH
+      : CONTROL_PLANE_OWNER_RELATIVE_PATH,
   );
 }
 
@@ -137,7 +140,9 @@ function extractOwnerDiagnostics(input: {
   const authorityPayload = input.authorityPayload ?? asRecord(envelope?.result);
   return {
     ownerCommand:
-      asString(errorDetails?.ownerCommand) ?? asString(envelope?.command) ?? input.ownerCommand,
+      asString(errorDetails?.ownerCommand) ??
+      asString(envelope?.command) ??
+      input.ownerCommand,
     authoritySurface:
       asString(errorDetails?.authoritySurface) ??
       asString(errorDetails?.surface) ??
@@ -145,13 +150,17 @@ function extractOwnerDiagnostics(input: {
       input.authoritySurface,
     ownerErrorCode: asString(error?.code),
     authorityStore:
-      asString(errorDetails?.authorityStore) ?? asString(authorityPayload?.authorityStore),
+      asString(errorDetails?.authorityStore) ??
+      asString(authorityPayload?.authorityStore),
     authoritySource:
-      asString(errorDetails?.authoritySource) ?? asString(authorityPayload?.authoritySource),
+      asString(errorDetails?.authoritySource) ??
+      asString(authorityPayload?.authoritySource),
     contractFamily:
-      asString(authorityPayload?.contractFamily) ?? asString(envelope?.contract_family),
+      asString(authorityPayload?.contractFamily) ??
+      asString(envelope?.contract_family),
     contractVersion:
-      asString(authorityPayload?.contractVersion) ?? asString(envelope?.contract_version),
+      asString(authorityPayload?.contractVersion) ??
+      asString(envelope?.contract_version),
     stdout: input.result?.stdout ?? "",
     stderr: input.result?.stderr ?? "",
     exitCode: input.result?.code ?? null,
@@ -184,7 +193,11 @@ function fail(input: {
   });
 }
 
-function parseJson(ownerCommand: string, authoritySurface: string, result: ProcessRunResult) {
+function parseJson(
+  ownerCommand: string,
+  authoritySurface: string,
+  result: ProcessRunResult,
+) {
   try {
     return JSON.parse(result.stdout.trim()) as unknown;
   } catch (error) {
@@ -227,7 +240,12 @@ function validateAuthorityPayload<T>(
   const contractFamily = asString(payload.contractFamily);
   const contractVersion = asString(payload.contractVersion);
   const surface = asString(payload.surface);
-  if (!contractFamily || !contractVersion || !surface || !Object.hasOwn(payload, "payload")) {
+  if (
+    !contractFamily ||
+    !contractVersion ||
+    !surface ||
+    !Object.hasOwn(payload, "payload")
+  ) {
     fail({
       authorityPayload: payload,
       authoritySurface,
@@ -279,7 +297,7 @@ async function executeOwnerCommand(input: {
   }
   const result = await runProcess(ownerPath(input.tool), args, {
     allowNonZeroExit: true,
-    cwd: AGENTS_VXAPP_ROOT,
+    cwd: AGENTS_VXAPP_REPO_ROOT,
     maxBufferBytes: OWNER_COMMAND_MAX_BUFFER_BYTES,
     outputMode: "truncate",
     timeoutMs: OWNER_COMMAND_TIMEOUT_MS,
@@ -287,7 +305,8 @@ async function executeOwnerCommand(input: {
     fail({
       authoritySurface: input.surface,
       cause: error,
-      message: error instanceof Error ? error.message : "Failed to run owner command.",
+      message:
+        error instanceof Error ? error.message : "Failed to run owner command.",
       ownerCommand: input.command,
     }),
   );
@@ -328,7 +347,8 @@ async function executeOwnerCommand(input: {
     fail({
       authoritySurface: input.surface,
       envelope,
-      message: "Owner envelope is missing contract_family, contract_version, or command.",
+      message:
+        "Owner envelope is missing contract_family, contract_version, or command.",
       ownerCommand: input.command,
       result,
     });
@@ -352,7 +372,12 @@ async function executeOwnerCommand(input: {
     });
   }
   return {
-    authority: validateAuthorityPayload(input.command, input.surface, envelope.result, result),
+    authority: validateAuthorityPayload(
+      input.command,
+      input.surface,
+      envelope.result,
+      result,
+    ),
     result,
   };
 }
@@ -363,7 +388,9 @@ function ownerManifestEntryFromRecord(value: unknown): OwnerManifestEntry {
   const surface = asString(entry?.surface ?? entry?.authoritySurface);
   const implemented = asBoolean(entry?.implemented);
   if (!command || !surface || implemented === null) {
-    throw new Error("Owner manifest contains an invalid ownerCommandManifest entry.");
+    throw new Error(
+      "Owner manifest contains an invalid ownerCommandManifest entry.",
+    );
   }
   return {
     command,
@@ -372,14 +399,18 @@ function ownerManifestEntryFromRecord(value: unknown): OwnerManifestEntry {
   };
 }
 
-function callerContractEntryFromRecord(value: unknown): OwnerCallerContractEntry {
+function callerContractEntryFromRecord(
+  value: unknown,
+): OwnerCallerContractEntry {
   const entry = asRecord(value);
   const command = asString(entry?.command);
   const wrapperKey = asString(entry?.wrapperKey);
   const surface = asString(entry?.surface ?? entry?.authoritySurface);
   const toolFamily = asString(entry?.toolFamily ?? entry?.tool);
   if (!command || !wrapperKey || !surface || !toolFamily) {
-    throw new Error("Owner manifest contains an invalid callerContractManifest entry.");
+    throw new Error(
+      "Owner manifest contains an invalid callerContractManifest entry.",
+    );
   }
   if (toolFamily !== "control-plane") {
     throw new Error(
@@ -409,7 +440,9 @@ function parseManifest(payload: unknown): AgentsVxappOwnerManifest {
   for (const rawEntry of root.ownerCommandManifest) {
     const entry = ownerManifestEntryFromRecord(rawEntry);
     if (ownerEntries.has(entry.command)) {
-      throw new Error(`Owner manifest has duplicate command '${entry.command}'.`);
+      throw new Error(
+        `Owner manifest has duplicate command '${entry.command}'.`,
+      );
     }
     ownerEntries.set(entry.command, entry);
   }
@@ -417,17 +450,25 @@ function parseManifest(payload: unknown): AgentsVxappOwnerManifest {
   for (const rawEntry of root.callerContractManifest) {
     const entry = callerContractEntryFromRecord(rawEntry);
     if (callerEntries.has(entry.command)) {
-      throw new Error(`Owner caller contract has duplicate command '${entry.command}'.`);
+      throw new Error(
+        `Owner caller contract has duplicate command '${entry.command}'.`,
+      );
     }
     if (wrapperKeys.has(entry.wrapperKey)) {
-      throw new Error(`Owner caller contract has duplicate wrapperKey '${entry.wrapperKey}'.`);
+      throw new Error(
+        `Owner caller contract has duplicate wrapperKey '${entry.wrapperKey}'.`,
+      );
     }
     const ownerEntry = ownerEntries.get(entry.command);
     if (!ownerEntry) {
-      throw new Error(`Owner caller contract is missing owner command row '${entry.command}'.`);
+      throw new Error(
+        `Owner caller contract is missing owner command row '${entry.command}'.`,
+      );
     }
     if (ownerEntry.implemented !== true) {
-      throw new Error(`Owner caller contract command '${entry.command}' is not implemented.`);
+      throw new Error(
+        `Owner caller contract command '${entry.command}' is not implemented.`,
+      );
     }
     if (ownerEntry.surface !== entry.surface) {
       throw new Error(
@@ -475,7 +516,8 @@ export async function bootstrapAgentsVxappOwnerManifest(): Promise<AgentsVxappOw
       authorityPayload: asRecord(authority),
       authoritySurface: "contract_manifest",
       cause: error,
-      message: error instanceof Error ? error.message : "Owner manifest is invalid.",
+      message:
+        error instanceof Error ? error.message : "Owner manifest is invalid.",
       ownerCommand: BOOTSTRAP_MANIFEST_COMMAND,
       result,
     });
@@ -565,7 +607,9 @@ async function callManifestCommandByName<T>(input: {
   const { authority, result } = await executeOwnerCommand({
     command: entry.command,
     ...(input.args ? { args: input.args } : {}),
-    ...(input.payloadJson !== undefined ? { payloadJson: input.payloadJson } : {}),
+    ...(input.payloadJson !== undefined
+      ? { payloadJson: input.payloadJson }
+      : {}),
     surface: entry.surface,
     tool: entry.tool,
   });
@@ -581,12 +625,16 @@ async function callManifestCommandByName<T>(input: {
 }
 
 export async function fetchAgentsVxappBootstrapSidebarSnapshot() {
-  return (await callManifestCommand<ServerGetAgentsVxappSidebarGraphResult>("bootstrap_snapshot"))
-    .payload;
+  return (
+    await callManifestCommand<ServerGetAgentsVxappSidebarGraphResult>(
+      "bootstrap_snapshot",
+    )
+  ).payload;
 }
 
 export async function fetchAgentsVxappControlPlaneSnapshot() {
-  return (await callManifestCommand<JsonRecord>("control_plane_snapshot")).payload;
+  return (await callManifestCommand<JsonRecord>("control_plane_snapshot"))
+    .payload;
 }
 
 export async function fetchAgentsVxappProgramsTodosSnapshot() {
@@ -599,38 +647,83 @@ export async function fetchAgentsVxappProgramsTodosSnapshot() {
 
 export async function requestAgentsVxappProgramMutation(
   input:
-    | { readonly action: "create"; readonly input: ServerCreateAgentsVxappProgramInput }
-    | { readonly action: "update"; readonly input: ServerUpdateAgentsVxappProgramInput }
-    | { readonly action: "delete"; readonly input: ServerDeleteAgentsVxappProgramInput }
-    | { readonly action: "lifecycle"; readonly input: ServerSetAgentsVxappProgramLifecycleInput },
+    | {
+        readonly action: "create";
+        readonly input: ServerCreateAgentsVxappProgramInput;
+      }
+    | {
+        readonly action: "update";
+        readonly input: ServerUpdateAgentsVxappProgramInput;
+      }
+    | {
+        readonly action: "delete";
+        readonly input: ServerDeleteAgentsVxappProgramInput;
+      }
+    | {
+        readonly action: "lifecycle";
+        readonly input: ServerSetAgentsVxappProgramLifecycleInput;
+      },
 ) {
-  return (await callManifestCommand<ServerAgentsVxappOwnerMutationResult>("programs", input))
-    .payload;
+  return (
+    await callManifestCommand<ServerAgentsVxappOwnerMutationResult>(
+      "programs",
+      input,
+    )
+  ).payload;
 }
 
 export async function requestAgentsVxappTodoMutation(
   input:
-    | { readonly action: "create"; readonly input: ServerCreateAgentsVxappTodoInput }
-    | { readonly action: "update"; readonly input: ServerUpdateAgentsVxappTodoInput }
-    | { readonly action: "delete"; readonly input: ServerDeleteAgentsVxappTodoInput },
+    | {
+        readonly action: "create";
+        readonly input: ServerCreateAgentsVxappTodoInput;
+      }
+    | {
+        readonly action: "update";
+        readonly input: ServerUpdateAgentsVxappTodoInput;
+      }
+    | {
+        readonly action: "delete";
+        readonly input: ServerDeleteAgentsVxappTodoInput;
+      },
 ) {
-  return (await callManifestCommand<ServerAgentsVxappOwnerMutationResult>("todos", input)).payload;
+  return (
+    await callManifestCommand<ServerAgentsVxappOwnerMutationResult>(
+      "todos",
+      input,
+    )
+  ).payload;
 }
 
 export async function fetchAgentsVxappRoleSessionRuntimePaths<T>() {
   return callRoleSessionCommand<T>(ROLE_SESSION_RUNTIME_PATHS_COMMAND);
 }
 
-export async function fetchAgentsVxappWorkerRuntimeSnapshot(input: GetWorkerRuntimeSnapshotInput) {
-  return (await callManifestCommand<GetWorkerRuntimeSnapshotResult>("worker_runtime", input))
-    .payload;
+export async function fetchAgentsVxappWorkerRuntimeSnapshot(
+  input: GetWorkerRuntimeSnapshotInput,
+) {
+  return (
+    await callManifestCommand<GetWorkerRuntimeSnapshotResult>(
+      "worker_runtime",
+      input,
+    )
+  ).payload;
 }
 
-export async function fetchAgentsVxappAgentRuntimeSnapshot(input: GetAgentRuntimeSnapshotInput) {
-  return (await callManifestCommand<GetAgentRuntimeSnapshotResult>("agent_runtime", input)).payload;
+export async function fetchAgentsVxappAgentRuntimeSnapshot(
+  input: GetAgentRuntimeSnapshotInput,
+) {
+  return (
+    await callManifestCommand<GetAgentRuntimeSnapshotResult>(
+      "agent_runtime",
+      input,
+    )
+  ).payload;
 }
 
-export async function requestAgentsVxappThreadStatus(input: { readonly threadId: string }) {
+export async function requestAgentsVxappThreadStatus(input: {
+  readonly threadId: string;
+}) {
   return (
     await callManifestCommandByName<JsonRecord>({
       command: "t3code-thread-status",
@@ -640,7 +733,9 @@ export async function requestAgentsVxappThreadStatus(input: { readonly threadId:
   ).payload;
 }
 
-export async function requestAgentsVxappThreadEventIngest(input: Readonly<JsonRecord>) {
+export async function requestAgentsVxappThreadEventIngest(
+  input: Readonly<JsonRecord>,
+) {
   return (
     await callManifestCommandByName<JsonRecord>({
       command: "t3code-thread-event-ingest",
@@ -650,7 +745,9 @@ export async function requestAgentsVxappThreadEventIngest(input: Readonly<JsonRe
   ).payload;
 }
 
-export async function requestAgentsVxappApprovalRequest(input: Readonly<JsonRecord>) {
+export async function requestAgentsVxappApprovalRequest(
+  input: Readonly<JsonRecord>,
+) {
   return (
     await callManifestCommandByName<JsonRecord>({
       command: "t3code-approval-request",
@@ -660,7 +757,9 @@ export async function requestAgentsVxappApprovalRequest(input: Readonly<JsonReco
   ).payload;
 }
 
-export async function requestAgentsVxappApprovalResponse(input: Readonly<JsonRecord>) {
+export async function requestAgentsVxappApprovalResponse(
+  input: Readonly<JsonRecord>,
+) {
   return (
     await callManifestCommandByName<JsonRecord>({
       command: "t3code-approval-respond",
@@ -670,7 +769,9 @@ export async function requestAgentsVxappApprovalResponse(input: Readonly<JsonRec
   ).payload;
 }
 
-export async function requestAgentsVxappUserInputResponse(input: Readonly<JsonRecord>) {
+export async function requestAgentsVxappUserInputResponse(
+  input: Readonly<JsonRecord>,
+) {
   return (
     await callManifestCommandByName<JsonRecord>({
       command: "t3code-user-input-respond",

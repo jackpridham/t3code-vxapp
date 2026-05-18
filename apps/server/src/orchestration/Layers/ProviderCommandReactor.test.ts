@@ -34,6 +34,7 @@ import {
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
+import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as agentsVxappOwnerClient from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 
@@ -50,6 +51,39 @@ function unsupportedEffect(label: string) {
 
 function settleHotStream() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+function makeRuntimePaths() {
+  return {
+    runtimeRoot: "/tmp/.agents-vxapp-runtime",
+    roleSessionsRoot: "/tmp/.agents-vxapp-runtime/role-sessions",
+    roleStateRoot: "/tmp/.agents-vxapp-runtime/role-state",
+    workspaceRuntimeMetadataDir: ".agents/runtime",
+    env: {
+      runtimeRoot: "VX_AGENTS_ROLE_SESSION_RUNTIME_ROOT",
+      stateRoot: "VX_AGENTS_ROLE_SESSION_STATE_ROOT",
+    },
+    roles: {
+      cto: {
+        role: "cto" as const,
+        generatedWorkspaceRoot: "/tmp/.agents-vxapp-runtime/role-sessions/cto",
+        stateRoot: "/tmp/.agents-vxapp-runtime/role-state/cto",
+        sessionsRoot: "/tmp/.agents-vxapp-runtime/role-state/cto/sessions",
+        reservationsRoot:
+          "/tmp/.agents-vxapp-runtime/role-state/cto/reservations",
+      },
+      jasper: {
+        role: "jasper" as const,
+        generatedWorkspaceRoot:
+          "/tmp/.agents-vxapp-runtime/role-sessions/jasper",
+        stateRoot: "/tmp/.agents-vxapp-runtime/role-state/jasper",
+        sessionsRoot:
+          "/tmp/.agents-vxapp-runtime/role-state/jasper/sessions",
+        reservationsRoot:
+          "/tmp/.agents-vxapp-runtime/role-state/jasper/reservations",
+      },
+    },
+  };
 }
 
 function createGitCoreStub(): GitCoreShape {
@@ -85,6 +119,8 @@ function findFailureActivities(input: {
 }
 
 describe("ProviderCommandReactor authority boundary", () => {
+  const vxappRoleSessionWorktreePath =
+    "/tmp/.agents-vxapp-runtime/role-sessions/jasper/thread-1/workspace";
   const tempDirs: string[] = [];
   const runtimes: Array<ManagedRuntime.ManagedRuntime<ProviderCommandReactor, unknown>> = [];
   const scopes: Scope.Closeable[] = [];
@@ -108,7 +144,14 @@ describe("ProviderCommandReactor authority boundary", () => {
     }
   });
 
-  async function createHarness() {
+  async function createHarness(options?: {
+    worktreePath?: string | null;
+    ownerAuthorityWorktreePaths?: ReadonlyArray<string>;
+    initialHasActiveError?: boolean;
+    initialActiveError?: string | null;
+    initialHistoricalError?: string | null;
+    initialErrorPresentationSource?: "none" | "owner" | "session";
+  }) {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-reactor-"));
     tempDirs.push(stateRoot);
 
@@ -159,7 +202,7 @@ describe("ProviderCommandReactor authority boundary", () => {
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       runtimeMode: "approval-required" as const,
       branch: null,
-      worktreePath: null,
+      worktreePath: options?.worktreePath ?? null,
       createdAt: "2026-05-16T00:00:00.000Z",
       updatedAt: "2026-05-16T00:00:00.000Z",
       archivedAt: null,
@@ -174,10 +217,11 @@ describe("ProviderCommandReactor authority boundary", () => {
         lastError: null,
         updatedAt: "2026-05-16T00:00:00.000Z",
       },
-      hasActiveError: false,
-      activeError: null,
-      historicalError: null,
-      errorPresentationSource: "none" as const,
+      hasActiveError: options?.initialHasActiveError ?? false,
+      activeError: options?.initialActiveError ?? null,
+      historicalError: options?.initialHistoricalError ?? null,
+      errorPresentationSource:
+        options?.initialErrorPresentationSource ?? ("none" as const),
       activities: [] as OrchestrationThreadActivity[],
       proposedPlans: [],
       checkpoints: [],
@@ -215,6 +259,43 @@ describe("ProviderCommandReactor authority boundary", () => {
       streamDomainEvents: Stream.fromPubSub(domainEventPubSub),
     };
 
+    const authorityLayer =
+      options?.ownerAuthorityWorktreePaths !== undefined ||
+      options?.worktreePath !== undefined
+        ? Layer.succeed(AgentsVxappExternalRoleAuthority, {
+            getSnapshot: () =>
+              Effect.succeed({
+                projects: [],
+                threadSummaries: (options?.ownerAuthorityWorktreePaths ?? [])
+                  .map((worktreePath) => ({
+                    id: asThreadId(`authority:${worktreePath}`),
+                    projectId: asProjectId("project-1"),
+                    title: "Authority Thread",
+                    labels: [],
+                    modelSelection: {
+                      provider: "codex" as const,
+                      model: "gpt-5-codex",
+                    },
+                    runtimeMode: "approval-required" as const,
+                    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+                    branch: "t3code/authority-thread",
+                    worktreePath,
+                    latestTurn: null,
+                    createdAt: "2026-05-16T00:00:00.000Z",
+                    updatedAt: "2026-05-16T00:00:00.000Z",
+                    archivedAt: null,
+                    deletedAt: null,
+                    session: null,
+                    hasActiveError: false,
+                    activeError: null,
+                    historicalError: null,
+                    errorPresentationSource: "none" as const,
+                  })),
+              }),
+            getRuntimePaths: () => Effect.succeed(makeRuntimePaths()),
+          })
+        : Layer.empty;
+
     const runtime = ManagedRuntime.make(
       ProviderCommandReactorLive.pipe(
         Layer.provideMerge(Layer.succeed(OrchestrationEngineService, orchestrationEngine)),
@@ -223,6 +304,7 @@ describe("ProviderCommandReactor authority boundary", () => {
         Layer.provideMerge(Layer.succeed(GitCore, createGitCoreStub())),
         Layer.provideMerge(Layer.succeed(TextGeneration, createTextGenerationStub())),
         Layer.provideMerge(makeTestServerSettingsLayer()),
+        Layer.provideMerge(authorityLayer),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), stateRoot)),
         Layer.provideMerge(NodeServices.layer),
       ),
@@ -255,7 +337,9 @@ describe("ProviderCommandReactor authority boundary", () => {
   }
 
   it("blocks provider approval responses when the owner helper fails and appends failure activity", async () => {
-    const harness = await createHarness();
+    const harness = await createHarness({
+      worktreePath: vxappRoleSessionWorktreePath,
+    });
     vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalResponse").mockRejectedValueOnce(
       new Error("owner approval response failed"),
     );
@@ -340,8 +424,76 @@ describe("ProviderCommandReactor authority boundary", () => {
     ).toEqual([]);
   });
 
+  it("preserves owner error presentation for role-session vxapp worktrees", async () => {
+    const harness = await createHarness({
+      worktreePath: vxappRoleSessionWorktreePath,
+      initialHasActiveError: true,
+      initialActiveError: "owner preserved",
+      initialHistoricalError: "owner history",
+      initialErrorPresentationSource: "owner",
+    });
+
+    await harness.publishEvent({
+      type: "thread.archived",
+      eventId: EventId.makeUnsafe("evt-archived-vxapp-role-session"),
+      sequence: 5,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:05.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        archivedAt: "2026-05-16T00:00:05.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-archived-vxapp-role-session"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    const thread = await harness.readThread();
+    expect(thread.hasActiveError).toBe(true);
+    expect(thread.activeError).toBe("owner preserved");
+    expect(thread.historicalError).toBe("owner history");
+    expect(thread.errorPresentationSource).toBe("owner");
+  });
+
+  it("preserves owner error presentation for owner-authoritative vxapp worktrees outside role-session roots", async () => {
+    const worktreePath = "/tmp/custom-vxapp/thread-1/worktree";
+    const harness = await createHarness({
+      worktreePath,
+      ownerAuthorityWorktreePaths: [worktreePath],
+      initialHasActiveError: true,
+      initialActiveError: "owner preserved",
+      initialHistoricalError: "owner history",
+      initialErrorPresentationSource: "owner",
+    });
+
+    await harness.publishEvent({
+      type: "thread.archived",
+      eventId: EventId.makeUnsafe("evt-archived-vxapp-owner-truth"),
+      sequence: 6,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:06.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        archivedAt: "2026-05-16T00:00:06.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-archived-vxapp-owner-truth"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    const thread = await harness.readThread();
+    expect(thread.hasActiveError).toBe(true);
+    expect(thread.activeError).toBe("owner preserved");
+    expect(thread.historicalError).toBe("owner history");
+    expect(thread.errorPresentationSource).toBe("owner");
+  });
+
   it("blocks provider user-input responses when the owner helper fails and appends failure activity", async () => {
-    const harness = await createHarness();
+    const harness = await createHarness({
+      worktreePath: vxappRoleSessionWorktreePath,
+    });
     vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappUserInputResponse").mockRejectedValueOnce(
       new Error("owner user input response failed"),
     );

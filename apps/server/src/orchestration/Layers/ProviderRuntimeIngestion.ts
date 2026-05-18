@@ -16,7 +16,16 @@ import {
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
-import { Cache, Cause, Data, Duration, Effect, Layer, Option, Stream } from "effect";
+import {
+  Cache,
+  Cause,
+  Data,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Stream,
+} from "effect";
 import { projectThinkingActivitiesFromRuntimeEvent } from "@t3tools/orchestration-core/provider-thinking-activities";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -37,16 +46,26 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
 import { notifyOrchestratorChatMessage } from "../orchestratorNotify.ts";
 import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
-import { AGENTS_VXAPP_ROOT } from "../../extensions/vxapp/agentsVxappSqlite.ts";
+import {
+  AgentsVxappExternalRoleAuthority,
+  buildExternalRoleAuthorityIndex,
+} from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
+import { isAgentsVxappWorktreePath } from "../../extensions/vxapp/agentsVxappAuthorityPaths.ts";
 import {
   requestAgentsVxappApprovalRequest,
   requestAgentsVxappThreadEventIngest,
   requestAgentsVxappThreadStatus,
 } from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 
-const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
-const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
-  CommandId.makeUnsafe(`provider:${event.eventId}:${tag}:${crypto.randomUUID()}`);
+const providerTurnKey = (threadId: ThreadId, turnId: TurnId) =>
+  `${threadId}:${turnId}`;
+const providerCommandId = (
+  event: ProviderRuntimeEvent,
+  tag: string,
+): CommandId =>
+  CommandId.makeUnsafe(
+    `provider:${event.eventId}:${tag}:${crypto.randomUUID()}`,
+  );
 
 const TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY = 10_000;
 const TURN_MESSAGE_IDS_BY_TURN_TTL = Duration.minutes(120);
@@ -55,11 +74,8 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
-const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
-
-function isVxappBackedThread(thread: OrchestrationThread): boolean {
-  return thread.worktreePath !== null && thread.worktreePath.startsWith(AGENTS_VXAPP_ROOT);
-}
+const STRICT_PROVIDER_LIFECYCLE_GUARD =
+  process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 function resolveProviderLocalThreadErrorPresentation(input: {
   readonly thread: OrchestrationThread;
@@ -70,8 +86,14 @@ function resolveProviderLocalThreadErrorPresentation(input: {
     typeof resolveLocalThreadErrorPresentation
   >[0]["sessionStatus"];
   readonly sessionLastError: string | null;
+  readonly worktreeAuthority: Parameters<typeof isAgentsVxappWorktreePath>[1];
 }) {
-  if (isVxappBackedThread(input.thread)) {
+  if (
+    isAgentsVxappWorktreePath(
+      input.thread.worktreePath,
+      input.worktreeAuthority,
+    )
+  ) {
     return {
       hasActiveError: input.thread.hasActiveError,
       activeError: input.thread.activeError,
@@ -107,18 +129,30 @@ function toTurnId(value: TurnId | string | undefined): TurnId | undefined {
   return value === undefined ? undefined : TurnId.makeUnsafe(String(value));
 }
 
-function toApprovalRequestId(value: string | undefined): ApprovalRequestId | undefined {
+function toApprovalRequestId(
+  value: string | undefined,
+): ApprovalRequestId | undefined {
   return value === undefined ? undefined : ApprovalRequestId.makeUnsafe(value);
 }
 
-function sameId(left: string | null | undefined, right: string | null | undefined): boolean {
-  if (left === null || left === undefined || right === null || right === undefined) {
+function sameId(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  if (
+    left === null ||
+    left === undefined ||
+    right === null ||
+    right === undefined
+  ) {
     return false;
   }
   return left === right;
 }
 
-function readRuntimePayloadRecord(value: unknown): Record<string, unknown> | null {
+function readRuntimePayloadRecord(
+  value: unknown,
+): Record<string, unknown> | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -130,7 +164,9 @@ function readRuntimePayloadTurnId(value: unknown): TurnId | null {
   if (!record) {
     return null;
   }
-  return typeof record.activeTurnId === "string" ? TurnId.makeUnsafe(record.activeTurnId) : null;
+  return typeof record.activeTurnId === "string"
+    ? TurnId.makeUnsafe(record.activeTurnId)
+    : null;
 }
 
 function readRuntimePayloadLastError(value: unknown): string | null {
@@ -154,7 +190,9 @@ function isLifecycleStateEvent(
   );
 }
 
-function runtimeModeForThread(thread: OrchestrationReadModel["threads"][number]) {
+function runtimeModeForThread(
+  thread: OrchestrationReadModel["threads"][number],
+) {
   return thread.session?.runtimeMode ?? thread.runtimeMode ?? "full-access";
 }
 
@@ -186,14 +224,18 @@ function ownerErrorDetail(error: unknown): string {
   ) {
     return (error as { detail: string }).detail;
   }
-  return error instanceof Error ? error.message : "agents-vxapp owner command failed.";
+  return error instanceof Error
+    ? error.message
+    : "agents-vxapp owner command failed.";
 }
 
 class OwnerCommandFailure extends Data.TaggedError("OwnerCommandFailure")<{
   readonly detail: string;
 }> {}
 
-function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
+function normalizeProposedPlanMarkdown(
+  planMarkdown: string | undefined,
+): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
     return undefined;
@@ -205,7 +247,10 @@ function proposedPlanIdForTurn(threadId: ThreadId, turnId: TurnId): string {
   return `plan:${threadId}:turn:${turnId}`;
 }
 
-function proposedPlanIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId): string {
+function proposedPlanIdFromEvent(
+  event: ProviderRuntimeEvent,
+  threadId: ThreadId,
+): string {
   const turnId = toTurnId(event.turnId);
   if (turnId) {
     return proposedPlanIdForTurn(threadId, turnId);
@@ -219,7 +264,10 @@ function proposedPlanIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId
 function buildContextWindowActivityPayload(
   event: ProviderRuntimeEvent,
 ): ThreadTokenUsageSnapshot | undefined {
-  if (event.type !== "thread.token-usage.updated" || event.payload.usage.usedTokens <= 0) {
+  if (
+    event.type !== "thread.token-usage.updated" ||
+    event.payload.usage.usedTokens <= 0
+  ) {
     return undefined;
   }
   return event.payload.usage;
@@ -240,7 +288,14 @@ function normalizeRuntimeTurnState(
 }
 
 function orchestrationSessionStatusFromRuntimeState(
-  state: "starting" | "running" | "waiting" | "ready" | "interrupted" | "stopped" | "error",
+  state:
+    | "starting"
+    | "running"
+    | "waiting"
+    | "ready"
+    | "interrupted"
+    | "stopped"
+    | "error",
 ): "starting" | "running" | "ready" | "interrupted" | "stopped" | "error" {
   switch (state) {
     case "starting":
@@ -296,7 +351,9 @@ function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
 ): ReadonlyArray<OrchestrationThreadActivity> {
   const maybeSequence = (() => {
-    const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
+    const eventWithSequence = event as ProviderRuntimeEvent & {
+      sessionSequence?: number;
+    };
     return eventWithSequence.sessionSequence !== undefined
       ? { sequence: eventWithSequence.sessionSequence }
       : {};
@@ -317,7 +374,9 @@ function runtimeEventToActivities(
       if (event.payload.requestType === "tool_user_input") {
         return [];
       }
-      const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType);
+      const requestKind = requestKindFromCanonicalRequestType(
+        event.payload.requestType,
+      );
       return [
         {
           id: event.eventId,
@@ -336,7 +395,9 @@ function runtimeEventToActivities(
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
             requestType: event.payload.requestType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(event.payload.detail
+              ? { detail: truncateDetail(event.payload.detail) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -348,7 +409,9 @@ function runtimeEventToActivities(
       if (event.payload.requestType === "tool_user_input") {
         return [];
       }
-      const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType);
+      const requestKind = requestKindFromCanonicalRequestType(
+        event.payload.requestType,
+      );
       return [
         {
           id: event.eventId,
@@ -360,7 +423,9 @@ function runtimeEventToActivities(
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
             requestType: event.payload.requestType,
-            ...(event.payload.decision ? { decision: event.payload.decision } : {}),
+            ...(event.payload.decision
+              ? { decision: event.payload.decision }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -395,7 +460,9 @@ function runtimeEventToActivities(
           summary: "Runtime warning",
           payload: {
             message: truncateDetail(event.payload.message),
-            ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
+            ...(event.payload.detail !== undefined
+              ? { detail: event.payload.detail }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -474,7 +541,9 @@ function runtimeEventToActivities(
                 : "Task started",
           payload: {
             taskId: event.payload.taskId,
-            ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
+            ...(event.payload.taskType
+              ? { taskType: event.payload.taskType }
+              : {}),
             ...(event.payload.description
               ? { detail: truncateDetail(event.payload.description) }
               : {}),
@@ -501,8 +570,12 @@ function runtimeEventToActivities(
           payload: {
             taskId: event.payload.taskId,
             status: event.payload.status,
-            ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
-            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+            ...(event.payload.summary
+              ? { detail: truncateDetail(event.payload.summary) }
+              : {}),
+            ...(event.payload.usage !== undefined
+              ? { usage: event.payload.usage }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -524,7 +597,9 @@ function runtimeEventToActivities(
           summary: "Context compacted",
           payload: {
             state: event.payload.state,
-            ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
+            ...(event.payload.detail !== undefined
+              ? { detail: event.payload.detail }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -566,8 +641,12 @@ function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.detail
+              ? { detail: truncateDetail(event.payload.detail) }
+              : {}),
+            ...(event.payload.data !== undefined
+              ? { data: event.payload.data }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -588,8 +667,12 @@ function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool",
           payload: {
             itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.detail
+              ? { detail: truncateDetail(event.payload.detail) }
+              : {}),
+            ...(event.payload.data !== undefined
+              ? { data: event.payload.data }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -610,8 +693,12 @@ function runtimeEventToActivities(
           summary: `${event.payload.title ?? "Tool"} started`,
           payload: {
             itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.detail
+              ? { detail: truncateDetail(event.payload.detail) }
+              : {}),
+            ...(event.payload.data !== undefined
+              ? { data: event.payload.data }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -633,6 +720,26 @@ const make = Effect.fn("make")(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const projectHooksService = yield* ProjectHooksService;
+  const getWorktreeAuthority = () =>
+    Effect.serviceOption(AgentsVxappExternalRoleAuthority).pipe(
+      Effect.flatMap((externalRoleAuthorityOption) =>
+        Option.match(externalRoleAuthorityOption, {
+          onNone: () => Effect.succeed<null>(null),
+          onSome: (externalRoleAuthority) =>
+            Effect.all({
+              runtimePaths: externalRoleAuthority.getRuntimePaths(),
+              externalSnapshot: externalRoleAuthority.getSnapshot(),
+            }).pipe(
+              Effect.map(({ runtimePaths, externalSnapshot }) => ({
+                runtimePaths,
+                authoritativeWorktreePaths:
+                  buildExternalRoleAuthorityIndex(externalSnapshot)
+                    .worktreePaths,
+              })),
+            ),
+        }),
+      ),
+    );
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -648,7 +755,9 @@ const make = Effect.fn("make")(function* () {
   }) =>
     orchestrationEngine.dispatch({
       type: "thread.activity.append",
-      commandId: CommandId.makeUnsafe(`provider:${crypto.randomUUID()}:failure-activity`),
+      commandId: CommandId.makeUnsafe(
+        `provider:${crypto.randomUUID()}:failure-activity`,
+      ),
       threadId: input.threadId,
       activity: {
         id: EventId.makeUnsafe(crypto.randomUUID()),
@@ -672,7 +781,9 @@ const make = Effect.fn("make")(function* () {
     if (event.payload.requestType === "tool_user_input") {
       return true;
     }
-    const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType);
+    const requestKind = requestKindFromCanonicalRequestType(
+      event.payload.requestType,
+    );
     return yield* Effect.tryPromise({
       try: () =>
         requestAgentsVxappApprovalRequest({
@@ -686,10 +797,11 @@ const make = Effect.fn("make")(function* () {
           ...(requestKind ? { requestKind } : {}),
           ...(event.payload.detail ? { detail: event.payload.detail } : {}),
         }),
-      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+      catch: (error) =>
+        new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
     }).pipe(
       Effect.as(true),
-      Effect.catch((error) =>
+      Effect.catchTag("OwnerCommandFailure", (error) =>
         appendProviderFailureActivity({
           threadId: thread.id,
           kind: "provider.approval.request.failed",
@@ -718,10 +830,11 @@ const make = Effect.fn("make")(function* () {
           ...(event.turnId ? { turnId: event.turnId } : {}),
           questions: event.payload.questions,
         }),
-      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+      catch: (error) =>
+        new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
     }).pipe(
       Effect.as(true),
-      Effect.catch((error) =>
+      Effect.catchTag("OwnerCommandFailure", (error) =>
         appendProviderFailureActivity({
           threadId: thread.id,
           kind: "provider.user-input.request.failed",
@@ -739,15 +852,17 @@ const make = Effect.fn("make")(function* () {
     thread: OrchestrationThread,
     event: ProviderRuntimeEvent,
   ) {
-    if (!isVxappBackedThread(thread)) {
+    const worktreeAuthority = yield* getWorktreeAuthority();
+    if (!isAgentsVxappWorktreePath(thread.worktreePath, worktreeAuthority)) {
       return true;
     }
     return yield* Effect.tryPromise({
       try: () => requestAgentsVxappThreadStatus({ threadId: thread.id }),
-      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+      catch: (error) =>
+        new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
     }).pipe(
       Effect.as(true),
-      Effect.catch((error) =>
+      Effect.catchTag("OwnerCommandFailure", (error) =>
         appendProviderFailureActivity({
           threadId: thread.id,
           kind: "provider.thread.status.sync.failed",
@@ -766,13 +881,18 @@ const make = Effect.fn("make")(function* () {
     lookup: () => Effect.succeed(new Set<MessageId>()),
   });
 
-  const bufferedAssistantTextByMessageId = yield* Cache.make<MessageId, string>({
-    capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
-    timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
-    lookup: () => Effect.succeed(""),
-  });
+  const bufferedAssistantTextByMessageId = yield* Cache.make<MessageId, string>(
+    {
+      capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
+      timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
+      lookup: () => Effect.succeed(""),
+    },
+  );
 
-  const bufferedProposedPlanById = yield* Cache.make<string, { text: string; createdAt: string }>({
+  const bufferedProposedPlanById = yield* Cache.make<
+    string,
+    { text: string; createdAt: string }
+  >({
     capacity: BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY,
     timeToLive: BUFFERED_PROPOSED_PLAN_BY_ID_TTL,
     lookup: () => Effect.succeed({ text: "", createdAt: "" }),
@@ -794,8 +914,15 @@ const make = Effect.fn("make")(function* () {
     return isGitRepository(workspaceCwd);
   });
 
-  const rememberAssistantMessageId = (threadId: ThreadId, turnId: TurnId, messageId: MessageId) =>
-    Cache.getOption(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId)).pipe(
+  const rememberAssistantMessageId = (
+    threadId: ThreadId,
+    turnId: TurnId,
+    messageId: MessageId,
+  ) =>
+    Cache.getOption(
+      turnMessageIdsByTurnKey,
+      providerTurnKey(threadId, turnId),
+    ).pipe(
       Effect.flatMap((existingIds) =>
         Cache.set(
           turnMessageIdsByTurnKey,
@@ -812,8 +939,15 @@ const make = Effect.fn("make")(function* () {
       ),
     );
 
-  const forgetAssistantMessageId = (threadId: ThreadId, turnId: TurnId, messageId: MessageId) =>
-    Cache.getOption(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId)).pipe(
+  const forgetAssistantMessageId = (
+    threadId: ThreadId,
+    turnId: TurnId,
+    messageId: MessageId,
+  ) =>
+    Cache.getOption(
+      turnMessageIdsByTurnKey,
+      providerTurnKey(threadId, turnId),
+    ).pipe(
       Effect.flatMap((existingIds) =>
         Option.match(existingIds, {
           onNone: () => Effect.void,
@@ -821,23 +955,42 @@ const make = Effect.fn("make")(function* () {
             const nextIds = new Set(ids);
             nextIds.delete(messageId);
             if (nextIds.size === 0) {
-              return Cache.invalidate(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId));
+              return Cache.invalidate(
+                turnMessageIdsByTurnKey,
+                providerTurnKey(threadId, turnId),
+              );
             }
-            return Cache.set(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId), nextIds);
+            return Cache.set(
+              turnMessageIdsByTurnKey,
+              providerTurnKey(threadId, turnId),
+              nextIds,
+            );
           },
         }),
       ),
     );
 
   const getAssistantMessageIdsForTurn = (threadId: ThreadId, turnId: TurnId) =>
-    Cache.getOption(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId)).pipe(
+    Cache.getOption(
+      turnMessageIdsByTurnKey,
+      providerTurnKey(threadId, turnId),
+    ).pipe(
       Effect.map((existingIds) =>
-        Option.getOrElse(existingIds, (): Set<MessageId> => new Set<MessageId>()),
+        Option.getOrElse(
+          existingIds,
+          (): Set<MessageId> => new Set<MessageId>(),
+        ),
       ),
     );
 
-  const clearAssistantMessageIdsForTurn = (threadId: ThreadId, turnId: TurnId) =>
-    Cache.invalidate(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId));
+  const clearAssistantMessageIdsForTurn = (
+    threadId: ThreadId,
+    turnId: TurnId,
+  ) =>
+    Cache.invalidate(
+      turnMessageIdsByTurnKey,
+      providerTurnKey(threadId, turnId),
+    );
 
   const appendBufferedAssistantText = (messageId: MessageId, delta: string) =>
     Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
@@ -848,7 +1001,11 @@ const make = Effect.fn("make")(function* () {
             onSome: (text) => `${text}${delta}`,
           });
           if (nextText.length <= MAX_BUFFERED_ASSISTANT_CHARS) {
-            yield* Cache.set(bufferedAssistantTextByMessageId, messageId, nextText);
+            yield* Cache.set(
+              bufferedAssistantTextByMessageId,
+              messageId,
+              nextText,
+            );
             return "";
           }
 
@@ -871,14 +1028,20 @@ const make = Effect.fn("make")(function* () {
   const clearBufferedAssistantText = (messageId: MessageId) =>
     Cache.invalidate(bufferedAssistantTextByMessageId, messageId);
 
-  const appendBufferedProposedPlan = (planId: string, delta: string, createdAt: string) =>
+  const appendBufferedProposedPlan = (
+    planId: string,
+    delta: string,
+    createdAt: string,
+  ) =>
     Cache.getOption(bufferedProposedPlanById, planId).pipe(
       Effect.flatMap((existingEntry) => {
         const existing = Option.getOrUndefined(existingEntry);
         return Cache.set(bufferedProposedPlanById, planId, {
           text: `${existing?.text ?? ""}${delta}`,
           createdAt:
-            existing?.createdAt && existing.createdAt.length > 0 ? existing.createdAt : createdAt,
+            existing?.createdAt && existing.createdAt.length > 0
+              ? existing.createdAt
+              : createdAt,
         });
       }),
     );
@@ -898,57 +1061,61 @@ const make = Effect.fn("make")(function* () {
   const clearAssistantMessageState = (messageId: MessageId) =>
     clearBufferedAssistantText(messageId);
 
-  const finalizeAssistantMessage = Effect.fn("finalizeAssistantMessage")(function* (input: {
-    event: ProviderRuntimeEvent;
-    threadId: ThreadId;
-    messageId: MessageId;
-    turnId?: TurnId;
-    createdAt: string;
-    commandTag: string;
-    finalDeltaCommandTag: string;
-    fallbackText?: string;
-  }) {
-    const bufferedText = yield* takeBufferedAssistantText(input.messageId);
-    const text =
-      bufferedText.length > 0
-        ? bufferedText
-        : (input.fallbackText?.trim().length ?? 0) > 0
-          ? input.fallbackText!
-          : "";
+  const finalizeAssistantMessage = Effect.fn("finalizeAssistantMessage")(
+    function* (input: {
+      event: ProviderRuntimeEvent;
+      threadId: ThreadId;
+      messageId: MessageId;
+      turnId?: TurnId;
+      createdAt: string;
+      commandTag: string;
+      finalDeltaCommandTag: string;
+      fallbackText?: string;
+    }) {
+      const bufferedText = yield* takeBufferedAssistantText(input.messageId);
+      const text =
+        bufferedText.length > 0
+          ? bufferedText
+          : (input.fallbackText?.trim().length ?? 0) > 0
+            ? input.fallbackText!
+            : "";
 
-    if (text.length > 0) {
+      if (text.length > 0) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: providerCommandId(input.event, input.finalDeltaCommandTag),
+          threadId: input.threadId,
+          messageId: input.messageId,
+          delta: text,
+          ...(input.turnId ? { turnId: input.turnId } : {}),
+          createdAt: input.createdAt,
+        });
+      }
+
       yield* orchestrationEngine.dispatch({
-        type: "thread.message.assistant.delta",
-        commandId: providerCommandId(input.event, input.finalDeltaCommandTag),
+        type: "thread.message.assistant.complete",
+        commandId: providerCommandId(input.event, input.commandTag),
         threadId: input.threadId,
         messageId: input.messageId,
-        delta: text,
         ...(input.turnId ? { turnId: input.turnId } : {}),
         createdAt: input.createdAt,
       });
-    }
-
-    yield* orchestrationEngine.dispatch({
-      type: "thread.message.assistant.complete",
-      commandId: providerCommandId(input.event, input.commandTag),
-      threadId: input.threadId,
-      messageId: input.messageId,
-      ...(input.turnId ? { turnId: input.turnId } : {}),
-      createdAt: input.createdAt,
-    });
-    const readModel = yield* orchestrationEngine.getReadModel();
-    const finalizedThread = readModel.threads.find((thread) => thread.id === input.threadId);
-    const finalizedMessage = finalizedThread?.messages.find(
-      (message) => message.id === input.messageId,
-    );
-    if (finalizedThread && finalizedMessage) {
-      yield* notifyOrchestratorChatMessage({
-        thread: finalizedThread,
-        message: finalizedMessage,
-      });
-    }
-    yield* clearAssistantMessageState(input.messageId);
-  });
+      const readModel = yield* orchestrationEngine.getReadModel();
+      const finalizedThread = readModel.threads.find(
+        (thread) => thread.id === input.threadId,
+      );
+      const finalizedMessage = finalizedThread?.messages.find(
+        (message) => message.id === input.messageId,
+      );
+      if (finalizedThread && finalizedMessage) {
+        yield* notifyOrchestratorChatMessage({
+          thread: finalizedThread,
+          message: finalizedMessage,
+        });
+      }
+      yield* clearAssistantMessageState(input.messageId);
+    },
+  );
 
   const upsertProposedPlan = Effect.fn("upsertProposedPlan")(function* (input: {
     event: ProviderRuntimeEvent;
@@ -970,7 +1137,9 @@ const make = Effect.fn("make")(function* () {
       return;
     }
 
-    const existingPlan = input.threadProposedPlans.find((entry) => entry.id === input.planId);
+    const existingPlan = input.threadProposedPlans.find(
+      (entry) => entry.id === input.planId,
+    );
     yield* orchestrationEngine.dispatch({
       type: "thread.proposed-plan.upsert",
       commandId: providerCommandId(input.event, "proposed-plan-upsert"),
@@ -988,7 +1157,9 @@ const make = Effect.fn("make")(function* () {
     });
   });
 
-  const finalizeBufferedProposedPlan = Effect.fn("finalizeBufferedProposedPlan")(function* (input: {
+  const finalizeBufferedProposedPlan = Effect.fn(
+    "finalizeBufferedProposedPlan",
+  )(function* (input: {
     event: ProviderRuntimeEvent;
     threadId: ThreadId;
     threadProposedPlans: ReadonlyArray<{
@@ -1004,7 +1175,9 @@ const make = Effect.fn("make")(function* () {
   }) {
     const bufferedPlan = yield* takeBufferedProposedPlan(input.planId);
     const bufferedMarkdown = normalizeProposedPlanMarkdown(bufferedPlan?.text);
-    const fallbackMarkdown = normalizeProposedPlanMarkdown(input.fallbackMarkdown);
+    const fallbackMarkdown = normalizeProposedPlanMarkdown(
+      input.fallbackMarkdown,
+    );
     const planMarkdown = bufferedMarkdown ?? fallbackMarkdown;
     if (!planMarkdown) {
       return;
@@ -1026,84 +1199,96 @@ const make = Effect.fn("make")(function* () {
     yield* clearBufferedProposedPlan(input.planId);
   });
 
-  const clearTurnStateForSession = Effect.fn("clearTurnStateForSession")(function* (
+  const clearTurnStateForSession = Effect.fn("clearTurnStateForSession")(
+    function* (threadId: ThreadId) {
+      const prefix = `${threadId}:`;
+      const proposedPlanPrefix = `plan:${threadId}:`;
+      const turnKeys = Array.from(yield* Cache.keys(turnMessageIdsByTurnKey));
+      const proposedPlanKeys = Array.from(
+        yield* Cache.keys(bufferedProposedPlanById),
+      );
+      yield* Effect.forEach(
+        turnKeys,
+        Effect.fn(function* (key) {
+          if (!key.startsWith(prefix)) {
+            return;
+          }
+
+          const messageIds = yield* Cache.getOption(
+            turnMessageIdsByTurnKey,
+            key,
+          );
+          if (Option.isSome(messageIds)) {
+            yield* Effect.forEach(
+              messageIds.value,
+              clearAssistantMessageState,
+              {
+                concurrency: 1,
+              },
+            ).pipe(Effect.asVoid);
+          }
+
+          yield* Cache.invalidate(turnMessageIdsByTurnKey, key);
+        }),
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+      yield* Effect.forEach(
+        proposedPlanKeys,
+        (key) =>
+          key.startsWith(proposedPlanPrefix)
+            ? Cache.invalidate(bufferedProposedPlanById, key)
+            : Effect.void,
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
+    },
+  );
+
+  const getSourceProposedPlanReferenceForPendingTurnStart = Effect.fnUntraced(
+    function* (threadId: ThreadId) {
+      const pendingTurnStart =
+        yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+          threadId,
+        });
+      if (Option.isNone(pendingTurnStart)) {
+        return null;
+      }
+
+      const sourceThreadId = pendingTurnStart.value.sourceProposedPlanThreadId;
+      const sourcePlanId = pendingTurnStart.value.sourceProposedPlanId;
+      if (sourceThreadId === null || sourcePlanId === null) {
+        return null;
+      }
+
+      return {
+        sourceThreadId,
+        sourcePlanId,
+      } as const;
+    },
+  );
+
+  const getExpectedProviderTurnIdForThread = Effect.fnUntraced(function* (
     threadId: ThreadId,
   ) {
-    const prefix = `${threadId}:`;
-    const proposedPlanPrefix = `plan:${threadId}:`;
-    const turnKeys = Array.from(yield* Cache.keys(turnMessageIdsByTurnKey));
-    const proposedPlanKeys = Array.from(yield* Cache.keys(bufferedProposedPlanById));
-    yield* Effect.forEach(
-      turnKeys,
-      Effect.fn(function* (key) {
-        if (!key.startsWith(prefix)) {
-          return;
-        }
-
-        const messageIds = yield* Cache.getOption(turnMessageIdsByTurnKey, key);
-        if (Option.isSome(messageIds)) {
-          yield* Effect.forEach(messageIds.value, clearAssistantMessageState, {
-            concurrency: 1,
-          }).pipe(Effect.asVoid);
-        }
-
-        yield* Cache.invalidate(turnMessageIdsByTurnKey, key);
-      }),
-      { concurrency: 1 },
-    ).pipe(Effect.asVoid);
-    yield* Effect.forEach(
-      proposedPlanKeys,
-      (key) =>
-        key.startsWith(proposedPlanPrefix)
-          ? Cache.invalidate(bufferedProposedPlanById, key)
-          : Effect.void,
-      { concurrency: 1 },
-    ).pipe(Effect.asVoid);
-  });
-
-  const getSourceProposedPlanReferenceForPendingTurnStart = Effect.fnUntraced(function* (
-    threadId: ThreadId,
-  ) {
-    const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
-      threadId,
-    });
-    if (Option.isNone(pendingTurnStart)) {
-      return null;
-    }
-
-    const sourceThreadId = pendingTurnStart.value.sourceProposedPlanThreadId;
-    const sourcePlanId = pendingTurnStart.value.sourceProposedPlanId;
-    if (sourceThreadId === null || sourcePlanId === null) {
-      return null;
-    }
-
-    return {
-      sourceThreadId,
-      sourcePlanId,
-    } as const;
-  });
-
-  const getExpectedProviderTurnIdForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const sessions = yield* providerService.listSessions();
     const session = sessions.find((entry) => entry.threadId === threadId);
     return session?.activeTurnId;
   });
 
-  const getSourceProposedPlanReferenceForAcceptedTurnStart = Effect.fnUntraced(function* (
-    threadId: ThreadId,
-    eventTurnId: TurnId | undefined,
-  ) {
-    if (eventTurnId === undefined) {
-      return null;
-    }
+  const getSourceProposedPlanReferenceForAcceptedTurnStart = Effect.fnUntraced(
+    function* (threadId: ThreadId, eventTurnId: TurnId | undefined) {
+      if (eventTurnId === undefined) {
+        return null;
+      }
 
-    const expectedTurnId = yield* getExpectedProviderTurnIdForThread(threadId);
-    if (!sameId(expectedTurnId, eventTurnId)) {
-      return null;
-    }
+      const expectedTurnId =
+        yield* getExpectedProviderTurnIdForThread(threadId);
+      if (!sameId(expectedTurnId, eventTurnId)) {
+        return null;
+      }
 
-    return yield* getSourceProposedPlanReferenceForPendingTurnStart(threadId);
-  });
+      return yield* getSourceProposedPlanReferenceForPendingTurnStart(threadId);
+    },
+  );
 
   const markSourceProposedPlanImplemented = Effect.fnUntraced(function* (
     sourceThreadId: ThreadId,
@@ -1112,8 +1297,12 @@ const make = Effect.fn("make")(function* () {
     implementedAt: string,
   ) {
     const readModel = yield* orchestrationEngine.getReadModel();
-    const sourceThread = readModel.threads.find((entry) => entry.id === sourceThreadId);
-    const sourcePlan = sourceThread?.proposedPlans.find((entry) => entry.id === sourcePlanId);
+    const sourceThread = readModel.threads.find(
+      (entry) => entry.id === sourceThreadId,
+    );
+    const sourcePlan = sourceThread?.proposedPlans.find(
+      (entry) => entry.id === sourcePlanId,
+    );
     if (!sourceThread || !sourcePlan || sourcePlan.implementedAt !== null) {
       return;
     }
@@ -1138,22 +1327,28 @@ const make = Effect.fn("make")(function* () {
     event: ProviderRuntimeEvent,
   ) {
     const readModel = yield* orchestrationEngine.getReadModel();
-    const thread = readModel.threads.find((entry) => entry.id === event.threadId);
+    const thread = readModel.threads.find(
+      (entry) => entry.id === event.threadId,
+    );
     if (!thread) return;
 
     const now = event.createdAt;
     const eventTurnId = toTurnId(event.turnId);
     const bindingOption = yield* providerSessionDirectory.getBinding(thread.id);
     const runtimeBinding = Option.getOrUndefined(bindingOption);
-    const runtimeBindingActiveTurnId = readRuntimePayloadTurnId(runtimeBinding?.runtimePayload);
-    const activeTurnId = thread.session?.activeTurnId ?? runtimeBindingActiveTurnId ?? null;
+    const runtimeBindingActiveTurnId = readRuntimePayloadTurnId(
+      runtimeBinding?.runtimePayload,
+    );
+    const activeTurnId =
+      thread.session?.activeTurnId ?? runtimeBindingActiveTurnId ?? null;
     const lifecycleEventTurnId =
       event.type === "turn.completed" && eventTurnId === undefined
         ? (activeTurnId ?? undefined)
         : eventTurnId;
     const currentSessionUpdatedAt = thread.session?.updatedAt ?? null;
     const olderThanCurrentSession =
-      currentSessionUpdatedAt !== null && currentSessionUpdatedAt.localeCompare(now) > 0;
+      currentSessionUpdatedAt !== null &&
+      currentSessionUpdatedAt.localeCompare(now) > 0;
     const settledSessionWouldRegress =
       olderThanCurrentSession &&
       thread.session !== null &&
@@ -1171,7 +1366,8 @@ const make = Effect.fn("make")(function* () {
       activeTurnId !== null &&
       lifecycleEventTurnId !== undefined &&
       !sameId(activeTurnId, lifecycleEventTurnId);
-    const missingTurnForActiveTurn = activeTurnId !== null && lifecycleEventTurnId === undefined;
+    const missingTurnForActiveTurn =
+      activeTurnId !== null && lifecycleEventTurnId === undefined;
 
     const shouldApplyThreadLifecycle = (() => {
       if (!STRICT_PROVIDER_LIFECYCLE_GUARD) {
@@ -1204,18 +1400,27 @@ const make = Effect.fn("make")(function* () {
     })();
     const acceptedTurnStartedSourcePlan =
       event.type === "turn.started" && shouldApplyThreadLifecycle
-        ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
+        ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(
+            thread.id,
+            eventTurnId,
+          )
         : null;
 
     if (event.type === "request.opened") {
-      const ownerAccepted = yield* synchronizeOwnerApprovalRequest(thread, event);
+      const ownerAccepted = yield* synchronizeOwnerApprovalRequest(
+        thread,
+        event,
+      );
       if (!ownerAccepted) {
         return;
       }
     }
 
     if (event.type === "user-input.requested") {
-      const ownerAccepted = yield* synchronizeOwnerPendingUserInput(thread, event);
+      const ownerAccepted = yield* synchronizeOwnerPendingUserInput(
+        thread,
+        event,
+      );
       if (!ownerAccepted) {
         return;
       }
@@ -1255,26 +1460,37 @@ const make = Effect.fn("make")(function* () {
       const status = (() => {
         switch (event.type) {
           case "session.state.changed":
-            return orchestrationSessionStatusFromRuntimeState(event.payload.state);
+            return orchestrationSessionStatusFromRuntimeState(
+              event.payload.state,
+            );
           case "turn.started":
             return "running";
           case "session.exited":
             return "stopped";
           case "turn.completed":
-            return normalizeRuntimeTurnState(event.payload.state) === "failed" ? "error" : "ready";
+            return normalizeRuntimeTurnState(event.payload.state) === "failed"
+              ? "error"
+              : "ready";
           case "session.started":
           case "thread.started":
             // Provider thread/session start notifications can arrive during an
             // active turn; preserve turn-running state in that case.
-            return (activeTurnId ?? runtimeBindingActiveTurnId) !== null ? "running" : "ready";
+            return (activeTurnId ?? runtimeBindingActiveTurnId) !== null
+              ? "running"
+              : "ready";
         }
       })();
       const lastError =
-        event.type === "session.state.changed" && event.payload.state === "error"
-          ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
+        event.type === "session.state.changed" &&
+        event.payload.state === "error"
+          ? (event.payload.reason ??
+            thread.session?.lastError ??
+            "Provider session error")
           : event.type === "turn.completed" &&
               normalizeRuntimeTurnState(event.payload.state) === "failed"
-            ? (event.payload.errorMessage ?? thread.session?.lastError ?? "Turn failed")
+            ? (event.payload.errorMessage ??
+              thread.session?.lastError ??
+              "Turn failed")
             : status === "ready"
               ? null
               : (thread.session?.lastError ?? null);
@@ -1288,13 +1504,18 @@ const make = Effect.fn("make")(function* () {
               : "running";
 
       if (shouldApplyThreadLifecycle) {
+        const worktreeAuthority = yield* getWorktreeAuthority();
         const errorPresentation = resolveProviderLocalThreadErrorPresentation({
           thread,
           latestTurnState: status === "error" ? "error" : null,
           sessionStatus: status,
           sessionLastError: lastError,
+          worktreeAuthority,
         });
-        if (event.type === "turn.started" && acceptedTurnStartedSourcePlan !== null) {
+        if (
+          event.type === "turn.started" &&
+          acceptedTurnStartedSourcePlan !== null
+        ) {
           yield* markSourceProposedPlanImplemented(
             acceptedTurnStartedSourcePlan.sourceThreadId,
             acceptedTurnStartedSourcePlan.sourcePlanId,
@@ -1302,11 +1523,14 @@ const make = Effect.fn("make")(function* () {
             now,
           ).pipe(
             Effect.catchCause((cause) =>
-              Effect.logWarning("provider runtime ingestion failed to mark source proposed plan", {
-                eventId: event.eventId,
-                eventType: event.type,
-                cause: Cause.pretty(cause),
-              }),
+              Effect.logWarning(
+                "provider runtime ingestion failed to mark source proposed plan",
+                {
+                  eventId: event.eventId,
+                  eventType: event.type,
+                  cause: Cause.pretty(cause),
+                },
+              ),
             ),
           );
         }
@@ -1343,11 +1567,14 @@ const make = Effect.fn("make")(function* () {
         if (event.type === "turn.completed") {
           yield* projectHooksService.handleTurnCompleted(event).pipe(
             Effect.catchCause((cause) =>
-              Effect.logWarning("provider runtime ingestion failed to run project hooks", {
-                eventId: event.eventId,
-                threadId: event.threadId,
-                cause: Cause.pretty(cause),
-              }),
+              Effect.logWarning(
+                "provider runtime ingestion failed to run project hooks",
+                {
+                  eventId: event.eventId,
+                  threadId: event.threadId,
+                  cause: Cause.pretty(cause),
+                },
+              ),
             ),
           );
         }
@@ -1355,7 +1582,8 @@ const make = Effect.fn("make")(function* () {
     }
 
     const assistantDelta =
-      event.type === "content.delta" && event.payload.streamKind === "assistant_text"
+      event.type === "content.delta" &&
+      event.payload.streamKind === "assistant_text"
         ? event.payload.delta
         : undefined;
     const proposedPlanDelta =
@@ -1367,15 +1595,23 @@ const make = Effect.fn("make")(function* () {
       );
       const turnId = lifecycleEventTurnId;
       if (turnId) {
-        yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+        yield* rememberAssistantMessageId(
+          thread.id,
+          turnId,
+          assistantMessageId,
+        );
       }
 
       const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
         serverSettingsService.getSettings,
-        (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
+        (settings) =>
+          settings.enableAssistantStreaming ? "streaming" : "buffered",
       );
       if (assistantDeliveryMode === "buffered") {
-        const spillChunk = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta);
+        const spillChunk = yield* appendBufferedAssistantText(
+          assistantMessageId,
+          assistantDelta,
+        );
         if (spillChunk.length > 0) {
           yield* orchestrationEngine.dispatch({
             type: "thread.message.assistant.delta",
@@ -1406,7 +1642,8 @@ const make = Effect.fn("make")(function* () {
     }
 
     const assistantCompletion =
-      event.type === "item.completed" && event.payload.itemType === "assistant_message"
+      event.type === "item.completed" &&
+      event.payload.itemType === "assistant_message"
         ? {
             messageId: MessageId.makeUnsafe(
               `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
@@ -1432,7 +1669,11 @@ const make = Effect.fn("make")(function* () {
       const shouldApplyFallbackCompletionText =
         !existingAssistantMessage || existingAssistantMessage.text.length === 0;
       if (turnId) {
-        yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
+        yield* rememberAssistantMessageId(
+          thread.id,
+          turnId,
+          assistantMessageId,
+        );
       }
 
       yield* finalizeAssistantMessage({
@@ -1443,7 +1684,8 @@ const make = Effect.fn("make")(function* () {
         createdAt: now,
         commandTag: "assistant-complete",
         finalDeltaCommandTag: "assistant-delta-finalize",
-        ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
+        ...(assistantCompletion.fallbackText !== undefined &&
+        shouldApplyFallbackCompletionText
           ? { fallbackText: assistantCompletion.fallbackText }
           : {}),
       });
@@ -1459,7 +1701,9 @@ const make = Effect.fn("make")(function* () {
         threadId: thread.id,
         threadProposedPlans: thread.proposedPlans,
         planId: proposedPlanCompletion.planId,
-        ...(proposedPlanCompletion.turnId ? { turnId: proposedPlanCompletion.turnId } : {}),
+        ...(proposedPlanCompletion.turnId
+          ? { turnId: proposedPlanCompletion.turnId }
+          : {}),
         fallbackMarkdown: proposedPlanCompletion.planMarkdown,
         updatedAt: now,
       });
@@ -1468,7 +1712,10 @@ const make = Effect.fn("make")(function* () {
     if (event.type === "turn.completed") {
       const turnId = lifecycleEventTurnId;
       if (turnId) {
-        const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
+        const assistantMessageIds = yield* getAssistantMessageIdsForTurn(
+          thread.id,
+          turnId,
+        );
         yield* Effect.forEach(
           assistantMessageIds,
           (assistantMessageId) =>
@@ -1506,7 +1753,9 @@ const make = Effect.fn("make")(function* () {
       const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
         ? true
         : !settledSessionWouldRegress &&
-          (activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId));
+          (activeTurnId === null ||
+            eventTurnId === undefined ||
+            sameId(activeTurnId, eventTurnId));
 
       if (shouldApplyRuntimeError) {
         yield* orchestrationEngine.dispatch({
@@ -1567,11 +1816,16 @@ const make = Effect.fn("make")(function* () {
           );
           yield* orchestrationEngine.dispatch({
             type: "thread.turn.checkpoint.record",
-            commandId: providerCommandId(event, "thread-turn-checkpoint-record"),
+            commandId: providerCommandId(
+              event,
+              "thread-turn-checkpoint-record",
+            ),
             threadId: thread.id,
             turnId,
             completedAt: now,
-            checkpointRef: CheckpointRef.makeUnsafe(`provider-diff:${event.eventId}`),
+            checkpointRef: CheckpointRef.makeUnsafe(
+              `provider-diff:${event.eventId}`,
+            ),
             status: "missing",
             files: [],
             assistantMessageId,
@@ -1594,10 +1848,13 @@ const make = Effect.fn("make")(function* () {
     ).pipe(Effect.asVoid);
   });
 
-  const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
+  const processDomainEvent = (_event: TurnStartRequestedDomainEvent) =>
+    Effect.void;
 
   const processInput = (input: RuntimeIngestionInput) =>
-    input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);
+    input.source === "runtime"
+      ? processRuntimeEvent(input.event)
+      : processDomainEvent(input.event);
 
   const processInputSafely = (input: RuntimeIngestionInput) =>
     processInput(input).pipe(
@@ -1605,12 +1862,15 @@ const make = Effect.fn("make")(function* () {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
         }
-        return Effect.logWarning("provider runtime ingestion failed to process event", {
-          source: input.source,
-          eventId: input.event.eventId,
-          eventType: input.event.type,
-          cause: Cause.pretty(cause),
-        });
+        return Effect.logWarning(
+          "provider runtime ingestion failed to process event",
+          {
+            source: input.source,
+            eventId: input.event.eventId,
+            eventType: input.event.type,
+            cause: Cause.pretty(cause),
+          },
+        );
       }),
     );
 
@@ -1624,7 +1884,8 @@ const make = Effect.fn("make")(function* () {
       threadIds,
       (threadId) =>
         Effect.gen(function* () {
-          const bindingOption = yield* providerSessionDirectory.getBinding(threadId);
+          const bindingOption =
+            yield* providerSessionDirectory.getBinding(threadId);
           if (Option.isNone(bindingOption)) {
             return;
           }
@@ -1638,7 +1899,9 @@ const make = Effect.fn("make")(function* () {
             return;
           }
 
-          const thread = readModel.threads.find((entry) => entry.id === threadId);
+          const thread = readModel.threads.find(
+            (entry) => entry.id === threadId,
+          );
           const pruneReason = persistedSessionBindingPruneReason(thread);
           if (pruneReason) {
             yield* providerSessionDirectory.remove(threadId);
@@ -1660,7 +1923,9 @@ const make = Effect.fn("make")(function* () {
               : binding.status === "stopped"
                 ? "stopped"
                 : "error";
-          const nextLastError = readRuntimePayloadLastError(binding.runtimePayload);
+          const nextLastError = readRuntimePayloadLastError(
+            binding.runtimePayload,
+          );
 
           const alreadyMatches =
             currentSession?.status === nextStatus &&
@@ -1681,7 +1946,10 @@ const make = Effect.fn("make")(function* () {
               threadId,
               status: nextStatus,
               providerName: binding.provider,
-              runtimeMode: binding.runtimeMode ?? currentSession?.runtimeMode ?? "full-access",
+              runtimeMode:
+                binding.runtimeMode ??
+                currentSession?.runtimeMode ??
+                "full-access",
               activeTurnId: nextActiveTurnId,
               lastError: nextLastError,
               updatedAt: createdAt,
@@ -1693,28 +1961,33 @@ const make = Effect.fn("make")(function* () {
     ).pipe(Effect.asVoid);
   }).pipe(
     Effect.catchCause((cause) =>
-      Effect.logWarning("provider runtime ingestion failed to reconcile persisted sessions", {
-        cause: Cause.pretty(cause),
-      }),
+      Effect.logWarning(
+        "provider runtime ingestion failed to reconcile persisted sessions",
+        {
+          cause: Cause.pretty(cause),
+        },
+      ),
     ),
   );
 
-  const start: ProviderRuntimeIngestionShape["start"] = Effect.fn("start")(function* () {
-    yield* Effect.forkScoped(
-      Stream.runForEach(providerService.streamEvents, (event) =>
-        worker.enqueue({ source: "runtime", event }),
-      ),
-    );
-    yield* Effect.forkScoped(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.turn-start-requested") {
-          return Effect.void;
-        }
-        return worker.enqueue({ source: "domain", event });
-      }),
-    );
-    yield* reconcilePersistedSessionsOnStart;
-  });
+  const start: ProviderRuntimeIngestionShape["start"] = Effect.fn("start")(
+    function* () {
+      yield* Effect.forkScoped(
+        Stream.runForEach(providerService.streamEvents, (event) =>
+          worker.enqueue({ source: "runtime", event }),
+        ),
+      );
+      yield* Effect.forkScoped(
+        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+          if (event.type !== "thread.turn-start-requested") {
+            return Effect.void;
+          }
+          return worker.enqueue({ source: "domain", event });
+        }),
+      );
+      yield* reconcilePersistedSessionsOnStart;
+    },
+  );
 
   return {
     start,
@@ -1728,6 +2001,8 @@ export const ProviderRuntimeIngestionLive = Layer.effect(
 ).pipe(
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(
-    ProviderSessionDirectoryLive.pipe(Layer.provideMerge(ProviderSessionRuntimeRepositoryLive)),
+    ProviderSessionDirectoryLive.pipe(
+      Layer.provideMerge(ProviderSessionRuntimeRepositoryLive),
+    ),
   ),
 );

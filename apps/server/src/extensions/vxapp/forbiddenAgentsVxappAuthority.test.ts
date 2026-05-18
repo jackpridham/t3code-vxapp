@@ -4,7 +4,8 @@ import path from "node:path";
 import { describe, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../../../..");
-const ownerClientRelativePath = "apps/server/src/extensions/vxapp/agentsVxappOwnerClient.ts";
+const ownerClientRelativePath =
+  "apps/server/src/extensions/vxapp/agentsVxappOwnerClient.ts";
 const ownerClientPath = path.resolve(repoRoot, ownerClientRelativePath);
 const scanRoots = [
   "apps/server/src/extensions/vxapp",
@@ -44,23 +45,27 @@ function collectViolations(filePath: string, source: string) {
 
   if (
     filePath !== ownerClientPath &&
-    (/--compatibility-mode/.test(source) || /["'](?<![a-z0-9-])t3code-[a-z0-9-]+["']/.test(source))
+    (/--compatibility-mode/.test(source) ||
+      /["'](?<![a-z0-9-])t3code-[a-z0-9-]+["']/.test(source))
   ) {
     violations.push({
-      category: "compatibility-mode usage or owner command literals outside the owner client",
+      category:
+        "compatibility-mode usage or owner command literals outside the owner client",
       relativePath,
     });
   }
 
   const sqliteImportMatch = source.match(
-    /import\s*\{([^}]+)\}\s*from\s*["'][^"']*agentsVxappSqlite\.ts["']/m,
+    /import\s*\{([^}]+)\}\s*from\s*["'][^"']*agentsVxappRepoRoot\.ts["']/m,
   );
   if (sqliteImportMatch) {
     const importedNames = sqliteImportMatch[1]!
       .split(",")
       .map((name) => name.trim())
       .filter(Boolean);
-    const disallowedImports = importedNames.filter((name) => name !== "AGENTS_VXAPP_ROOT");
+    const disallowedImports = importedNames.filter(
+      (name) => name !== "AGENTS_VXAPP_REPO_ROOT",
+    );
     if (disallowedImports.length > 0) {
       violations.push({
         category: "direct agents-vxapp SQLite reads from cutover surfaces",
@@ -106,7 +111,8 @@ function collectViolations(filePath: string, source: string) {
     );
   if (directRuntimeMetadataIo) {
     violations.push({
-      category: "direct runtime metadata file reads for agent or worker runtime snapshots",
+      category:
+        "direct runtime metadata file reads for agent or worker runtime snapshots",
       relativePath,
     });
   }
@@ -125,14 +131,26 @@ function collectViolations(filePath: string, source: string) {
     });
   }
 
+  if (
+    /startsWith\(AGENTS_VXAPP_REPO_ROOT\)/.test(source) ||
+    (filePath !== ownerClientPath &&
+      /from\s+["'][^"']*agentsVxappRepoRoot\.ts["']/.test(source))
+  ) {
+    violations.push({
+      category: "repo-root-prefix vxapp classification on cutover surfaces",
+      relativePath,
+    });
+  }
+
   return violations;
 }
 
 describe("forbidden agents-vxapp authority sources", () => {
   it("keeps cutover surfaces free of forbidden legacy authority paths", () => {
     const violations = scanRoots.flatMap((relativeRoot) =>
-      listSourceFiles(path.resolve(repoRoot, relativeRoot)).flatMap((filePath) =>
-        collectViolations(filePath, fs.readFileSync(filePath, "utf8")),
+      listSourceFiles(path.resolve(repoRoot, relativeRoot)).flatMap(
+        (filePath) =>
+          collectViolations(filePath, fs.readFileSync(filePath, "utf8")),
       ),
     );
 

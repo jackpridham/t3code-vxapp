@@ -12,8 +12,12 @@ describe("ProjectionOperationalQuery authority boundary", () => {
     expect(source).toContain("controlPlane.getSnapshot({})");
     expect(source).toContain("controlPlane.getNotificationSummaryExport()");
     expect(source).toContain("controlPlane.getAttentionSummaryExport()");
+    expect(source).toContain("getRuntimePaths()");
     expect(source).toContain("getBindingAuthorityForVxappProjectRows");
     expect(source).toContain("programs = ownerSnapshot.programs.map(mapOwnerProgram)");
+    expect(source).toContain(
+      "vxapp projection boundary requires external role authority runtime paths.",
+    );
   });
 
   it("keeps local Program repository reads inside the non-vxapp branch", () => {
