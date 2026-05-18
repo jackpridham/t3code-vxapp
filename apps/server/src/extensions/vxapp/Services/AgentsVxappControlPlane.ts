@@ -1,4 +1,6 @@
 import type {
+  ProgramId,
+  ProjectId,
   ServerAgentsVxappOwnerMutationResult,
   ServerCreateAgentsVxappProgramInput,
   ServerCreateAgentsVxappTodoInput,
@@ -7,6 +9,7 @@ import type {
   ServerGetAgentsVxappControlPlaneSnapshotInput,
   ServerGetAgentsVxappControlPlaneSnapshotResult,
   ServerSetAgentsVxappProgramLifecycleInput,
+  ThreadId,
   ServerUpdateAgentsVxappProgramInput,
   ServerUpdateAgentsVxappTodoInput,
 } from "@t3tools/contracts";
@@ -93,6 +96,24 @@ export interface AgentsVxappWatchSummaryExport extends AgentsVxappOwnerExportEnv
   readonly wakeDecision: JsonRecord | null;
 }
 
+export interface AgentsVxappProgramsProjectionProgram extends JsonRecord {
+  readonly id: ProgramId;
+  readonly title: string;
+  readonly objective: string | null;
+  readonly status: string;
+  readonly executiveProjectId: ProjectId | null;
+  readonly executiveThreadId: ThreadId | null;
+  readonly currentOrchestratorThreadId: ThreadId | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+  readonly deletedAt: string | null;
+}
+
+export interface AgentsVxappProgramsProjectionSnapshot {
+  readonly programs: ReadonlyArray<AgentsVxappProgramsProjectionProgram>;
+}
+
 export interface AgentsVxappControlPlaneShape {
   readonly getBindingAuthorityExport: () => Effect.Effect<
     AgentsVxappBindingAuthorityExport,
@@ -118,7 +139,11 @@ export interface AgentsVxappControlPlaneShape {
     AgentsVxappOwnerProjectionAuthoritySnapshot,
     AgentsVxappControlPlaneError
   >;
-  readonly getSnapshot: (
+  readonly getProgramsProjectionSnapshot: () => Effect.Effect<
+    AgentsVxappProgramsProjectionSnapshot,
+    AgentsVxappControlPlaneError
+  >;
+  readonly getProgramsTodosSnapshot: (
     input: ServerGetAgentsVxappControlPlaneSnapshotInput,
   ) => Effect.Effect<ServerGetAgentsVxappControlPlaneSnapshotResult, AgentsVxappControlPlaneError>;
   readonly createProgram: (

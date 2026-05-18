@@ -113,7 +113,7 @@ export const makeVxappWsRouteHandlers: Effect.Effect<
       WS_METHODS.serverGetAgentsVxappControlPlaneSnapshot,
       {
         handle: (request) =>
-          agentsVxappControlPlane.getSnapshot(
+          agentsVxappControlPlane.getProgramsTodosSnapshot(
             stripRequestTag(
               request.body as Extract<
                 WebSocketRequest["body"],

@@ -8,11 +8,13 @@ import {
   type AgentsVxappControlPlaneShape,
   type AgentsVxappNotificationSummaryExport,
   type AgentsVxappOwnerProjectionAuthoritySnapshot,
+  type AgentsVxappProgramsProjectionSnapshot,
   type AgentsVxappProgramAuthorityExport,
   type AgentsVxappWatchSummaryExport,
 } from "../Services/AgentsVxappControlPlane.ts";
 import {
   fetchAgentsVxappControlPlaneSnapshot,
+  fetchAgentsVxappProgramsProjectionSnapshot,
   fetchAgentsVxappProgramsTodosSnapshot,
   requestAgentsVxappProgramMutation,
   requestAgentsVxappTodoMutation,
@@ -135,8 +137,14 @@ const makeAgentsVxappControlPlane = Effect.succeed({
         payload,
       } satisfies AgentsVxappOwnerProjectionAuthoritySnapshot;
     }),
-  getSnapshot: () =>
-    ownerPromise("ownerControlPlane.programsTodos.getSnapshot", () =>
+  getProgramsProjectionSnapshot: () =>
+    ownerPromise(
+      "ownerControlPlane.programsProjection.getSnapshot",
+      () =>
+        fetchAgentsVxappProgramsProjectionSnapshot() as unknown as Promise<AgentsVxappProgramsProjectionSnapshot>,
+    ),
+  getProgramsTodosSnapshot: () =>
+    ownerPromise("ownerControlPlane.programsTodos.getProgramsTodosSnapshot", () =>
       fetchAgentsVxappProgramsTodosSnapshot(),
     ),
   createProgram: (input) =>

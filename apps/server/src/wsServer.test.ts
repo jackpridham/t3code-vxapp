@@ -20,19 +20,31 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 vi.mock("./extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
   bootstrapAgentsVxappOwnerManifest: vi.fn(),
   fetchAgentsVxappAgentRuntimeSnapshot: vi.fn(),
-  fetchAgentsVxappBootstrapSidebarSnapshot: vi.fn(),
   fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
+  fetchAgentsVxappExternalRoleAuthoritySnapshot: vi.fn(),
   fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
   fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
+  fetchAgentsVxappSidebarGraphSnapshot: vi.fn(),
   fetchAgentsVxappWorkerRuntimeSnapshot: vi.fn(),
   requestAgentsVxappApprovalRequest: vi.fn(),
   requestAgentsVxappApprovalResponse: vi.fn(),
+  requestAgentsVxappProjectEventIngest: vi.fn(),
   requestAgentsVxappProgramMutation: vi.fn(),
   requestAgentsVxappThreadEventIngest: vi.fn(),
   requestAgentsVxappThreadStatus: vi.fn(),
   requestAgentsVxappTodoMutation: vi.fn(),
   requestAgentsVxappUserInputResponse: vi.fn(),
   resetAgentsVxappOwnerManifestForTests: vi.fn(),
+}));
+
+vi.mock("./extensions/vxapp/projectEventMirror.ts", () => ({
+  isProjectLifecycleEvent: vi.fn(
+    (event: { type?: string }) =>
+      event.type === "project.created" ||
+      event.type === "project.meta-updated" ||
+      event.type === "project.deleted",
+  ),
+  mirrorProjectLifecycleEvent: vi.fn(),
 }));
 
 import { createServer } from "./wsServer";
@@ -87,10 +99,12 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import {
   fetchAgentsVxappControlPlaneSnapshot,
+  fetchAgentsVxappExternalRoleAuthoritySnapshot,
   fetchAgentsVxappProgramsTodosSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   fetchAgentsVxappWorkerRuntimeSnapshot,
 } from "./extensions/vxapp/agentsVxappOwnerClient.ts";
+import { mirrorProjectLifecycleEvent } from "./extensions/vxapp/projectEventMirror.ts";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -101,6 +115,10 @@ const workerRuntimeFixturesRoot = path.resolve(
   "../../web/src/lib/workerRuntime/__fixtures__/snapshots",
 );
 const mockedControlPlaneSnapshot = vi.mocked(fetchAgentsVxappControlPlaneSnapshot);
+const mockedExternalRoleAuthoritySnapshot = vi.mocked(
+  fetchAgentsVxappExternalRoleAuthoritySnapshot,
+);
+const mockedProjectLifecycleMirror = vi.mocked(mirrorProjectLifecycleEvent);
 const mockedProgramsTodosSnapshot = vi.mocked(fetchAgentsVxappProgramsTodosSnapshot);
 const mockedRuntimePaths = vi.mocked(fetchAgentsVxappRoleSessionRuntimePaths);
 const mockedWorkerRuntimeSnapshot = vi.mocked(fetchAgentsVxappWorkerRuntimeSnapshot);
@@ -121,6 +139,11 @@ const emptyOwnerProgramsTodosSnapshot = {
   todos: [],
   currentTodos: [],
 } as Awaited<ReturnType<typeof fetchAgentsVxappProgramsTodosSnapshot>>;
+
+const emptyOwnerExternalRoleAuthoritySnapshot = {
+  projects: [],
+  threadSummaries: [],
+} as Awaited<ReturnType<typeof fetchAgentsVxappExternalRoleAuthoritySnapshot>>;
 
 const defaultOwnerRuntimePaths = {
   runtimeRoot: "/runtime",
@@ -600,7 +623,10 @@ describe("WebSocket Server", () => {
     }
 
     mockedControlPlaneSnapshot.mockResolvedValue(emptyOwnerControlPlaneSnapshot);
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValue(emptyOwnerExternalRoleAuthoritySnapshot);
     mockedProgramsTodosSnapshot.mockResolvedValue(emptyOwnerProgramsTodosSnapshot);
+    mockedProjectLifecycleMirror.mockReset();
+    mockedProjectLifecycleMirror.mockResolvedValue(undefined);
     mockedRuntimePaths.mockResolvedValue(defaultOwnerRuntimePaths);
 
     const baseDir = options.baseDir ?? makeTempDir("t3code-ws-base-");
@@ -1179,6 +1205,137 @@ describe("WebSocket Server", () => {
         id: bootstrapThreadId,
         projectId: bootstrapProjectId,
         title: "New thread",
+      }),
+    );
+  });
+
+  it("returns startup-safe external projects on the real bootstrap-summary websocket route", async () => {
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValueOnce({
+      projects: [
+        {
+          id: "project-external",
+          title: "External Project",
+          workspaceRoot: "/home/gizmo/worktrees/project-external",
+          kind: "project",
+          currentSessionRootThreadId: null,
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: "2026-05-18T04:00:00.000Z",
+          updatedAt: "2026-05-18T04:02:00.000Z",
+          deletedAt: null,
+        },
+      ],
+      threadSummaries: [],
+    });
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getBootstrapSummary);
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual(
+      expect.objectContaining({
+        projects: expect.arrayContaining([
+          expect.objectContaining({
+            id: "project-external",
+            title: "External Project",
+            workspaceRoot: "/home/gizmo/worktrees/project-external",
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("mirrors live project lifecycle events into the strict owner project ingest helper", async () => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const workspaceRoot = makeTempDir("t3code-ws-owner-mirror-project-");
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const createResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-project-create-owner-mirror",
+      projectId: "project-owner-mirror",
+      title: "Owner Mirror",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt: "2026-05-18T05:00:00.000Z",
+    });
+    expect(createResponse.error).toBeUndefined();
+
+    const updateResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.meta.update",
+      commandId: "cmd-project-update-owner-mirror",
+      projectId: "project-owner-mirror",
+      title: "Owner Mirror Updated",
+      updatedAt: "2026-05-18T05:01:00.000Z",
+    });
+    expect(updateResponse.error).toBeUndefined();
+
+    const deleteResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.delete",
+      commandId: "cmd-project-delete-owner-mirror",
+      projectId: "project-owner-mirror",
+    });
+    expect(deleteResponse.error).toBeUndefined();
+
+    await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (push) => {
+      const event = push.data as { type?: string; aggregateId?: string };
+      return event.type === "project.created" && event.aggregateId === "project-owner-mirror";
+    });
+    await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (push) => {
+      const event = push.data as { type?: string; aggregateId?: string };
+      return event.type === "project.meta-updated" && event.aggregateId === "project-owner-mirror";
+    });
+    await waitForPush(ws, ORCHESTRATION_WS_CHANNELS.domainEvent, (push) => {
+      const event = push.data as { type?: string; aggregateId?: string };
+      return event.type === "project.deleted" && event.aggregateId === "project-owner-mirror";
+    });
+
+    await vi.waitFor(() => {
+      expect(mockedProjectLifecycleMirror).toHaveBeenCalledTimes(3);
+    });
+    expect(mockedProjectLifecycleMirror).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: "project.created",
+        aggregateId: "project-owner-mirror",
+        payload: expect.objectContaining({
+          projectId: "project-owner-mirror",
+          workspaceRoot,
+        }),
+      }),
+    );
+    expect(mockedProjectLifecycleMirror).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "project.meta-updated",
+        aggregateId: "project-owner-mirror",
+        payload: expect.objectContaining({
+          projectId: "project-owner-mirror",
+          title: "Owner Mirror Updated",
+        }),
+      }),
+    );
+    expect(mockedProjectLifecycleMirror).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        type: "project.deleted",
+        aggregateId: "project-owner-mirror",
+        payload: expect.objectContaining({
+          projectId: "project-owner-mirror",
+        }),
       }),
     );
   });

@@ -14,15 +14,16 @@ import {
 import {
   AgentsVxappSidebar,
   AgentsVxappSidebarError,
+  type AgentsVxappSidebarOwnerGraphSnapshot,
   type AgentsVxappSidebarShape,
 } from "../Services/AgentsVxappSidebar.ts";
-import { fetchAgentsVxappBootstrapSidebarSnapshot } from "../agentsVxappOwnerClient.ts";
+import { fetchAgentsVxappSidebarGraphSnapshot } from "../agentsVxappOwnerClient.ts";
 
 const ProjectionProjectIdRow = Schema.Struct({ projectId: ProjectId });
 const ProjectionThreadIdRow = Schema.Struct({ threadId: ThreadId });
 
 function buildMirrorDiagnostics(input: {
-  graph: Omit<ServerGetAgentsVxappSidebarGraphResult, "mirrorDiagnostics">;
+  graph: AgentsVxappSidebarOwnerGraphSnapshot;
   ignoredProjectIds?: ReadonlySet<ProjectId>;
   ignoredThreadIds?: ReadonlySet<ThreadId>;
   projectionProjectIds: readonly ProjectId[];
@@ -87,7 +88,7 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
   const getGraph: AgentsVxappSidebarShape["getGraph"] = () =>
     Effect.gen(function* () {
       const graph = yield* Effect.tryPromise({
-        try: () => fetchAgentsVxappBootstrapSidebarSnapshot(),
+        try: () => fetchAgentsVxappSidebarGraphSnapshot(),
         catch: (error) =>
           new AgentsVxappSidebarError({
             message:

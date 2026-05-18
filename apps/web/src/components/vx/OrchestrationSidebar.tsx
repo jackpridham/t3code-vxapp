@@ -1007,6 +1007,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   });
   const controlPlaneQuery = useQuery(agentsVxappControlPlaneSnapshotQueryOptions());
   const sqliteGraphQuery = useQuery(agentsVxappSidebarGraphQueryOptions());
+  const programs = useStore((store) => store.programs ?? []);
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const programNotifications = useStore((store) => store.programNotifications ?? []);
@@ -1042,9 +1043,9 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const rootThreadIds = useMemo(
     () =>
       resolveSidebarRootThreadIds({
-        programs: controlPlaneQuery.data?.programs ?? [],
+        programs,
       }),
-    [controlPlaneQuery.data?.programs],
+    [programs],
   );
   const sessionQueries = useQueries({
     queries: rootThreadIds.map((rootThreadId) =>
@@ -1074,7 +1075,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
         ctoAttentionItems,
         currentTodos: controlPlaneQuery.data?.currentTodos ?? [],
         programNotifications,
-        programs: controlPlaneQuery.data?.programs ?? [],
+        programs,
         projects,
         sessionWorkerThreadsByRootId,
         sqliteGraph: sqliteGraphQuery.data ?? null,
@@ -1085,7 +1086,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       ctoAttentionItems,
       controlPlaneQuery.data?.currentTodos,
       programNotifications,
-      controlPlaneQuery.data?.programs,
+      programs,
       projects,
       sessionWorkerThreadsByRootId,
       sqliteGraphQuery.data,

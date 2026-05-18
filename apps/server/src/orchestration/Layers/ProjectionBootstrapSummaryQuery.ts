@@ -70,14 +70,13 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   }),
 );
 
-const ProjectionProgramNotificationDbRowSchema =
-  ProjectionProgramNotification.mapFields(
-    Struct.assign({
-      evidence: Schema.fromJsonString(ProgramNotificationEvidence),
-      consumeReason: Schema.NullOr(Schema.String),
-      dropReason: Schema.NullOr(Schema.String),
-    }),
-  );
+const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.mapFields(
+  Struct.assign({
+    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
+    consumeReason: Schema.NullOr(Schema.String),
+    dropReason: Schema.NullOr(Schema.String),
+  }),
+);
 
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
@@ -122,9 +121,7 @@ function maxIso(left: string | null, right: string): string {
 }
 
 function computeSnapshotSequence(
-  stateRows: ReadonlyArray<
-    Schema.Schema.Type<typeof ProjectionStateDbRowSchema>
-  >,
+  stateRows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionStateDbRowSchema>>,
 ): number {
   if (stateRows.length === 0) {
     return 0;
@@ -147,10 +144,7 @@ function computeSnapshotSequence(
   return Number.isFinite(minSequence) ? minSequence : 0;
 }
 
-function toPersistenceSqlOrDecodeError(
-  sqlOperation: string,
-  decodeOperation: string,
-) {
+function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): ProjectionRepositoryError =>
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
@@ -158,12 +152,8 @@ function toPersistenceSqlOrDecodeError(
 }
 
 function missingRuntimePathAuthorityError() {
-  return toPersistenceSqlError(
-    "ProjectionBootstrapSummaryQuery.getRuntimePaths:missingAuthority",
-  )(
-    new Error(
-      "vxapp projection boundary requires external role authority runtime paths.",
-    ),
+  return toPersistenceSqlError("ProjectionBootstrapSummaryQuery.getRuntimePaths:missingAuthority")(
+    new Error("vxapp projection boundary requires external role authority runtime paths."),
   );
 }
 
@@ -181,8 +171,7 @@ function mergeProjectsWithExternal(
     ...externalSnapshot.projects,
   ].toSorted(
     (left, right) =>
-      left.createdAt.localeCompare(right.createdAt) ||
-      left.id.localeCompare(right.id),
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
   );
 }
 
@@ -195,8 +184,7 @@ function mergeThreadsWithExternal(input: {
     input.localThreads
       .filter(
         (thread) =>
-          thread.worktreePath !== null &&
-          externalIndex.worktreePaths.has(thread.worktreePath),
+          thread.worktreePath !== null && externalIndex.worktreePaths.has(thread.worktreePath),
       )
       .map((thread) => thread.projectId),
   );
@@ -206,10 +194,7 @@ function mergeThreadsWithExternal(input: {
         !externalIndex.threadIds.has(thread.id) &&
         !externalIndex.projectIds.has(thread.projectId) &&
         !strippedLocalProjectIds.has(thread.projectId) &&
-        !(
-          thread.worktreePath !== null &&
-          externalIndex.worktreePaths.has(thread.worktreePath)
-        ),
+        !(thread.worktreePath !== null && externalIndex.worktreePaths.has(thread.worktreePath)),
     ),
     ...input.externalSnapshot.threadSummaries.map((thread) => ({
       id: thread.id,
@@ -241,21 +226,11 @@ function mergeThreadsWithExternal(input: {
       ...(thread.orchestratorThreadId !== undefined
         ? { orchestratorThreadId: thread.orchestratorThreadId }
         : {}),
-      ...(thread.parentThreadId !== undefined
-        ? { parentThreadId: thread.parentThreadId }
-        : {}),
-      ...(thread.spawnRole !== undefined
-        ? { spawnRole: thread.spawnRole }
-        : {}),
-      ...(thread.spawnedBy !== undefined
-        ? { spawnedBy: thread.spawnedBy }
-        : {}),
-      ...(thread.workflowId !== undefined
-        ? { workflowId: thread.workflowId }
-        : {}),
-      ...(thread.programId !== undefined
-        ? { programId: thread.programId }
-        : {}),
+      ...(thread.parentThreadId !== undefined ? { parentThreadId: thread.parentThreadId } : {}),
+      ...(thread.spawnRole !== undefined ? { spawnRole: thread.spawnRole } : {}),
+      ...(thread.spawnedBy !== undefined ? { spawnedBy: thread.spawnedBy } : {}),
+      ...(thread.workflowId !== undefined ? { workflowId: thread.workflowId } : {}),
+      ...(thread.programId !== undefined ? { programId: thread.programId } : {}),
       ...(thread.executiveProjectId !== undefined
         ? { executiveProjectId: thread.executiveProjectId }
         : {}),
@@ -265,24 +240,19 @@ function mergeThreadsWithExternal(input: {
     })),
   ].toSorted(
     (left, right) =>
-      left.createdAt.localeCompare(right.createdAt) ||
-      left.id.localeCompare(right.id),
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
   );
 }
 
 function requireOwnerString(value: unknown, field: string): string {
-  const normalized =
-    typeof value === "string" && value.trim().length > 0 ? value : null;
+  const normalized = typeof value === "string" && value.trim().length > 0 ? value : null;
   if (!normalized) {
     throw new Error(`vxapp owner export is missing ${field}.`);
   }
   return normalized;
 }
 
-function requireOwnerObject(
-  value: unknown,
-  field: string,
-): Record<string, unknown> {
+function requireOwnerObject(value: unknown, field: string): Record<string, unknown> {
   const normalized =
     value !== null && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -296,10 +266,7 @@ function requireOwnerObject(
 function mapOwnerProgramNotification(
   row: Record<string, unknown>,
 ): OrchestrationProgramNotification {
-  const notificationId = requireOwnerString(
-    row.notificationId ?? row.id,
-    "notificationId",
-  );
+  const notificationId = requireOwnerString(row.notificationId ?? row.id, "notificationId");
   const programId = requireOwnerString(row.programId, "programId");
   const executiveProjectId = requireOwnerString(
     row.executiveProjectId ?? row.projectId,
@@ -329,28 +296,15 @@ function mapOwnerProgramNotification(
     ) as OrchestrationProgramNotification["severity"],
     summary: requireOwnerString(row.summary, "summary"),
     evidence: requireOwnerObject(row.evidence ?? row.source ?? {}, "evidence"),
-    state: requireOwnerString(
-      row.state,
-      "state",
-    ) as OrchestrationProgramNotification["state"],
-    queuedAt: requireOwnerString(
-      row.queuedAt ?? row.createdAt ?? row.updatedAt,
-      "queuedAt",
-    ),
+    state: requireOwnerString(row.state, "state") as OrchestrationProgramNotification["state"],
+    queuedAt: requireOwnerString(row.queuedAt ?? row.createdAt ?? row.updatedAt, "queuedAt"),
     deliveredAt: typeof row.deliveredAt === "string" ? row.deliveredAt : null,
     consumedAt: typeof row.consumedAt === "string" ? row.consumedAt : null,
     droppedAt: typeof row.droppedAt === "string" ? row.droppedAt : null,
-    consumeReason:
-      typeof row.consumeReason === "string" ? row.consumeReason : undefined,
+    consumeReason: typeof row.consumeReason === "string" ? row.consumeReason : undefined,
     dropReason: typeof row.dropReason === "string" ? row.dropReason : undefined,
-    createdAt: requireOwnerString(
-      row.createdAt ?? row.queuedAt ?? row.updatedAt,
-      "createdAt",
-    ),
-    updatedAt: requireOwnerString(
-      row.updatedAt ?? row.createdAt ?? row.queuedAt,
-      "updatedAt",
-    ),
+    createdAt: requireOwnerString(row.createdAt ?? row.queuedAt ?? row.updatedAt, "createdAt"),
+    updatedAt: requireOwnerString(row.updatedAt ?? row.createdAt ?? row.queuedAt, "updatedAt"),
   };
 }
 
@@ -367,13 +321,8 @@ function mapOwnerProgram(program: {
   readonly completedAt: string | null;
   readonly deletedAt: string | null;
 }): OrchestrationProgram {
-  if (
-    program.executiveProjectId === null ||
-    program.executiveThreadId === null
-  ) {
-    throw new Error(
-      `vxapp owner snapshot is missing executive ids for program ${program.id}.`,
-    );
+  if (program.executiveProjectId === null || program.executiveThreadId === null) {
+    throw new Error(`vxapp owner snapshot is missing executive ids for program ${program.id}.`);
   }
   return {
     id: program.id,
@@ -672,451 +621,400 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
               ? Effect.fail(missingRuntimePathAuthorityError())
               : Effect.succeed<AgentsVxappRoleSessionRuntimePaths | null>(null),
           onSome: (externalRoleAuthority) =>
-            externalRoleAuthority.getRuntimePaths().pipe(
-              Effect.mapError(
-                toPersistenceSqlError(
-                  "ProjectionBootstrapSummaryQuery.getRuntimePaths:query",
+            externalRoleAuthority
+              .getRuntimePaths()
+              .pipe(
+                Effect.mapError(
+                  toPersistenceSqlError("ProjectionBootstrapSummaryQuery.getRuntimePaths:query"),
                 ),
               ),
-            ),
         }),
       ),
     );
 
-  const getBootstrapSummary: ProjectionBootstrapSummaryQueryShape["getBootstrapSummary"] =
-    () =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const projectRows = yield* listProjectRows(undefined).pipe(
+  const getBootstrapSummary: ProjectionBootstrapSummaryQueryShape["getBootstrapSummary"] = () =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const projectRows = yield* listProjectRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:query",
+                "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:decodeRows",
+              ),
+            ),
+          );
+          const [
+            programRows,
+            threadRows,
+            sessionRows,
+            latestTurnRows,
+            wakeRows,
+            stateRows,
+            externalSnapshot,
+            runtimePaths,
+          ] = yield* Effect.all([
+            listProgramRows(undefined).pipe(
               Effect.mapError(
                 toPersistenceSqlOrDecodeError(
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:query",
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjects:decodeRows",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:decodeRows",
                 ),
               ),
-            );
-            const [
-              programRows,
-              threadRows,
-              sessionRows,
-              latestTurnRows,
-              wakeRows,
-              stateRows,
-              externalSnapshot,
-              runtimePaths,
-            ] = yield* Effect.all([
-              listProgramRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:decodeRows",
-                  ),
+            ),
+            listThreadRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:decodeRows",
                 ),
               ),
-              listThreadRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreads:decodeRows",
-                  ),
+            ),
+            listThreadSessionRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:decodeRows",
                 ),
               ),
-              listThreadSessionRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listThreadSessions:decodeRows",
-                  ),
+            ),
+            listLatestTurnRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:decodeRows",
                 ),
               ),
-              listLatestTurnRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:decodeRows",
-                  ),
+            ),
+            listOrchestratorWakeRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:decodeRows",
                 ),
               ),
-              listOrchestratorWakeRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:decodeRows",
-                  ),
+            ),
+            listProjectionStateRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:decodeRows",
                 ),
               ),
-              listProjectionStateRows(undefined).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:query",
-                    "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProjectionState:decodeRows",
-                  ),
-                ),
-              ),
-              getExternalSnapshot(),
-              getRuntimePaths({
-                requiredForBoundary: projectRows.length > 0,
-              }),
-            ]);
+            ),
+            getExternalSnapshot(),
+            getRuntimePaths({
+              requiredForBoundary: projectRows.length > 0,
+            }),
+          ]);
 
-            const latestTurnByThread = new Map<
-              string,
-              OrchestrationLatestTurn
-            >();
-            const sessionsByThread = new Map<string, OrchestrationSession>();
-            let updatedAt: string | null = null;
-            const vxappBacked = projectRows.some((row) =>
-              isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths),
-            );
-            let bindingAuthority: {
-              jasper: {
-                currentThread: {
-                  id: string;
-                  projectId: string;
-                };
+          const latestTurnByThread = new Map<string, OrchestrationLatestTurn>();
+          const sessionsByThread = new Map<string, OrchestrationSession>();
+          let updatedAt: string | null = null;
+          const vxappBacked = projectRows.some((row) =>
+            isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths),
+          );
+          let bindingAuthority: {
+            jasper: {
+              currentThread: {
+                id: string;
+                projectId: string;
               };
-            } | null = null;
-            let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> =
-              [];
-            let ownerPrograms: ReadonlyArray<OrchestrationProgram> | null =
-              null;
-            if (vxappBacked) {
-              const controlPlane = yield* Effect.serviceOption(
-                AgentsVxappControlPlane,
-              ).pipe(
-                Effect.flatMap((controlPlaneOption) =>
-                  Option.match(controlPlaneOption, {
-                    onNone: () =>
-                      Effect.fail(
-                        new Error(
-                          "vxapp-backed bootstrap requires external control plane service.",
-                        ),
-                      ),
-                    onSome: (service) => Effect.succeed(service),
-                  }),
-                ),
-              );
-              const [
-                bindingAuthorityExport,
-                notificationSummaryExport,
-                ownerSnapshot,
-              ] = yield* Effect.all([
+            };
+          } | null = null;
+          let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
+          let ownerPrograms: ReadonlyArray<OrchestrationProgram> | null = null;
+          if (vxappBacked) {
+            const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
+              Effect.flatMap((controlPlaneOption) =>
+                Option.match(controlPlaneOption, {
+                  onNone: () =>
+                    Effect.fail(
+                      new Error("vxapp-backed bootstrap requires external control plane service."),
+                    ),
+                  onSome: (service) => Effect.succeed(service),
+                }),
+              ),
+            );
+            const [bindingAuthorityExport, notificationSummaryExport, ownerSnapshot] =
+              yield* Effect.all([
                 controlPlane.getBindingAuthorityExport(),
                 controlPlane.getNotificationSummaryExport(),
-                controlPlane.getSnapshot({}),
+                controlPlane.getProgramsProjectionSnapshot(),
               ]);
-              bindingAuthority = {
-                jasper: {
-                  currentThread: {
-                    id: bindingAuthorityExport.jasper.currentThread.id,
-                    projectId:
-                      bindingAuthorityExport.jasper.currentThread.projectId,
-                  },
+            bindingAuthority = {
+              jasper: {
+                currentThread: {
+                  id: bindingAuthorityExport.jasper.currentThread.id,
+                  projectId: bindingAuthorityExport.jasper.currentThread.projectId,
                 },
-              };
-              programNotificationRows =
-                notificationSummaryExport.notifications.map(
-                  mapOwnerProgramNotification,
-                );
-              ownerPrograms = ownerSnapshot.programs.map(mapOwnerProgram);
-            } else {
-              const localProgramNotificationRows =
-                yield* listProgramNotificationRows(undefined).pipe(
-                  Effect.mapError(
-                    toPersistenceSqlOrDecodeError(
-                      "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:query",
-                      "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:decodeRows",
-                    ),
-                  ),
-                );
-              programNotificationRows = localProgramNotificationRows.map(
-                (row) => ({
-                  notificationId: row.notificationId,
-                  programId: row.programId,
-                  executiveProjectId: row.executiveProjectId,
-                  executiveThreadId: row.executiveThreadId,
-                  orchestratorThreadId: row.orchestratorThreadId,
-                  kind: row.kind,
-                  severity: row.severity,
-                  summary: row.summary,
-                  evidence: row.evidence,
-                  state: row.state,
-                  queuedAt: row.queuedAt,
-                  deliveredAt: row.deliveredAt,
-                  consumedAt: row.consumedAt,
-                  droppedAt: row.droppedAt,
-                  consumeReason: row.consumeReason ?? undefined,
-                  dropReason: row.dropReason ?? undefined,
-                  createdAt: row.createdAt,
-                  updatedAt: row.updatedAt,
-                }),
-              );
-            }
-
-            for (const row of latestTurnRows) {
-              updatedAt = maxIso(updatedAt, row.requestedAt);
-              if (row.startedAt !== null) {
-                updatedAt = maxIso(updatedAt, row.startedAt);
-              }
-              if (row.completedAt !== null) {
-                updatedAt = maxIso(updatedAt, row.completedAt);
-              }
-              if (latestTurnByThread.has(row.threadId)) {
-                continue;
-              }
-              latestTurnByThread.set(row.threadId, {
-                turnId: row.turnId,
-                state: row.state,
-                requestedAt: row.requestedAt,
-                startedAt: row.startedAt,
-                completedAt: row.completedAt,
-                assistantMessageId: row.assistantMessageId,
-                ...(row.sourceProposedPlanThreadId !== null &&
-                row.sourceProposedPlanId !== null
-                  ? {
-                      sourceProposedPlan: {
-                        threadId: row.sourceProposedPlanThreadId,
-                        planId: row.sourceProposedPlanId,
-                      },
-                    }
-                  : {}),
-              });
-            }
-
-            for (const row of sessionRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-              sessionsByThread.set(row.threadId, {
-                threadId: row.threadId,
-                status: row.status,
-                providerName: row.providerName,
-                runtimeMode: row.runtimeMode,
-                activeTurnId: row.activeTurnId,
-                lastError: row.lastError,
-                updatedAt: row.updatedAt,
-              });
-            }
-
-            for (const row of projectRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-            for (const row of ownerPrograms ?? programRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-            for (const row of programNotificationRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-            for (const row of threadRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-            for (const row of stateRows) {
-              updatedAt = maxIso(updatedAt, row.updatedAt);
-            }
-
-            const localProjects: ReadonlyArray<OrchestrationProject> =
-              projectRows.map((row) =>
-                Object.assign(
-                  {
-                    id: row.projectId,
-                    title: row.title,
-                    workspaceRoot: row.workspaceRoot,
-                    kind: row.kind ?? "project",
-                    defaultModelSelection: row.defaultModelSelection,
-                    scripts: row.scripts,
-                    hooks: row.hooks,
-                    createdAt: row.createdAt,
-                    updatedAt: row.updatedAt,
-                    deletedAt: row.deletedAt,
-                  },
-                  row.sidebarParentProjectId !== null
-                    ? { sidebarParentProjectId: row.sidebarParentProjectId }
-                    : undefined,
-                  row.currentSessionRootThreadId !== null
-                    ? {
-                        currentSessionRootThreadId:
-                          row.currentSessionRootThreadId,
-                      }
-                    : undefined,
-                ),
-              );
-            const projects = applyBindingCurrentThreadToProjects(
-              mergeProjectsWithExternal(localProjects, externalSnapshot),
-              bindingAuthority,
+              },
+            };
+            programNotificationRows = notificationSummaryExport.notifications.map(
+              mapOwnerProgramNotification,
             );
-
-            const programs: ReadonlyArray<OrchestrationProgram> =
-              ownerPrograms ??
-              programRows.map((row) =>
-                toOrchestrationProgram(decodeProjectionProgramDbRow(row)),
-              );
-
-            const programNotifications = programNotificationRows;
-
-            const vxappBackedProjectIds = new Set(
-              projectRows
-                .filter((row) =>
-                  isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths),
-                )
-                .map((row) => row.projectId),
-            );
-            const externalIndex =
-              buildExternalRoleAuthorityIndex(externalSnapshot);
-            const localCurrentAuthorityThreadRows = vxappBacked
-              ? threadRows.filter(
-                  (row) =>
-                    !vxappBackedProjectIds.has(row.projectId) &&
-                    !externalIndex.threadIds.has(row.threadId) &&
-                    !(
-                      row.worktreePath !== null &&
-                      externalIndex.worktreePaths.has(row.worktreePath)
-                    ),
-                )
-              : threadRows;
-
-            const localThreads: ReadonlyArray<OrchestrationThread> =
-              localCurrentAuthorityThreadRows.map(
-                (row) =>
-                  Object.assign(
-                    {
-                      ...resolveLocalThreadErrorPresentation({
-                        archivedAt: row.archivedAt,
-                        deletedAt: row.deletedAt,
-                        latestTurnState: latestTurnByThread.get(row.threadId)
-                          ?.state,
-                        sessionStatus: sessionsByThread.get(row.threadId)
-                          ?.status,
-                        sessionLastError: sessionsByThread.get(row.threadId)
-                          ?.lastError,
-                      }),
-                      id: row.threadId,
-                      projectId: row.projectId,
-                      title: row.title,
-                      labels: row.labels,
-                      modelSelection: row.modelSelection,
-                      runtimeMode: row.runtimeMode,
-                      interactionMode: row.interactionMode,
-                      branch: row.branch,
-                      worktreePath: row.worktreePath,
-                      latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                      createdAt: row.createdAt,
-                      updatedAt: row.updatedAt,
-                      archivedAt: row.archivedAt,
-                      deletedAt: row.deletedAt,
-                      messages: [],
-                      proposedPlans: [],
-                      activities: [],
-                      checkpoints: [],
-                      session: sessionsByThread.get(row.threadId) ?? null,
-                    },
-                    row.orchestratorProjectId !== null
-                      ? { orchestratorProjectId: row.orchestratorProjectId }
-                      : undefined,
-                    row.orchestratorThreadId !== null
-                      ? { orchestratorThreadId: row.orchestratorThreadId }
-                      : undefined,
-                    row.parentThreadId !== null
-                      ? { parentThreadId: row.parentThreadId }
-                      : undefined,
-                    row.spawnRole !== null
-                      ? { spawnRole: row.spawnRole }
-                      : undefined,
-                    row.spawnedBy !== null
-                      ? { spawnedBy: row.spawnedBy }
-                      : undefined,
-                    row.workflowId !== null
-                      ? { workflowId: row.workflowId }
-                      : undefined,
-                    row.programId !== null
-                      ? { programId: row.programId }
-                      : undefined,
-                    row.executiveProjectId !== null
-                      ? { executiveProjectId: row.executiveProjectId }
-                      : undefined,
-                    row.executiveThreadId !== null
-                      ? { executiveThreadId: row.executiveThreadId }
-                      : undefined,
-                  ) satisfies OrchestrationThread,
-              );
-            const threads = mergeThreadsWithExternal({
-              localThreads,
-              externalSnapshot,
-            });
-
-            const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> =
-              vxappBacked
-                ? []
-                : wakeRows.map((row) =>
-                    Object.assign(
-                      {
-                        wakeId: row.wakeId,
-                        orchestratorThreadId: row.orchestratorThreadId,
-                        orchestratorProjectId: row.orchestratorProjectId,
-                        workerThreadId: row.workerThreadId,
-                        workerProjectId: row.workerProjectId,
-                        workerTurnId: row.workerTurnId,
-                        workerTitleSnapshot: row.workerTitleSnapshot,
-                        outcome: row.outcome,
-                        summary: row.summary,
-                        queuedAt: row.queuedAt,
-                        state: row.state,
-                        deliveredAt: row.deliveredAt,
-                        consumedAt: row.consumedAt,
-                      },
-                      row.workflowId !== null
-                        ? { workflowId: row.workflowId }
-                        : undefined,
-                      row.deliveryMessageId !== null
-                        ? { deliveryMessageId: row.deliveryMessageId }
-                        : undefined,
-                      row.consumeReason !== null
-                        ? { consumeReason: row.consumeReason }
-                        : undefined,
-                    ),
-                  );
-
-            return yield* decodeReadModel({
-              snapshotSequence: computeSnapshotSequence(stateRows),
-              snapshotProfile: "bootstrap-summary",
-              projects,
-              programs,
-              programNotifications,
-              threads,
-              orchestratorWakeItems,
-              updatedAt:
-                [
-                  updatedAt,
-                  ...externalSnapshot.projects.map(
-                    (project) => project.updatedAt,
-                  ),
-                  ...externalSnapshot.threadSummaries.map(
-                    (thread) => thread.updatedAt,
-                  ),
-                  ...externalSnapshot.threadSummaries.flatMap((thread) =>
-                    thread.session ? [thread.session.updatedAt] : [],
-                  ),
-                ]
-                  .filter((value): value is string => value !== null)
-                  .toSorted()
-                  .at(-1) ?? new Date(0).toISOString(),
-            }).pipe(
+            ownerPrograms = ownerSnapshot.programs.map(mapOwnerProgram);
+          } else {
+            const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
               Effect.mapError(
-                toPersistenceDecodeError(
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:decodeReadModel",
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:query",
+                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:decodeRows",
                 ),
               ),
             );
-          }),
-        )
-        .pipe(
-          Effect.mapError((error) => {
-            if (isPersistenceError(error)) {
-              return error;
+            programNotificationRows = localProgramNotificationRows.map((row) => ({
+              notificationId: row.notificationId,
+              programId: row.programId,
+              executiveProjectId: row.executiveProjectId,
+              executiveThreadId: row.executiveThreadId,
+              orchestratorThreadId: row.orchestratorThreadId,
+              kind: row.kind,
+              severity: row.severity,
+              summary: row.summary,
+              evidence: row.evidence,
+              state: row.state,
+              queuedAt: row.queuedAt,
+              deliveredAt: row.deliveredAt,
+              consumedAt: row.consumedAt,
+              droppedAt: row.droppedAt,
+              consumeReason: row.consumeReason ?? undefined,
+              dropReason: row.dropReason ?? undefined,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+            }));
+          }
+
+          for (const row of latestTurnRows) {
+            updatedAt = maxIso(updatedAt, row.requestedAt);
+            if (row.startedAt !== null) {
+              updatedAt = maxIso(updatedAt, row.startedAt);
             }
-            return toPersistenceSqlError(
-              "ProjectionBootstrapSummaryQuery.getBootstrapSummary:query",
-            )(error);
-          }),
-        );
+            if (row.completedAt !== null) {
+              updatedAt = maxIso(updatedAt, row.completedAt);
+            }
+            if (latestTurnByThread.has(row.threadId)) {
+              continue;
+            }
+            latestTurnByThread.set(row.threadId, {
+              turnId: row.turnId,
+              state: row.state,
+              requestedAt: row.requestedAt,
+              startedAt: row.startedAt,
+              completedAt: row.completedAt,
+              assistantMessageId: row.assistantMessageId,
+              ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
+                ? {
+                    sourceProposedPlan: {
+                      threadId: row.sourceProposedPlanThreadId,
+                      planId: row.sourceProposedPlanId,
+                    },
+                  }
+                : {}),
+            });
+          }
+
+          for (const row of sessionRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+            sessionsByThread.set(row.threadId, {
+              threadId: row.threadId,
+              status: row.status,
+              providerName: row.providerName,
+              runtimeMode: row.runtimeMode,
+              activeTurnId: row.activeTurnId,
+              lastError: row.lastError,
+              updatedAt: row.updatedAt,
+            });
+          }
+
+          for (const row of projectRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+          for (const row of ownerPrograms ?? programRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+          for (const row of programNotificationRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+          for (const row of threadRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+          for (const row of stateRows) {
+            updatedAt = maxIso(updatedAt, row.updatedAt);
+          }
+
+          const localProjects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) =>
+            Object.assign(
+              {
+                id: row.projectId,
+                title: row.title,
+                workspaceRoot: row.workspaceRoot,
+                kind: row.kind ?? "project",
+                defaultModelSelection: row.defaultModelSelection,
+                scripts: row.scripts,
+                hooks: row.hooks,
+                createdAt: row.createdAt,
+                updatedAt: row.updatedAt,
+                deletedAt: row.deletedAt,
+              },
+              row.sidebarParentProjectId !== null
+                ? { sidebarParentProjectId: row.sidebarParentProjectId }
+                : undefined,
+              row.currentSessionRootThreadId !== null
+                ? {
+                    currentSessionRootThreadId: row.currentSessionRootThreadId,
+                  }
+                : undefined,
+            ),
+          );
+          const projects = applyBindingCurrentThreadToProjects(
+            mergeProjectsWithExternal(localProjects, externalSnapshot),
+            bindingAuthority,
+          );
+
+          const programs: ReadonlyArray<OrchestrationProgram> =
+            ownerPrograms ??
+            programRows.map((row) => toOrchestrationProgram(decodeProjectionProgramDbRow(row)));
+
+          const programNotifications = programNotificationRows;
+
+          const vxappBackedProjectIds = new Set(
+            projectRows
+              .filter((row) => isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths))
+              .map((row) => row.projectId),
+          );
+          const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
+          const localCurrentAuthorityThreadRows = vxappBacked
+            ? threadRows.filter(
+                (row) =>
+                  !vxappBackedProjectIds.has(row.projectId) &&
+                  !externalIndex.threadIds.has(row.threadId) &&
+                  !(row.worktreePath !== null && externalIndex.worktreePaths.has(row.worktreePath)),
+              )
+            : threadRows;
+
+          const localThreads: ReadonlyArray<OrchestrationThread> =
+            localCurrentAuthorityThreadRows.map(
+              (row) =>
+                Object.assign(
+                  {
+                    ...resolveLocalThreadErrorPresentation({
+                      archivedAt: row.archivedAt,
+                      deletedAt: row.deletedAt,
+                      latestTurnState: latestTurnByThread.get(row.threadId)?.state,
+                      sessionStatus: sessionsByThread.get(row.threadId)?.status,
+                      sessionLastError: sessionsByThread.get(row.threadId)?.lastError,
+                    }),
+                    id: row.threadId,
+                    projectId: row.projectId,
+                    title: row.title,
+                    labels: row.labels,
+                    modelSelection: row.modelSelection,
+                    runtimeMode: row.runtimeMode,
+                    interactionMode: row.interactionMode,
+                    branch: row.branch,
+                    worktreePath: row.worktreePath,
+                    latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt,
+                    archivedAt: row.archivedAt,
+                    deletedAt: row.deletedAt,
+                    messages: [],
+                    proposedPlans: [],
+                    activities: [],
+                    checkpoints: [],
+                    session: sessionsByThread.get(row.threadId) ?? null,
+                  },
+                  row.orchestratorProjectId !== null
+                    ? { orchestratorProjectId: row.orchestratorProjectId }
+                    : undefined,
+                  row.orchestratorThreadId !== null
+                    ? { orchestratorThreadId: row.orchestratorThreadId }
+                    : undefined,
+                  row.parentThreadId !== null ? { parentThreadId: row.parentThreadId } : undefined,
+                  row.spawnRole !== null ? { spawnRole: row.spawnRole } : undefined,
+                  row.spawnedBy !== null ? { spawnedBy: row.spawnedBy } : undefined,
+                  row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+                  row.programId !== null ? { programId: row.programId } : undefined,
+                  row.executiveProjectId !== null
+                    ? { executiveProjectId: row.executiveProjectId }
+                    : undefined,
+                  row.executiveThreadId !== null
+                    ? { executiveThreadId: row.executiveThreadId }
+                    : undefined,
+                ) satisfies OrchestrationThread,
+            );
+          const threads = mergeThreadsWithExternal({
+            localThreads,
+            externalSnapshot,
+          });
+
+          const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> = vxappBacked
+            ? []
+            : wakeRows.map((row) =>
+                Object.assign(
+                  {
+                    wakeId: row.wakeId,
+                    orchestratorThreadId: row.orchestratorThreadId,
+                    orchestratorProjectId: row.orchestratorProjectId,
+                    workerThreadId: row.workerThreadId,
+                    workerProjectId: row.workerProjectId,
+                    workerTurnId: row.workerTurnId,
+                    workerTitleSnapshot: row.workerTitleSnapshot,
+                    outcome: row.outcome,
+                    summary: row.summary,
+                    queuedAt: row.queuedAt,
+                    state: row.state,
+                    deliveredAt: row.deliveredAt,
+                    consumedAt: row.consumedAt,
+                  },
+                  row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
+                  row.deliveryMessageId !== null
+                    ? { deliveryMessageId: row.deliveryMessageId }
+                    : undefined,
+                  row.consumeReason !== null ? { consumeReason: row.consumeReason } : undefined,
+                ),
+              );
+
+          return yield* decodeReadModel({
+            snapshotSequence: computeSnapshotSequence(stateRows),
+            snapshotProfile: "bootstrap-summary",
+            projects,
+            programs,
+            programNotifications,
+            threads,
+            orchestratorWakeItems,
+            updatedAt:
+              [
+                updatedAt,
+                ...externalSnapshot.projects.map((project) => project.updatedAt),
+                ...externalSnapshot.threadSummaries.map((thread) => thread.updatedAt),
+                ...externalSnapshot.threadSummaries.flatMap((thread) =>
+                  thread.session ? [thread.session.updatedAt] : [],
+                ),
+              ]
+                .filter((value): value is string => value !== null)
+                .toSorted()
+                .at(-1) ?? new Date(0).toISOString(),
+          }).pipe(
+            Effect.mapError(
+              toPersistenceDecodeError(
+                "ProjectionBootstrapSummaryQuery.getBootstrapSummary:decodeReadModel",
+              ),
+            ),
+          );
+        }),
+      )
+      .pipe(
+        Effect.mapError((error) => {
+          if (isPersistenceError(error)) {
+            return error;
+          }
+          return toPersistenceSqlError("ProjectionBootstrapSummaryQuery.getBootstrapSummary:query")(
+            error,
+          );
+        }),
+      );
 
   return {
     getBootstrapSummary,

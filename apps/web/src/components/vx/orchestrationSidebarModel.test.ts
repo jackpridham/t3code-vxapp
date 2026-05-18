@@ -12,9 +12,7 @@ import {
 } from "./orchestrationSidebarModel";
 import type { Project, Thread } from "~/types";
 
-function makeProject(
-  input: Partial<Project> & Pick<Project, "id" | "name" | "cwd">,
-): Project {
+function makeProject(input: Partial<Project> & Pick<Project, "id" | "name" | "cwd">): Project {
   return {
     currentSessionRootThreadId: null,
     defaultModelSelection: null,
@@ -24,9 +22,7 @@ function makeProject(
   };
 }
 
-function makeThread(
-  input: Partial<Thread> & Pick<Thread, "id" | "projectId" | "title">,
-): Thread {
+function makeThread(input: Partial<Thread> & Pick<Thread, "id" | "projectId" | "title">): Thread {
   const { id, projectId, title, ...rest } = input;
   return {
     activities: [],
@@ -224,16 +220,15 @@ describe("buildOrchestrationSidebarModel", () => {
 
     expect(model.source).toBe("sqlite");
     expect(model.executives).toHaveLength(1);
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]?.thread?.title,
-    ).toBe("worker/ket Repair the OAuth callback flow");
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]?.title,
-    ).toBe("Repair the OAuth callback flow");
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]
-        ?.provenanceLabel,
-    ).toBe("api-vxapp");
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.thread?.title).toBe(
+      "worker/ket Repair the OAuth callback flow",
+    );
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.title).toBe(
+      "Repair the OAuth callback flow",
+    );
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.provenanceLabel).toBe(
+      "api-vxapp",
+    );
     expect(model.executives[0]?.notifications).toHaveLength(1);
   });
 
@@ -260,6 +255,37 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.executives).toHaveLength(1);
     expect(model.executives[0]?.label).toBe("Unassigned Executive");
     expect(model.diagnostics.staleMirror).toBe(false);
+  });
+
+  it("uses hydrated project rows to label executive sidebar buckets without sqlite graph help", () => {
+    const model = buildOrchestrationSidebarModel({
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+          executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+          id: ProgramId.makeUnsafe("program-1"),
+          title: "Hydrated Program",
+          status: "active",
+        }),
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "Executive Project",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: null,
+      threads: [],
+      wakeItems: [],
+    });
+
+    expect(model.executives).toHaveLength(1);
+    expect(model.executives[0]?.label).toBe("Executive Project");
+    expect(model.executives[0]?.programs[0]?.title).toBe("Hydrated Program");
   });
 
   it("excludes terminal programs from the sidebar portfolio", () => {
@@ -299,9 +325,7 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(model.executives[0]?.programs.map((program) => program.id)).toEqual([
-      "program-active",
-    ]);
+    expect(model.executives[0]?.programs.map((program) => program.id)).toEqual(["program-active"]);
     expect(
       resolveSidebarRootThreadIds({
         programs: [
@@ -454,9 +478,7 @@ describe("buildOrchestrationSidebarModel", () => {
         reason: "Waiting for vendor callback proof.",
       },
     });
-    expect(
-      model.executives[0]?.programs[0]?.closeoutSummary.missingItems,
-    ).toEqual(["PR missing"]);
+    expect(model.executives[0]?.programs[0]?.closeoutSummary.missingItems).toEqual(["PR missing"]);
     expect(model.executives[0]?.programs[0]?.statusDetail).toBeNull();
   });
 
@@ -487,9 +509,7 @@ describe("buildOrchestrationSidebarModel", () => {
 
     expect(model.executives[0]?.programs[0]?.currentLane).toBeNull();
     expect(model.executives[0]?.programs[0]?.laneState).toBe("no-active-lane");
-    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(
-      0,
-    );
+    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(0);
     expect(model.executives[0]?.programs[0]?.historicalWorkerCount).toBe(0);
   });
 
@@ -615,25 +635,17 @@ describe("buildOrchestrationSidebarModel", () => {
 
     expect(model.executives[0]?.programs[0]?.currentLane).toBeNull();
     expect(model.executives[0]?.programs[0]?.laneState).toBe("no-active-lane");
-    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(
-      1,
-    );
+    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(1);
     expect(model.executives[0]?.programs[0]?.historicalWorkerCount).toBe(2);
-    expect(model.executives[0]?.programs[0]?.lastHistoricalLane?.id).toBe(
+    expect(model.executives[0]?.programs[0]?.lastHistoricalLane?.id).toBe("orch-latest");
+    expect(model.executives[0]?.programs[0]?.historicalLanes.map((lane) => lane.id)).toEqual([
       "orch-latest",
-    );
+    ]);
     expect(
-      model.executives[0]?.programs[0]?.historicalLanes.map((lane) => lane.id),
-    ).toEqual(["orch-latest"]);
-    expect(
-      model.executives[0]?.programs[0]?.historicalLanes.every(
-        (lane) => !lane.isActiveNow,
-      ),
+      model.executives[0]?.programs[0]?.historicalLanes.every((lane) => !lane.isActiveNow),
     ).toBe(true);
     expect(
-      model.executives[0]?.programs[0]?.historicalLanes[0]?.workers.map(
-        (worker) => worker.id,
-      ),
+      model.executives[0]?.programs[0]?.historicalLanes[0]?.workers.map((worker) => worker.id),
     ).toEqual(["worker-2", "worker-1"]);
   });
 
@@ -730,9 +742,7 @@ describe("buildOrchestrationSidebarModel", () => {
       "program-idle",
     ]);
     expect(
-      model.executives[0]?.programs[1]?.currentLane?.workers.map(
-        (worker) => worker.id,
-      ),
+      model.executives[0]?.programs[1]?.currentLane?.workers.map((worker) => worker.id),
     ).toEqual(["idle-worker-newer", "idle-worker-older"]);
   });
 
@@ -889,20 +899,12 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.executives[0]?.programs[0]?.laneState).toBe("active");
     expect(model.executives[0]?.programs[0]?.currentLane?.id).toBe("orch-live");
     expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers.map(
-        (worker) => worker.id,
-      ),
+      model.executives[0]?.programs[0]?.currentLane?.workers.map((worker) => worker.id),
     ).toEqual(["worker-live"]);
-    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(
-      1,
-    );
+    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(1);
     expect(model.executives[0]?.programs[0]?.historicalWorkerCount).toBe(1);
-    expect(model.executives[0]?.programs[0]?.lastHistoricalLane?.id).toBe(
-      "orch-archived",
-    );
-    expect(
-      model.executives[0]?.programs[0]?.historicalLanes[0]?.isActiveNow,
-    ).toBe(false);
+    expect(model.executives[0]?.programs[0]?.lastHistoricalLane?.id).toBe("orch-archived");
+    expect(model.executives[0]?.programs[0]?.historicalLanes[0]?.isActiveNow).toBe(false);
   });
 
   it("hides historical orchestrators that have no associated historical workers", () => {
@@ -1010,12 +1012,10 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(
-      model.executives[0]?.programs[0]?.historicalLanes.map((lane) => lane.id),
-    ).toEqual(["orch-kept"]);
-    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(
-      1,
-    );
+    expect(model.executives[0]?.programs[0]?.historicalLanes.map((lane) => lane.id)).toEqual([
+      "orch-kept",
+    ]);
+    expect(model.executives[0]?.programs[0]?.historicalOrchestratorCount).toBe(1);
   });
 
   it("derives the orchestrator name from generated role-session workspaces instead of 'workspace'", () => {
@@ -1066,10 +1066,8 @@ describe("buildOrchestrationSidebarModel", () => {
             title: "PartyMore.ai launch plan and first delivery wave",
             updatedAt: "2026-05-10T00:00:00.000Z",
             workflowId: null,
-            workspaceRoot:
-              "/tmp/.agents-vxapp-runtime/role-sessions/jasper/jasper-123/workspace",
-            worktreePath:
-              "/tmp/.agents-vxapp-runtime/role-sessions/jasper/jasper-123/workspace",
+            workspaceRoot: "/tmp/.agents-vxapp-runtime/role-sessions/jasper/jasper-123/workspace",
+            worktreePath: "/tmp/.agents-vxapp-runtime/role-sessions/jasper/jasper-123/workspace",
           },
         ],
       }),
@@ -1078,8 +1076,7 @@ describe("buildOrchestrationSidebarModel", () => {
           id: ThreadId.makeUnsafe("orch-role-session"),
           projectId: ProjectId.makeUnsafe("workspace-project"),
           title: "PartyMore.ai launch plan and first delivery wave",
-          worktreePath:
-            "/tmp/.agents-vxapp-runtime/role-sessions/jasper/jasper-123/workspace",
+          worktreePath: "/tmp/.agents-vxapp-runtime/role-sessions/jasper/jasper-123/workspace",
         }),
       ],
       wakeItems: [],
@@ -1149,10 +1146,7 @@ describe("buildOrchestrationSidebarModel", () => {
     });
 
     expect(model.diagnostics.staleMirror).toBe(true);
-    expect(model.diagnostics.missingProjectIds).toEqual([
-      "exec-missing",
-      "worker-project-missing",
-    ]);
+    expect(model.diagnostics.missingProjectIds).toEqual(["exec-missing", "worker-project-missing"]);
     expect(model.diagnostics.missingThreadIds).toEqual([
       "exec-thread-missing",
       "orch-missing",
@@ -1169,8 +1163,7 @@ describe("buildOrchestrationSidebarModel", () => {
         staleMirror: true,
       } as unknown as ServerGetAgentsVxappSidebarGraphResult["mirrorDiagnostics"],
     });
-    delete (sqliteGraph.mirrorDiagnostics as Record<string, unknown>)
-      .missingProjectIds;
+    delete (sqliteGraph.mirrorDiagnostics as Record<string, unknown>).missingProjectIds;
 
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],
@@ -1547,9 +1540,9 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState,
-    ).toBe("transient");
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState).toBe(
+      "transient",
+    );
   });
 
   it("keeps workers inspectable when live thread is missing worktreePath but sqlite lineage has it", () => {
@@ -1660,13 +1653,12 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState,
-    ).toBe("inspectable");
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]
-        ?.worktreePathHint,
-    ).toBe("/api");
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState).toBe(
+      "inspectable",
+    );
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.worktreePathHint).toBe(
+      "/api",
+    );
   });
 
   it("keeps workers inspectable when the live worker project carries the authoritative workspace", () => {
@@ -1728,13 +1720,12 @@ describe("buildOrchestrationSidebarModel", () => {
       wakeItems: [],
     });
 
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState,
-    ).toBe("inspectable");
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.workers[0]
-        ?.worktreePathHint,
-    ).toBe("/worktrees/api-vxapp-task-1");
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.runtimeState).toBe(
+      "inspectable",
+    );
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers[0]?.worktreePathHint).toBe(
+      "/worktrees/api-vxapp-task-1",
+    );
   });
 
   it("marks executive and orchestrator rows inspectable from live threads even without worker worktrees", () => {
@@ -1778,11 +1769,7 @@ describe("buildOrchestrationSidebarModel", () => {
 
     expect(model.executives[0]?.runtimeState).toBe("inspectable");
     expect(model.executives[0]?.worktreePathHint).toBe(null);
-    expect(model.executives[0]?.programs[0]?.currentLane?.runtimeState).toBe(
-      "inspectable",
-    );
-    expect(
-      model.executives[0]?.programs[0]?.currentLane?.worktreePathHint,
-    ).toBe(null);
+    expect(model.executives[0]?.programs[0]?.currentLane?.runtimeState).toBe("inspectable");
+    expect(model.executives[0]?.programs[0]?.currentLane?.worktreePathHint).toBe(null);
   });
 });

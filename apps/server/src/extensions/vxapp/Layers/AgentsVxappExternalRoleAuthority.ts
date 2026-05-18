@@ -8,7 +8,7 @@ import {
   type AgentsVxappRoleSessionRuntimePaths,
 } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import {
-  fetchAgentsVxappControlPlaneSnapshot,
+  fetchAgentsVxappExternalRoleAuthoritySnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   AgentsVxappOwnerClientError,
 } from "../agentsVxappOwnerClient.ts";
@@ -77,7 +77,7 @@ function buildSnapshot(payload: unknown): AgentsVxappExternalRoleAuthoritySnapsh
 const makeAgentsVxappExternalRoleAuthority = Effect.succeed({
   getSnapshot: () =>
     ownerPromise("AgentsVxappExternalRoleAuthority.getSnapshot", async () =>
-      buildSnapshot(await fetchAgentsVxappControlPlaneSnapshot()),
+      buildSnapshot(await fetchAgentsVxappExternalRoleAuthoritySnapshot()),
     ),
   getRuntimePaths: () =>
     ownerPromise("AgentsVxappExternalRoleAuthority.getRuntimePaths", () =>

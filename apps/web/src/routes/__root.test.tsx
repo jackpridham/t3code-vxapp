@@ -264,6 +264,58 @@ describe("bootstrapOrchestrationState", () => {
     expect(recoverFromSequenceGap).toHaveBeenCalledTimes(1);
   });
 
+  it("hydrates bootstrap summary projects on the real bootstrap path even without a selected root thread", async () => {
+    const recovery = createOrchestrationRecoveryCoordinator();
+    const bootstrapSummary = {
+      ...makeReadModel(4, null),
+      projects: [
+        {
+          id: ProjectId.makeUnsafe("project-external"),
+          title: "External Project",
+          workspaceRoot: "/home/gizmo/worktrees/project-external",
+          kind: "project",
+          currentSessionRootThreadId: null,
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: "2026-05-18T04:00:00.000Z",
+          updatedAt: "2026-05-18T04:02:00.000Z",
+          deletedAt: null,
+        },
+      ],
+      threads: [],
+    };
+    const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
+    const getCurrentState = vi.fn();
+    const getSnapshot = vi.fn();
+    const api = {
+      orchestration: {
+        getBootstrapSummary,
+        getCurrentState,
+        getSnapshot,
+        ...makeThreadDetailApi(),
+      },
+    } as unknown as NativeApi;
+    const syncServerReadModel = vi.fn();
+    const reconcileSnapshotDerivedState = vi.fn();
+    const recoverFromSequenceGap = vi.fn().mockResolvedValue(undefined);
+
+    await bootstrapOrchestrationState({
+      api,
+      recovery,
+      syncServerReadModel,
+      reconcileSnapshotDerivedState,
+      recoverFromSequenceGap,
+      isDisposed: () => false,
+    });
+
+    expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).not.toHaveBeenCalled();
+    expect(syncServerReadModel).toHaveBeenCalledTimes(1);
+    expect(syncServerReadModel).toHaveBeenCalledWith(bootstrapSummary);
+    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(1);
+  });
+
   it("uses bounded current state when the bootstrap summary fails", async () => {
     const recovery = createOrchestrationRecoveryCoordinator();
 

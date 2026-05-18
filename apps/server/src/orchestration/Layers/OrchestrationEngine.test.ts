@@ -38,8 +38,10 @@ import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
 } from "../../persistence/Services/OrchestrationEventStore.ts";
+import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -52,6 +54,40 @@ const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asMessageId = (value: string): MessageId => MessageId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.makeUnsafe(value);
+const agentsVxappExternalRoleAuthorityStub = Layer.succeed(AgentsVxappExternalRoleAuthority, {
+  getSnapshot: () =>
+    Effect.succeed({
+      projects: [],
+      threadSummaries: [],
+    }),
+  getRuntimePaths: () =>
+    Effect.succeed({
+      runtimeRoot: "/tmp/agents-vxapp-runtime",
+      roleSessionsRoot: "/tmp/agents-vxapp-role-sessions",
+      roleStateRoot: "/tmp/agents-vxapp-role-state",
+      workspaceRuntimeMetadataDir: "/tmp/agents-vxapp-workspace-metadata",
+      env: {
+        runtimeRoot: "/tmp/agents-vxapp-runtime",
+        stateRoot: "/tmp/agents-vxapp-role-state",
+      },
+      roles: {
+        cto: {
+          role: "cto",
+          generatedWorkspaceRoot: "/tmp/agents-vxapp-workspaces/cto",
+          stateRoot: "/tmp/agents-vxapp-role-state/cto",
+          sessionsRoot: "/tmp/agents-vxapp-role-sessions/cto",
+          reservationsRoot: "/tmp/agents-vxapp-reservations/cto",
+        },
+        jasper: {
+          role: "jasper",
+          generatedWorkspaceRoot: "/tmp/agents-vxapp-workspaces/jasper",
+          stateRoot: "/tmp/agents-vxapp-role-state/jasper",
+          sessionsRoot: "/tmp/agents-vxapp-role-sessions/jasper",
+          reservationsRoot: "/tmp/agents-vxapp-reservations/jasper",
+        },
+      },
+    }),
+});
 
 async function createOrchestrationSystem(
   options: {
@@ -71,10 +107,12 @@ async function createOrchestrationSystem(
   );
   const persistenceLayer = options.persistenceLayer ?? SqlitePersistenceMemory;
   const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
     Layer.provide(persistenceLayer),
+    Layer.provideMerge(agentsVxappExternalRoleAuthorityStub),
     Layer.provideMerge(ServerConfigLayer),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -115,10 +153,12 @@ describe("OrchestrationEngine", () => {
     });
     const runtime = ManagedRuntime.make(
       OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
         Layer.provide(OrchestrationProjectionPipelineLive),
         Layer.provide(Layer.succeed(OrchestrationEventStore, eventStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(SqlitePersistenceMemory),
+        Layer.provideMerge(agentsVxappExternalRoleAuthorityStub),
         Layer.provideMerge(ServerConfigLayer),
         Layer.provideMerge(NodeServices.layer),
       ),
@@ -567,10 +607,12 @@ describe("OrchestrationEngine", () => {
 
     const runtime = ManagedRuntime.make(
       OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
         Layer.provide(OrchestrationProjectionPipelineLive),
         Layer.provide(Layer.succeed(OrchestrationEventStore, flakyStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(SqlitePersistenceMemory),
+        Layer.provideMerge(agentsVxappExternalRoleAuthorityStub),
         Layer.provideMerge(ServerConfigLayer),
         Layer.provideMerge(NodeServices.layer),
       ),
@@ -684,10 +726,12 @@ describe("OrchestrationEngine", () => {
 
     const runtime = ManagedRuntime.make(
       OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(OrchestrationEventStoreLive),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(SqlitePersistenceMemory),
+        Layer.provideMerge(agentsVxappExternalRoleAuthorityStub),
       ),
     );
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
@@ -845,10 +889,12 @@ describe("OrchestrationEngine", () => {
 
     const runtime = ManagedRuntime.make(
       OrchestrationEngineLive.pipe(
+        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(Layer.succeed(OrchestrationEventStore, nonTransactionalStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(SqlitePersistenceMemory),
+        Layer.provideMerge(agentsVxappExternalRoleAuthorityStub),
       ),
     );
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));

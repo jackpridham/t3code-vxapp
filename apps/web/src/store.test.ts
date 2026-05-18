@@ -295,6 +295,38 @@ describe("store read model sync", () => {
     );
   });
 
+  it("adds projects from bootstrap summary even when the summary carries no threads", () => {
+    const next = syncServerReadModel(
+      {
+        ...makeState(makeThread()),
+        projects: [],
+        threads: [],
+        bootstrapComplete: false,
+      },
+      makeReadModel(makeReadModelThread({}), {
+        snapshotProfile: "bootstrap-summary",
+        projects: [
+          makeReadModelProject({
+            id: ProjectId.makeUnsafe("project-external"),
+            title: "External Project",
+            workspaceRoot: "/runtime/role-sessions/jasper/workspace/project-external",
+            currentSessionRootThreadId: null,
+          }),
+        ],
+        threads: [],
+      }),
+    );
+
+    expect(next.bootstrapComplete).toBe(true);
+    expect(next.projects).toEqual([
+      expect.objectContaining({
+        id: "project-external",
+        name: "External Project",
+        cwd: "/runtime/role-sessions/jasper/workspace/project-external",
+      }),
+    ]);
+  });
+
   it("merges bootstrap summary payloads without dropping unrelated hydrated threads", () => {
     const initialState: AppState = {
       ...makeState(makeThread()),

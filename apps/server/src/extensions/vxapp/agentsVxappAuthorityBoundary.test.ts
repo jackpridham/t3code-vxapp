@@ -42,6 +42,7 @@ describe("agents-vxapp owner authority boundary", () => {
     expect(ownerCommandLiterals).toEqual(expect.arrayContaining(["t3code-contract-manifest"]));
     expect(ownerClientSource).toContain("t3code-thread-status");
     expect(ownerClientSource).toContain("t3code-thread-event-ingest");
+    expect(ownerClientSource).toContain("t3code-projects-event-ingest");
     expect(ownerClientSource).toContain("t3code-approval-request");
     expect(ownerClientSource).toContain("t3code-approval-respond");
     expect(ownerClientSource).toContain("t3code-user-input-respond");

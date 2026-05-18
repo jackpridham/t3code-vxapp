@@ -158,9 +158,7 @@ describe("shouldClearThreadSelectionOnMouseDown", () => {
   it("preserves selection for thread list toggle controls", () => {
     const selectionSafe = {
       closest: (selector: string) =>
-        selector.includes("[data-thread-selection-safe]")
-          ? ({} as Element)
-          : null,
+        selector.includes("[data-thread-selection-safe]") ? ({} as Element) : null,
     } as unknown as HTMLElement;
 
     expect(shouldClearThreadSelectionOnMouseDown(selectionSafe)).toBe(false);
@@ -233,9 +231,7 @@ describe("buildSidebarProgramNotificationGroups", () => {
           queuedAt: "2026-04-20T00:01:00.000Z",
         }),
         makeProgramNotification({
-          notificationId: ProgramNotificationId.makeUnsafe(
-            "notification-critical",
-          ),
+          notificationId: ProgramNotificationId.makeUnsafe("notification-critical"),
           programId: programBetaId,
           kind: "worker_progress",
           severity: "warning",
@@ -243,9 +239,7 @@ describe("buildSidebarProgramNotificationGroups", () => {
           queuedAt: "2026-04-20T00:00:00.000Z",
         }),
         makeProgramNotification({
-          notificationId: ProgramNotificationId.makeUnsafe(
-            "notification-actionable",
-          ),
+          notificationId: ProgramNotificationId.makeUnsafe("notification-actionable"),
           programId: programAlphaId,
           kind: "decision_required",
           severity: "warning",
@@ -253,9 +247,7 @@ describe("buildSidebarProgramNotificationGroups", () => {
           queuedAt: "2026-04-20T00:02:00.000Z",
         }),
         makeProgramNotification({
-          notificationId: ProgramNotificationId.makeUnsafe(
-            "notification-consumed",
-          ),
+          notificationId: ProgramNotificationId.makeUnsafe("notification-consumed"),
           programId: programBetaId,
           state: "consumed",
           summary: "Already handled",
@@ -266,33 +258,23 @@ describe("buildSidebarProgramNotificationGroups", () => {
     expect(groups).toHaveLength(2);
     expect(groups[0]?.programTitle).toBe("Beta cleanup");
     expect(groups[0]?.warningCount).toBe(1);
-    expect(
-      groups[0]?.notifications.map((notification) => notification.summary),
-    ).toEqual(["Beta progress update"]);
+    expect(groups[0]?.notifications.map((notification) => notification.summary)).toEqual([
+      "Beta progress update",
+    ]);
     expect(groups[1]?.programTitle).toBe("Alpha launch");
+    expect(groups[1]?.notifications.map((notification) => notification.summary)).toEqual([
+      "Alpha status update",
+    ]);
     expect(
-      groups[1]?.notifications.map((notification) => notification.summary),
-    ).toEqual(["Alpha status update"]);
-    expect(
-      groups.flatMap((group) =>
-        group.notifications.map((notification) => notification.kind),
-      ),
+      groups.flatMap((group) => group.notifications.map((notification) => notification.kind)),
     ).toEqual(["worker_progress", "status_update"]);
   });
 
   it("renders human labels for notification kinds", () => {
-    expect(getSidebarProgramNotificationKindLabel("decision_required")).toBe(
-      "Decision",
-    );
-    expect(getSidebarProgramNotificationKindLabel("risk_escalated")).toBe(
-      "Risk",
-    );
-    expect(getSidebarProgramNotificationKindLabel("worker_completed")).toBe(
-      "Worker completed",
-    );
-    expect(getSidebarCtoAttentionKindLabel("final_review_ready")).toBe(
-      "Final review",
-    );
+    expect(getSidebarProgramNotificationKindLabel("decision_required")).toBe("Decision");
+    expect(getSidebarProgramNotificationKindLabel("risk_escalated")).toBe("Risk");
+    expect(getSidebarProgramNotificationKindLabel("worker_completed")).toBe("Worker completed");
+    expect(getSidebarCtoAttentionKindLabel("final_review_ready")).toBe("Final review");
   });
 });
 
@@ -379,9 +361,7 @@ function makeProgramNotification(
   };
 }
 
-function makeCtoAttentionItem(
-  overrides: Partial<CtoAttentionItem> = {},
-): CtoAttentionItem {
+function makeCtoAttentionItem(overrides: Partial<CtoAttentionItem> = {}): CtoAttentionItem {
   return {
     attentionId: CtoAttentionId.makeUnsafe("attention-1"),
     attentionKey:
@@ -589,16 +569,9 @@ describe("partitionProjectsForSidebar", () => {
       projects: [app, cto, jasper, docs],
     });
 
-    expect(result.executiveProjects.map((project) => project.id)).toEqual([
-      cto.id,
-    ]);
-    expect(result.orchestratorProjects.map((project) => project.id)).toEqual([
-      jasper.id,
-    ]);
-    expect(result.regularProjects.map((project) => project.id)).toEqual([
-      app.id,
-      docs.id,
-    ]);
+    expect(result.executiveProjects.map((project) => project.id)).toEqual([cto.id]);
+    expect(result.orchestratorProjects.map((project) => project.id)).toEqual([jasper.id]);
+    expect(result.regularProjects.map((project) => project.id)).toEqual([app.id, docs.id]);
   });
 });
 
@@ -828,10 +801,7 @@ describe("getVisibleSidebarThreadIds", () => {
           ],
         },
       ]),
-    ).toEqual([
-      ThreadId.makeUnsafe("thread-12"),
-      ThreadId.makeUnsafe("thread-11"),
-    ]);
+    ).toEqual([ThreadId.makeUnsafe("thread-12"), ThreadId.makeUnsafe("thread-11")]);
   });
 });
 
@@ -1352,43 +1322,35 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 
 describe("getSidebarThreadLabels", () => {
   it("normalizes labels and limits the sidebar preview", () => {
-    expect(
-      getSidebarThreadLabels(
-        ["  alpha ", "", "beta", "alpha", "gamma", "delta"],
-        2,
-      ),
-    ).toEqual(["alpha", "beta"]);
-  });
-
-  it("uses the default preview limit when one is not provided", () => {
-    expect(getSidebarThreadLabels(["alpha", "beta", "gamma"])).toEqual([
+    expect(getSidebarThreadLabels(["  alpha ", "", "beta", "alpha", "gamma", "delta"], 2)).toEqual([
       "alpha",
       "beta",
     ]);
   });
 
+  it("uses the default preview limit when one is not provided", () => {
+    expect(getSidebarThreadLabels(["alpha", "beta", "gamma"])).toEqual(["alpha", "beta"]);
+  });
+
   it("preserves first-seen order after trimming and deduping labels", () => {
-    expect(
-      getSidebarThreadLabels(
-        ["  beta", "alpha  ", "beta", "alpha", "gamma"],
-        3,
-      ),
-    ).toEqual(["beta", "alpha", "gamma"]);
+    expect(getSidebarThreadLabels(["  beta", "alpha  ", "beta", "alpha", "gamma"], 3)).toEqual([
+      "beta",
+      "alpha",
+      "gamma",
+    ]);
   });
 
   it("returns all unique trimmed labels when under the preview limit", () => {
-    expect(
-      getSidebarThreadLabels([" worker ", "model:gpt-5.4", "worker"], 5),
-    ).toEqual(["worker", "gpt-5.4"]);
+    expect(getSidebarThreadLabels([" worker ", "model:gpt-5.4", "worker"], 5)).toEqual([
+      "worker",
+      "gpt-5.4",
+    ]);
   });
 
   it("hides provider labels from the sidebar preview", () => {
-    expect(
-      getSidebarThreadLabels(
-        ["provider:codex", "worker", "provider:claudeAgent"],
-        5,
-      ),
-    ).toEqual(["worker"]);
+    expect(getSidebarThreadLabels(["provider:codex", "worker", "provider:claudeAgent"], 5)).toEqual(
+      ["worker"],
+    );
   });
 
   it("returns an empty array for missing labels", () => {
@@ -1448,9 +1410,7 @@ describe("filterThreadsByLabels", () => {
       ["worker", "model:gpt-5.4"],
     );
 
-    expect(filtered.map((thread) => thread.id)).toEqual([
-      ThreadId.makeUnsafe("thread-1"),
-    ]);
+    expect(filtered.map((thread) => thread.id)).toEqual([ThreadId.makeUnsafe("thread-1")]);
   });
 
   it("excludes threads without labels when filters are active", () => {
@@ -1463,9 +1423,7 @@ describe("filterThreadsByLabels", () => {
       ["worker"],
     );
 
-    expect(filtered.map((thread) => thread.id)).toEqual([
-      ThreadId.makeUnsafe("thread-3"),
-    ]);
+    expect(filtered.map((thread) => thread.id)).toEqual([ThreadId.makeUnsafe("thread-3")]);
   });
 
   it("matches selected labels exactly rather than trimming source labels during filtering", () => {
@@ -1480,9 +1438,7 @@ describe("filterThreadsByLabels", () => {
       ["worker"],
     );
 
-    expect(filtered.map((thread) => thread.id)).toEqual([
-      ThreadId.makeUnsafe("thread-2"),
-    ]);
+    expect(filtered.map((thread) => thread.id)).toEqual([ThreadId.makeUnsafe("thread-2")]);
   });
 });
 
@@ -1888,11 +1844,7 @@ describe("groupThreadsByLineage", () => {
       createdAt: "2026-03-09T10:01:00.000Z",
     });
 
-    const { groups, ungrouped } = groupThreadsByLineage([
-      parent,
-      worker1,
-      worker2,
-    ]);
+    const { groups, ungrouped } = groupThreadsByLineage([parent, worker1, worker2]);
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.parentThreadId).toBe("parent-1");
@@ -1916,9 +1868,7 @@ describe("groupThreadsByLineage", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]?.parentThreadId).toBe("external-parent");
     expect(groups[0]?.parentThread).toBeNull();
-    expect(groups[0]?.workers.map((w) => w.id)).toEqual([
-      ThreadId.makeUnsafe("worker-1"),
-    ]);
+    expect(groups[0]?.workers.map((w) => w.id)).toEqual([ThreadId.makeUnsafe("worker-1")]);
     expect(ungrouped).toHaveLength(0);
   });
 

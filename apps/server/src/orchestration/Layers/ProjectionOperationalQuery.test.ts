@@ -9,7 +9,7 @@ const source = readFileSync(resolve(here, "ProjectionOperationalQuery.ts"), "utf
 
 describe("ProjectionOperationalQuery authority boundary", () => {
   it("uses owner-backed current Program, notification, attention, and binding truth for vxapp rows", () => {
-    expect(source).toContain("controlPlane.getSnapshot({})");
+    expect(source).toContain("controlPlane.getProgramsProjectionSnapshot()");
     expect(source).toContain("controlPlane.getNotificationSummaryExport()");
     expect(source).toContain("controlPlane.getAttentionSummaryExport()");
     expect(source).toContain("getRuntimePaths()");

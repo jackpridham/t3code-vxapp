@@ -11,6 +11,11 @@ export class AgentsVxappSidebarError extends Schema.TaggedErrorClass<AgentsVxapp
   },
 ) {}
 
+export type AgentsVxappSidebarOwnerGraphSnapshot = Omit<
+  ServerGetAgentsVxappSidebarGraphResult,
+  "mirrorDiagnostics"
+>;
+
 export interface AgentsVxappSidebarShape {
   readonly getGraph: (
     input: ServerGetAgentsVxappSidebarGraphInput,

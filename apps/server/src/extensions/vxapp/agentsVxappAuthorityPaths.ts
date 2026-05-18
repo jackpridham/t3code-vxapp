@@ -11,9 +11,7 @@ export interface AgentsVxappWorktreeAuthority {
     | undefined;
 }
 
-function normalizeComparablePath(
-  value: string | null | undefined,
-): string | null {
+function normalizeComparablePath(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? path.resolve(normalized) : null;
 }
@@ -28,19 +26,12 @@ function isPathWithinRoot(
     return false;
   }
   const relative = path.relative(root, candidate);
-  return (
-    relative === "" ||
-    (!relative.startsWith("..") && !path.isAbsolute(relative))
-  );
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function isAuthoritativeWorktreePath(
   candidatePath: string | null | undefined,
-  authoritativeWorktreePaths:
-    | ReadonlySet<string>
-    | ReadonlyArray<string>
-    | null
-    | undefined,
+  authoritativeWorktreePaths: ReadonlySet<string> | ReadonlyArray<string> | null | undefined,
 ): boolean {
   const candidate = normalizeComparablePath(candidatePath);
   if (!candidate || !authoritativeWorktreePaths) {
@@ -66,14 +57,8 @@ export function isAgentsVxappWorkspaceRoot(
     return false;
   }
   return (
-    isPathWithinRoot(
-      workspaceRoot,
-      runtimePaths.roles.cto.generatedWorkspaceRoot,
-    ) ||
-    isPathWithinRoot(
-      workspaceRoot,
-      runtimePaths.roles.jasper.generatedWorkspaceRoot,
-    )
+    isPathWithinRoot(workspaceRoot, runtimePaths.roles.cto.generatedWorkspaceRoot) ||
+    isPathWithinRoot(workspaceRoot, runtimePaths.roles.jasper.generatedWorkspaceRoot)
   );
 }
 
@@ -86,9 +71,6 @@ export function isAgentsVxappWorktreePath(
   }
   return (
     isPathWithinRoot(worktreePath, authority.runtimePaths?.roleSessionsRoot) ||
-    isAuthoritativeWorktreePath(
-      worktreePath,
-      authority.authoritativeWorktreePaths,
-    )
+    isAuthoritativeWorktreePath(worktreePath, authority.authoritativeWorktreePaths)
   );
 }

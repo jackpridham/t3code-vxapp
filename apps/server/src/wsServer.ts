@@ -15,6 +15,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
+  type OrchestrationEvent,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -85,6 +86,10 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
 import { makeVxappWsRouteHandlers, type VxappWsRouteHandlerServices } from "./extensions/vxapp";
+import {
+  isProjectLifecycleEvent,
+  mirrorProjectLifecycleEvent,
+} from "./extensions/vxapp/projectEventMirror.ts";
 import { resolveStartupBootstrapSelection } from "./bootstrapThreadSelection";
 import { AgentRuntime } from "./agentRuntime/Services/AgentRuntime.ts";
 import { WorkerRuntime } from "./workerRuntime/Services/WorkerRuntime.ts";
@@ -112,6 +117,21 @@ export interface ServerShape {
  * Server - Service tag for HTTP/WebSocket lifecycle management.
  */
 export class Server extends ServiceMap.Service<Server, ServerShape>()("t3/wsServer/Server") {}
+
+type ProjectLifecycleCommand = Extract<
+  OrchestrationCommand,
+  { type: "project.create" | "project.meta.update" | "project.delete" }
+>;
+
+function isProjectLifecycleCommand(
+  command: OrchestrationCommand,
+): command is ProjectLifecycleCommand {
+  return (
+    command.type === "project.create" ||
+    command.type === "project.meta.update" ||
+    command.type === "project.delete"
+  );
+}
 
 const isServerNotRunningError = (error: Error): boolean => {
   const maybeCode = (error as NodeJS.ErrnoException).code;
@@ -277,6 +297,13 @@ function probeWebSocketControlPlane(input: {
 class RouteRequestError extends Schema.TaggedErrorClass<RouteRequestError>()("RouteRequestError", {
   message: Schema.String,
 }) {}
+
+class ProjectLifecycleMirrorError extends Schema.TaggedErrorClass<ProjectLifecycleMirrorError>()(
+  "ProjectLifecycleMirrorError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 export const createServer = Effect.fn(function* (): Effect.fn.Return<
   http.Server,
@@ -725,6 +752,38 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const subscriptionsScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(subscriptionsScope, Exit.void));
 
+  const synchronizeProjectLifecycleEvent = (event: OrchestrationEvent) =>
+    !isProjectLifecycleEvent(event)
+      ? Effect.void
+      : Effect.tryPromise({
+          try: () => mirrorProjectLifecycleEvent(event),
+          catch: (cause) =>
+            new ProjectLifecycleMirrorError({
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+        });
+
+  const logProjectLifecycleMirrorFailure = (event: OrchestrationEvent, cause: unknown) =>
+    Effect.sync(() => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      logger.warn("agents-vxapp project lifecycle mirror failed", {
+        detail: error.message,
+        eventId: event.eventId,
+        eventType: event.type,
+        projectId: event.aggregateKind === "project" ? event.aggregateId : undefined,
+      });
+    });
+
+  const mirrorProjectLifecycleEventBestEffort = (event: OrchestrationEvent) =>
+    synchronizeProjectLifecycleEvent(event).pipe(
+      Effect.catch((cause) => logProjectLifecycleMirrorFailure(event, cause)),
+    );
+
+  yield* Stream.runForEach(
+    orchestrationEngine.readEvents(0, Number.MAX_SAFE_INTEGER),
+    mirrorProjectLifecycleEventBestEffort,
+  ).pipe(Effect.forkIn(subscriptionsScope));
+
   yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
     pushBus.publishAll(ORCHESTRATION_WS_CHANNELS.domainEvent, event),
   ).pipe(Effect.forkIn(subscriptionsScope));
@@ -923,7 +982,18 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
         const { command } = request.body;
         const normalized = yield* normalizeDispatchCommand({ command, mode: "live" });
-        return yield* orchestrationEngine.dispatch(normalized.command);
+        const beforeSequence = (yield* orchestrationEngine.getReadModel()).snapshotSequence;
+        const result = yield* orchestrationEngine.dispatch(normalized.command);
+        if (isProjectLifecycleCommand(normalized.command)) {
+          const eventCount = Math.max(0, result.sequence - beforeSequence);
+          if (eventCount > 0) {
+            yield* Stream.runForEach(
+              orchestrationEngine.readEvents(beforeSequence, eventCount),
+              mirrorProjectLifecycleEventBestEffort,
+            );
+          }
+        }
+        return result;
       }
 
       case ORCHESTRATION_WS_METHODS.dryRunCommand: {

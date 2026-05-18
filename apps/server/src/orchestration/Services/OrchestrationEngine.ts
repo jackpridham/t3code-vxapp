@@ -41,6 +41,7 @@ export interface OrchestrationEngineShape {
    */
   readonly readEvents: (
     fromSequenceExclusive: number,
+    limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>;
 
   /**

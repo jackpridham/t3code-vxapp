@@ -5,16 +5,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agentsVxappOwnerClient.ts", () => ({
-  fetchAgentsVxappBootstrapSidebarSnapshot: vi.fn(),
+  fetchAgentsVxappSidebarGraphSnapshot: vi.fn(),
 }));
 
-import { fetchAgentsVxappBootstrapSidebarSnapshot } from "../agentsVxappOwnerClient.ts";
+import { fetchAgentsVxappSidebarGraphSnapshot } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappSidebar } from "../Services/AgentsVxappSidebar.ts";
 import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import { AgentsVxappSidebarLive } from "./AgentsVxappSidebar.ts";
 
-const mockedSidebarSnapshot = vi.mocked(fetchAgentsVxappBootstrapSidebarSnapshot);
+const mockedSidebarGraphSnapshot = vi.mocked(fetchAgentsVxappSidebarGraphSnapshot);
 
 const ownerGraph = {
   source: "sqlite" as const,
@@ -83,11 +83,6 @@ const ownerGraph = {
     },
   ],
   attentionItems: [],
-  mirrorDiagnostics: {
-    missingProjectIds: [],
-    missingThreadIds: [],
-    staleMirror: false,
-  },
 };
 
 const sidebarLayer = AgentsVxappSidebarLive.pipe(
@@ -102,12 +97,12 @@ const sidebarLayer = AgentsVxappSidebarLive.pipe(
 );
 
 afterEach(() => {
-  mockedSidebarSnapshot.mockReset();
+  mockedSidebarGraphSnapshot.mockReset();
 });
 
 describe("AgentsVxappSidebarLive", () => {
   it("assembles the graph from owner-backed inputs without normalizing owner vocabularies", async () => {
-    mockedSidebarSnapshot.mockResolvedValueOnce(ownerGraph);
+    mockedSidebarGraphSnapshot.mockResolvedValueOnce(ownerGraph);
 
     const graph = await Effect.runPromise(
       Effect.gen(function* () {
@@ -119,7 +114,7 @@ describe("AgentsVxappSidebarLive", () => {
       }).pipe(Effect.provide(sidebarLayer)),
     );
 
-    expect(mockedSidebarSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockedSidebarGraphSnapshot).toHaveBeenCalledTimes(1);
     expect(graph.threadLinks[0]?.spawnRole).toBe("invented-owner-role");
     expect(graph.openWakes[0]?.state).toBe("owner-invented-state");
     expect(graph.notifications[0]?.kind).toBe("owner-new-kind");

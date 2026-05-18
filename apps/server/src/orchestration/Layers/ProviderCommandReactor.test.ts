@@ -69,18 +69,14 @@ function makeRuntimePaths() {
         generatedWorkspaceRoot: "/tmp/.agents-vxapp-runtime/role-sessions/cto",
         stateRoot: "/tmp/.agents-vxapp-runtime/role-state/cto",
         sessionsRoot: "/tmp/.agents-vxapp-runtime/role-state/cto/sessions",
-        reservationsRoot:
-          "/tmp/.agents-vxapp-runtime/role-state/cto/reservations",
+        reservationsRoot: "/tmp/.agents-vxapp-runtime/role-state/cto/reservations",
       },
       jasper: {
         role: "jasper" as const,
-        generatedWorkspaceRoot:
-          "/tmp/.agents-vxapp-runtime/role-sessions/jasper",
+        generatedWorkspaceRoot: "/tmp/.agents-vxapp-runtime/role-sessions/jasper",
         stateRoot: "/tmp/.agents-vxapp-runtime/role-state/jasper",
-        sessionsRoot:
-          "/tmp/.agents-vxapp-runtime/role-state/jasper/sessions",
-        reservationsRoot:
-          "/tmp/.agents-vxapp-runtime/role-state/jasper/reservations",
+        sessionsRoot: "/tmp/.agents-vxapp-runtime/role-state/jasper/sessions",
+        reservationsRoot: "/tmp/.agents-vxapp-runtime/role-state/jasper/reservations",
       },
     },
   };
@@ -220,8 +216,7 @@ describe("ProviderCommandReactor authority boundary", () => {
       hasActiveError: options?.initialHasActiveError ?? false,
       activeError: options?.initialActiveError ?? null,
       historicalError: options?.initialHistoricalError ?? null,
-      errorPresentationSource:
-        options?.initialErrorPresentationSource ?? ("none" as const),
+      errorPresentationSource: options?.initialErrorPresentationSource ?? ("none" as const),
       activities: [] as OrchestrationThreadActivity[],
       proposedPlans: [],
       checkpoints: [],
@@ -260,14 +255,13 @@ describe("ProviderCommandReactor authority boundary", () => {
     };
 
     const authorityLayer =
-      options?.ownerAuthorityWorktreePaths !== undefined ||
-      options?.worktreePath !== undefined
+      options?.ownerAuthorityWorktreePaths !== undefined || options?.worktreePath !== undefined
         ? Layer.succeed(AgentsVxappExternalRoleAuthority, {
             getSnapshot: () =>
               Effect.succeed({
                 projects: [],
-                threadSummaries: (options?.ownerAuthorityWorktreePaths ?? [])
-                  .map((worktreePath) => ({
+                threadSummaries: (options?.ownerAuthorityWorktreePaths ?? []).map(
+                  (worktreePath) => ({
                     id: asThreadId(`authority:${worktreePath}`),
                     projectId: asProjectId("project-1"),
                     title: "Authority Thread",
@@ -290,7 +284,8 @@ describe("ProviderCommandReactor authority boundary", () => {
                     activeError: null,
                     historicalError: null,
                     errorPresentationSource: "none" as const,
-                  })),
+                  }),
+                ),
               }),
             getRuntimePaths: () => Effect.succeed(makeRuntimePaths()),
           })

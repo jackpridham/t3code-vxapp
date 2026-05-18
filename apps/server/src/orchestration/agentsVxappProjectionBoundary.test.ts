@@ -13,9 +13,7 @@ function read(relativePath: string): string {
 
 function projectorsBlock(): string {
   const source = read("src/orchestration/Layers/ProjectionPipeline.ts");
-  const start = source.indexOf(
-    "const projectors: ReadonlyArray<ProjectorDefinition>",
-  );
+  const start = source.indexOf("const projectors: ReadonlyArray<ProjectorDefinition>");
   const end = source.indexOf("const applyProjectorEventsInTransaction", start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
@@ -27,16 +25,10 @@ describe("agents-vxapp projection authority boundary", () => {
     const block = projectorsBlock();
 
     expect(block).not.toContain("ORCHESTRATION_PROJECTOR_NAMES.programs");
-    expect(block).not.toContain(
-      "ORCHESTRATION_PROJECTOR_NAMES.programNotifications",
-    );
+    expect(block).not.toContain("ORCHESTRATION_PROJECTOR_NAMES.programNotifications");
     expect(block).not.toContain("ORCHESTRATION_PROJECTOR_NAMES.ctoAttention");
-    expect(block).not.toContain(
-      "ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals",
-    );
-    expect(block).not.toContain(
-      "ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes",
-    );
+    expect(block).not.toContain("ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals");
+    expect(block).not.toContain("ORCHESTRATION_PROJECTOR_NAMES.orchestratorWakes");
     expect(block).not.toContain("program.");
     expect(block).not.toContain("thread.orchestrator-wake-upserted");
     expect(block).not.toContain("thread.approval-response-requested");
@@ -49,7 +41,7 @@ describe("agents-vxapp projection authority boundary", () => {
       "src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts",
     ]) {
       const source = read(relativePath);
-      expect(source).toContain("controlPlane.getSnapshot({})");
+      expect(source).toContain("controlPlane.getProgramsProjectionSnapshot()");
       expect(source).toContain("getNotificationSummaryExport()");
       expect(source).toContain("getRuntimePaths()");
       expect(source).toContain("AgentsVxappControlPlane");
@@ -66,9 +58,7 @@ describe("agents-vxapp projection authority boundary", () => {
     expect(read("src/orchestration/Layers/ProjectionSnapshotQuery.ts")).toMatch(
       /vxappBackedProjectRows\.length > 0\s*\?\s*\[\]\s*:\s*orchestratorWakeRows/,
     );
-    expect(
-      read("src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts"),
-    ).toMatch(
+    expect(read("src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts")).toMatch(
       /const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> =[\s\S]*vxappBacked[\s\S]*\?\s*\[\]/,
     );
   });

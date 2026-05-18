@@ -22,18 +22,14 @@ function makeRuntimePaths(): AgentsVxappRoleSessionRuntimePaths {
         generatedWorkspaceRoot: "/tmp/.agents-vxapp-runtime/role-sessions/cto",
         stateRoot: "/tmp/.agents-vxapp-runtime/role-state/cto",
         sessionsRoot: "/tmp/.agents-vxapp-runtime/role-state/cto/sessions",
-        reservationsRoot:
-          "/tmp/.agents-vxapp-runtime/role-state/cto/reservations",
+        reservationsRoot: "/tmp/.agents-vxapp-runtime/role-state/cto/reservations",
       },
       jasper: {
         role: "jasper",
-        generatedWorkspaceRoot:
-          "/tmp/.agents-vxapp-runtime/role-sessions/jasper",
+        generatedWorkspaceRoot: "/tmp/.agents-vxapp-runtime/role-sessions/jasper",
         stateRoot: "/tmp/.agents-vxapp-runtime/role-state/jasper",
-        sessionsRoot:
-          "/tmp/.agents-vxapp-runtime/role-state/jasper/sessions",
-        reservationsRoot:
-          "/tmp/.agents-vxapp-runtime/role-state/jasper/reservations",
+        sessionsRoot: "/tmp/.agents-vxapp-runtime/role-state/jasper/sessions",
+        reservationsRoot: "/tmp/.agents-vxapp-runtime/role-state/jasper/reservations",
       },
     },
   };
@@ -74,22 +70,14 @@ describe("agentsVxappAuthorityPaths", () => {
   it("does not classify unrelated repo-root paths as vxapp-backed", () => {
     const runtimePaths = makeRuntimePaths();
 
+    expect(isAgentsVxappWorkspaceRoot("/home/gizmo/agents-vxapp/apps/server", runtimePaths)).toBe(
+      false,
+    );
     expect(
-      isAgentsVxappWorkspaceRoot(
-        "/home/gizmo/agents-vxapp/apps/server",
+      isAgentsVxappWorktreePath("/home/gizmo/agents-vxapp/worktrees/thread-1", {
         runtimePaths,
-      ),
-    ).toBe(false);
-    expect(
-      isAgentsVxappWorktreePath(
-        "/home/gizmo/agents-vxapp/worktrees/thread-1",
-        {
-          runtimePaths,
-          authoritativeWorktreePaths: [
-            "/tmp/custom-vxapp/thread-7/worktree",
-          ],
-        },
-      ),
+        authoritativeWorktreePaths: ["/tmp/custom-vxapp/thread-7/worktree"],
+      }),
     ).toBe(false);
   });
 

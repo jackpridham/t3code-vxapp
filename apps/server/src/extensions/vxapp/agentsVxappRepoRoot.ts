@@ -6,9 +6,33 @@ const OWNER_ENTRYPOINTS = [
   "scripts/tools/t3-control-plane-owner",
   "scripts/tools/role-session-owner",
 ] as const;
+const T3CODE_REPO_ROOT_SENTINELS = ["bun.lock", "apps/server/package.json"] as const;
 const ENV_REPO_ROOT = "T3_AGENTS_VXAPP_REPO_ROOT";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const T3CODE_REPO_ROOT = path.resolve(MODULE_DIR, "../../../../..");
+
+function isT3CodeRepoRoot(candidate: string): boolean {
+  return T3CODE_REPO_ROOT_SENTINELS.every((relativePath) =>
+    fs.existsSync(path.join(candidate, relativePath)),
+  );
+}
+
+export function resolveT3CodeRepoRoot(fromDir: string): string {
+  let candidate = path.resolve(fromDir);
+
+  while (true) {
+    if (isT3CodeRepoRoot(candidate)) {
+      return candidate;
+    }
+
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      throw new Error(`Unable to resolve t3code-vxapp repo root from ${fromDir}.`);
+    }
+    candidate = parent;
+  }
+}
+
+const T3CODE_REPO_ROOT = resolveT3CodeRepoRoot(MODULE_DIR);
 
 function hasOwnerEntrypoints(repoRoot: string): boolean {
   return OWNER_ENTRYPOINTS.every((relativePath) =>

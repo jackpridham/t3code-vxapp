@@ -17,19 +17,22 @@ beforeEach(() => {
   vi.resetModules();
 });
 
-const loadEnvOverrideModule = () =>
-  import("./agentsVxappRepoRoot.ts");
-const loadInvalidEnvModule = () =>
-  import("./agentsVxappRepoRoot.ts");
-const loadSiblingDiscoveryModule = () =>
-  import("./agentsVxappRepoRoot.ts");
+const loadEnvOverrideModule = () => import("./agentsVxappRepoRoot.ts");
+const loadInvalidEnvModule = () => import("./agentsVxappRepoRoot.ts");
+const loadSiblingDiscoveryModule = () => import("./agentsVxappRepoRoot.ts");
 
 describe("agentsVxappRepoRoot resolution", () => {
+  it("resolves the t3code-vxapp repo root from bundled dist module directories", async () => {
+    const expectedRoot = path.resolve(import.meta.dirname, "../../../../..");
+    const buildOutputModuleDir = path.resolve(import.meta.dirname, "../../../dist");
+
+    const module = await loadSiblingDiscoveryModule();
+
+    expect(module.resolveT3CodeRepoRoot(buildOutputModuleDir)).toBe(expectedRoot);
+  });
+
   it("honors T3_AGENTS_VXAPP_REPO_ROOT at import time", async () => {
-    const expectedRoot = path.resolve(
-      import.meta.dirname,
-      "../../../../../../agents-vxapp",
-    );
+    const expectedRoot = path.resolve(import.meta.dirname, "../../../../../../agents-vxapp");
     process.env.T3_AGENTS_VXAPP_REPO_ROOT = expectedRoot;
 
     const module = await loadEnvOverrideModule();
@@ -51,14 +54,10 @@ describe("agentsVxappRepoRoot resolution", () => {
     const module = await loadSiblingDiscoveryModule();
 
     expect(
-      fs.existsSync(
-        `${module.AGENTS_VXAPP_REPO_ROOT}/scripts/tools/t3-control-plane-owner`,
-      ),
+      fs.existsSync(`${module.AGENTS_VXAPP_REPO_ROOT}/scripts/tools/t3-control-plane-owner`),
     ).toBe(true);
-    expect(
-      fs.existsSync(
-        `${module.AGENTS_VXAPP_REPO_ROOT}/scripts/tools/role-session-owner`,
-      ),
-    ).toBe(true);
+    expect(fs.existsSync(`${module.AGENTS_VXAPP_REPO_ROOT}/scripts/tools/role-session-owner`)).toBe(
+      true,
+    );
   });
 });

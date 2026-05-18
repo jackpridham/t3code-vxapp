@@ -8,10 +8,12 @@ vi.mock("../../processRunner.ts", () => ({
 import { runProcess } from "../../processRunner.ts";
 import {
   bootstrapAgentsVxappOwnerManifest,
+  fetchAgentsVxappSidebarGraphSnapshot,
   fetchAgentsVxappWorkerRuntimeSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   requestAgentsVxappApprovalRequest,
   requestAgentsVxappApprovalResponse,
+  requestAgentsVxappProjectEventIngest,
   requestAgentsVxappThreadEventIngest,
   requestAgentsVxappThreadStatus,
   requestAgentsVxappUserInputResponse,
@@ -25,6 +27,7 @@ t3code-contract-manifest	contract_manifest
 t3code-bootstrap-snapshot	bootstrap_snapshot
 t3code-control-plane-snapshot	control_plane_snapshot
 t3code-programs-todos-snapshot	programs_todos_snapshot
+t3code-sidebar-graph-snapshot	sidebar_graph_snapshot
 t3code-cto-status	cto
 t3code-cto-ensure	cto
 t3code-cto-request-orchestration	cto
@@ -76,6 +79,7 @@ t3code-threads-diff-request	threads
 t3code-approval-request	approvals
 t3code-approval-respond	approvals
 t3code-user-input-respond	user_input
+t3code-projects-event-ingest	projects
 t3code-projects-list	projects
 t3code-projects-inspect	projects
 t3code-projects-resolve	projects
@@ -184,6 +188,7 @@ describe("agentsVxappOwnerClient", () => {
         "t3code-contract-manifest",
         "t3code-cto-status",
         "t3code-projects-list",
+        "t3code-sidebar-graph-snapshot",
         "t3code-worker-dispatch",
         "t3code-provider-ws-request",
         "t3code-orchestrator-status",
@@ -196,6 +201,9 @@ describe("agentsVxappOwnerClient", () => {
     );
     expect(manifest.commandsByName.get("t3code-thread-status")?.surface).toBe("threads");
     expect(manifest.commandsByName.get("t3code-thread-event-ingest")?.surface).toBe("threads");
+    expect(manifest.commandsByName.get("t3code-sidebar-graph-snapshot")?.surface).toBe(
+      "sidebar_graph_snapshot",
+    );
     expect(manifest.commandsByName.get("t3code-contract-manifest")?.surface).toBe(
       "contract_manifest",
     );
@@ -301,6 +309,9 @@ describe("agentsVxappOwnerClient", () => {
       )
       .mockResolvedValueOnce(processResult(envelope("t3code-thread-status", "threads", {})))
       .mockResolvedValueOnce(processResult(envelope("t3code-thread-event-ingest", "threads", {})))
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-projects-event-ingest", "projects", {})),
+      )
       .mockResolvedValueOnce(processResult(envelope("t3code-approval-request", "approvals", {})))
       .mockResolvedValueOnce(processResult(envelope("t3code-approval-respond", "approvals", {})))
       .mockResolvedValueOnce(
@@ -312,6 +323,11 @@ describe("agentsVxappOwnerClient", () => {
       threadId: "thread-1",
       eventType: "tool_user_input",
       state: "pending",
+    });
+    await requestAgentsVxappProjectEventIngest({
+      projectId: "project-1",
+      action: "create",
+      createdAt: "2026-05-18T00:00:00Z",
     });
     await requestAgentsVxappApprovalRequest({
       threadId: "thread-1",
@@ -351,6 +367,17 @@ describe("agentsVxappOwnerClient", () => {
       4,
       expect.stringMatching(/t3-control-plane-owner$/),
       [
+        "t3code-projects-event-ingest",
+        "--json",
+        "--payload-json",
+        expect.stringContaining('"projectId":"project-1"'),
+      ],
+      expect.objectContaining({}),
+    );
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      5,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      [
         "t3code-approval-request",
         "--json",
         "--payload-json",
@@ -359,7 +386,7 @@ describe("agentsVxappOwnerClient", () => {
       expect.objectContaining({}),
     );
     expect(mockedRunProcess).toHaveBeenNthCalledWith(
-      5,
+      6,
       expect.stringMatching(/t3-control-plane-owner$/),
       [
         "t3code-approval-respond",
@@ -370,7 +397,7 @@ describe("agentsVxappOwnerClient", () => {
       expect.objectContaining({}),
     );
     expect(mockedRunProcess).toHaveBeenNthCalledWith(
-      6,
+      7,
       expect.stringMatching(/t3-control-plane-owner$/),
       [
         "t3code-user-input-respond",
@@ -382,14 +409,48 @@ describe("agentsVxappOwnerClient", () => {
     );
   });
 
+  it("routes the sidebar graph helper through the dedicated startup-safe owner command", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-sidebar-graph-snapshot", "sidebar_graph_snapshot", {
+            source: "sqlite",
+            dbPath: "/tmp/vx_agents.sqlite3",
+            fallbackReason: null,
+            threadLinks: [],
+            openWakes: [],
+            watchProjections: [],
+            notifications: [],
+            attentionItems: [],
+          }),
+        ),
+      );
+
+    await fetchAgentsVxappSidebarGraphSnapshot();
+
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      ["t3code-sidebar-graph-snapshot", "--json"],
+      expect.objectContaining({}),
+    );
+  });
+
   it("keeps role-session runtime paths on the separate role-session owner surface", async () => {
     mockedRunProcess.mockResolvedValueOnce(
-      processResult(
-        envelope("runtime-paths", "role_session_runtime_paths", {
+      processResult({
+        ok: true,
+        command: "runtime-paths",
+        contract_family: "role-session",
+        contract_version: "v1",
+        result: {
           runtimeRoot: "/runtime",
           roleSessionsRoot: "/runtime/role-sessions",
-        }),
-      ),
+        },
+      }),
     );
 
     const payload = await fetchAgentsVxappRoleSessionRuntimePaths<Record<string, unknown>>();
@@ -400,7 +461,7 @@ describe("agentsVxappOwnerClient", () => {
     });
     expect(mockedRunProcess).toHaveBeenCalledWith(
       expect.stringMatching(/role-session-owner$/),
-      ["runtime-paths", "--json"],
+      ["runtime-paths"],
       expect.objectContaining({ allowNonZeroExit: true }),
     );
   });
@@ -483,9 +544,12 @@ describe("agentsVxappOwnerClient", () => {
       processResult(
         envelope("t3code-contract-manifest", "contract_manifest", {
           ...manifestPayload(),
-          callerContractManifest: manifestPayload().callerContractManifest.map((entry) =>
-            entry.command === "t3code-thread-status" ? { ...entry, surface: "approvals" } : entry,
-          ),
+          callerContractManifest: manifestPayload().callerContractManifest.map((entry) => {
+            if (entry.command !== "t3code-thread-status") {
+              return entry;
+            }
+            return Object.assign({}, entry, { surface: "approvals" });
+          }),
         }),
       ),
     );
