@@ -16,7 +16,6 @@ import type {
 } from "@t3tools/contracts";
 import { ProgramId, ProjectId, ThreadId } from "@t3tools/contracts";
 import {
-  AlertTriangleIcon,
   Layers3Icon,
   ListTodoIcon,
   PencilIcon,
@@ -25,6 +24,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
+import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
 import { useStore } from "~/store";
 import type { Project, Thread } from "~/types";
 import {
@@ -38,10 +38,6 @@ import {
   updateAgentsVxappProgramMutationOptions,
   updateAgentsVxappTodoMutationOptions,
 } from "~/lib/agentsVxappControlPlaneReactQuery";
-import {
-  agentsVxappSidebarGraphQueryOptions,
-  agentsVxappSidebarQueryKeys,
-} from "~/lib/agentsVxappSidebarReactQuery";
 import { buildAppDocumentTitle, useDocumentTitle } from "~/lib/documentTitle";
 import { randomUUID, cn } from "~/lib/utils";
 import { toastManager } from "~/components/ui/toast";
@@ -77,6 +73,7 @@ import {
 } from "~/components/ui/select";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
+import { VortexErrorBanner } from "./VortexErrorBanner";
 import {
   buildProgramTodoGroups,
   canonicalizeProgramScope,
@@ -148,7 +145,6 @@ type GroupCardView = {
 
 const EMPTY_PROGRAMS: readonly ServerAgentsVxappProgramSnapshot[] = [];
 const EMPTY_TODOS: readonly ServerAgentsVxappTodoSnapshot[] = [];
-const EMPTY_CURRENT_TODOS: readonly { programId: string; todoId: string }[] = [];
 const EMPTY_AGENTS: readonly string[] = [];
 const EMPTY_THREAD_LINKS: readonly {
   threadId: Thread["id"];
@@ -724,15 +720,20 @@ const SelectedGroupPane = memo(function SelectedGroupPane(props: {
 
 export function ProgramsTodosView() {
   useDocumentTitle(buildAppDocumentTitle({ parts: ["Programs"] }));
+  useAgentsVxappSidebarAuthorityBootstrap();
   const queryClient = useQueryClient();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
+  const authoritySnapshot = useAgentsVxappStore((store) => store.snapshot);
+  const authorityStatus = useAgentsVxappStore((store) => store.status);
+  const authorityError = useAgentsVxappStore((store) => store.error);
+  const currentTodoByProgramId = useAgentsVxappStore((store) => store.currentTodoIdByProgramId);
+  const refreshSidebarAuthority = useAgentsVxappStore((store) => store.refreshSidebarAuthority);
   const snapshotQuery = useQuery({
     ...agentsVxappControlPlaneSnapshotQueryOptions(),
     staleTime: 0,
     refetchOnMount: "always",
   });
-  const sidebarGraphQuery = useQuery(agentsVxappSidebarGraphQueryOptions());
 
   const [selectedGroupKey, setSelectedGroupKey] = useState("");
   const [programSearch, setProgramSearch] = useState("");
@@ -799,15 +800,11 @@ export function ProgramsTodosView() {
 
   const snapshot = snapshotQuery.data;
   const agents = snapshot?.agents ?? EMPTY_AGENTS;
-  const programs = snapshot?.programs ?? EMPTY_PROGRAMS;
-  const todos = snapshot?.todos ?? EMPTY_TODOS;
-  const currentTodoByProgramId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of snapshot?.currentTodos ?? EMPTY_CURRENT_TODOS) {
-      map.set(row.programId, row.todoId);
-    }
-    return map;
-  }, [snapshot?.currentTodos]);
+  const programs = useMemo(
+    () => authoritySnapshot?.programs.map((card) => card.program) ?? EMPTY_PROGRAMS,
+    [authoritySnapshot],
+  );
+  const todos = authoritySnapshot?.todos ?? EMPTY_TODOS;
 
   const executiveOptions = useMemo(
     () =>
@@ -823,17 +820,9 @@ export function ProgramsTodosView() {
       resolveOrchestratorOptions({
         programs,
         threads,
-        threadLinks:
-          sidebarGraphQuery.data?.threadLinks.map((link) => ({
-            threadId: link.threadId,
-            title: link.title,
-            roleSession: link.roleSession ?? null,
-            workspaceRoot: link.workspaceRoot,
-            worktreePath: link.worktreePath,
-            spawnRole: link.spawnRole,
-          })) ?? EMPTY_THREAD_LINKS,
+        threadLinks: EMPTY_THREAD_LINKS,
       }),
-    [programs, sidebarGraphQuery.data?.threadLinks, threads],
+    [programs, threads],
   );
 
   const allGroups = useMemo(
@@ -968,16 +957,13 @@ export function ProgramsTodosView() {
 
   const refreshControlPlaneData = useCallback(async () => {
     await Promise.all([
+      refreshSidebarAuthority({ force: true }),
       queryClient.refetchQueries({
         queryKey: agentsVxappControlPlaneQueryKeys.snapshot(),
         type: "active",
       }),
-      queryClient.refetchQueries({
-        queryKey: agentsVxappSidebarQueryKeys.graph(),
-        type: "active",
-      }),
     ]);
-  }, [queryClient]);
+  }, [queryClient, refreshSidebarAuthority]);
 
   const patchProgramSnapshot = useCallback(
     (
@@ -1321,7 +1307,7 @@ export function ProgramsTodosView() {
     updateTodoMutation.isPending ||
     deleteTodoMutation.isPending;
 
-  if (snapshotQuery.isLoading && !snapshot) {
+  if (authorityStatus === "loading" && authoritySnapshot === null) {
     return (
       <main className="flex-1 overflow-y-auto bg-background text-foreground">
         <div className="mx-auto flex w-full max-w-7xl flex-col px-4 py-6 sm:px-6">
@@ -1329,7 +1315,7 @@ export function ProgramsTodosView() {
             <EmptyHeader>
               <Layers3Icon className="size-10 text-muted-foreground/60" />
               <EmptyTitle>Loading Programs</EmptyTitle>
-              <EmptyDescription>Reading Programs and TODOs from agents-vxapp…</EmptyDescription>
+              <EmptyDescription>Reading Program authority from agents-vxapp…</EmptyDescription>
             </EmptyHeader>
           </Empty>
         </div>
@@ -1337,21 +1323,17 @@ export function ProgramsTodosView() {
     );
   }
 
-  if (snapshotQuery.error) {
+  if (authorityStatus === "error" && authoritySnapshot === null) {
     return (
       <main className="flex-1 overflow-y-auto bg-background text-foreground">
         <div className="mx-auto flex w-full max-w-7xl flex-col px-4 py-6 sm:px-6">
-          <Empty className="min-h-[50vh]">
-            <EmptyHeader>
-              <AlertTriangleIcon className="size-10 text-destructive/70" />
-              <EmptyTitle>Programs unavailable</EmptyTitle>
-              <EmptyDescription>
-                {snapshotQuery.error instanceof Error
-                  ? snapshotQuery.error.message
-                  : "Failed to load Programs and TODOs."}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+          <div className="mx-auto w-full max-w-2xl">
+            <VortexErrorBanner
+              heading="Programs unavailable"
+              error={authorityError}
+              fallbackMessage="Failed to load Program authority from agents-vxapp."
+            />
+          </div>
         </div>
       </main>
     );
@@ -1398,9 +1380,7 @@ export function ProgramsTodosView() {
                 <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
                   Current TODOs
                 </div>
-                <div className="mt-2 text-2xl font-semibold">
-                  {snapshot?.currentTodos.length ?? 0}
-                </div>
+                <div className="mt-2 text-2xl font-semibold">{currentTodoByProgramId.size}</div>
               </div>
               <div className="rounded-xl border border-border/70 bg-background/70 p-3">
                 <div className="text-[11px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
@@ -1410,7 +1390,7 @@ export function ProgramsTodosView() {
               </div>
             </CardPanel>
             <CardFooter className="border-t bg-muted/20 text-xs text-muted-foreground">
-              SQLite: {snapshot?.dbPath}
+              Control plane: {snapshot?.dbPath ?? "unavailable"}
             </CardFooter>
           </Card>
 

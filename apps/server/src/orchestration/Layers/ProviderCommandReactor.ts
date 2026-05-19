@@ -41,6 +41,7 @@ import {
 import { isAgentsVxappWorktreePath } from "../../extensions/vxapp/agentsVxappAuthorityPaths.ts";
 import {
   requestAgentsVxappApprovalResponse,
+  requestAgentsVxappThreadEventIngest,
   requestAgentsVxappUserInputResponse,
 } from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 
@@ -116,6 +117,30 @@ function mapProviderSessionStatusToOrchestrationStatus(
     default:
       return "ready";
   }
+}
+
+function ownerThreadSessionSetProvenance(
+  occurredAt: string,
+): Readonly<Record<"source" | "eventType" | "occurredAt", string>> {
+  return {
+    source: "t3code-vxapp.provider-command-reactor",
+    eventType: "thread.session-set",
+    occurredAt,
+  };
+}
+
+function buildStoppedOwnerThreadSessionPayload(input: {
+  readonly thread: OrchestrationThread;
+  readonly updatedAt: string;
+}) {
+  return {
+    status: "stopped" as const,
+    providerName: input.thread.session?.providerName ?? null,
+    runtimeMode: input.thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+    activeTurnId: null,
+    lastError: input.thread.session?.lastError ?? null,
+    updatedAt: input.updatedAt,
+  };
 }
 
 const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
@@ -293,7 +318,8 @@ const make = Effect.gen(function* () {
       | "provider.turn.interrupt.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
-      | "provider.session.stop.failed";
+      | "provider.session.stop.failed"
+      | "provider.thread.status.sync.failed";
     readonly summary: string;
     readonly detail: string;
     readonly turnId: TurnId | null;
@@ -504,6 +530,7 @@ const make = Effect.gen(function* () {
         requestedModelSelection !== undefined &&
         requestedModelSelection.provider !== currentProvider;
       const activeSession = yield* resolveActiveSession(existingSessionThreadId);
+      const cwdChanged = effectiveCwd !== activeSession?.cwd;
       const sessionModelSwitch =
         currentProvider === undefined
           ? "in-session"
@@ -520,6 +547,7 @@ const make = Effect.gen(function* () {
 
       if (
         !runtimeModeChanged &&
+        !cwdChanged &&
         !providerChanged &&
         !shouldRestartForModelChange &&
         !shouldRestartForModelSelectionChange
@@ -539,6 +567,9 @@ const make = Effect.gen(function* () {
         currentRuntimeMode: thread.session?.runtimeMode,
         desiredRuntimeMode: thread.runtimeMode,
         runtimeModeChanged,
+        previousCwd: activeSession?.cwd,
+        desiredCwd: effectiveCwd,
+        cwdChanged,
         providerChanged,
         modelChanged,
         shouldRestartForModelChange,
@@ -554,6 +585,7 @@ const make = Effect.gen(function* () {
         restartedSessionThreadId: restartedSession.threadId,
         provider: restartedSession.provider,
         runtimeMode: restartedSession.runtimeMode,
+        cwd: restartedSession.cwd,
       });
       yield* bindSessionToThread(restartedSession);
       return restartedSession.threadId;
@@ -1112,6 +1144,31 @@ const make = Effect.gen(function* () {
       }),
       createdAt: now,
     });
+    if (isAgentsVxappWorktreePath(thread.worktreePath, worktreeAuthority)) {
+      yield* Effect.tryPromise({
+        try: () =>
+          requestAgentsVxappThreadEventIngest({
+            threadId: thread.id,
+            session: buildStoppedOwnerThreadSessionPayload({
+              thread,
+              updatedAt: now,
+            }),
+            ownerProvenance: ownerThreadSessionSetProvenance(now),
+          }),
+        catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+      }).pipe(
+        Effect.catchTag("OwnerCommandFailure", (error) =>
+          appendProviderFailureActivity({
+            threadId: thread.id,
+            kind: "provider.thread.status.sync.failed",
+            summary: "Provider thread session sync failed",
+            detail: error.detail,
+            turnId: null,
+            createdAt: now,
+          }),
+        ),
+      );
+    }
     sessionBoundaryFences.delete(thread.id);
   });
 
@@ -1146,6 +1203,31 @@ const make = Effect.gen(function* () {
         }),
         createdAt: archivedAt,
       });
+      if (isAgentsVxappWorktreePath(thread.worktreePath, worktreeAuthority)) {
+        yield* Effect.tryPromise({
+          try: () =>
+            requestAgentsVxappThreadEventIngest({
+              threadId: thread.id,
+              session: buildStoppedOwnerThreadSessionPayload({
+                thread,
+                updatedAt: archivedAt,
+              }),
+              ownerProvenance: ownerThreadSessionSetProvenance(archivedAt),
+            }),
+          catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+        }).pipe(
+          Effect.catchTag("OwnerCommandFailure", (error) =>
+            appendProviderFailureActivity({
+              threadId: thread.id,
+              kind: "provider.thread.status.sync.failed",
+              summary: "Provider thread session sync failed",
+              detail: error.detail,
+              turnId: null,
+              createdAt: archivedAt,
+            }),
+          ),
+        );
+      }
     }
 
     yield* providerSessionDirectory.remove(event.payload.threadId);

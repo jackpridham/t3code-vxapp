@@ -9,6 +9,15 @@ Use this skill when browser UI data crosses the NativeApi/WebSocket boundary.
 
 The shape is: contracts define schemas and NativeApi types; the server routes WebSocket methods; the web app calls NativeApi from React Query query functions.
 
+When the RPC is an `agents-vxapp` authority surface, preserve the owner-backed
+shape across contracts, server, and web. Do not patch missing fields by joining
+local browser state into the component.
+
+For VX program/sidebar/notification/attention/wake semantic reads, the browser
+boundary is the centralized `agentsVxappStore`, not 10+ per-component React
+Query hooks. Use React Query for mutations and lazy detail fetches; use the
+owner store for shared semantic authority.
+
 ## Primary Files
 
 Contracts:
@@ -28,6 +37,8 @@ Web:
 
 - `apps/web/src/wsNativeApi.ts`
 - `apps/web/src/nativeApi.ts`
+- `apps/web/src/agentsVxappStore.ts`
+- `apps/web/src/lib/agentsVxappStoreBridge.ts`
 - `apps/web/src/lib/*ReactQuery.ts`
 - consuming components under `apps/web/src/components`
 
@@ -42,8 +53,11 @@ When adding a new RPC:
 5. Implement or extend the server service/layer.
 6. Route the method in `apps/server/src/wsServer.ts`.
 7. Add the browser mapping in `apps/web/src/wsNativeApi.ts`.
-8. Add React Query query options in `apps/web/src/lib/*ReactQuery.ts`.
-9. Use those query options from components.
+8. Add React Query query options in `apps/web/src/lib/*ReactQuery.ts` when the
+   surface is actually query-owned.
+9. For shared `agents-vxapp` semantic authority reads, wire the result through
+   `agentsVxappStoreBridge.ts` and `agentsVxappStore.ts`.
+10. Consume store selectors from components.
 
 Do not call transport methods directly from components.
 
@@ -112,6 +126,11 @@ Use distinct query keys:
 ["artifacts", targetId, includeArchived ? "withArchived" : "active"];
 ```
 
+For owner-backed runtime or authority reads, the same rule applies to
+authoritative identity inputs. If the owner contract distinguishes worker
+runtime by `workspace`, include that `workspace` in both the request and the
+query key.
+
 ## Cache Boundary Rules
 
 - Server command output shared across clients belongs in server-side TTL cache if expensive.
@@ -128,6 +147,23 @@ When the same endpoint can return active-only and archived-inclusive data, keep 
 - Keep transient UI state local unless it is a real setting.
 - Fall back from preloaded/local data to RPC data when possible.
 - Render clear loading, empty, and error states.
+
+For vxapp-backed Program/TODO/notification/attention/open-wake UI:
+
+- preserve the owner-backed surface across contracts, server, store bridge, and
+  selectors
+- keep one semantic authority fetch in the centralized `agentsVxappStore`
+- do not mount deprecated `getAgentsVxappSidebarGraph` or
+  `getAgentsVxappControlPlaneSnapshot` reads for VX semantic truth
+- do not allocate unstable arrays or sorted copies inside Zustand selectors;
+  derive them after selection or in memoized store normalization
+
+For worker/agent runtime detail UI:
+
+- split worker and agent runtime helpers by target kind rather than overloading
+  a single endpoint
+- use React Query for lazy runtime detail fetches keyed by authoritative
+  identity inputs like `workspace` and `threadId`
 
 For direct detail URLs, do not depend only on preloaded list data. If the cache misses, fetch the server list before showing not-found.
 

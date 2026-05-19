@@ -14,35 +14,49 @@ const mockedWorkerSnapshot = vi.mocked(fetchAgentsVxappWorkerRuntimeSnapshot);
 
 const ownerWorkerSnapshot = {
   threadId: ThreadId.makeUnsafe("thread-worker"),
-  worktreePath: "/tmp/owner-worktree",
+  runtimeKind: "worker-contract" as const,
+  agentKind: "worker" as const,
+  workspace: "/tmp/owner-worktree",
+  availability: "inspectable" as const,
+  reasonCode: null,
   runtimeDir: "/tmp/owner-worktree/.agents/runtime",
+  runtimeRoot: "/tmp/owner-worktree/.agents",
+  stateRoot: "/tmp/owner-worktree",
+  workspaceResolution: "thread-worktree" as const,
   sourceFiles: {
     contextPlan: {
-      fileName: "context-plan.json",
-      absolutePath: "/tmp/owner-worktree/.agents/runtime/context-plan.json",
       status: "loaded",
-      detail: null,
+      failureCode: null,
+      failureMessage: null,
     },
     dispatchContract: {
-      fileName: "dispatch-contract.json",
-      absolutePath: "/tmp/owner-worktree/.agents/runtime/dispatch-contract.json",
       status: "loaded",
-      detail: null,
+      failureCode: null,
+      failureMessage: null,
     },
     installedPacks: {
-      fileName: "installed-packs.json",
-      absolutePath: "/tmp/owner-worktree/.agents/runtime/installed-packs.json",
       status: "loaded",
-      detail: null,
-    },
-    instructionStackAudit: {
-      fileName: "instruction-stack-audit.json",
-      absolutePath: "/tmp/owner-worktree/.agents/runtime/instruction-stack-audit.json",
-      status: "loaded",
-      detail: null,
+      failureCode: null,
+      failureMessage: null,
     },
   },
-  summary: {
+  audit: {
+    schema_version: "1.0.0",
+    repo: "owner-repo",
+    taskClass: "owner-task-class",
+    contextMode: "owner-context-mode",
+    closeoutAuthority: "owner-closeout-authority",
+    workspace: "/tmp/owner-worktree",
+    runtimeDir: "/tmp/owner-worktree/.agents/runtime",
+    skillsDir: null,
+    agentsSkillsDir: null,
+    instructionStackStatus: "clean",
+    packAuditStatus: "clean",
+    status: "clean",
+    issues: [],
+  },
+  contextPlan: {
+    schema_version: "1.0.0",
     repo: "owner-repo",
     taskClass: "owner-task-class",
     contextMode: "owner-context-mode",
@@ -53,26 +67,54 @@ const ownerWorkerSnapshot = {
     forbiddenCapabilities: [],
     conflicts: [],
     warnings: [],
-    repoClaude: null,
-    legacyGlobalSkills: null,
     workspace: "/tmp/owner-worktree",
     runtimeDir: "/tmp/owner-worktree/.agents/runtime",
     skillsDir: null,
     agentsSkillsDir: null,
-    auditStatus: "clean",
-    auditFindings: [],
-    packAuditStatus: null,
-    packAuditIssueCount: 0,
-    packCount: 0,
+    repoClaude: null,
+    legacyGlobalSkills: false,
   },
-  packs: [],
-  raw: {
-    contextPlan: null,
-    dispatchContract: null,
-    installedPacks: null,
-    instructionStackAudit: null,
+  dispatchContract: {
+    schema_version: "1.0.0",
+    repo: "owner-repo",
+    taskClass: "owner-task-class",
+    contextMode: "owner-context-mode",
+    closeoutAuthority: "owner-closeout-authority",
+    validationProfile: null,
+    selectedPacks: [],
+    allowedCapabilities: [],
+    forbiddenCapabilities: [],
+    conflicts: [],
+    warnings: [],
+    workspace: "/tmp/owner-worktree",
+    runtimeFiles: {},
   },
-};
+  installedPacks: {
+    schema_version: "1.0.0",
+    repo: "owner-repo",
+    taskClass: "owner-task-class",
+    contextMode: "owner-context-mode",
+    closeoutAuthority: "owner-closeout-authority",
+    workspace: "/tmp/owner-worktree",
+    runtimeDir: "/tmp/owner-worktree/.agents/runtime",
+    skillsDir: null,
+    agentsSkillsDir: null,
+    packs: [],
+  },
+  instructionStack: {
+    schema_version: "1.0.0",
+    repo: "owner-repo",
+    taskClass: "owner-task-class",
+    contextMode: "owner-context-mode",
+    closeoutAuthority: "owner-closeout-authority",
+    workspace: "/tmp/owner-worktree",
+    status: "clean",
+    findings: [],
+    packAudit: {},
+  },
+  findings: [],
+  issues: [],
+} as const;
 
 afterEach(() => {
   mockedWorkerSnapshot.mockReset();
@@ -85,14 +127,18 @@ describe("WorkerRuntimeLive", () => {
     const snapshot = await Effect.runPromise(
       Effect.gen(function* () {
         const workerRuntime = yield* WorkerRuntime;
-        return yield* workerRuntime.getSnapshot({ threadId: ThreadId.makeUnsafe("thread-worker") });
+        return yield* workerRuntime.getSnapshot({
+          threadId: ThreadId.makeUnsafe("thread-worker"),
+          workspace: "/tmp/owner-worktree",
+        });
       }).pipe(Effect.provide(WorkerRuntimeLive)),
     );
 
     expect(mockedWorkerSnapshot).toHaveBeenCalledWith({
       threadId: ThreadId.makeUnsafe("thread-worker"),
+      workspace: "/tmp/owner-worktree",
     });
-    expect(snapshot.summary.repo).toBe("owner-repo");
-    expect(snapshot.worktreePath).toBe("/tmp/owner-worktree");
+    expect(snapshot.contextPlan?.repo).toBe("owner-repo");
+    expect(snapshot.workspace).toBe("/tmp/owner-worktree");
   });
 });

@@ -1,5 +1,10 @@
 import { Schema, SchemaTransformation } from "effect";
-import { AgentsVxappMutationResult } from "./agentsVxappAuthority";
+import {
+  AgentsVxappDisplayDescriptor,
+  AgentsVxappMutationResult,
+  AgentsVxappSidebarAuthorityDiagnostic,
+  AgentsVxappSidebarAuthorityRuntimeTarget,
+} from "./agentsVxappAuthority";
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
 import { GetAgentRuntimeSnapshotInput, GetAgentRuntimeSnapshotResult } from "./agentRuntime";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
@@ -401,6 +406,58 @@ export const ServerGetAgentsVxappControlPlaneSnapshotResult = Schema.Struct({
 });
 export type ServerGetAgentsVxappControlPlaneSnapshotResult =
   typeof ServerGetAgentsVxappControlPlaneSnapshotResult.Type;
+
+export const ServerAgentsVxappSidebarAuthorityProgramCard = Schema.Struct({
+  program: ServerAgentsVxappProgramSnapshot,
+  display: Schema.NullOr(AgentsVxappDisplayDescriptor).pipe(Schema.withDecodingDefault(() => null)),
+  currentTodo: Schema.NullOr(ServerAgentsVxappTodoSnapshot).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  executive: Schema.NullOr(AgentsVxappSidebarAuthorityRuntimeTarget).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  orchestrator: Schema.NullOr(AgentsVxappSidebarAuthorityRuntimeTarget).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  workers: Schema.Array(AgentsVxappSidebarAuthorityRuntimeTarget).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  notifications: Schema.Array(ServerAgentsVxappSidebarProgramNotification).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  attentionItems: Schema.Array(ServerAgentsVxappSidebarAttentionItem).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  openWakes: Schema.Array(ServerAgentsVxappSidebarWake).pipe(Schema.withDecodingDefault(() => [])),
+  watchProjection: Schema.NullOr(ServerAgentsVxappSidebarWatchProjection).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  activeAllocations: Schema.Array(JsonRecord).pipe(Schema.withDecodingDefault(() => [])),
+  ownerDiagnostics: Schema.Array(AgentsVxappSidebarAuthorityDiagnostic).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+});
+export type ServerAgentsVxappSidebarAuthorityProgramCard =
+  typeof ServerAgentsVxappSidebarAuthorityProgramCard.Type;
+
+export const ServerGetAgentsVxappSidebarAuthoritySnapshotInput = Schema.Struct({});
+export type ServerGetAgentsVxappSidebarAuthoritySnapshotInput =
+  typeof ServerGetAgentsVxappSidebarAuthoritySnapshotInput.Type;
+
+export const ServerGetAgentsVxappSidebarAuthoritySnapshotResult = Schema.Struct({
+  programs: Schema.Array(ServerAgentsVxappSidebarAuthorityProgramCard).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  todos: Schema.Array(ServerAgentsVxappTodoSnapshot).pipe(Schema.withDecodingDefault(() => [])),
+  currentTodos: Schema.Array(ServerAgentsVxappCurrentTodoProjection).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  ownerDiagnostics: Schema.Array(AgentsVxappSidebarAuthorityDiagnostic).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+});
+export type ServerGetAgentsVxappSidebarAuthoritySnapshotResult =
+  typeof ServerGetAgentsVxappSidebarAuthoritySnapshotResult.Type;
 
 export const ServerAgentsVxappTodoPlanLinkInput = Schema.Struct({
   repo: TrimmedNonEmptyString,

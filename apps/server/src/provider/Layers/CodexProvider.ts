@@ -22,6 +22,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
+  AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
@@ -291,14 +292,12 @@ export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
   Effect.orElseSucceed(() => false),
 );
 
-const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
-
 const probeCodexCapabilities = (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
 }) =>
   Effect.tryPromise((signal) => probeCodexAccount({ ...input, signal })).pipe(
-    Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
+    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
     Effect.result,
     Effect.map((result) => {
       if (Result.isFailure(result)) return undefined;
@@ -454,7 +453,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const authProbe = yield* runCodexCommand(["login", "status"]).pipe(
-    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
     Effect.result,
   );
   const account = resolveAccount

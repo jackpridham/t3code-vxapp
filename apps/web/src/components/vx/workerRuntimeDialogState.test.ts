@@ -9,36 +9,49 @@ function makeSnapshot(
 ): ServerGetWorkerRuntimeSnapshotResult {
   return {
     threadId,
-    worktreePath: "/fixtures/worktrees/worker-thread",
+    runtimeKind: "worker-contract",
+    agentKind: "worker",
+    workspace: "/fixtures/worktrees/worker-thread",
+    availability: "inspectable",
+    reasonCode: null,
     runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
+    runtimeRoot: "/fixtures/worktrees/worker-thread/.agents",
+    stateRoot: "/fixtures/worktrees/worker-thread",
+    workspaceResolution: "thread-worktree",
     sourceFiles: {
       contextPlan: {
-        absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/context-plan.json",
-        detail: null,
-        fileName: "context-plan.json",
         status: "loaded",
+        failureCode: null,
+        failureMessage: null,
       },
       dispatchContract: {
-        absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/dispatch-contract.json",
-        detail: null,
-        fileName: "dispatch-contract.json",
         status: "loaded",
+        failureCode: null,
+        failureMessage: null,
       },
       installedPacks: {
-        absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/installed-packs.json",
-        detail: null,
-        fileName: "installed-packs.json",
         status: "loaded",
-      },
-      instructionStackAudit: {
-        absolutePath:
-          "/fixtures/worktrees/worker-thread/.agents/runtime/instruction-stack-audit.json",
-        detail: null,
-        fileName: "instruction-stack-audit.json",
-        status: "loaded",
+        failureCode: null,
+        failureMessage: null,
       },
     },
-    summary: {
+    audit: {
+      schema_version: "1.0.0",
+      repo: "api-vxapp",
+      taskClass: "source-editing-implementation",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      workspace: "/fixtures/worktrees/worker-thread",
+      runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
+      skillsDir: null,
+      agentsSkillsDir: null,
+      instructionStackStatus: "clean",
+      packAuditStatus: "clean",
+      status: "clean",
+      issues: [],
+    },
+    contextPlan: {
+      schema_version: "1.0.0",
       repo: "api-vxapp",
       taskClass: "source-editing-implementation",
       contextMode: "isolated",
@@ -49,83 +62,94 @@ function makeSnapshot(
       forbiddenCapabilities: [],
       conflicts: [],
       warnings: [],
-      repoClaude: null,
-      legacyGlobalSkills: false,
       workspace: "/fixtures/worktrees/worker-thread",
       runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
       skillsDir: null,
       agentsSkillsDir: null,
-      auditStatus: "clean",
-      auditFindings: [],
-      packAuditStatus: null,
-      packAuditIssueCount: 0,
-      packCount: 0,
+      repoClaude: null,
+      legacyGlobalSkills: false,
     },
-    packs: [],
-    raw: {
-      contextPlan: null,
-      dispatchContract: null,
-      installedPacks: null,
-      instructionStackAudit: null,
+    dispatchContract: {
+      schema_version: "1.0.0",
+      repo: "api-vxapp",
+      taskClass: "source-editing-implementation",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      validationProfile: null,
+      selectedPacks: [],
+      allowedCapabilities: [],
+      forbiddenCapabilities: [],
+      conflicts: [],
+      warnings: [],
+      workspace: "/fixtures/worktrees/worker-thread",
+      runtimeFiles: {},
     },
+    installedPacks: {
+      schema_version: "1.0.0",
+      repo: "api-vxapp",
+      taskClass: "source-editing-implementation",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      workspace: "/fixtures/worktrees/worker-thread",
+      runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
+      skillsDir: null,
+      agentsSkillsDir: null,
+      packs: [],
+    },
+    instructionStack: {
+      schema_version: "1.0.0",
+      repo: "api-vxapp",
+      taskClass: "source-editing-implementation",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      workspace: "/fixtures/worktrees/worker-thread",
+      status: "clean",
+      findings: [],
+      packAudit: {},
+    },
+    findings: [],
+    issues: [],
     ...overrides,
   };
 }
 
 describe("deriveWorkerRuntimeDialogState", () => {
-  it("surfaces worker-unavailable detail when all runtime files are missing", () => {
-    const state = deriveWorkerRuntimeDialogState({
-      data: makeSnapshot({
-        sourceFiles: {
-          contextPlan: {
-            absolutePath: "runtime-unavailable/context-plan.json",
-            detail: "Worker thread 'worker-thread' has no worktree path yet.",
-            fileName: "context-plan.json",
-            status: "missing",
-          },
-          dispatchContract: {
-            absolutePath: "runtime-unavailable/dispatch-contract.json",
-            detail: "Worker thread 'worker-thread' has no worktree path yet.",
-            fileName: "dispatch-contract.json",
-            status: "missing",
-          },
-          installedPacks: {
-            absolutePath: "runtime-unavailable/installed-packs.json",
-            detail: "Worker thread 'worker-thread' has no worktree path yet.",
-            fileName: "installed-packs.json",
-            status: "missing",
-          },
-          instructionStackAudit: {
-            absolutePath: "runtime-unavailable/instruction-stack-audit.json",
-            detail: "Worker thread 'worker-thread' has no worktree path yet.",
-            fileName: "instruction-stack-audit.json",
-            status: "missing",
-          },
-        },
+  it("treats loaded runtime snapshots as ready", () => {
+    expect(
+      deriveWorkerRuntimeDialogState({
+        data: makeSnapshot(),
+        error: null,
+        isError: false,
+        isLoading: false,
+        threadId,
+        unavailableHint: null,
       }),
-      error: null,
-      isError: false,
-      isLoading: false,
-      threadId,
-    });
-
-    expect(state).toEqual({
+    ).toEqual({
       mode: "ready",
       message: null,
     });
   });
 
-  it("surfaces invalid runtime file detail", () => {
+  it("surfaces owner degraded responses instead of transport errors", () => {
     const state = deriveWorkerRuntimeDialogState({
       data: makeSnapshot({
+        availability: "degraded",
+        reasonCode: "runtime_files_missing",
         sourceFiles: {
-          ...makeSnapshot().sourceFiles,
+          contextPlan: {
+            status: "missing",
+            failureCode: "missing_runtime_file",
+            failureMessage: "Required runtime input is missing.",
+          },
           dispatchContract: {
-            absolutePath:
-              "/fixtures/worktrees/worker-thread/.agents/runtime/dispatch-contract.json",
-            detail: "Schema validation failed.",
-            fileName: "dispatch-contract.json",
-            status: "schema-error",
+            status: "missing",
+            failureCode: "missing_runtime_file",
+            failureMessage: "Required runtime input is missing.",
+          },
+          installedPacks: {
+            status: "missing",
+            failureCode: "missing_runtime_file",
+            failureMessage: "Required runtime input is missing.",
           },
         },
       }),
@@ -136,8 +160,8 @@ describe("deriveWorkerRuntimeDialogState", () => {
     });
 
     expect(state).toEqual({
-      mode: "ready",
-      message: null,
+      mode: "degraded",
+      message: "Runtime files are missing.",
     });
   });
 
@@ -180,22 +204,6 @@ describe("deriveWorkerRuntimeDialogState", () => {
       mode: "stale-lineage",
       message:
         "This worker row is only present in fallback sqlite lineage data and is unavailable in the current T3 projection.",
-    });
-  });
-
-  it("returns ready when runtime files are available", () => {
-    expect(
-      deriveWorkerRuntimeDialogState({
-        data: makeSnapshot(),
-        error: null,
-        isError: false,
-        isLoading: false,
-        threadId,
-        unavailableHint: null,
-      }),
-    ).toEqual({
-      mode: "ready",
-      message: null,
     });
   });
 });

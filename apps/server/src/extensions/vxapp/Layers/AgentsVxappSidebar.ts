@@ -17,10 +17,15 @@ import {
   type AgentsVxappSidebarOwnerGraphSnapshot,
   type AgentsVxappSidebarShape,
 } from "../Services/AgentsVxappSidebar.ts";
-import { fetchAgentsVxappSidebarGraphSnapshot } from "../agentsVxappOwnerClient.ts";
+import {
+  fetchAgentsVxappSidebarAuthoritySnapshot,
+  fetchAgentsVxappSidebarGraphSnapshot,
+  AgentsVxappOwnerClientError,
+} from "../agentsVxappOwnerClient.ts";
 
 const ProjectionProjectIdRow = Schema.Struct({ projectId: ProjectId });
 const ProjectionThreadIdRow = Schema.Struct({ threadId: ThreadId });
+const isAgentsVxappSidebarError = Schema.is(AgentsVxappSidebarError);
 
 function buildMirrorDiagnostics(input: {
   graph: AgentsVxappSidebarOwnerGraphSnapshot;
@@ -85,42 +90,51 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
       `,
   });
 
+  function mapSidebarError(message: string, cause: unknown): AgentsVxappSidebarError {
+    if (isAgentsVxappSidebarError(cause)) {
+      return cause;
+    }
+    if (cause instanceof AgentsVxappOwnerClientError) {
+      return new AgentsVxappSidebarError({
+        message,
+        ownerCommand: cause.ownerCommand,
+        authoritySurface: cause.authoritySurface,
+        ownerErrorCode: cause.ownerErrorCode,
+      });
+    }
+    return new AgentsVxappSidebarError({ message });
+  }
+
   const getGraph: AgentsVxappSidebarShape["getGraph"] = () =>
     Effect.gen(function* () {
       const graph = yield* Effect.tryPromise({
         try: () => fetchAgentsVxappSidebarGraphSnapshot(),
         catch: (error) =>
-          new AgentsVxappSidebarError({
-            message:
-              error instanceof Error
-                ? error.message
-                : "Failed to fetch vxapp sidebar owner snapshot.",
-          }),
+          mapSidebarError(
+            error instanceof Error
+              ? error.message
+              : "Failed to fetch vxapp sidebar owner snapshot.",
+            error,
+          ),
       });
 
       const [projectionProjectRows, projectionThreadRows] = yield* Effect.all([
         listProjectionProjectIds(undefined),
         listProjectionThreadIds(undefined),
       ]).pipe(
-        Effect.mapError(
-          (error) =>
-            new AgentsVxappSidebarError({
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Failed to query mirrored T3 projection tables.",
-            }),
+        Effect.mapError((error) =>
+          mapSidebarError(
+            error instanceof Error
+              ? error.message
+              : "Failed to query mirrored T3 projection tables.",
+            error,
+          ),
         ),
       );
 
       const externalRoleIndex = yield* externalRoleAuthority.getSnapshot().pipe(
         Effect.map(buildExternalRoleAuthorityIndex),
-        Effect.mapError(
-          (error) =>
-            new AgentsVxappSidebarError({
-              message: error.detail,
-            }),
-        ),
+        Effect.mapError((error) => mapSidebarError(error.detail, error)),
       );
 
       return {
@@ -141,8 +155,21 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
       } satisfies ServerGetAgentsVxappSidebarGraphResult;
     });
 
+  const getAuthoritySnapshot: AgentsVxappSidebarShape["getAuthoritySnapshot"] = () =>
+    Effect.tryPromise({
+      try: () => fetchAgentsVxappSidebarAuthoritySnapshot(),
+      catch: (error) =>
+        mapSidebarError(
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch vxapp sidebar authority owner snapshot.",
+          error,
+        ),
+    });
+
   return {
     getGraph,
+    getAuthoritySnapshot,
   } satisfies AgentsVxappSidebarShape;
 });
 

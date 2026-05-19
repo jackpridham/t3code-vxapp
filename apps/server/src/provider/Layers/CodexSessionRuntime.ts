@@ -48,7 +48,9 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "no such thread",
   "unknown thread",
   "does not exist",
+  "no rollout found",
 ];
+const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
 
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
@@ -714,6 +716,7 @@ export const makeCodexSessionRuntime = (
           ...(options.homePath
             ? { env: { ...process.env, CODEX_HOME: expandHomePath(options.homePath) } }
             : {}),
+          forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
           shell: process.platform === "win32",
         }),
       )

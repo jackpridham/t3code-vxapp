@@ -1,9 +1,12 @@
-import type { OrchestratorWakeItem } from "@t3tools/contracts";
+import type {
+  ServerAgentsVxappSidebarProgramNotification,
+  ServerAgentsVxappSidebarWake,
+} from "@t3tools/contracts";
 import { BellRingIcon, ChevronDownIcon, FlaskConicalIcon, ListTodoIcon } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 
 import { readNativeApi } from "~/nativeApi";
-import type { ProgramNotification, Project, Thread } from "../../types";
+import type { Project, Thread } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
@@ -19,18 +22,12 @@ import {
   type DevProgramTarget,
 } from "./devOrchestrationMenu";
 
-function formatWakeStateLabel(state: OrchestratorWakeItem["state"]): string {
+function formatWakeStateLabel(state: string): string {
   switch (state) {
     case "pending":
       return "pending";
     case "delivering":
       return "delivering";
-    case "delivered":
-      return "delivered";
-    case "consumed":
-      return "consumed";
-    case "dropped":
-      return "dropped";
     default:
       return state;
   }
@@ -46,14 +43,14 @@ export function DevOrchestrationMenu({
   programTargets,
   orchestratorTargets,
   programNotifications,
-  orchestratorWakeItems,
+  openWakes,
 }: {
   activeThread: Thread | undefined;
   activeProject: Project | undefined;
   programTargets: readonly DevProgramTarget[];
   orchestratorTargets: readonly DevOrchestratorTarget[];
-  programNotifications: readonly ProgramNotification[];
-  orchestratorWakeItems: readonly OrchestratorWakeItem[];
+  programNotifications: readonly ServerAgentsVxappSidebarProgramNotification[];
+  openWakes: readonly ServerAgentsVxappSidebarWake[];
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -71,10 +68,13 @@ export function DevOrchestrationMenu({
   const relevantNotifications = useMemo(
     () =>
       programNotifications
-        .filter((notification) => relevantProgramIds.has(notification.programId))
+        .filter(
+          (notification) =>
+            notification.programId !== null && relevantProgramIds.has(notification.programId),
+        )
         .toSorted(
           (left, right) =>
-            right.queuedAt.localeCompare(left.queuedAt) ||
+            (right.queuedAt ?? "").localeCompare(left.queuedAt ?? "") ||
             right.notificationId.localeCompare(left.notificationId),
         )
         .slice(0, 6),
@@ -82,14 +82,15 @@ export function DevOrchestrationMenu({
   );
   const relevantWakeItems = useMemo(
     () =>
-      orchestratorWakeItems
+      openWakes
         .filter((wakeItem) => relevantOrchestratorThreadIds.has(wakeItem.orchestratorThreadId))
         .toSorted(
           (left, right) =>
-            right.queuedAt.localeCompare(left.queuedAt) || right.wakeId.localeCompare(left.wakeId),
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            right.wakeId.localeCompare(left.wakeId),
         )
         .slice(0, 6),
-    [orchestratorWakeItems, relevantOrchestratorThreadIds],
+    [openWakes, relevantOrchestratorThreadIds],
   );
 
   if (!activeThread) {
@@ -389,13 +390,15 @@ export function DevOrchestrationMenu({
                           className="rounded border border-border/60 bg-background/60 px-2 py-1.5"
                         >
                           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-foreground">
-                            <span className="font-medium">{wakeItem.outcome}</span>
+                            <span className="font-medium">
+                              {wakeItem.programId ?? wakeItem.wakeId}
+                            </span>
                             <Badge variant="outline" className="h-4 px-1 text-[9px]">
                               {formatWakeStateLabel(wakeItem.state)}
                             </Badge>
                           </div>
                           <div className="mt-1 text-[11px] text-muted-foreground">
-                            {wakeItem.summary}
+                            {wakeItem.reason ?? "Owner-backed wake still open."}
                           </div>
                         </div>
                       ))}

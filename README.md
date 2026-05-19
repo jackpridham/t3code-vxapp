@@ -48,7 +48,7 @@ The upstream t3code is a clean browser UI for one assistant at a time. The momen
 This fork is the control plane that makes that loop tractable:
 
 - **Spans repos.** One orchestrator supervises workers checked out in worktrees across every registered repo, each with its own provider session and pack-profile.
-- **Durable.** Everything — commands, events, executive programs, notifications, lineage, wake items, plans, artifacts, checkpoints — is event-sourced in SQLite. Restart the server, close the browser, power-cycle the box: state survives.
+- **Durable.** T3 persists orchestration commands, events, projections, artifacts, and checkpoints locally, while `agents-vxapp` owns the authoritative vxapp-backed Program/TODO/notification/attention/wake/thread/runtime graph. Restart the server, close the browser, power-cycle the box: state survives.
 - **Observable.** The founder/CTO layer can see product-level program decisions and blockers, while Jasper can ask what workers belong to it, what each changed, and which wakes are still pending — without reading terminal scrollback.
 - **Wired into `vx`.** The Vortex CLI drives plans, artifacts, dispatch, worktrees, and deployment directly against the T3 engine via WebSocket RPC.
 - **Skill-pack aware.** Workers dispatched through `vx apps <repo> --agent dispatch` get a materialized `.claude/skills/` directory selected by role + repo + task class + context mode — not a global mirror. Control-state packs such as `vx todo` are mounted only for lanes that need them.
@@ -118,6 +118,12 @@ Three layers, one protocol:
 
 The `vx` CLI treats the T3 server as the authoritative engine — commands (plan updates, artifact writes, worker dispatch) flow through the same RPC the browser uses, so UI and CLI see the same state.
 
+For vxapp-backed executive/runtime surfaces, authority is split intentionally:
+
+- **T3** owns transport, eventing, provider sessions, local projections, and browser rendering.
+- **`agents-vxapp`** owns Program/TODO/notification/attention/wake/thread-selection/runtime truth and exposes that through the owner command family behind `scripts/tools/t3-control-plane-owner`.
+- **T3 UI must not rebuild that owner truth from local browser store state or ad hoc projection joins.**
+
 ---
 
 ## Orchestration Model
@@ -170,20 +176,21 @@ Workers with `spawnRole=worker` but missing authoritative Jasper lineage are sho
 
 The CTO attention layer is a bounded read surface for executive decisions and blockers.
 
-- `ctoAttentionItems` now appears on the orchestration read model and is hydrated by the server, web store, and sidebar.
+- `agents-vxapp` is the authority for vxapp-backed attention, passive notifications, wakes, and current Program/TODO linkage.
+- Legacy orchestration sidebar panels may still read `ctoAttentionItems` and `programNotifications` from the orchestration read model, but VX sidebar/program surfaces should prefer the owner-backed `agents-vxapp` contract.
 - Actionable kinds are `decision_required`, `blocked`, `risk_escalated`, `founder_update_required`, `final_review_ready`, and `program_completed`.
 - Passive kinds stay in `programNotifications`: `worker_started`, `worker_progress`, `worker_completed`, `routine_status`, `test_retry`, `implementation_progress`, and `status_update`.
 - `closeout_ready` remains a legacy alias that maps to `final_review_ready`.
 - CTO attention rows dedupe by `attentionKey`, which is derived from program id, normalized kind, source thread and role, and the best stable correlation token available.
 - Lifecycle states are `required`, `acknowledged`, `resolved`, and `dropped`.
-- Worker wakes remain Jasper-owned `orchestratorWakeItems` and must not be consumed as CTO attention.
+- Worker wakes remain Jasper-owned and must not be consumed as CTO attention.
 
 ### Script Handoff
 
 The scripts follow-up is handled in the separate `enhance/cto-attention-cli-support` plan.
 
-- Scripts should prefer `ctoAttentionItems` for executive attention.
-- `programNotifications` is legacy/passive fallback data for notification-centric UIs.
+- Scripts and VX executive surfaces should prefer owner-backed attention and notification reads.
+- Projection/browser-store `programNotifications` remains legacy/passive data for non-owner-backed notification-centric UIs.
 - T3 workers must not edit `vortex-scripts` for this lane.
 
 ---
@@ -621,6 +628,8 @@ python3 scripts/seed-dev-db.py
 
 The reseed copies a bounded snapshot from `~/.t3/userdata/state.sqlite`, then biases retention toward the current `~/agents-vxapp/.agents/state/vx_agents.sqlite3` control-plane graph so the sidebar and local thread/chat state stay aligned.
 
+This mirror is a local developer convenience, not the semantic source of truth. If the UI still disagrees with `agents-vxapp` after reseeding, fix the owner contract wiring rather than adding more local fallback logic.
+
 ---
 
 ## T3 Native Control Plane — `vx t3`
@@ -677,7 +686,7 @@ This is the panel the orchestrator reads to decide the next dispatch — files c
 
 ## UI Surfaces
 
-- **Orchestration Sidebar** — Jasper session selector, worker counts scoped to the active orchestrator, cross-project worker visibility, wake summaries, two visibility modes (`selected-session` / `project-diagnostic`).
+- **Orchestration Sidebar** — Jasper session selector, worker counts scoped to the active orchestrator, cross-project worker visibility, wake summaries, two visibility modes (`selected-session` / `project-diagnostic`). VX sidebar/program rows should render owner-backed `agents-vxapp` truth for Program, TODO, notification, attention, wake, and runtime state.
 - **Executive/CTO grouping** — CTO executive projects and program-linked work sit above Jasper orchestrators, so founder-level decisions do not look like worker children.
 - **ChatView** — conversation rendering with activity cards, approvals, checkpoint markers, proposed-plan cards, wake notices.
 - **ChangesPanel** — the four tabs above.
@@ -687,7 +696,9 @@ This is the panel the orchestrator reads to decide the next dispatch — files c
 - **TerminalDrawer** — thread-attached PTY with resize/restart/close.
 - **Settings** — providers, model slugs, runtime modes, notifications, archived threads, keybindings, project hooks, project scripts.
 
-The sidebar, program metadata, thread metadata, wake queue, notification list, and projections must agree on what belongs to what — the user should never have to reconstruct a run from memory.
+Worker runtime display is workspace-authoritative. Worker runtime chips and dialogs should use owner-provided runtime targets and `server.getWorkerRuntimeSnapshot`, while executive/orchestrator runtime display should use the owner-backed agent-runtime surface.
+
+The sidebar, program metadata, thread metadata, wake queue, notification list, and owner-backed Program/TODO/runtime surfaces must agree on what belongs to what — the user should never have to reconstruct a run from memory.
 
 ---
 
@@ -716,24 +727,26 @@ SQLite: `~/.t3/userdata/state.sqlite`
 
 ## Repo Map
 
-| Path                 | Role                                                                                                                 |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `apps/server`        | Orchestration engine, event store, projections, reactors, provider adapters, git, terminal, settings, static serving |
-| `apps/web`           | React/Vite UI — chat, executive/sidebar state, changes, artifacts, diffs, terminals, settings                        |
-| `packages/contracts` | Effect Schema protocol — every RPC, push channel, event, and projection shape                                        |
-| `packages/shared`    | Shared runtime utilities (explicit subpath exports, no barrel)                                                       |
-| `scripts`            | Build, release, and maintenance helpers                                                                              |
-| `docs`               | Design notes, specs, implementation checklists                                                                       |
-| `deploy.sh`          | Local build/restart/readiness helper (`--full`, `--build-only`, `--restart-only`, `--status`)                        |
+| Path                 | Role                                                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/server`        | Orchestration engine, event store, projections, vxapp owner bridge, reactors, provider adapters, git, terminal, settings, static serving |
+| `apps/web`           | React/Vite UI — chat, owner-backed executive/sidebar state, changes, artifacts, diffs, terminals, settings                               |
+| `packages/contracts` | Effect Schema protocol — every RPC, push channel, event, projection shape, and owner-backed vxapp transport contract                     |
+| `packages/shared`    | Shared runtime utilities (explicit subpath exports, no barrel)                                                                           |
+| `scripts`            | Build, release, and maintenance helpers                                                                                                  |
+| `docs`               | Design notes, specs, implementation checklists                                                                                           |
+| `deploy.sh`          | Local build/restart/readiness helper (`--full`, `--build-only`, `--restart-only`, `--status`)                                            |
 
 ---
 
 ## Technical Documentation
 
-| Document                                                                                     | Purpose                                                                                                          |
-| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [`@Docs/@TechnicalDocs/t3code-vxapp/README.md`](@Docs/@TechnicalDocs/t3code-vxapp/README.md) | Targeted knowledge-bridge integration notes and current caveats.                                                 |
-| [`docs/`](docs/)                                                                             | Local design notes, specs, and implementation checklists that are not part of the shared `@Docs` knowledge tree. |
+| Document                                                                                                                           | Purpose                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| [`@Docs/@TechnicalDocs/t3code-vxapp/README.md`](@Docs/@TechnicalDocs/t3code-vxapp/README.md)                                       | Index of focused `t3code-vxapp` technical docs for owner-boundary and wake-routing behavior.                       |
+| [`@Docs/@TechnicalDocs/t3code-vxapp/vxapp-owner-boundary.md`](@Docs/@TechnicalDocs/t3code-vxapp/vxapp-owner-boundary.md)           | Owner-client transport, startup-safe versus strict surface selection, and lifecycle mirroring into `agents-vxapp`. |
+| [`@Docs/@TechnicalDocs/t3code-vxapp/orchestrator-wake-reactor.md`](@Docs/@TechnicalDocs/t3code-vxapp/orchestrator-wake-reactor.md) | Worker wake creation, owner wake mutation, direct Jasper delivery, and delivery-settlement behavior.               |
+| [`docs/`](docs/)                                                                                                                   | Local design notes, specs, and implementation checklists that are not part of the shared `@Docs` knowledge tree.   |
 
 The root README is the current high-level architecture source for orchestration, runtime packs, plans, TODO state, artifacts, and T3 server/UI boundaries.
 

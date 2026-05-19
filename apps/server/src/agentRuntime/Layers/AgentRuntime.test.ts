@@ -14,8 +14,10 @@ const mockedAgentSnapshot = vi.mocked(fetchAgentsVxappAgentRuntimeSnapshot);
 
 const ownerAgentSnapshot = {
   threadId: ThreadId.makeUnsafe("thread-agent"),
-  agentKind: "orchestrator",
-  runtimeKind: "role-runtime",
+  agentKind: "orchestrator" as const,
+  runtimeKind: "role-runtime" as const,
+  availability: "inspectable" as const,
+  reasonCode: null,
   workspaceRoot: "/tmp/owner-role-workspace",
   runtimeDir: "/tmp/owner-role-workspace/.agents/runtime",
   workspaceResolution: {
@@ -49,7 +51,7 @@ const ownerAgentSnapshot = {
   roleDetails: {
     selectionReason: "owner-selected",
   },
-};
+} as const;
 
 afterEach(() => {
   mockedAgentSnapshot.mockReset();

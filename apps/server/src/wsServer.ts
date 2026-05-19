@@ -86,10 +86,15 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
 import { makeVxappWsRouteHandlers, type VxappWsRouteHandlerServices } from "./extensions/vxapp";
+import { buildVortexWebSocketErrorResponse } from "./extensions/vxapp/vortexErrorResponse.ts";
 import {
   isProjectLifecycleEvent,
   mirrorProjectLifecycleEvent,
 } from "./extensions/vxapp/projectEventMirror.ts";
+import {
+  isThreadLifecycleEvent,
+  mirrorThreadLifecycleEvent,
+} from "./extensions/vxapp/threadEventMirror.ts";
 import { resolveStartupBootstrapSelection } from "./bootstrapThreadSelection";
 import { AgentRuntime } from "./agentRuntime/Services/AgentRuntime.ts";
 import { WorkerRuntime } from "./workerRuntime/Services/WorkerRuntime.ts";
@@ -117,21 +122,6 @@ export interface ServerShape {
  * Server - Service tag for HTTP/WebSocket lifecycle management.
  */
 export class Server extends ServiceMap.Service<Server, ServerShape>()("t3/wsServer/Server") {}
-
-type ProjectLifecycleCommand = Extract<
-  OrchestrationCommand,
-  { type: "project.create" | "project.meta.update" | "project.delete" }
->;
-
-function isProjectLifecycleCommand(
-  command: OrchestrationCommand,
-): command is ProjectLifecycleCommand {
-  return (
-    command.type === "project.create" ||
-    command.type === "project.meta.update" ||
-    command.type === "project.delete"
-  );
-}
 
 const isServerNotRunningError = (error: Error): boolean => {
   const maybeCode = (error as NodeJS.ErrnoException).code;
@@ -779,9 +769,38 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       Effect.catch((cause) => logProjectLifecycleMirrorFailure(event, cause)),
     );
 
-  yield* Stream.runForEach(
-    orchestrationEngine.readEvents(0, Number.MAX_SAFE_INTEGER),
-    mirrorProjectLifecycleEventBestEffort,
+  const synchronizeThreadLifecycleEvent = (event: OrchestrationEvent) =>
+    !isThreadLifecycleEvent(event)
+      ? Effect.void
+      : Effect.tryPromise({
+          try: () => mirrorThreadLifecycleEvent(event),
+          catch: (cause) =>
+            new ProjectLifecycleMirrorError({
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+        });
+
+  const logThreadLifecycleMirrorFailure = (event: OrchestrationEvent, cause: unknown) =>
+    Effect.sync(() => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      logger.warn("agents-vxapp thread lifecycle mirror failed", {
+        detail: error.message,
+        eventId: event.eventId,
+        eventType: event.type,
+        threadId: event.aggregateKind === "thread" ? event.aggregateId : undefined,
+      });
+    });
+
+  const mirrorThreadLifecycleEventBestEffort = (event: OrchestrationEvent) =>
+    synchronizeThreadLifecycleEvent(event).pipe(
+      Effect.catch((cause) => logThreadLifecycleMirrorFailure(event, cause)),
+    );
+
+  yield* Stream.runForEach(orchestrationEngine.readEvents(0, Number.MAX_SAFE_INTEGER), (event) =>
+    Effect.all([
+      mirrorProjectLifecycleEventBestEffort(event),
+      mirrorThreadLifecycleEventBestEffort(event),
+    ]),
   ).pipe(Effect.forkIn(subscriptionsScope));
 
   yield* Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
@@ -984,14 +1003,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const normalized = yield* normalizeDispatchCommand({ command, mode: "live" });
         const beforeSequence = (yield* orchestrationEngine.getReadModel()).snapshotSequence;
         const result = yield* orchestrationEngine.dispatch(normalized.command);
-        if (isProjectLifecycleCommand(normalized.command)) {
-          const eventCount = Math.max(0, result.sequence - beforeSequence);
-          if (eventCount > 0) {
-            yield* Stream.runForEach(
-              orchestrationEngine.readEvents(beforeSequence, eventCount),
-              mirrorProjectLifecycleEventBestEffort,
-            );
-          }
+        const eventCount = Math.max(0, result.sequence - beforeSequence);
+        if (eventCount > 0) {
+          yield* Stream.runForEach(
+            orchestrationEngine.readEvents(beforeSequence, eventCount),
+            (event) =>
+              Effect.all([
+                mirrorProjectLifecycleEventBestEffort(event),
+                mirrorThreadLifecycleEventBestEffort(event),
+              ]),
+          );
         }
         return result;
       }
@@ -1255,9 +1276,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
     const result = yield* Effect.exit(routeRequest(ws, request.success));
     if (Exit.isFailure(result)) {
+      const failure = Cause.squash(result.cause);
       return yield* sendWsResponse({
         id: request.success.id,
-        error: { message: Cause.pretty(result.cause) },
+        error: buildVortexWebSocketErrorResponse(failure),
       });
     }
 

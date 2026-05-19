@@ -1,14 +1,23 @@
 import type {
+  AgentsVxappRuntimeAvailability,
+  AgentsVxappRuntimeReasonCode,
+  AgentsVxappSidebarAuthorityRuntimeTarget,
   ServerAgentsVxappCurrentTodoProjection,
   OrchestratorWakeItem,
   OrchestrationThreadSummary,
   ServerAgentsVxappProgramSnapshot,
+  ServerAgentsVxappSidebarAuthorityProgramCard,
   ServerAgentsVxappSidebarAttentionItem,
   ServerAgentsVxappSidebarProgramNotification,
   ServerAgentsVxappSidebarThreadLink,
   ServerAgentsVxappSidebarWatchProjection,
+  ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   ServerGetAgentsVxappSidebarGraphResult,
   ThreadId,
+} from "@t3tools/contracts";
+import {
+  AgentsVxappRuntimeAvailabilityValue,
+  AgentsVxappRuntimeReasonCodeValue,
 } from "@t3tools/contracts";
 import { isThreadRuntimeActive } from "../Sidebar.logic";
 import { collapseThreadToCanonicalProject } from "~/lib/orchestrationMode";
@@ -27,6 +36,8 @@ export type SidebarNotificationSection = "attention" | "program-update";
 export type SidebarWorkerWakeState = "pending" | "delivering" | null;
 export type SidebarAgentRuntimeState =
   | "inspectable"
+  | "degraded"
+  | "unavailable"
   | "pending-worktree"
   | "transient"
   | "stale-lineage";
@@ -419,7 +430,28 @@ function normalizeSqliteAttention(
   };
 }
 
+function normalizeAuthorityNotification(
+  notification: ServerAgentsVxappSidebarProgramNotification,
+): SidebarNotificationItem | null {
+  return normalizeSqliteNotification(notification);
+}
+
+function normalizeAuthorityAttention(
+  item: ServerAgentsVxappSidebarAttentionItem,
+): SidebarNotificationItem | null {
+  return normalizeSqliteAttention(item);
+}
+
+function buildAuthorityProgramCardById(
+  authoritySnapshot: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null,
+): Map<string, ServerAgentsVxappSidebarAuthorityProgramCard> {
+  return new Map(
+    (authoritySnapshot?.programs ?? []).map((card) => [card.program.id, card] as const),
+  );
+}
+
 function getNotificationItems(input: {
+  authoritySnapshot: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null;
   ctoAttentionItems: readonly CtoAttentionItem[];
   programNotifications: readonly ProgramNotification[];
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
@@ -433,6 +465,20 @@ function getNotificationItems(input: {
     }
   };
 
+  if (input.authoritySnapshot) {
+    addItems(
+      input.authoritySnapshot.programs.flatMap((card) =>
+        card.attentionItems.map(normalizeAuthorityAttention),
+      ),
+    );
+    addItems(
+      input.authoritySnapshot.programs.flatMap((card) =>
+        card.notifications.map(normalizeAuthorityNotification),
+      ),
+    );
+    return [...mergedById.values()];
+  }
+
   if (hasSqliteGraphSource(input.sqliteGraph)) {
     addItems(input.sqliteGraph.attentionItems.map(normalizeSqliteAttention));
     addItems(input.sqliteGraph.notifications.map(normalizeSqliteNotification));
@@ -445,10 +491,28 @@ function getNotificationItems(input: {
 }
 
 function buildWakeStateByThreadId(input: {
+  authoritySnapshot: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null;
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
   wakeItems: readonly OrchestratorWakeItem[];
 }): Map<string, SidebarWorkerWakeState> {
   const stateByThreadId = new Map<string, SidebarWorkerWakeState>();
+
+  if (input.authoritySnapshot) {
+    for (const wake of input.authoritySnapshot.programs.flatMap((card) => card.openWakes)) {
+      const workerThreadId = wake.payload?.workerThreadId;
+      if (typeof workerThreadId !== "string") {
+        continue;
+      }
+      if (wake.state === "delivering") {
+        stateByThreadId.set(workerThreadId, "delivering");
+        continue;
+      }
+      if (!stateByThreadId.has(workerThreadId)) {
+        stateByThreadId.set(workerThreadId, "pending");
+      }
+    }
+    return stateByThreadId;
+  }
 
   if (hasSqliteGraphSource(input.sqliteGraph)) {
     for (const wake of input.sqliteGraph.openWakes) {
@@ -829,13 +893,72 @@ function isTransientWorkerThread(
   return sessionLooksDormant && latestTurnState === null;
 }
 
+function describeRuntimeReasonCode(
+  reasonCode: AgentsVxappRuntimeReasonCode | null,
+  fallbackLabel: string,
+): string {
+  switch (reasonCode) {
+    case AgentsVxappRuntimeReasonCodeValue.RuntimeFilesMissing:
+      return `Runtime files are missing for this ${fallbackLabel}.`;
+    case AgentsVxappRuntimeReasonCodeValue.RuntimePayloadInvalid:
+      return `Runtime payload is invalid for this ${fallbackLabel}.`;
+    case AgentsVxappRuntimeReasonCodeValue.RuntimeAuthorityMissing:
+      return `Runtime authority is missing for this ${fallbackLabel}.`;
+    default:
+      return `Runtime details are unavailable for this ${fallbackLabel}.`;
+  }
+}
+
+function runtimeStateFromAvailability(
+  availability: AgentsVxappRuntimeAvailability,
+): SidebarAgentRuntimeState {
+  switch (availability) {
+    case AgentsVxappRuntimeAvailabilityValue.Inspectable:
+      return "inspectable";
+    case AgentsVxappRuntimeAvailabilityValue.Degraded:
+      return "degraded";
+    case AgentsVxappRuntimeAvailabilityValue.Unavailable:
+      return "unavailable";
+  }
+}
+
+function classifyRuntimeTarget(input: {
+  label: string;
+  runtimeTarget: AgentsVxappSidebarAuthorityRuntimeTarget;
+}): SidebarRuntimeMetadata {
+  const runtimeState = runtimeStateFromAvailability(input.runtimeTarget.availability);
+  return {
+    runtimeState,
+    runtimeStateMessage:
+      runtimeState === "inspectable"
+        ? null
+        : describeRuntimeReasonCode(input.runtimeTarget.reasonCode, input.label),
+    worktreePathHint: input.runtimeTarget.workspace ?? null,
+  };
+}
+
 function classifyWorkerRuntime(input: {
+  authoritativeOwnerRequired?: boolean;
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   label: string;
   projectById: ReadonlyMap<string, Project>;
+  runtimeTarget: AgentsVxappSidebarAuthorityRuntimeTarget | null;
   sessionThread?: SidebarWorkerAuthoritySummary | null;
   thread: SidebarWorkerAuthorityThread | null;
 }): SidebarRuntimeMetadata {
+  if (input.runtimeTarget) {
+    return classifyRuntimeTarget({
+      label: input.label,
+      runtimeTarget: input.runtimeTarget,
+    });
+  }
+  if (input.authoritativeOwnerRequired) {
+    return {
+      runtimeState: "unavailable",
+      runtimeStateMessage: `Owner runtime target is missing for this ${input.label}.`,
+      worktreePathHint: null,
+    };
+  }
   const authoritativeThread = input.thread ?? input.sessionThread ?? null;
   const authoritativeProjectId =
     input.thread?.projectId ??
@@ -888,11 +1011,26 @@ function classifyWorkerRuntime(input: {
 }
 
 function classifyRoleRuntime(input: {
+  authoritativeOwnerRequired?: boolean;
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   label: string;
+  runtimeTarget: AgentsVxappSidebarAuthorityRuntimeTarget | null;
   sessionThread?: SidebarAgentAuthoritySummary | null;
   thread: SidebarAgentAuthorityThread | null;
 }): SidebarRuntimeMetadata {
+  if (input.runtimeTarget) {
+    return classifyRuntimeTarget({
+      label: input.label,
+      runtimeTarget: input.runtimeTarget,
+    });
+  }
+  if (input.authoritativeOwnerRequired) {
+    return {
+      runtimeState: "unavailable",
+      runtimeStateMessage: `Owner runtime target is missing for this ${input.label}.`,
+      worktreePathHint: null,
+    };
+  }
   const authoritativeThread = input.thread ?? input.sessionThread ?? null;
   if (authoritativeThread) {
     return {
@@ -1017,8 +1155,27 @@ function sortNotifications(items: SidebarNotificationItem[]): SidebarNotificatio
 }
 
 function buildProgramCurrentTodoById(input: {
+  authoritySnapshot: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null;
   currentTodos: readonly ServerAgentsVxappCurrentTodoProjection[] | undefined;
 }): Map<string, SidebarProgramCurrentTodo> {
+  if (input.authoritySnapshot) {
+    const next = new Map<string, SidebarProgramCurrentTodo>();
+    for (const card of input.authoritySnapshot.programs) {
+      if (card.currentTodo) {
+        next.set(card.program.id, {
+          agent: card.currentTodo.agent,
+          todoId: card.currentTodo.todoId,
+        });
+      }
+    }
+    for (const todo of input.authoritySnapshot.currentTodos) {
+      next.set(todo.programId, {
+        agent: todo.agent,
+        todoId: todo.todoId,
+      });
+    }
+    return next;
+  }
   return new Map(
     (input.currentTodos ?? []).map((todo) => [
       todo.programId,
@@ -1031,8 +1188,23 @@ function buildProgramCurrentTodoById(input: {
 }
 
 function buildProgramWatchById(input: {
+  authoritySnapshot: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null;
   sqliteGraph: ServerGetAgentsVxappSidebarGraphResult | null;
 }): Map<string, SidebarProgramWatchState> {
+  if (input.authoritySnapshot) {
+    return new Map(
+      input.authoritySnapshot.programs
+        .filter((card) => card.watchProjection !== null)
+        .map((card) => [
+          card.program.id,
+          {
+            classification: card.watchProjection?.classification ?? null,
+            enabled: card.watchProjection?.enabled ?? false,
+            reason: card.watchProjection?.reason ?? null,
+          },
+        ]),
+    );
+  }
   const watchProjections: readonly ServerAgentsVxappSidebarWatchProjection[] = hasSqliteGraphSource(
     input.sqliteGraph,
   )
@@ -1051,6 +1223,7 @@ function buildProgramWatchById(input: {
 }
 
 export function buildOrchestrationSidebarModel(input: {
+  authoritySnapshot?: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null;
   ctoAttentionItems: readonly CtoAttentionItem[];
   currentTodos?: readonly ServerAgentsVxappCurrentTodoProjection[];
   programNotifications: readonly ProgramNotification[];
@@ -1061,9 +1234,16 @@ export function buildOrchestrationSidebarModel(input: {
   threads: readonly Thread[];
   wakeItems: readonly OrchestratorWakeItem[];
 }): OrchestrationSidebarModel {
+  const authoritySnapshot = input.authoritySnapshot ?? null;
+  const authorityProgramCardById = buildAuthorityProgramCardById(authoritySnapshot);
   const threadLinkById = buildThreadLinkById(input.sqliteGraph);
   const liveThreadById = buildLiveThreadById({ threads: input.threads });
-  const notifications = getNotificationItems(input);
+  const notifications = getNotificationItems({
+    authoritySnapshot,
+    ctoAttentionItems: input.ctoAttentionItems,
+    programNotifications: input.programNotifications,
+    sqliteGraph: input.sqliteGraph,
+  });
   const notificationsByProgramId = new Map<string, SidebarNotificationItem[]>();
   for (const notification of notifications) {
     if (!notification.programId) {
@@ -1077,6 +1257,7 @@ export function buildOrchestrationSidebarModel(input: {
     }
   }
   const wakeStateByThreadId = buildWakeStateByThreadId({
+    authoritySnapshot,
     sqliteGraph: input.sqliteGraph,
     wakeItems: input.wakeItems,
   });
@@ -1085,15 +1266,18 @@ export function buildOrchestrationSidebarModel(input: {
     sqliteGraph: input.sqliteGraph,
   });
   const currentTodoByProgramId = buildProgramCurrentTodoById({
+    authoritySnapshot,
     currentTodos: input.currentTodos,
   });
   const watchByProgramId = buildProgramWatchById({
+    authoritySnapshot,
     sqliteGraph: input.sqliteGraph,
   });
   const projectById = new Map(input.projects.map((project) => [project.id, project] as const));
   const executivesById = new Map<string, SidebarExecutiveNode>();
 
   for (const program of getProgramList(input)) {
+    const authorityCard = authorityProgramCardById.get(program.id) ?? null;
     const executiveProjectId = program.executiveProjectId ?? null;
     const executiveThreadId = program.executiveThreadId ?? null;
     const executiveAuthority =
@@ -1120,8 +1304,10 @@ export function buildOrchestrationSidebarModel(input: {
         : null;
       const executiveFallbackThreadLink = resolvedExecutiveAuthority.fallbackThreadLink;
       const runtime = classifyRoleRuntime({
+        authoritativeOwnerRequired: authoritySnapshot !== null,
         fallbackThreadLink: executiveFallbackThreadLink,
         label: "executive thread",
+        runtimeTarget: authorityCard?.executive ?? null,
         thread: executiveThread,
       });
       executive = {
@@ -1148,8 +1334,10 @@ export function buildOrchestrationSidebarModel(input: {
       executive.thread = liveThreadById.get(resolvedExecutiveThreadId) ?? null;
       executive.fallbackThreadLink = resolvedExecutiveAuthority.fallbackThreadLink;
       const runtime = classifyRoleRuntime({
+        authoritativeOwnerRequired: authoritySnapshot !== null,
         fallbackThreadLink: executive.fallbackThreadLink,
         label: "executive thread",
+        runtimeTarget: authorityCard?.executive ?? null,
         thread: executive.thread,
       });
       executive.runtimeState = runtime.runtimeState;
@@ -1157,7 +1345,8 @@ export function buildOrchestrationSidebarModel(input: {
       executive.worktreePathHint = runtime.worktreePathHint;
     }
 
-    const currentRootThreadId = program.currentOrchestratorThreadId ?? null;
+    const currentRootThreadId =
+      authorityCard?.orchestrator?.threadId ?? program.currentOrchestratorThreadId ?? null;
     const currentRootThread = currentRootThreadId
       ? (liveThreadById.get(currentRootThreadId) ?? null)
       : null;
@@ -1174,9 +1363,21 @@ export function buildOrchestrationSidebarModel(input: {
           thread.spawnRole === "worker" && thread.orchestratorThreadId === currentRootThreadId,
       )
       .map((thread) => thread.id);
-    const workerIds = [
-      ...new Set([...liveWorkerIds, ...sessionWorkerThreads.map((thread) => thread.id)]),
-    ];
+    const authorityWorkerIds = (authorityCard?.workers ?? [])
+      .map((worker) => worker.threadId)
+      .filter(
+        (threadId): threadId is ThreadId => typeof threadId === "string" && threadId.length > 0,
+      );
+    const workerIds =
+      authorityCard !== null
+        ? authorityWorkerIds
+        : [
+            ...new Set([
+              ...authorityWorkerIds,
+              ...liveWorkerIds,
+              ...sessionWorkerThreads.map((thread) => thread.id),
+            ]),
+          ];
     const sessionWorkerThreadById = new Map(
       sessionWorkerThreads.map((thread) => [thread.id, thread] as const),
     );
@@ -1196,15 +1397,18 @@ export function buildOrchestrationSidebarModel(input: {
     const buildWorkerNode = (inputWorker: {
       archivedAt: string | null;
       fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
-      id: string;
+      id: ThreadId;
       isHistorical: boolean;
       sessionThread: SessionWorkerThreadSummary | null;
       thread: Thread | null;
     }): SidebarWorkerNode => {
       const runtime = classifyWorkerRuntime({
+        authoritativeOwnerRequired: authoritySnapshot !== null && !inputWorker.isHistorical,
         fallbackThreadLink: inputWorker.fallbackThreadLink,
         label: "worker row",
         projectById,
+        runtimeTarget:
+          authorityCard?.workers.find((worker) => worker.threadId === inputWorker.id) ?? null,
         sessionThread: inputWorker.sessionThread,
         thread: inputWorker.thread,
       });
@@ -1295,6 +1499,7 @@ export function buildOrchestrationSidebarModel(input: {
         const runtime = classifyRoleRuntime({
           fallbackThreadLink: laneFallbackThreadLink,
           label: "orchestrator lane",
+          runtimeTarget: null,
           thread: laneThread,
         });
         const historicalLaneWorkers = sortWorkers(
@@ -1303,7 +1508,7 @@ export function buildOrchestrationSidebarModel(input: {
               archivedAt: workerEntry.archivedAt ?? workerEntry.thread?.archivedAt ?? null,
               fallbackThreadLink:
                 workerEntry.fallbackThreadLink ?? threadLinkById.get(workerEntry.id) ?? null,
-              id: workerEntry.id,
+              id: workerEntry.id as ThreadId,
               isHistorical: true,
               sessionThread: null,
               thread: workerEntry.thread ?? liveThreadById.get(workerEntry.id) ?? null,
@@ -1366,8 +1571,10 @@ export function buildOrchestrationSidebarModel(input: {
         ? null
         : (() => {
             const runtime = classifyRoleRuntime({
+              authoritativeOwnerRequired: authoritySnapshot !== null,
               fallbackThreadLink: fallbackRootThreadLink,
               label: "orchestrator lane",
+              runtimeTarget: authorityCard?.orchestrator ?? null,
               thread: currentRootThread,
             });
             return {
@@ -1440,7 +1647,7 @@ export function buildOrchestrationSidebarModel(input: {
               thread: latestHistoricalLaneEntry.thread,
               title: latestHistoricalLaneEntry.title,
             },
-      baseStatus: program.baseStatus,
+      baseStatus: authorityCard === null ? program.baseStatus : null,
       closeoutSummary,
       currentStatus: program.currentStatus,
       currentTodo: currentTodoByProgramId.get(program.id) ?? null,

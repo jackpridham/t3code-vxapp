@@ -35,6 +35,14 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 
+## Agents-vxapp Authority Contract
+
+- `~/agents-vxapp` is the authority for vxapp-backed Program, TODO, notification, attention, wake, thread-selection, and runtime truth.
+- In T3, features under `apps/server/src/extensions/vxapp/**` and `apps/web/src/components/vx/**` should prefer owner-backed reads through `apps/server/src/extensions/vxapp/agentsVxappOwnerClient.ts`. Do not rebuild those semantics from local orchestration projections or browser store state.
+- Treat the owner command family behind `scripts/tools/t3-control-plane-owner` as the canonical public contract for vxapp-backed reads and mutations. Important read surfaces include Program selection/TODO/runtime views, runtime allocations, current/watch thread authority, agent runtime snapshots, and worker runtime snapshots.
+- Worker runtime authority is workspace-based. Do not introduce new `worktreePath`-keyed runtime logic in T3; existing `worktreePath` usage in this area is migration debt unless a task explicitly requires compatibility.
+- If T3 UI data disagrees with `agents-vxapp`, fix the authority wiring or owner contract. Do not add a second local fallback truth source just to make the UI look healthy.
+
 ## Codex App Server (Important)
 
 T3 Code is currently Codex-first. The server starts `codex app-server` (JSON-RPC over stdio) per provider session, then streams structured events to the browser through WebSocket push messages.

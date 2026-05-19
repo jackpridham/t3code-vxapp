@@ -5,6 +5,7 @@ import {
   type ProgramId,
   type ProjectId,
   ProgramNotificationId,
+  type ServerAgentsVxappProgramSnapshot,
   ThreadId,
   type ThreadId as ThreadIdType,
   TurnId,
@@ -18,6 +19,8 @@ import { newCommandId, randomUUID } from "~/lib/utils";
 import type { Program, Project, Thread } from "../../types";
 import { getSidebarProgramNotificationKindLabel } from "../Sidebar.logic";
 
+type DevProgramSource = Program | ServerAgentsVxappProgramSnapshot;
+
 export type DevThreadRole = "executive" | "orchestrator" | "worker" | "thread";
 
 export interface DevProgramNotificationSection {
@@ -27,10 +30,10 @@ export interface DevProgramNotificationSection {
 }
 
 export interface DevProgramTarget {
-  readonly programId: Program["id"];
-  readonly programTitle: Program["title"];
-  readonly executiveProjectId: Program["executiveProjectId"];
-  readonly executiveThreadId: Program["executiveThreadId"];
+  readonly programId: DevProgramSource["id"];
+  readonly programTitle: DevProgramSource["title"];
+  readonly executiveProjectId: NonNullable<DevProgramSource["executiveProjectId"]>;
+  readonly executiveThreadId: NonNullable<DevProgramSource["executiveThreadId"]>;
   readonly orchestratorThreadId: ThreadIdType | null;
   readonly orchestratorProjectId: ProjectId | null;
   readonly roles: readonly DevThreadRole[];
@@ -115,7 +118,7 @@ function resolveSourceRole(target: DevProgramTarget, sourceThread: Thread): DevT
 export function resolveDevProgramTargets(input: {
   readonly thread: Thread | undefined;
   readonly project: Project | undefined;
-  readonly programs: readonly Program[];
+  readonly programs: readonly DevProgramSource[];
   readonly threads: readonly Thread[];
 }): DevProgramTarget[] {
   const thread = input.thread;
@@ -124,7 +127,7 @@ export function resolveDevProgramTargets(input: {
   }
 
   const threadById = new Map(input.threads.map((entry) => [entry.id, entry] as const));
-  const matchedPrograms = new Map<Program["id"], Program>();
+  const matchedPrograms = new Map<DevProgramSource["id"], DevProgramSource>();
 
   const addProgramIfPresent = (programId: string | undefined) => {
     if (!programId) {
@@ -160,7 +163,10 @@ export function resolveDevProgramTargets(input: {
   }
 
   return [...matchedPrograms.values()]
-    .map((program) => {
+    .flatMap((program) => {
+      if (program.executiveProjectId === null || program.executiveThreadId === null) {
+        return [];
+      }
       const roles = new Set<DevThreadRole>();
       addRole(
         roles,
@@ -193,15 +199,17 @@ export function resolveDevProgramTargets(input: {
           : (threadById.get(normalizedOrchestratorThreadId)?.projectId ??
             (normalizedOrchestratorThreadId === thread.id ? thread.projectId : null));
 
-      return {
-        programId: program.id,
-        programTitle: program.title,
-        executiveProjectId: program.executiveProjectId,
-        executiveThreadId: program.executiveThreadId,
-        orchestratorThreadId: normalizedOrchestratorThreadId,
-        orchestratorProjectId,
-        roles: [...roles].toSorted() as DevThreadRole[],
-      } satisfies DevProgramTarget;
+      return [
+        {
+          programId: program.id,
+          programTitle: program.title,
+          executiveProjectId: program.executiveProjectId,
+          executiveThreadId: program.executiveThreadId,
+          orchestratorThreadId: normalizedOrchestratorThreadId,
+          orchestratorProjectId,
+          roles: [...roles].toSorted() as DevThreadRole[],
+        } satisfies DevProgramTarget,
+      ];
     })
     .toSorted(
       (left, right) =>
@@ -289,7 +297,7 @@ export function resolveDevOrchestratorTargets(input: {
 export function resolveDevOrchestrationTargets(input: {
   readonly thread: Thread | undefined;
   readonly project: Project | undefined;
-  readonly programs: readonly Program[];
+  readonly programs: readonly DevProgramSource[];
   readonly threads: readonly Thread[];
 }): DevOrchestrationTargets {
   const programTargets = resolveDevProgramTargets(input);

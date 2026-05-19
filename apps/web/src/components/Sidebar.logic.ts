@@ -1,4 +1,9 @@
 import * as React from "react";
+import type {
+  ServerAgentsVxappProgramSnapshot,
+  ServerAgentsVxappSidebarAttentionItem,
+  ServerAgentsVxappSidebarProgramNotification,
+} from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { CtoAttentionItem, Program, ProgramNotification, Project, Thread } from "../types";
 import { getDisplayThreadLabelEntries } from "../lib/threadLabels";
@@ -34,17 +39,25 @@ type SidebarProgramItemGroup<TItem> = {
   criticalCount: number;
   warningCount: number;
 };
+type SidebarProgramSummary = Pick<Program, "id" | "title"> | ServerAgentsVxappProgramSnapshot;
+type SidebarNotificationLike = ProgramNotification | ServerAgentsVxappSidebarProgramNotification;
+type SidebarAttentionLike = CtoAttentionItem | ServerAgentsVxappSidebarAttentionItem;
+type SidebarProgramItemGroupEntry = {
+  programId: ProgramNotification["programId"] | null;
+  queuedAt: string | null;
+  severity: ProgramNotification["severity"];
+};
 export type SidebarProgramNotificationGroup = {
   programId: ProgramNotification["programId"];
   programTitle: string;
-  notifications: ProgramNotification[];
+  notifications: SidebarNotificationLike[];
   criticalCount: number;
   warningCount: number;
 };
 export type SidebarCtoAttentionGroup = {
   programId: ProgramNotification["programId"];
   programTitle: string;
-  attentionItems: CtoAttentionItem[];
+  attentionItems: SidebarAttentionLike[];
   criticalCount: number;
   warningCount: number;
 };
@@ -243,14 +256,8 @@ export function getSidebarCtoAttentionKindLabel(kind: CtoAttentionItem["kind"]):
   return PROGRAM_NOTIFICATION_KIND_LABELS[kind] ?? kind;
 }
 
-function buildSidebarProgramItemGroups<
-  TItem extends {
-    programId: ProgramNotification["programId"];
-    severity: ProgramNotification["severity"];
-    queuedAt: string;
-  },
->(input: {
-  programs: readonly Program[];
+function buildSidebarProgramItemGroups<TItem extends SidebarProgramItemGroupEntry>(input: {
+  programs: readonly SidebarProgramSummary[];
   items: readonly TItem[];
   getSortKey: (item: TItem) => string;
 }): SidebarProgramItemGroup<TItem>[] {
@@ -258,6 +265,9 @@ function buildSidebarProgramItemGroups<
   const groupsByProgramId = new Map<ProgramNotification["programId"], TItem[]>();
 
   for (const item of input.items) {
+    if (item.programId === null) {
+      continue;
+    }
     const existing = groupsByProgramId.get(item.programId);
     if (existing) {
       existing.push(item);
@@ -276,7 +286,7 @@ function buildSidebarProgramItemGroups<
           (left, right) =>
             getProgramNotificationSeverityPriority(right.severity) -
               getProgramNotificationSeverityPriority(left.severity) ||
-            right.queuedAt.localeCompare(left.queuedAt) ||
+            (right.queuedAt ?? "").localeCompare(left.queuedAt ?? "") ||
             input.getSortKey(left).localeCompare(input.getSortKey(right)),
         ),
         criticalCount: items.filter((item) => item.severity === "critical").length,
@@ -293,8 +303,8 @@ function buildSidebarProgramItemGroups<
 }
 
 export function buildSidebarProgramNotificationGroups(input: {
-  programs: readonly Program[];
-  notifications: readonly ProgramNotification[];
+  programs: readonly SidebarProgramSummary[];
+  notifications: readonly SidebarNotificationLike[];
 }): SidebarProgramNotificationGroup[] {
   return buildSidebarProgramItemGroups({
     programs: input.programs,
@@ -314,8 +324,8 @@ export function buildSidebarProgramNotificationGroups(input: {
 }
 
 export function buildSidebarCtoAttentionGroups(input: {
-  programs: readonly Program[];
-  ctoAttentionItems: readonly CtoAttentionItem[];
+  programs: readonly SidebarProgramSummary[];
+  ctoAttentionItems: readonly SidebarAttentionLike[];
 }): SidebarCtoAttentionGroup[] {
   return buildSidebarProgramItemGroups({
     programs: input.programs,

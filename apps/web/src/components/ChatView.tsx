@@ -16,6 +16,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ResolvedKeybindingsConfig,
   type ServerProvider,
+  type ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   type ThreadId,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
@@ -28,6 +29,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate } from "@tanstack/react-router";
+import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
@@ -226,6 +228,8 @@ const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_AUTHORITY_PROGRAMS: ServerGetAgentsVxappSidebarAuthoritySnapshotResult["programs"][number]["program"][] =
+  [];
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -456,15 +460,16 @@ export default function ChatView({
   onToggleMobileSidebar,
   threadId,
 }: ChatViewProps) {
+  useAgentsVxappSidebarAuthorityBootstrap();
   const serverThread = useThreadById(threadId);
   const isMobile = useIsMobile();
   const isDrawerLayout = layoutMode === "drawer";
   const allowAuxiliaryPanels = !isDrawerLayout;
   const projects = useStore((store) => store.projects);
-  const programs = useStore((store) => store.programs ?? []);
-  const programNotifications = useStore((store) => store.programNotifications ?? []);
+  const authorityProgramCards = useAgentsVxappStore((store) => store.programCards);
+  const authorityProgramNotifications = useAgentsVxappStore((store) => store.notifications);
+  const authorityOpenWakes = useAgentsVxappStore((store) => store.openWakes);
   const threads = useStore((store) => store.threads);
-  const allOrchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -783,15 +788,22 @@ export default function ChatView({
         : null,
     [activeThread, projects, threads],
   );
+  const authorityPrograms = useMemo(
+    () =>
+      authorityProgramCards.length > 0
+        ? authorityProgramCards.map((card) => card.program)
+        : EMPTY_AUTHORITY_PROGRAMS,
+    [authorityProgramCards],
+  );
   const devOrchestrationTargets = useMemo(
     () =>
       resolveDevOrchestrationTargets({
         thread: activeThread,
         project: activeProject,
-        programs,
+        programs: authorityPrograms,
         threads,
       }),
-    [activeProject, activeThread, programs, threads],
+    [activeProject, activeThread, authorityPrograms, threads],
   );
   const showDevOrchestrationToggle =
     devOrchestrationTargets.programTargets.length > 0 ||
@@ -3932,8 +3944,8 @@ export default function ChatView({
           activeProject={activeProject}
           programTargets={devOrchestrationTargets.programTargets}
           orchestratorTargets={devOrchestrationTargets.orchestratorTargets}
-          programNotifications={programNotifications}
-          orchestratorWakeItems={allOrchestratorWakeItems}
+          programNotifications={authorityProgramNotifications}
+          openWakes={authorityOpenWakes}
         />
       ) : null}
       {orchestrationNoticeCount > 0 ? (

@@ -117,18 +117,19 @@ describe("workerRuntime fixtures", () => {
   it("accepts owner-defined runtime status and kind strings as transport data", async () => {
     const sourceFile = await Effect.runPromise(
       decodeWorkerRuntimeSourceFile({
-        fileName: "context-plan.json",
-        absolutePath: "/tmp/context-plan.json",
         status: "runtime-source/custom",
-        detail: null,
+        failureCode: null,
+        failureMessage: null,
       }),
     );
 
     const snapshot = await Effect.runPromise(
       decodeAgentRuntimeSnapshot({
         threadId: "thread-1",
-        agentKind: "agent-kind/custom",
+        agentKind: "worker",
         runtimeKind: "snapshot-kind/custom",
+        availability: "inspectable",
+        reasonCode: null,
         workspaceRoot: null,
         runtimeDir: null,
         workspaceResolution: {
@@ -175,7 +176,7 @@ describe("workerRuntime fixtures", () => {
     );
 
     assert.strictEqual(sourceFile.status, "runtime-source/custom");
-    assert.strictEqual(snapshot.agentKind, "agent-kind/custom");
+    assert.strictEqual(snapshot.agentKind, "worker");
     assert.strictEqual(snapshot.runtimeKind, "snapshot-kind/custom");
     assert.strictEqual(snapshot.workspaceResolution.kind, "workspace-resolution/custom");
     assert.strictEqual(snapshot.workerDetails?.auditStatus, "audit-status/custom");

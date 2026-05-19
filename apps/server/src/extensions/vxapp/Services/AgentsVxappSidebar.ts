@@ -1,4 +1,6 @@
 import type {
+  ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
+  ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   ServerGetAgentsVxappSidebarGraphInput,
   ServerGetAgentsVxappSidebarGraphResult,
 } from "@t3tools/contracts";
@@ -8,6 +10,9 @@ export class AgentsVxappSidebarError extends Schema.TaggedErrorClass<AgentsVxapp
   "AgentsVxappSidebarError",
   {
     message: Schema.String,
+    ownerCommand: Schema.optional(Schema.String),
+    authoritySurface: Schema.optional(Schema.String),
+    ownerErrorCode: Schema.optional(Schema.NullOr(Schema.String)),
   },
 ) {}
 
@@ -20,6 +25,9 @@ export interface AgentsVxappSidebarShape {
   readonly getGraph: (
     input: ServerGetAgentsVxappSidebarGraphInput,
   ) => Effect.Effect<ServerGetAgentsVxappSidebarGraphResult, AgentsVxappSidebarError>;
+  readonly getAuthoritySnapshot: (
+    input: ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
+  ) => Effect.Effect<ServerGetAgentsVxappSidebarAuthoritySnapshotResult, AgentsVxappSidebarError>;
 }
 
 export class AgentsVxappSidebar extends ServiceMap.Service<

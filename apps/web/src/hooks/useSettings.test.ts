@@ -99,7 +99,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
   it("defaults the changes window navigation mode during legacy migration", () => {
     expect(buildLegacyClientSettingsMigrationPatch({})).toMatchObject({
       chatViewInputWhenScrolling: "compact",
-      changesDrawerVisibility: "always_show",
+      changesDrawerVisibility: "always_hide",
       changesPanelWindowNavigationMode: "dynamic",
       ideModeEnabled: false,
       rememberChangesDrawerWidth: true,

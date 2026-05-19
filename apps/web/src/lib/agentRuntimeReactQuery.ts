@@ -20,15 +20,12 @@ export function agentRuntimeSnapshotQueryOptions(input: {
 }) {
   return queryOptions({
     queryKey: agentRuntimeQueryKeys.snapshot(input.threadId, input.agentKind),
-    enabled: input.threadId !== null,
+    enabled: true,
     staleTime: AGENT_RUNTIME_STALE_TIME_MS,
     queryFn: async () => {
-      if (!input.threadId) {
-        throw new Error("Agent runtime snapshot is unavailable.");
-      }
       return ensureNativeApi().server.getAgentRuntimeSnapshot({
-        threadId: input.threadId,
         agentKind: input.agentKind,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
       });
     },
   });

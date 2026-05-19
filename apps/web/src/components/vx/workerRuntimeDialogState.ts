@@ -1,16 +1,36 @@
 import type { ServerGetWorkerRuntimeSnapshotResult } from "@t3tools/contracts";
 
-export type WorkerRuntimeUnavailableHint = "pending-worktree" | "transient" | "stale-lineage";
+export type WorkerRuntimeUnavailableHint =
+  | "degraded"
+  | "unavailable"
+  | "pending-worktree"
+  | "transient"
+  | "stale-lineage";
 
 export type WorkerRuntimeDialogMode =
   | "loading"
   | "error"
   | "missing"
   | "invalid"
+  | "degraded"
+  | "unavailable"
   | "pending-worktree"
   | "transient"
   | "stale-lineage"
   | "ready";
+
+function describeRuntimeReasonCode(reasonCode: string | null): string {
+  switch (reasonCode) {
+    case "runtime_files_missing":
+      return "Runtime files are missing.";
+    case "runtime_payload_invalid":
+      return "Runtime payload is invalid.";
+    case "runtime_authority_missing":
+      return "Runtime authority is missing.";
+    default:
+      return "Runtime details are not available yet.";
+  }
+}
 
 export function deriveWorkerRuntimeDialogState(input: {
   data: ServerGetWorkerRuntimeSnapshotResult | null | undefined;
@@ -54,6 +74,12 @@ export function deriveWorkerRuntimeDialogState(input: {
     return {
       mode: "missing",
       message: "Runtime details are not available yet.",
+    };
+  }
+  if (input.data.availability !== "inspectable") {
+    return {
+      mode: input.data.availability,
+      message: describeRuntimeReasonCode(input.data.reasonCode),
     };
   }
 

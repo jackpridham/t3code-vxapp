@@ -2,6 +2,7 @@ import {
   type WsPush,
   type WsPushChannel,
   type WsPushMessage,
+  type VortexErrorCode,
   WebSocketResponse,
   type WsResponse as WsResponseMessage,
   WsResponse as WsResponseSchema,
@@ -48,6 +49,25 @@ function asError(value: unknown, fallback: string): Error {
     return value;
   }
   return new Error(fallback);
+}
+
+export class WebSocketRequestError extends Error {
+  readonly code: VortexErrorCode | null;
+  readonly title: string | null;
+  readonly ownerErrorCode: string | null;
+
+  constructor(input: {
+    readonly message: string;
+    readonly code?: VortexErrorCode | null;
+    readonly title?: string | null;
+    readonly ownerErrorCode?: string | null;
+  }) {
+    super(input.message);
+    this.name = "WebSocketRequestError";
+    this.code = input.code ?? null;
+    this.title = input.title ?? null;
+    this.ownerErrorCode = input.ownerErrorCode ?? null;
+  }
 }
 
 export class WsTransport {
@@ -252,7 +272,14 @@ export class WsTransport {
     this.pending.delete(message.id);
 
     if (message.error) {
-      pending.reject(new Error(message.error.message));
+      pending.reject(
+        new WebSocketRequestError({
+          message: message.error.message,
+          code: message.error.code ?? null,
+          title: message.error.title ?? null,
+          ownerErrorCode: message.error.ownerErrorCode ?? null,
+        }),
+      );
       return;
     }
 

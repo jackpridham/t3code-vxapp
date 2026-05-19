@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  type AgentsVxappSidebarAuthorityRuntimeTarget,
   ProgramId,
   ProjectId,
   ThreadId,
   type ServerAgentsVxappProgramSnapshot,
+  type ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   type ServerGetAgentsVxappSidebarGraphResult,
 } from "@t3tools/contracts";
 import {
@@ -91,6 +93,32 @@ function makeSqliteGraph(
     source: "sqlite",
     threadLinks: [],
     watchProjections: [],
+    ...overrides,
+  };
+}
+
+function makeAuthorityRuntimeTarget(
+  overrides: Partial<AgentsVxappSidebarAuthorityRuntimeTarget> = {},
+): AgentsVxappSidebarAuthorityRuntimeTarget {
+  return {
+    agentKind: "worker",
+    availability: "inspectable",
+    kind: "worker",
+    reasonCode: null,
+    threadId: null,
+    workspace: null,
+    ...overrides,
+  };
+}
+
+function makeAuthoritySnapshot(
+  overrides: Partial<ServerGetAgentsVxappSidebarAuthoritySnapshotResult> = {},
+): ServerGetAgentsVxappSidebarAuthoritySnapshotResult {
+  return {
+    currentTodos: [],
+    ownerDiagnostics: [],
+    programs: [],
+    todos: [],
     ...overrides,
   };
 }
@@ -377,6 +405,89 @@ describe("buildOrchestrationSidebarModel", () => {
       currentStatus: "blocked",
       status: "blocked",
     });
+  });
+
+  it("uses owner-published workers and suppresses base status in authority mode", () => {
+    const program = makeProgram({
+      baseStatus: "active",
+      currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+      currentStatus: "blocked",
+      id: ProgramId.makeUnsafe("program-1"),
+      title: "Blocked Program",
+      status: "blocked",
+    });
+
+    const model = buildOrchestrationSidebarModel({
+      authoritySnapshot: makeAuthoritySnapshot({
+        programs: [
+          {
+            activeAllocations: [],
+            attentionItems: [],
+            currentTodo: null,
+            display: {
+              label: "Control-plane repair required",
+              sortKey: null,
+              summary: null,
+              tone: "danger",
+            },
+            executive: makeAuthorityRuntimeTarget({
+              agentKind: "executive",
+              availability: "unavailable",
+              kind: "executive",
+              reasonCode: "runtime_authority_missing",
+            }),
+            notifications: [],
+            openWakes: [],
+            orchestrator: makeAuthorityRuntimeTarget({
+              agentKind: "orchestrator",
+              availability: "unavailable",
+              kind: "orchestrator",
+              reasonCode: "runtime_authority_missing",
+              threadId: ThreadId.makeUnsafe("orch-1"),
+            }),
+            ownerDiagnostics: [],
+            program,
+            watchProjection: null,
+            workers: [],
+          },
+        ],
+      }),
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [program],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: null,
+      threads: [
+        makeThread({
+          id: ThreadId.makeUnsafe("orch-1"),
+          projectId: ProjectId.makeUnsafe("exec-project"),
+          title: "Orchestrator live",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("worker-residue"),
+          orchestratorThreadId: ThreadId.makeUnsafe("orch-1"),
+          programId: ProgramId.makeUnsafe("program-1"),
+          projectId: ProjectId.makeUnsafe("exec-project"),
+          spawnRole: "worker",
+          title: "worker/ket Residual worker",
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.programs[0]).toMatchObject({
+      activeWorkerCount: 0,
+      baseStatus: null,
+      currentStatus: "blocked",
+    });
+    expect(model.executives[0]?.programs[0]?.currentLane?.workers).toEqual([]);
   });
 
   it("attaches current todo, watch state, closeout summary, and worker counts to programs", () => {

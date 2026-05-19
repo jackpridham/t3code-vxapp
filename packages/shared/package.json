@@ -55,6 +55,10 @@
     "./orchestrator": {
       "types": "./src/orchestrator.ts",
       "import": "./src/orchestrator.ts"
+    },
+    "./vortexErrors": {
+      "types": "./src/vortexErrors.ts",
+      "import": "./src/vortexErrors.ts"
     }
   },
   "scripts": {

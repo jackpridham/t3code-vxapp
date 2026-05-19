@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { TrimmedNonEmptyString } from "./baseSchemas";
+import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 
 export const AgentsVxappOwnerCommand = TrimmedNonEmptyString;
 export type AgentsVxappOwnerCommand = typeof AgentsVxappOwnerCommand.Type;
@@ -63,6 +63,186 @@ export type AgentsVxappOwnerResultEnvelope = typeof AgentsVxappOwnerResultEnvelo
 
 export const AgentsVxappAuthorityEnvelope = AgentsVxappOwnerResultEnvelope;
 export type AgentsVxappAuthorityEnvelope = typeof AgentsVxappAuthorityEnvelope.Type;
+
+export const AgentsVxappSidebarAuthorityField = {
+  Programs: "programs",
+  Todos: "todos",
+  CurrentTodos: "currentTodos",
+  OwnerDiagnostics: "ownerDiagnostics",
+} as const;
+
+export const AgentsVxappSidebarProgramCardField = {
+  Program: "program",
+  Display: "display",
+  CurrentTodo: "currentTodo",
+  Executive: "executive",
+  Orchestrator: "orchestrator",
+  Workers: "workers",
+  Notifications: "notifications",
+  AttentionItems: "attentionItems",
+  OpenWakes: "openWakes",
+  WatchProjection: "watchProjection",
+  ActiveAllocations: "activeAllocations",
+  OwnerDiagnostics: "ownerDiagnostics",
+} as const;
+
+export const AgentsVxappRuntimeTargetField = {
+  Kind: "kind",
+  AgentKind: "agentKind",
+  ThreadId: "threadId",
+  Workspace: "workspace",
+  Availability: "availability",
+  ReasonCode: "reasonCode",
+} as const;
+
+export const AgentsVxappRuntimeTargetKindValue = {
+  Executive: "executive",
+  Orchestrator: "orchestrator",
+  Worker: "worker",
+} as const;
+
+export const AgentsVxappRuntimeTargetKind = Schema.Literals([
+  AgentsVxappRuntimeTargetKindValue.Executive,
+  AgentsVxappRuntimeTargetKindValue.Orchestrator,
+  AgentsVxappRuntimeTargetKindValue.Worker,
+]);
+export type AgentsVxappRuntimeTargetKind = typeof AgentsVxappRuntimeTargetKind.Type;
+
+export const AgentsVxappRuntimeAvailabilityValue = {
+  Inspectable: "inspectable",
+  Degraded: "degraded",
+  Unavailable: "unavailable",
+} as const;
+
+export const AgentsVxappRuntimeAvailability = Schema.Literals([
+  AgentsVxappRuntimeAvailabilityValue.Inspectable,
+  AgentsVxappRuntimeAvailabilityValue.Degraded,
+  AgentsVxappRuntimeAvailabilityValue.Unavailable,
+]);
+export type AgentsVxappRuntimeAvailability = typeof AgentsVxappRuntimeAvailability.Type;
+
+export const AgentsVxappRuntimeReasonCodeValue = {
+  RuntimeFilesMissing: "runtime_files_missing",
+  RuntimePayloadInvalid: "runtime_payload_invalid",
+  RuntimeAuthorityMissing: "runtime_authority_missing",
+} as const;
+
+export const AgentsVxappRuntimeReasonCode = Schema.Literals([
+  AgentsVxappRuntimeReasonCodeValue.RuntimeFilesMissing,
+  AgentsVxappRuntimeReasonCodeValue.RuntimePayloadInvalid,
+  AgentsVxappRuntimeReasonCodeValue.RuntimeAuthorityMissing,
+]);
+export type AgentsVxappRuntimeReasonCode = typeof AgentsVxappRuntimeReasonCode.Type;
+
+export const AgentsVxappOwnerDiagnosticCodeValue = {
+  CurrentTodoAuthorityMissing: "current_todo_authority_missing",
+  RuntimeTargetFieldsMissing: "runtime_target_fields_missing",
+  WorkerWorkspaceAuthorityMissing: "worker_workspace_authority_missing",
+  ThreadAuthorityMissing: "thread_authority_missing",
+  RuntimeAuthorityUnavailable: "runtime_authority_unavailable",
+} as const;
+
+export const AgentsVxappOwnerDiagnosticCode = Schema.Literals([
+  AgentsVxappOwnerDiagnosticCodeValue.CurrentTodoAuthorityMissing,
+  AgentsVxappOwnerDiagnosticCodeValue.RuntimeTargetFieldsMissing,
+  AgentsVxappOwnerDiagnosticCodeValue.WorkerWorkspaceAuthorityMissing,
+  AgentsVxappOwnerDiagnosticCodeValue.ThreadAuthorityMissing,
+  AgentsVxappOwnerDiagnosticCodeValue.RuntimeAuthorityUnavailable,
+]);
+export type AgentsVxappOwnerDiagnosticCode = typeof AgentsVxappOwnerDiagnosticCode.Type;
+
+export const AgentsVxappOwnerLoadStatusValue = {
+  Idle: "idle",
+  Loading: "loading",
+  Ready: "ready",
+  Error: "error",
+} as const;
+
+export const AgentsVxappOwnerLoadStatus = Schema.Literals([
+  AgentsVxappOwnerLoadStatusValue.Idle,
+  AgentsVxappOwnerLoadStatusValue.Loading,
+  AgentsVxappOwnerLoadStatusValue.Ready,
+  AgentsVxappOwnerLoadStatusValue.Error,
+]);
+export type AgentsVxappOwnerLoadStatus = typeof AgentsVxappOwnerLoadStatus.Type;
+
+export const AgentsVxappSidebarAuthorityRuntimeTarget = Schema.Struct({
+  kind: AgentsVxappRuntimeTargetKind,
+  agentKind: AgentsVxappRuntimeTargetKind,
+  threadId: Schema.NullOr(ThreadId),
+  workspace: Schema.NullOr(TrimmedNonEmptyString),
+  availability: AgentsVxappRuntimeAvailability,
+  reasonCode: Schema.NullOr(AgentsVxappRuntimeReasonCode),
+});
+export type AgentsVxappSidebarAuthorityRuntimeTarget =
+  typeof AgentsVxappSidebarAuthorityRuntimeTarget.Type;
+
+export const AgentsVxappSidebarAuthorityDiagnostic = Schema.Struct({
+  code: AgentsVxappOwnerDiagnosticCode,
+  message: TrimmedNonEmptyString,
+  programId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  threadId: Schema.optional(Schema.NullOr(ThreadId)),
+});
+export type AgentsVxappSidebarAuthorityDiagnostic =
+  typeof AgentsVxappSidebarAuthorityDiagnostic.Type;
+
+export const AgentsVxappOwnerBoundaryErrorKindValue = {
+  TransportError: "transport_error",
+  DecodeError: "decode_error",
+  MissingRequiredField: "missing_required_field",
+  OwnerContractError: "owner_contract_error",
+} as const;
+
+export const AgentsVxappOwnerBoundaryErrorKind = Schema.Literals([
+  AgentsVxappOwnerBoundaryErrorKindValue.TransportError,
+  AgentsVxappOwnerBoundaryErrorKindValue.DecodeError,
+  AgentsVxappOwnerBoundaryErrorKindValue.MissingRequiredField,
+  AgentsVxappOwnerBoundaryErrorKindValue.OwnerContractError,
+]);
+export type AgentsVxappOwnerBoundaryErrorKind = typeof AgentsVxappOwnerBoundaryErrorKind.Type;
+
+export const VortexErrorCodeValue = {
+  OwnerTransportFailure: "60",
+  OwnerDecodeFailure: "61",
+  OwnerMissingRequiredField: "62",
+  OwnerContractFailure: "63",
+  OwnerSurfaceMissing: "64",
+  OwnerSurfaceAmbiguous: "65",
+  OwnerRuntimeAuthorityMissing: "68",
+  OwnerRoleWorkspaceMismatch: "69",
+  UnknownVortexFailure: "99",
+} as const;
+
+export const VortexErrorCode = Schema.Literals([
+  VortexErrorCodeValue.OwnerTransportFailure,
+  VortexErrorCodeValue.OwnerDecodeFailure,
+  VortexErrorCodeValue.OwnerMissingRequiredField,
+  VortexErrorCodeValue.OwnerContractFailure,
+  VortexErrorCodeValue.OwnerSurfaceMissing,
+  VortexErrorCodeValue.OwnerSurfaceAmbiguous,
+  VortexErrorCodeValue.OwnerRuntimeAuthorityMissing,
+  VortexErrorCodeValue.OwnerRoleWorkspaceMismatch,
+  VortexErrorCodeValue.UnknownVortexFailure,
+]);
+export type VortexErrorCode = typeof VortexErrorCode.Type;
+
+export const VortexErrorResponse = Schema.Struct({
+  code: Schema.optional(VortexErrorCode),
+  title: Schema.optional(TrimmedNonEmptyString),
+  message: TrimmedNonEmptyString,
+  ownerErrorCode: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+});
+export type VortexErrorResponse = typeof VortexErrorResponse.Type;
+
+export const AgentsVxappOwnerBoundaryError = Schema.Struct({
+  kind: AgentsVxappOwnerBoundaryErrorKind,
+  code: Schema.optional(VortexErrorCode),
+  title: Schema.optional(TrimmedNonEmptyString),
+  message: TrimmedNonEmptyString,
+  ownerErrorCode: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  details: Schema.optional(Schema.NullOr(AgentsVxappJsonRecord)),
+});
+export type AgentsVxappOwnerBoundaryError = typeof AgentsVxappOwnerBoundaryError.Type;
 
 export const AgentsVxappMutationRequest = Schema.Struct({
   command: AgentsVxappOwnerCommand,

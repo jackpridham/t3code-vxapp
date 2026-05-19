@@ -11,13 +11,14 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { Cause, Effect, FileSystem, Layer } from "effect";
+import { Cause, Data, Effect, FileSystem, Layer, Stream } from "effect";
 
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import {
   type ProjectionTurn,
   ProjectionTurnRepository,
 } from "../../persistence/Services/ProjectionTurns.ts";
+import { requestAgentsVxappWakeMutation } from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -58,6 +59,22 @@ const DEFAULT_SUPPRESS_STARTUP_WAKE_MARKER = "/tmp/t3code-vxapp-no-wake";
 
 const serverCommandId = (tag: string): CommandId =>
   CommandId.makeUnsafe(`server:orchestrator-wake:${tag}:${crypto.randomUUID()}`);
+
+function ownerErrorDetail(error: unknown): string {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "detail" in error &&
+    typeof (error as { detail?: unknown }).detail === "string"
+  ) {
+    return (error as { detail: string }).detail;
+  }
+  return error instanceof Error ? error.message : "agents-vxapp owner command failed.";
+}
+
+class OwnerCommandFailure extends Data.TaggedError("OwnerCommandFailure")<{
+  readonly detail: string;
+}> {}
 
 function resolveActiveRejectedWakeNotificationTarget(input: {
   readonly readModel: OrchestrationReadModel;
@@ -117,19 +134,6 @@ function resolveActiveRejectedWakeNotificationTarget(input: {
   return singleThreadCandidates[0] ?? null;
 }
 
-function normalizeWakeOutcome(state: string): "completed" | "failed" | "interrupted" | null {
-  switch (state) {
-    case "completed":
-    case "failed":
-    case "interrupted":
-      return state;
-    case "cancelled":
-      return null;
-    default:
-      throw new Error(`Unsupported wake outcome: ${state}`);
-  }
-}
-
 function wakeOutcomeFromCheckpoint(input: {
   readonly status: string;
   readonly files: ReadonlyArray<unknown>;
@@ -146,6 +150,21 @@ function wakeOutcomeFromCheckpoint(input: {
       return null;
     default:
       throw new Error(`Unsupported checkpoint status for wake outcome: ${input.status}`);
+  }
+}
+
+function wakeOutcomeFromLatestTurnState(
+  state: string,
+): "completed" | "failed" | "interrupted" | null {
+  switch (state) {
+    case "completed":
+      return "completed";
+    case "error":
+      return "failed";
+    case "interrupted":
+      return "interrupted";
+    default:
+      return null;
   }
 }
 
@@ -198,19 +217,72 @@ function toWakeItem(input: {
   };
 }
 
-function buildWakeSummary(input: {
+function buildWakeSummaryFromOutcome(input: {
   readonly workerThread: OrchestrationThread;
   readonly outcome: "completed" | "failed" | "interrupted";
-  readonly runtimeEvent: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>;
 }): string {
-  const title = input.workerThread.title;
   switch (input.outcome) {
     case "failed":
-      return input.runtimeEvent.payload.errorMessage?.trim() || `${title} failed its turn`;
+      return `${input.workerThread.title} failed its turn`;
     case "interrupted":
-      return input.runtimeEvent.payload.errorMessage?.trim() || `${title} was interrupted`;
+      return `${input.workerThread.title} was interrupted`;
     case "completed":
-      return `${title} completed its assigned turn`;
+      return `${input.workerThread.title} completed its assigned turn`;
+  }
+}
+
+function normalizeWakeOutcome(
+  outcome: string | null | undefined,
+): "completed" | "failed" | "interrupted" {
+  switch (outcome) {
+    case "completed":
+    case "failed":
+    case "interrupted":
+      return outcome;
+    default:
+      return "completed";
+  }
+}
+
+function normalizeWakeState(
+  state: string | null | undefined,
+): "pending" | "delivering" | "delivered" | "consumed" | "dropped" {
+  switch (state) {
+    case "delivering":
+    case "delivered":
+    case "consumed":
+    case "dropped":
+      return state;
+    default:
+      return "pending";
+  }
+}
+
+function normalizeWakeConsumeReason(
+  reason: string | null | undefined,
+):
+  | "worker_rechecked"
+  | "worker_superseded_by_new_turn"
+  | "worker_deleted"
+  | "worker_reparented"
+  | "orchestrator_missing"
+  | "orchestrator_deleted"
+  | "orchestrator_mismatch"
+  | "duplicate"
+  | "manual_dismiss" {
+  switch (reason) {
+    case "worker_superseded_by_new_turn":
+    case "worker_deleted":
+    case "worker_reparented":
+    case "orchestrator_missing":
+    case "orchestrator_deleted":
+    case "orchestrator_mismatch":
+    case "duplicate":
+    case "manual_dismiss":
+    case "worker_rechecked":
+      return reason;
+    default:
+      return "worker_rechecked";
   }
 }
 
@@ -270,14 +342,25 @@ function resolveProgramForWorkerWake(input: {
 }
 
 function isOrchestratorInactive(thread: OrchestrationThread): boolean {
-  const session = thread.session;
+  return isSessionWakeDrainable(thread.session);
+}
+
+function isSessionWakeDrainable(
+  session:
+    | {
+        readonly activeTurnId: TurnId | null;
+        readonly status: string;
+      }
+    | null
+    | undefined,
+): boolean {
   if (!session) {
     return true;
   }
   if (session.activeTurnId !== null) {
     return false;
   }
-  return session.status !== "starting" && session.status !== "running";
+  return session.status !== "starting";
 }
 
 function resolveWorkerWorkspaceForWake(input: {
@@ -490,7 +573,7 @@ function partitionPendingWakeItemsForDelivery(items: readonly OrchestratorWakeIt
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
-  const _providerService = yield* ProviderService;
+  const providerService = yield* ProviderService;
   const serverSettingsService = yield* ServerSettingsService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -618,14 +701,143 @@ const make = Effect.gen(function* () {
       });
       return;
     }
-
-    yield* Effect.logDebug("orchestrator wake upsert delegated to agents-vxapp authority", {
-      wakeId: input.wakeItem.wakeId,
-      commandTag: input.commandTag,
-      aggregateThreadId,
-      targetState: input.wakeItem.state,
-    });
+    const mutation: Parameters<typeof requestAgentsVxappWakeMutation>[0] =
+      input.wakeItem.state === "consumed"
+        ? {
+            action: "consume" as const,
+            wakeId: input.wakeItem.wakeId,
+            orchestratorThreadId: input.wakeItem.orchestratorThreadId,
+            reason: normalizeWakeConsumeReason(input.wakeItem.consumeReason),
+          }
+        : input.wakeItem.state === "dropped"
+          ? {
+              action: "drop" as const,
+              wakeId: input.wakeItem.wakeId,
+              orchestratorThreadId: input.wakeItem.orchestratorThreadId,
+              stateSource: "owner_payload" as const,
+            }
+          : input.wakeItem.state === "delivered"
+            ? {
+                action: "deliver" as const,
+                wakeId: input.wakeItem.wakeId,
+                orchestratorThreadId: input.wakeItem.orchestratorThreadId,
+                stateSource: "owner_payload" as const,
+              }
+            : {
+                action: "upsert" as const,
+                wakeId: input.wakeItem.wakeId,
+                orchestratorThreadId: input.wakeItem.orchestratorThreadId,
+                ...(input.wakeItem.orchestratorProjectId !== undefined
+                  ? { orchestratorProjectId: input.wakeItem.orchestratorProjectId }
+                  : {}),
+                ...(input.wakeItem.workerThreadId !== undefined
+                  ? { workerThreadId: input.wakeItem.workerThreadId }
+                  : {}),
+                ...(input.wakeItem.workerProjectId !== undefined
+                  ? { workerProjectId: input.wakeItem.workerProjectId }
+                  : {}),
+                ...(input.wakeItem.workerTurnId !== undefined
+                  ? { workerTurnId: input.wakeItem.workerTurnId }
+                  : {}),
+                ...(input.wakeItem.workflowId !== undefined
+                  ? { workflowId: input.wakeItem.workflowId }
+                  : {}),
+                ...(input.wakeItem.workerTitleSnapshot !== undefined
+                  ? { workerTitleSnapshot: input.wakeItem.workerTitleSnapshot }
+                  : {}),
+                ...(normalizeWakeOutcome(input.wakeItem.outcome) !== undefined
+                  ? { outcome: normalizeWakeOutcome(input.wakeItem.outcome) }
+                  : {}),
+                ...(input.wakeItem.summary !== undefined
+                  ? { summary: input.wakeItem.summary }
+                  : {}),
+                state: normalizeWakeState(input.wakeItem.state),
+                stateSource: "owner_payload" as const,
+                ...(input.wakeItem.state === "pending" || input.wakeItem.state === "delivering"
+                  ? {}
+                  : { reason: normalizeWakeConsumeReason(input.wakeItem.consumeReason) }),
+                routingKind: "worker_to_orchestrator" as const,
+              };
+    yield* Effect.tryPromise({
+      try: () => requestAgentsVxappWakeMutation(mutation),
+      catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+    }).pipe(
+      Effect.tap(() =>
+        Effect.logDebug("orchestrator wake upsert delegated to agents-vxapp authority", {
+          wakeId: input.wakeItem.wakeId,
+          commandTag: input.commandTag,
+          aggregateThreadId,
+          targetState: input.wakeItem.state,
+        }),
+      ),
+    );
   });
+
+  const deliverWakeDirectlyIfPossible = Effect.fn("deliverWakeDirectlyIfPossible")(
+    function* (input: {
+      readonly readModel: OrchestrationReadModel;
+      readonly wakeItem: OrchestratorWakeItem;
+      readonly createdAt: string;
+    }) {
+      const orchestratorThread = input.readModel.threads.find(
+        (entry) =>
+          entry.id === input.wakeItem.orchestratorThreadId &&
+          entry.archivedAt === null &&
+          entry.deletedAt === null,
+      );
+      if (!orchestratorThread) {
+        return;
+      }
+      if (!isSessionWakeDrainable(orchestratorThread.session)) {
+        return;
+      }
+
+      const deliveryMessageId = MessageId.makeUnsafe(
+        `msg-orchestrator-wake-${input.wakeItem.orchestratorThreadId}-${crypto.randomUUID()}`,
+      );
+      const prompt = buildOrchestratorWakePrompt({
+        items: [input.wakeItem],
+        readModel: input.readModel,
+      });
+
+      const dispatchResult = yield* Effect.exit(
+        orchestrationEngine.dispatch({
+          type: "thread.turn.start",
+          commandId: serverCommandId("wake-direct-dispatch"),
+          threadId: input.wakeItem.orchestratorThreadId,
+          message: {
+            messageId: deliveryMessageId,
+            role: "user",
+            text: prompt,
+            attachments: [],
+          },
+          runtimeMode: orchestratorThread.runtimeMode,
+          interactionMode: orchestratorThread.interactionMode,
+          createdAt: input.createdAt,
+        }),
+      );
+      if (dispatchResult._tag === "Failure") {
+        yield* Effect.logWarning("orchestrator wake direct delivery dispatch failed", {
+          wakeId: input.wakeItem.wakeId,
+          orchestratorThreadId: input.wakeItem.orchestratorThreadId,
+          cause: Cause.pretty(dispatchResult.cause),
+        });
+        return;
+      }
+
+      yield* dispatchWakeUpsert({
+        preferredThreadId: input.wakeItem.orchestratorThreadId,
+        wakeItem: {
+          ...input.wakeItem,
+          state: "delivered",
+          deliveryMessageId,
+          deliveredAt: input.createdAt,
+        },
+        createdAt: input.createdAt,
+        commandTag: "owner-direct-deliver",
+      });
+    },
+  );
 
   const syncProgramRelationshipAndNotifyForWake = Effect.fn(
     "syncProgramRelationshipAndNotifyForWake",
@@ -670,172 +882,167 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const enqueueWakeFromCompletedTurn = Effect.fn("enqueueWakeFromCompletedTurn")(function* (
-    event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>,
-  ) {
-    const turnId = event.turnId;
-    if (turnId === undefined) {
-      return;
-    }
+  const enqueueWakeForSettledWorkerThread = Effect.fn("enqueueWakeForSettledWorkerThread")(
+    function* (input: {
+      readonly readModel: OrchestrationReadModel;
+      readonly workerThread: OrchestrationThread;
+      readonly turnId: TurnId;
+      readonly outcome: "completed" | "failed" | "interrupted";
+      readonly createdAt: string;
+      readonly summary: string;
+      readonly commandTag: string;
+    }) {
+      const { readModel, workerThread, turnId, outcome, createdAt } = input;
+      const duplicateWake = readModel.orchestratorWakeItems.find(
+        (wakeItem) =>
+          wakeItem.workerThreadId === workerThread.id &&
+          wakeItem.workerTurnId === turnId &&
+          wakeItem.outcome === outcome,
+      );
+      if (duplicateWake) {
+        return;
+      }
 
-    const outcome = normalizeWakeOutcome(event.payload.state);
-    if (outcome === null) {
-      return;
-    }
+      if (
+        workerThread.orchestratorThreadId === undefined ||
+        workerThread.orchestratorProjectId === undefined
+      ) {
+        yield* appendWakeRejectedActivity({
+          readModel,
+          workerThread,
+          turnId,
+          createdAt,
+          reason: "missing_orchestrator_lineage",
+          detail: "Worker turn completed without a valid orchestrator target.",
+        });
+        return;
+      }
 
-    const readModel = yield* orchestrationEngine.getReadModel();
-    const workerThread = readModel.threads.find((entry) => entry.id === event.threadId);
-    if (!workerThread || workerThread.spawnRole !== "worker") {
-      return;
-    }
-    if (workerThread.archivedAt !== null || workerThread.deletedAt !== null) {
-      return;
-    }
+      if (workerThread.workflowId === undefined) {
+        yield* appendWakeRejectedActivity({
+          readModel,
+          workerThread,
+          turnId,
+          createdAt,
+          reason: "missing_workflow_id",
+          detail: "Worker turn completed without a workflowId.",
+          orchestratorThreadId: workerThread.orchestratorThreadId,
+          orchestratorProjectId: workerThread.orchestratorProjectId,
+        });
+        return;
+      }
 
-    const duplicateWake = readModel.orchestratorWakeItems.find(
-      (wakeItem) =>
-        wakeItem.workerThreadId === workerThread.id &&
-        wakeItem.workerTurnId === turnId &&
-        wakeItem.outcome === outcome,
-    );
-    if (duplicateWake) {
-      return;
-    }
+      if (
+        workerThread.parentThreadId !== undefined &&
+        workerThread.parentThreadId !== workerThread.orchestratorThreadId
+      ) {
+        yield* appendWakeRejectedActivity({
+          readModel,
+          workerThread,
+          turnId,
+          createdAt,
+          reason: "parent_orchestrator_mismatch",
+          detail: "Worker parentThreadId does not match orchestratorThreadId.",
+          orchestratorThreadId: workerThread.orchestratorThreadId,
+          orchestratorProjectId: workerThread.orchestratorProjectId,
+        });
+        return;
+      }
 
-    if (
-      workerThread.orchestratorThreadId === undefined ||
-      workerThread.orchestratorProjectId === undefined
-    ) {
-      yield* appendWakeRejectedActivity({
-        readModel,
-        workerThread,
-        turnId,
-        createdAt: event.createdAt,
-        reason: "missing_orchestrator_lineage",
-        detail: "Worker turn completed without a valid orchestrator target.",
+      if (workerThread.orchestratorThreadId === workerThread.id) {
+        yield* appendWakeRejectedActivity({
+          readModel,
+          workerThread,
+          turnId,
+          createdAt,
+          reason: "worker_targets_itself",
+          detail: "Worker lineage points back to the worker thread itself.",
+          orchestratorThreadId: workerThread.orchestratorThreadId,
+          orchestratorProjectId: workerThread.orchestratorProjectId,
+        });
+        return;
+      }
+
+      const orchestratorThread = readModel.threads.find(
+        (entry) => entry.id === workerThread.orchestratorThreadId,
+      );
+      if (!orchestratorThread) {
+        yield* appendWakeRejectedActivity({
+          readModel,
+          workerThread,
+          turnId,
+          createdAt,
+          reason: "orchestrator_missing",
+          detail: "Worker target orchestrator thread no longer exists.",
+          orchestratorThreadId: workerThread.orchestratorThreadId,
+          orchestratorProjectId: workerThread.orchestratorProjectId,
+        });
+        return;
+      }
+
+      if (orchestratorThread.projectId !== workerThread.orchestratorProjectId) {
+        yield* appendWakeRejectedActivity({
+          readModel,
+          workerThread,
+          turnId,
+          createdAt,
+          reason: "orchestrator_mismatch",
+          detail: "Worker target orchestrator project does not match the recorded lineage.",
+          orchestratorThreadId: workerThread.orchestratorThreadId,
+          orchestratorProjectId: workerThread.orchestratorProjectId,
+        });
+        return;
+      }
+
+      const wakeId = `wake:${workerThread.id}:${turnId}:${outcome}`;
+      const turns = yield* projectionTurnRepository.listByThreadId({
+        threadId: workerThread.id,
       });
-      return;
-    }
-
-    if (workerThread.workflowId === undefined) {
-      yield* appendWakeRejectedActivity({
-        readModel,
-        workerThread,
-        turnId,
-        createdAt: event.createdAt,
-        reason: "missing_workflow_id",
-        detail: "Worker turn completed without a workflowId.",
+      const supersededAt = findSupersedingTurnRequestedAt({
+        turns,
+        completedTurnId: turnId,
+        completedAt: createdAt,
+        activeTurnId: workerThread.session?.activeTurnId ?? null,
+      });
+      const wakeItem = toWakeItem({
+        wakeId,
         orchestratorThreadId: workerThread.orchestratorThreadId,
         orchestratorProjectId: workerThread.orchestratorProjectId,
-      });
-      return;
-    }
-
-    if (
-      workerThread.parentThreadId !== undefined &&
-      workerThread.parentThreadId !== workerThread.orchestratorThreadId
-    ) {
-      yield* appendWakeRejectedActivity({
-        readModel,
         workerThread,
-        turnId,
-        createdAt: event.createdAt,
-        reason: "parent_orchestrator_mismatch",
-        detail: "Worker parentThreadId does not match orchestratorThreadId.",
-        orchestratorThreadId: workerThread.orchestratorThreadId,
-        orchestratorProjectId: workerThread.orchestratorProjectId,
+        workerTurnId: turnId,
+        outcome,
+        summary: input.summary,
+        queuedAt: createdAt,
       });
-      return;
-    }
-
-    if (workerThread.orchestratorThreadId === workerThread.id) {
-      yield* appendWakeRejectedActivity({
-        readModel,
-        workerThread,
-        turnId,
-        createdAt: event.createdAt,
-        reason: "worker_targets_itself",
-        detail: "Worker lineage points back to the worker thread itself.",
-        orchestratorThreadId: workerThread.orchestratorThreadId,
-        orchestratorProjectId: workerThread.orchestratorProjectId,
+      yield* dispatchWakeUpsert({
+        preferredThreadId: workerThread.orchestratorThreadId,
+        wakeItem:
+          supersededAt === null
+            ? wakeItem
+            : {
+                ...wakeItem,
+                state: "consumed",
+                consumedAt: supersededAt,
+                consumeReason: "worker_superseded_by_new_turn",
+              },
+        createdAt: supersededAt ?? createdAt,
+        commandTag: supersededAt === null ? input.commandTag : `${input.commandTag}-superseded`,
       });
-      return;
-    }
-
-    const orchestratorThread = readModel.threads.find(
-      (entry) => entry.id === workerThread.orchestratorThreadId,
-    );
-    if (!orchestratorThread) {
-      yield* appendWakeRejectedActivity({
-        readModel,
-        workerThread,
-        turnId,
-        createdAt: event.createdAt,
-        reason: "orchestrator_missing",
-        detail: "Worker target orchestrator thread no longer exists.",
-        orchestratorThreadId: workerThread.orchestratorThreadId,
-        orchestratorProjectId: workerThread.orchestratorProjectId,
-      });
-      return;
-    }
-
-    if (orchestratorThread.projectId !== workerThread.orchestratorProjectId) {
-      yield* appendWakeRejectedActivity({
-        readModel,
-        workerThread,
-        turnId,
-        createdAt: event.createdAt,
-        reason: "orchestrator_mismatch",
-        detail: "Worker target orchestrator project does not match the recorded lineage.",
-        orchestratorThreadId: workerThread.orchestratorThreadId,
-        orchestratorProjectId: workerThread.orchestratorProjectId,
-      });
-      return;
-    }
-
-    const wakeId = `wake:${workerThread.id}:${turnId}:${outcome}`;
-    const turns = yield* projectionTurnRepository.listByThreadId({
-      threadId: workerThread.id,
-    });
-    const supersededAt = findSupersedingTurnRequestedAt({
-      turns,
-      completedTurnId: turnId,
-      completedAt: event.createdAt,
-      activeTurnId: workerThread.session?.activeTurnId ?? null,
-    });
-    const wakeItem = toWakeItem({
-      wakeId,
-      orchestratorThreadId: workerThread.orchestratorThreadId,
-      orchestratorProjectId: workerThread.orchestratorProjectId,
-      workerThread,
-      workerTurnId: turnId,
-      outcome,
-      summary: buildWakeSummary({ workerThread, outcome, runtimeEvent: event }),
-      queuedAt: event.createdAt,
-    });
-    yield* dispatchWakeUpsert({
-      preferredThreadId: workerThread.orchestratorThreadId,
-      wakeItem:
-        supersededAt === null
-          ? wakeItem
-          : {
-              ...wakeItem,
-              state: "consumed",
-              consumedAt: supersededAt,
-              consumeReason: "worker_superseded_by_new_turn",
-            },
-      createdAt: supersededAt ?? event.createdAt,
-      commandTag: supersededAt === null ? "upsert" : "upsert-superseded",
-    });
-    if (supersededAt === null) {
-      yield* syncProgramRelationshipAndNotifyForWake({
-        readModel,
-        workerThread,
-        wakeItem,
-        createdAt: event.createdAt,
-      });
-    }
-  });
+      if (supersededAt === null) {
+        yield* deliverWakeDirectlyIfPossible({
+          readModel,
+          wakeItem,
+          createdAt,
+        });
+        yield* syncProgramRelationshipAndNotifyForWake({
+          readModel,
+          workerThread,
+          wakeItem,
+          createdAt,
+        });
+      }
+    },
+  );
 
   const enqueueWakeFromTerminalTurnDiff = Effect.fn("enqueueWakeFromTerminalTurnDiff")(function* (
     event: Extract<OrchestrationEvent, { type: "thread.turn-diff-completed" }>,
@@ -980,12 +1187,7 @@ const make = Effect.gen(function* () {
       workerThread,
       workerTurnId: turnId,
       outcome,
-      summary:
-        outcome === "failed"
-          ? `${workerThread.title} failed its turn`
-          : outcome === "interrupted"
-            ? `${workerThread.title} was interrupted`
-            : `${workerThread.title} completed its assigned turn`,
+      summary: buildWakeSummaryFromOutcome({ workerThread, outcome }),
       queuedAt: event.payload.completedAt,
     });
     yield* dispatchWakeUpsert({
@@ -1003,6 +1205,11 @@ const make = Effect.gen(function* () {
       commandTag: supersededAt === null ? "diff-upsert" : "diff-upsert-superseded",
     });
     if (supersededAt === null) {
+      yield* deliverWakeDirectlyIfPossible({
+        readModel,
+        wakeItem,
+        createdAt: event.payload.completedAt,
+      });
       yield* syncProgramRelationshipAndNotifyForWake({
         readModel,
         workerThread,
@@ -1010,6 +1217,43 @@ const make = Effect.gen(function* () {
         createdAt: event.payload.completedAt,
       });
     }
+  });
+
+  const enqueueWakeFromWorkerSessionSet = Effect.fn("enqueueWakeFromWorkerSessionSet")(function* (
+    event: Extract<OrchestrationEvent, { type: "thread.session-set" }>,
+  ) {
+    if (!isSessionWakeDrainable(event.payload.session)) {
+      return;
+    }
+
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const workerThread = readModel.threads.find((entry) => entry.id === event.payload.threadId);
+    if (!workerThread || workerThread.spawnRole !== "worker") {
+      return;
+    }
+    if (workerThread.archivedAt !== null || workerThread.deletedAt !== null) {
+      return;
+    }
+
+    const latestTurn = workerThread.latestTurn;
+    if (!latestTurn?.completedAt) {
+      return;
+    }
+
+    const outcome = wakeOutcomeFromLatestTurnState(latestTurn.state);
+    if (outcome === null) {
+      return;
+    }
+
+    yield* enqueueWakeForSettledWorkerThread({
+      readModel,
+      workerThread,
+      turnId: latestTurn.turnId,
+      outcome,
+      createdAt: latestTurn.completedAt,
+      summary: buildWakeSummaryFromOutcome({ workerThread, outcome }),
+      commandTag: "session-settle-upsert",
+    });
   });
 
   const consumeDeliveringWakeItemsForCompletedReviewTurn = Effect.fn(
@@ -1529,6 +1773,11 @@ const make = Effect.gen(function* () {
       );
 
       if (dispatchResult._tag === "Failure") {
+        yield* Effect.logWarning("orchestrator wake batch delivery dispatch failed", {
+          orchestratorThreadId,
+          wakeIds: batch.map((wakeItem) => wakeItem.wakeId),
+          cause: Cause.pretty(dispatchResult.cause),
+        });
         yield* Effect.forEach(
           batch,
           (wakeItem) =>
@@ -1586,11 +1835,8 @@ const make = Effect.gen(function* () {
           yield* enqueueWakeFromTerminalTurnDiff(event);
           return;
         case "thread.session-set":
-          if (
-            event.payload.session.activeTurnId === null &&
-            event.payload.session.status !== "starting" &&
-            event.payload.session.status !== "running"
-          ) {
+          yield* enqueueWakeFromWorkerSessionSet(event);
+          if (isSessionWakeDrainable(event.payload.session)) {
             yield* finalizeDeliveringWakeItemsForOrchestrator({
               orchestratorThreadId: event.payload.threadId,
               settledAt: event.payload.session.updatedAt,
@@ -1615,9 +1861,7 @@ const make = Effect.gen(function* () {
 
   const processInput = (input: WakeReactorInput) =>
     input.source === "runtime"
-      ? consumeDeliveringWakeItemsForCompletedReviewTurn(input.event).pipe(
-          Effect.flatMap(() => enqueueWakeFromCompletedTurn(input.event)),
-        )
+      ? consumeDeliveringWakeItemsForCompletedReviewTurn(input.event)
       : processDomainEvent(input.event);
 
   const processInputSafely = (input: WakeReactorInput) =>
@@ -1635,7 +1879,7 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const _worker = yield* makeDrainableWorker(processInputSafely);
+  const worker = yield* makeDrainableWorker(processInputSafely);
 
   const shouldSuppressStartupWakeReconciliation = Effect.gen(function* () {
     if (isTruthyEnv(process.env[SUPPRESS_STARTUP_WAKE_ENV])) {
@@ -1693,8 +1937,36 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  const start: OrchestratorWakeReactorShape["start"] = () =>
-    Effect.logDebug("orchestrator wake reactor is delegated to agents-vxapp authority");
+  const start: OrchestratorWakeReactorShape["start"] = Effect.fn("start")(function* () {
+    yield* _reconcileWakesOnStart;
+
+    yield* Effect.forkScoped(
+      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (
+          event.type !== "thread.archived" &&
+          event.type !== "thread.deleted" &&
+          event.type !== "thread.turn-start-requested" &&
+          event.type !== "thread.turn-diff-completed" &&
+          event.type !== "thread.turn-interrupt-requested" &&
+          event.type !== "thread.session-set" &&
+          event.type !== "thread.unarchived" &&
+          event.type !== "thread.orchestrator-wake-upserted"
+        ) {
+          return Effect.void;
+        }
+        return worker.enqueue({ source: "domain", event });
+      }),
+    );
+
+    yield* Effect.forkScoped(
+      Stream.runForEach(providerService.streamEvents, (event) => {
+        if (event.type !== "turn.completed") {
+          return Effect.void;
+        }
+        return worker.enqueue({ source: "runtime", event });
+      }),
+    );
+  });
 
   return {
     start,

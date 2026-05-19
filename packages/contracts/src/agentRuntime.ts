@@ -1,6 +1,11 @@
 import { Schema, SchemaTransformation } from "effect";
 import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import {
+  AgentsVxappRuntimeAvailability,
+  AgentsVxappRuntimeReasonCode,
+  AgentsVxappRuntimeTargetKind,
+} from "./agentsVxappAuthority";
+import {
   WorkerRuntimeAuditFinding,
   WorkerRuntimeAuditStatus,
   WorkerRuntimePackSummary,
@@ -22,7 +27,7 @@ const openStringToDecodedSchema = <T>() =>
     ),
   );
 
-export const AgentRuntimeAgentKind = openStringToDecodedSchema<string>();
+export const AgentRuntimeAgentKind = AgentsVxappRuntimeTargetKind;
 export type AgentRuntimeAgentKind = typeof AgentRuntimeAgentKind.Type;
 
 export const AgentRuntimeSnapshotKind = openStringToDecodedSchema<string>();
@@ -88,9 +93,13 @@ export const AgentRuntimeRoleDetails = Schema.Struct({
 export type AgentRuntimeRoleDetails = typeof AgentRuntimeRoleDetails.Type;
 
 export const AgentRuntimeSnapshot = Schema.Struct({
-  threadId: ThreadId,
+  threadId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(() => null)),
   agentKind: AgentRuntimeAgentKind,
   runtimeKind: AgentRuntimeSnapshotKind,
+  availability: AgentsVxappRuntimeAvailability,
+  reasonCode: Schema.NullOr(AgentsVxappRuntimeReasonCode).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   workspaceRoot: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
   runtimeDir: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
   workspaceResolution: AgentRuntimeWorkspaceResolution,
@@ -104,8 +113,8 @@ export const AgentRuntimeSnapshot = Schema.Struct({
 export type AgentRuntimeSnapshot = typeof AgentRuntimeSnapshot.Type;
 
 export const GetAgentRuntimeSnapshotInput = Schema.Struct({
-  threadId: ThreadId,
   agentKind: AgentRuntimeAgentKind,
+  threadId: Schema.optional(ThreadId),
 });
 export type GetAgentRuntimeSnapshotInput = typeof GetAgentRuntimeSnapshotInput.Type;
 

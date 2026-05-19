@@ -11,6 +11,113 @@ import * as nativeApi from "../nativeApi";
 
 const threadId = ThreadId.makeUnsafe("worker-thread");
 
+function makeSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    threadId,
+    runtimeKind: "worker-contract",
+    agentKind: "worker",
+    workspace: "/fixtures/worktrees/worker-thread",
+    availability: "inspectable",
+    reasonCode: null,
+    runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
+    runtimeRoot: "/fixtures/worktrees/worker-thread/.agents",
+    stateRoot: "/fixtures/worktrees/worker-thread",
+    workspaceResolution: "thread-worktree",
+    sourceFiles: {
+      contextPlan: {
+        status: "loaded",
+        failureCode: null,
+        failureMessage: null,
+      },
+      dispatchContract: {
+        status: "loaded",
+        failureCode: null,
+        failureMessage: null,
+      },
+      installedPacks: {
+        status: "loaded",
+        failureCode: null,
+        failureMessage: null,
+      },
+    },
+    audit: {
+      schema_version: "1.0.0",
+      repo: "vue-vxapp",
+      taskClass: "review-only",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      workspace: "/fixtures/worktrees/worker-thread",
+      runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
+      skillsDir: null,
+      agentsSkillsDir: null,
+      instructionStackStatus: "clean",
+      packAuditStatus: "clean",
+      status: "clean",
+      issues: [],
+    },
+    contextPlan: {
+      schema_version: "1.0.0",
+      repo: "vue-vxapp",
+      taskClass: "review-only",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      validationProfile: null,
+      selectedPacks: [],
+      allowedCapabilities: [],
+      forbiddenCapabilities: [],
+      conflicts: [],
+      warnings: [],
+      workspace: "/fixtures/worktrees/worker-thread",
+      runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
+      skillsDir: null,
+      agentsSkillsDir: null,
+      repoClaude: null,
+      legacyGlobalSkills: false,
+    },
+    dispatchContract: {
+      schema_version: "1.0.0",
+      repo: "vue-vxapp",
+      taskClass: "review-only",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      validationProfile: null,
+      selectedPacks: [],
+      allowedCapabilities: [],
+      forbiddenCapabilities: [],
+      conflicts: [],
+      warnings: [],
+      workspace: "/fixtures/worktrees/worker-thread",
+      runtimeFiles: {},
+    },
+    installedPacks: {
+      schema_version: "1.0.0",
+      repo: "vue-vxapp",
+      taskClass: "review-only",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      workspace: "/fixtures/worktrees/worker-thread",
+      runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
+      skillsDir: null,
+      agentsSkillsDir: null,
+      packs: [],
+    },
+    instructionStack: {
+      schema_version: "1.0.0",
+      repo: "vue-vxapp",
+      taskClass: "review-only",
+      contextMode: "isolated",
+      closeoutAuthority: "code_tests",
+      workspace: "/fixtures/worktrees/worker-thread",
+      status: "clean",
+      findings: [],
+      packAudit: {},
+    },
+    findings: [],
+    issues: [],
+    ...overrides,
+  } as const;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -29,155 +136,44 @@ describe("workerRuntimeSnapshotQueryOptions", () => {
     expect(options.enabled).toBe(false);
   });
 
-  it("forwards the thread id and worktree path hint to the server runtime API", async () => {
-    const worktreePath = "/fixtures/worktrees/worker-thread";
-    const getWorkerRuntimeSnapshot = vi.fn().mockResolvedValue({
-      threadId,
-      worktreePath,
-      runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
-      sourceFiles: {
-        contextPlan: {
-          absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/context-plan.json",
-          detail: null,
-          fileName: "context-plan.json",
-          status: "loaded",
-        },
-        dispatchContract: {
-          absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/dispatch-contract.json",
-          detail: null,
-          fileName: "dispatch-contract.json",
-          status: "loaded",
-        },
-        installedPacks: {
-          absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/installed-packs.json",
-          detail: null,
-          fileName: "installed-packs.json",
-          status: "loaded",
-        },
-        instructionStackAudit: {
-          absolutePath:
-            "/fixtures/worktrees/worker-thread/.agents/runtime/instruction-stack-audit.json",
-          detail: null,
-          fileName: "instruction-stack-audit.json",
-          status: "loaded",
-        },
-      },
-      summary: {
-        repo: "vue-vxapp",
-        taskClass: "review-only",
-        contextMode: "isolated",
-        closeoutAuthority: "code_tests",
-        validationProfile: null,
-        selectedPacks: [],
-        allowedCapabilities: [],
-        forbiddenCapabilities: [],
-        conflicts: [],
-        warnings: [],
-        repoClaude: null,
-        legacyGlobalSkills: false,
-        workspace: "/fixtures/worktrees/worker-thread",
-        runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
-        skillsDir: null,
-        agentsSkillsDir: null,
-        auditStatus: "clean",
-        auditFindings: [],
-        packAuditStatus: null,
-        packAuditIssueCount: 0,
-        packCount: 0,
-      },
-      packs: [],
-      raw: {
-        contextPlan: null,
-        dispatchContract: null,
-        installedPacks: null,
-        instructionStackAudit: null,
-      },
-    });
+  it("forwards the thread id and workspace to the server runtime API", async () => {
+    const workspace = "/fixtures/worktrees/worker-thread";
+    const getWorkerRuntimeSnapshot = vi.fn().mockResolvedValue(makeSnapshot({ workspace }));
     vi.spyOn(nativeApi, "ensureNativeApi").mockReturnValue({
       server: {
         getWorkerRuntimeSnapshot,
       },
     } as unknown as NativeApi);
 
-    const options = workerRuntimeSnapshotQueryOptions({ threadId, worktreePath });
+    const options = workerRuntimeSnapshotQueryOptions({ threadId, workspace });
     const queryClient = new QueryClient();
     await queryClient.fetchQuery(options);
 
-    expect(getWorkerRuntimeSnapshot).toHaveBeenCalledWith({ threadId, worktreePath });
+    expect(getWorkerRuntimeSnapshot).toHaveBeenCalledWith({ threadId, workspace });
   });
 
-  it("can derive the repo label from the runtime snapshot summary", () => {
-    const snapshot = {
-      threadId,
-      worktreePath: "/fixtures/worktrees/worker-thread",
-      runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
-      sourceFiles: {
-        contextPlan: {
-          absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/context-plan.json",
-          detail: null,
-          fileName: "context-plan.json",
-          status: "loaded",
-        },
-        dispatchContract: {
-          absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/dispatch-contract.json",
-          detail: null,
-          fileName: "dispatch-contract.json",
-          status: "loaded",
-        },
-        installedPacks: {
-          absolutePath: "/fixtures/worktrees/worker-thread/.agents/runtime/installed-packs.json",
-          detail: null,
-          fileName: "installed-packs.json",
-          status: "loaded",
-        },
-        instructionStackAudit: {
-          absolutePath:
-            "/fixtures/worktrees/worker-thread/.agents/runtime/instruction-stack-audit.json",
-          detail: null,
-          fileName: "instruction-stack-audit.json",
-          status: "loaded",
-        },
-      },
-      summary: {
-        repo: "api-vxapp",
-        taskClass: "review-only",
-        contextMode: "isolated",
-        closeoutAuthority: "code_tests",
-        validationProfile: null,
-        selectedPacks: [],
-        allowedCapabilities: [],
-        forbiddenCapabilities: [],
-        conflicts: [],
-        warnings: [],
-        repoClaude: null,
-        legacyGlobalSkills: false,
-        workspace: "/fixtures/worktrees/worker-thread",
-        runtimeDir: "/fixtures/worktrees/worker-thread/.agents/runtime",
-        skillsDir: null,
-        agentsSkillsDir: null,
-        auditStatus: "clean",
-        auditFindings: [],
-        packAuditStatus: null,
-        packAuditIssueCount: 0,
-        packCount: 0,
-      },
-      packs: [],
-      raw: {
-        contextPlan: null,
-        dispatchContract: null,
-        installedPacks: null,
-        instructionStackAudit: null,
-      },
-    } as const;
-
-    expect(getWorkerRuntimeRepoLabel(snapshot as any)).toBe("api-vxapp");
+  it("can derive the repo label from the worker runtime snapshot", () => {
+    expect(
+      getWorkerRuntimeRepoLabel(
+        makeSnapshot({ contextPlan: { ...makeSnapshot().contextPlan, repo: "api-vxapp" } }) as any,
+      ),
+    ).toBe("api-vxapp");
+    expect(
+      getWorkerRuntimeRepoLabel(
+        makeSnapshot({
+          contextPlan: null,
+          dispatchContract: { ...makeSnapshot().dispatchContract, repo: "" },
+          installedPacks: { ...makeSnapshot().installedPacks, repo: "stores-vxapp" },
+        }) as any,
+      ),
+    ).toBe("stores-vxapp");
     expect(getWorkerRuntimeRepoLabel(null)).toBeNull();
   });
 
   it("exposes a repo-selecting query helper built on the snapshot query", () => {
     const options = workerRuntimeRepoQueryOptions({
       threadId,
-      worktreePath: "/fixtures/worktrees/worker-thread",
+      workspace: "/fixtures/worktrees/worker-thread",
     });
 
     expect(options.queryKey).toEqual(

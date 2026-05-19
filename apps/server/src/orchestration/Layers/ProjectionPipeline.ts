@@ -1010,11 +1010,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 : Option.none<ProjectionTurn>();
             }
             const targetTurn = Option.isSome(existingTurn) ? existingTurn : fallbackRunningTurn;
-            if (
-              Option.isNone(targetTurn) ||
-              targetTurn.value.turnId === null ||
-              (targetTurn.value.state !== "running" && targetTurn.value.state !== "pending")
-            ) {
+            if (Option.isNone(targetTurn)) {
+              yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
+                threadId: event.payload.threadId,
+              });
+              return;
+            }
+
+            if (targetTurn.value.turnId === null) {
+              yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
+                threadId: event.payload.threadId,
+              });
+              return;
+            }
+
+            if (targetTurn.value.state !== "running" && targetTurn.value.state !== "pending") {
               return;
             }
 

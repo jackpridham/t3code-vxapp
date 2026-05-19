@@ -1,4 +1,6 @@
+import type { ServerGetAgentsVxappSidebarAuthoritySnapshotResult } from "@t3tools/contracts";
 import { Badge } from "~/components/ui/badge";
+import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
 import {
   Dialog,
   DialogDescription,
@@ -8,12 +10,11 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
-import { useQuery } from "@tanstack/react-query";
 import { CircleDotIcon, ListTodoIcon } from "lucide-react";
-import { agentsVxappControlPlaneSnapshotQueryOptions } from "~/lib/agentsVxappControlPlaneReactQuery";
 import { cn } from "~/lib/utils";
 
 const NEUTRAL_BADGE_CLASSNAME = "h-5 border border-border/70 bg-background/70 px-1.5 text-[10px]";
+const EMPTY_TODOS: ServerGetAgentsVxappSidebarAuthoritySnapshotResult["todos"] = [];
 
 export function ProgramTodosDialog(props: {
   open: boolean;
@@ -21,15 +22,16 @@ export function ProgramTodosDialog(props: {
   programId: string;
   programTitle: string;
 }) {
-  const snapshotQuery = useQuery(agentsVxappControlPlaneSnapshotQueryOptions());
-  const currentTodoIds = new Set(
-    (snapshotQuery.data?.currentTodos ?? [])
-      .filter((row) => row.programId === props.programId)
-      .map((row) => row.todoId),
+  useAgentsVxappSidebarAuthorityBootstrap();
+  const status = useAgentsVxappStore((store) => store.status);
+  const error = useAgentsVxappStore((store) => store.error);
+  const currentTodoId = useAgentsVxappStore(
+    (store) => store.currentTodoIdByProgramId.get(props.programId) ?? null,
   );
-  const todos = (snapshotQuery.data?.todos ?? [])
-    .filter((todo) => todo.programId === props.programId)
-    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const rawTodos = useAgentsVxappStore(
+    (store) => store.todosByProgramId.get(props.programId) ?? EMPTY_TODOS,
+  );
+  const todos = rawTodos.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
   return (
     <Dialog onOpenChange={props.onOpenChange} open={props.open}>
@@ -41,15 +43,13 @@ export function ProgramTodosDialog(props: {
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
-          {snapshotQuery.isLoading ? (
+          {status === "loading" || status === "idle" ? (
             <div className="rounded-xl border border-border/70 bg-card/60 px-4 py-6 text-sm text-muted-foreground">
               Loading TODOs…
             </div>
-          ) : snapshotQuery.error ? (
+          ) : status === "error" ? (
             <div className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-6 text-sm text-destructive">
-              {snapshotQuery.error instanceof Error
-                ? snapshotQuery.error.message
-                : "Failed to load Program TODOs."}
+              {error?.message ?? "Failed to load Program TODOs."}
             </div>
           ) : todos.length === 0 ? (
             <Empty className="rounded-xl border border-dashed border-border/70 bg-card/40 py-12">
@@ -64,7 +64,7 @@ export function ProgramTodosDialog(props: {
           ) : (
             <div className="space-y-3">
               {todos.map((todo) => {
-                const isCurrent = currentTodoIds.has(todo.todoId);
+                const isCurrent = currentTodoId === todo.todoId;
 
                 return (
                   <section

@@ -5,6 +5,7 @@ import {
   type ServerCreateAgentsVxappTodoInput,
   type ServerDeleteAgentsVxappProgramInput,
   type ServerDeleteAgentsVxappTodoInput,
+  type ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
   type ServerGetAgentsVxappControlPlaneSnapshotInput,
   type ServerGetAgentsVxappSidebarGraphInput,
   type ServerListVortexAppArtifactsInput,
@@ -106,6 +107,20 @@ export const makeVxappWsRouteHandlers: Effect.Effect<
                 { _tag: typeof WS_METHODS.serverGetAgentsVxappSidebarGraph }
               >,
             ) as ServerGetAgentsVxappSidebarGraphInput,
+          ),
+      },
+    ],
+    [
+      WS_METHODS.serverGetAgentsVxappSidebarAuthoritySnapshot,
+      {
+        handle: (request) =>
+          agentsVxappSidebar.getAuthoritySnapshot(
+            stripRequestTag(
+              request.body as Extract<
+                WebSocketRequest["body"],
+                { _tag: typeof WS_METHODS.serverGetAgentsVxappSidebarAuthoritySnapshot }
+              >,
+            ) as ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
           ),
       },
     ],

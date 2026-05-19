@@ -1,10 +1,5 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { InfoIcon } from "lucide-react";
-import { useStore } from "~/store";
-import { agentsVxappControlPlaneSnapshotQueryOptions } from "~/lib/agentsVxappControlPlaneReactQuery";
-import { agentsVxappSidebarGraphQueryOptions } from "~/lib/agentsVxappSidebarReactQuery";
-import type { Thread } from "~/types";
+import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
 import {
   Dialog,
   DialogDescription,
@@ -14,77 +9,46 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
-import {
-  readProgramCloseoutVerdict,
-  readProgramScopeSummary,
-  resolveExecutiveOptions,
-  resolveOrchestratorOptions,
-  resolveProgramExecutiveLabel,
-  resolveProgramOrchestratorLabel,
-} from "./programsTodosModel";
+import { readProgramCloseoutVerdict, readProgramScopeSummary } from "./programsTodosModel";
 import { ProgramOverviewCard } from "./ProgramOverviewCard";
 import { resolveProgramDisplay } from "./programDisplay";
 
-const EMPTY_PROGRAMS = [] as const;
-const EMPTY_TODOS = [] as const;
-const EMPTY_THREAD_LINKS: readonly {
-  threadId: Thread["id"];
-  title: string | null;
-  roleSession?: { role: "cto" | "jasper"; sessionId: string | null } | null;
-  workspaceRoot: string | null;
-  worktreePath: string | null;
-  spawnRole: string | null;
-}[] = [];
+function readRuntimeTargetLabel(input: {
+  emptyLabel: string;
+  target: {
+    availability: "inspectable" | "degraded" | "unavailable";
+    threadId: string | null;
+    workspace: string | null;
+  } | null;
+  unavailableLabel: string;
+}) {
+  if (!input.target) {
+    return input.emptyLabel;
+  }
+  if (input.target.availability === "unavailable") {
+    return input.unavailableLabel;
+  }
+  return input.target.threadId ?? input.target.workspace ?? input.emptyLabel;
+}
 
 export function ProgramInfoDialog(props: {
   onOpenChange: (open: boolean) => void;
   open: boolean;
   programId: string;
 }) {
-  const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
-  const snapshotQuery = useQuery(agentsVxappControlPlaneSnapshotQueryOptions());
-  const sidebarGraphQuery = useQuery(agentsVxappSidebarGraphQueryOptions());
-
-  const programs = snapshotQuery.data?.programs ?? EMPTY_PROGRAMS;
-  const todos = snapshotQuery.data?.todos ?? EMPTY_TODOS;
-  const currentTodoByProgramId = useMemo(() => {
-    const next = new Map<string, string>();
-    for (const row of snapshotQuery.data?.currentTodos ?? []) {
-      next.set(row.programId, row.todoId);
-    }
-    return next;
-  }, [snapshotQuery.data?.currentTodos]);
-
-  const executiveOptions = useMemo(
-    () =>
-      resolveExecutiveOptions({
-        programs,
-        projects,
-        threads,
-      }),
-    [programs, projects, threads],
+  useAgentsVxappSidebarAuthorityBootstrap();
+  const status = useAgentsVxappStore((store) => store.status);
+  const error = useAgentsVxappStore((store) => store.error);
+  const programCard = useAgentsVxappStore(
+    (store) => store.programCardById.get(props.programId) ?? null,
   );
-  const orchestratorOptions = useMemo(
-    () =>
-      resolveOrchestratorOptions({
-        programs,
-        threads,
-        threadLinks:
-          sidebarGraphQuery.data?.threadLinks.map((link) => ({
-            threadId: link.threadId,
-            title: link.title,
-            roleSession: link.roleSession ?? null,
-            workspaceRoot: link.workspaceRoot,
-            worktreePath: link.worktreePath,
-            spawnRole: link.spawnRole,
-          })) ?? EMPTY_THREAD_LINKS,
-      }),
-    [programs, sidebarGraphQuery.data?.threadLinks, threads],
+  const todoCount = useAgentsVxappStore(
+    (store) => store.todosByProgramId.get(props.programId)?.length ?? 0,
   );
-
-  const program = programs.find((entry) => entry.id === props.programId) ?? null;
-  const todoCount = todos.filter((todo) => todo.programId === props.programId).length;
+  const currentTodoId = useAgentsVxappStore(
+    (store) => store.currentTodoIdByProgramId.get(props.programId) ?? null,
+  );
+  const program = programCard?.program ?? null;
   const programDisplay = program ? resolveProgramDisplay(program) : null;
 
   return (
@@ -97,15 +61,13 @@ export function ProgramInfoDialog(props: {
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
-          {snapshotQuery.isLoading ? (
+          {status === "loading" || status === "idle" ? (
             <div className="rounded-xl border border-border/70 bg-card/60 px-4 py-6 text-sm text-muted-foreground">
               Loading Program details…
             </div>
-          ) : snapshotQuery.error ? (
+          ) : status === "error" ? (
             <div className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-6 text-sm text-destructive">
-              {snapshotQuery.error instanceof Error
-                ? snapshotQuery.error.message
-                : "Failed to load Program details."}
+              {error?.message ?? "Failed to load Program details."}
             </div>
           ) : !program ? (
             <Empty className="rounded-xl border border-dashed border-border/70 bg-card/40 py-12">
@@ -119,15 +81,30 @@ export function ProgramInfoDialog(props: {
             </Empty>
           ) : (
             <ProgramOverviewCard
-              currentTodoId={currentTodoByProgramId.get(program.id) ?? null}
-              description={programDisplay?.summary ?? null}
-              executiveLabel={resolveProgramExecutiveLabel(program, executiveOptions)}
-              orchestratorLabel={resolveProgramOrchestratorLabel(program, orchestratorOptions)}
+              currentTodoId={currentTodoId}
+              description={programCard?.display?.summary ?? programDisplay?.summary ?? null}
+              executiveLabel={readRuntimeTargetLabel({
+                target: programCard?.executive ?? null,
+                emptyLabel: "Unassigned Executive",
+                unavailableLabel: "Executive unavailable",
+              })}
+              orchestratorLabel={readRuntimeTargetLabel({
+                target: programCard?.orchestrator ?? null,
+                emptyLabel: "No orchestrator",
+                unavailableLabel: "Orchestrator unavailable",
+              })}
               scopeSummary={readProgramScopeSummary(program)}
               status={
-                programDisplay ? { label: programDisplay.label, tone: programDisplay.tone } : null
+                programCard?.display
+                  ? {
+                      label: programCard.display.label ?? null,
+                      tone: programCard.display.tone ?? null,
+                    }
+                  : programDisplay
+                    ? { label: programDisplay.label, tone: programDisplay.tone }
+                    : null
               }
-              title={programDisplay?.heading ?? program.title}
+              title={programCard?.display?.heading ?? programDisplay?.heading ?? program.title}
               totalTodoCount={todoCount}
               verdict={readProgramCloseoutVerdict(program)}
             />

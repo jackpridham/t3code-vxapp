@@ -8,6 +8,7 @@ import type {
   ServerUpdateAgentsVxappProgramInput,
   ServerUpdateAgentsVxappTodoInput,
 } from "@t3tools/contracts";
+import { invalidateAgentsVxappStore, refreshAgentsVxappStore } from "~/agentsVxappStore";
 import { ensureNativeApi } from "~/nativeApi";
 import { agentsVxappSidebarQueryKeys } from "./agentsVxappSidebarReactQuery";
 
@@ -19,7 +20,9 @@ export const agentsVxappControlPlaneQueryKeys = {
 };
 
 export function invalidateAgentsVxappControlPlaneQueries(queryClient: QueryClient) {
+  invalidateAgentsVxappStore();
   return Promise.all([
+    refreshAgentsVxappStore({ force: true }),
     queryClient.invalidateQueries({ queryKey: agentsVxappControlPlaneQueryKeys.all }),
     queryClient.invalidateQueries({ queryKey: agentsVxappSidebarQueryKeys.all }),
   ]);

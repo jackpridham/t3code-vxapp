@@ -34,7 +34,7 @@ export const DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE: ChangesPanelWindowNav
   "dynamic";
 export const ChangesDrawerVisibility = Schema.Literals(["always_show", "always_hide"]);
 export type ChangesDrawerVisibility = typeof ChangesDrawerVisibility.Type;
-export const DEFAULT_CHANGES_DRAWER_VISIBILITY: ChangesDrawerVisibility = "always_show";
+export const DEFAULT_CHANGES_DRAWER_VISIBILITY: ChangesDrawerVisibility = "always_hide";
 export const DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH = true;
 export const ChatViewInputWhenScrolling = Schema.Literals(["hide", "show", "compact"]);
 export type ChatViewInputWhenScrolling = typeof ChatViewInputWhenScrolling.Type;

@@ -45,6 +45,7 @@ import {
 } from "@t3tools/contracts";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
+import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
 import { isElectron } from "../env";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isLinuxPlatform, isMacPlatform, newCommandId } from "../lib/utils";
@@ -139,7 +140,7 @@ import {
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useSidebarProjectController } from "./sidebar/useSidebarProjectController";
 import { buildSidebarWakeBadge } from "./sidebar/sidebarWakeBadge";
-import { buildSidebarWakeSummaryByThreadId } from "./sidebar/sidebarWakeSummary";
+import { buildAuthoritySidebarWakeSummaryByThreadId } from "./sidebar/sidebarWakeSummary";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import type { Project, Thread } from "../types";
@@ -242,13 +243,14 @@ function toSidebarThreadSnapshot(
 }
 
 export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
+  useAgentsVxappSidebarAuthorityBootstrap();
   const { isMobile, setOpenMobile } = useSidebar();
   const projects = useStore((store) => store.projects);
-  const programs = useStore((store) => store.programs ?? []);
-  const programNotifications = useStore((store) => store.programNotifications ?? []);
-  const ctoAttentionItems = useStore((store) => store.ctoAttentionItems ?? []);
+  const authorityProgramCards = useAgentsVxappStore((store) => store.programCards);
+  const authorityProgramNotifications = useAgentsVxappStore((store) => store.notifications);
+  const authorityAttentionItems = useAgentsVxappStore((store) => store.attentionItems);
+  const authorityOpenWakes = useAgentsVxappStore((store) => store.openWakes);
   const serverThreads = useStore((store) => store.threads);
-  const orchestratorWakeItems = useStore((store) => store.orchestratorWakeItems);
   const { projectExpandedById, projectOrder, threadLastVisitedAtById, labelFiltersByProject } =
     useUiStateStore(
       useShallow((store) => ({
@@ -338,17 +340,29 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
       ),
     [serverThreads, threadLastVisitedAtById],
   );
+  const authorityPrograms = useMemo(
+    () => authorityProgramCards.map((card) => card.program),
+    [authorityProgramCards],
+  );
   const orchestratorWakeSummaryByThreadId = useMemo(
-    () => buildSidebarWakeSummaryByThreadId(orchestratorWakeItems),
-    [orchestratorWakeItems],
+    () => buildAuthoritySidebarWakeSummaryByThreadId(authorityOpenWakes),
+    [authorityOpenWakes],
   );
   const programNotificationGroups = useMemo(
-    () => buildSidebarProgramNotificationGroups({ programs, notifications: programNotifications }),
-    [programs, programNotifications],
+    () =>
+      buildSidebarProgramNotificationGroups({
+        programs: authorityPrograms,
+        notifications: authorityProgramNotifications,
+      }),
+    [authorityProgramNotifications, authorityPrograms],
   );
   const ctoAttentionGroups = useMemo(
-    () => buildSidebarCtoAttentionGroups({ programs, ctoAttentionItems }),
-    [ctoAttentionItems, programs],
+    () =>
+      buildSidebarCtoAttentionGroups({
+        programs: authorityPrograms,
+        ctoAttentionItems: authorityAttentionItems,
+      }),
+    [authorityAttentionItems, authorityPrograms],
   );
   const projectCwdById = useMemo(
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),

@@ -19,9 +19,9 @@ describe("chatChangesPanelLayout", () => {
       resolveEffectiveChangesPanelOpen({
         changesPanelOpen: false,
         initializedFromSettings: false,
-        showByDefault: true,
+        showByDefault: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("respects the user-controlled store state after initialization", () => {

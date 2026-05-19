@@ -253,7 +253,7 @@ export function resolveExecutiveOptions(input: {
 export function resolveOrchestratorOptions(input: {
   programs: readonly ServerAgentsVxappProgramSnapshot[];
   threads: readonly Thread[];
-  threadLinks: readonly {
+  threadLinks?: readonly {
     threadId: Thread["id"];
     title: string | null;
     roleSession?: { role: "cto" | "jasper"; sessionId: string | null } | null;
@@ -272,7 +272,7 @@ export function resolveOrchestratorOptions(input: {
       ),
   );
 
-  for (const threadLink of input.threadLinks) {
+  for (const threadLink of input.threadLinks ?? []) {
     if (threadLink.spawnRole === "orchestrator" || candidateThreadIds.has(threadLink.threadId)) {
       const thread = threadById.get(threadLink.threadId) ?? null;
       const label =
@@ -282,6 +282,17 @@ export function resolveOrchestratorOptions(input: {
         threadLink.threadId;
       byId.set(threadLink.threadId, { label, threadId: threadLink.threadId });
     }
+  }
+
+  for (const threadId of candidateThreadIds) {
+    if (byId.has(threadId)) {
+      continue;
+    }
+    const thread = threadById.get(threadId) ?? null;
+    byId.set(threadId, {
+      label: thread?.title ?? threadId,
+      threadId,
+    });
   }
 
   return [...byId.values()].toSorted((left, right) => left.label.localeCompare(right.label));

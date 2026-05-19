@@ -221,6 +221,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(WS_METHODS.serverListVortexAppArtifacts, input),
       getAgentsVxappSidebarGraph: (input) =>
         transport.request(WS_METHODS.serverGetAgentsVxappSidebarGraph, input),
+      getAgentsVxappSidebarAuthoritySnapshot: (input) =>
+        transport.request(WS_METHODS.serverGetAgentsVxappSidebarAuthoritySnapshot, input),
       getAgentsVxappControlPlaneSnapshot: (input) =>
         transport.request(WS_METHODS.serverGetAgentsVxappControlPlaneSnapshot, input, {
           timeoutMs: 180_000,

@@ -119,6 +119,93 @@ function sameId(left: string | null | undefined, right: string | null | undefine
   return left === right;
 }
 
+function ownerThreadSessionSetProvenance(event: ProviderRuntimeEvent): Record<string, unknown> {
+  return {
+    source: "t3code-vxapp.provider-runtime",
+    eventId: event.eventId,
+    eventType: "thread.session-set",
+    occurredAt: event.createdAt,
+  };
+}
+
+function buildOwnerThreadSessionPayload(input: {
+  readonly thread: OrchestrationThread;
+  readonly event: ProviderRuntimeEvent;
+  readonly now: string;
+  readonly status: "running" | "ready" | "stopped" | "error";
+  readonly nextActiveTurnId: TurnId | null;
+  readonly lastError: string | null;
+}) {
+  return {
+    status: input.status,
+    providerName: input.event.provider,
+    runtimeMode: input.thread.session?.runtimeMode ?? "full-access",
+    activeTurnId: input.nextActiveTurnId,
+    lastError: input.lastError,
+    updatedAt: input.now,
+  };
+}
+
+function normalizeOwnerThreadSessionStatus(
+  status: "starting" | "ready" | "running" | "stopped" | "error" | "interrupted",
+): "ready" | "running" | "stopped" | "error" {
+  switch (status) {
+    case "starting":
+      return "running";
+    case "interrupted":
+      return "stopped";
+    default:
+      return status;
+  }
+}
+
+function buildOwnerLatestTurnPayload(input: {
+  readonly thread: OrchestrationThread;
+  readonly event: ProviderRuntimeEvent;
+  readonly now: string;
+  readonly status: "running" | "ready" | "stopped" | "error";
+  readonly nextActiveTurnId: TurnId | null;
+  readonly eventTurnId: TurnId | undefined;
+}) {
+  const currentLatestTurn: Record<string, unknown> =
+    input.thread.latestTurn && typeof input.thread.latestTurn === "object"
+      ? { ...input.thread.latestTurn }
+      : {};
+  const currentLatestTurnId =
+    typeof currentLatestTurn.turnId === "string"
+      ? currentLatestTurn.turnId
+      : typeof currentLatestTurn.id === "string"
+        ? currentLatestTurn.id
+        : null;
+  const currentLatestTurnState =
+    typeof currentLatestTurn.state === "string"
+      ? currentLatestTurn.state
+      : typeof currentLatestTurn.status === "string"
+        ? currentLatestTurn.status
+        : null;
+  const resolvedTurnId = input.nextActiveTurnId ?? input.eventTurnId ?? currentLatestTurnId ?? null;
+
+  if (input.status === "running") {
+    return {
+      ...(resolvedTurnId !== null ? { id: resolvedTurnId } : {}),
+      requestedAt: currentLatestTurn.requestedAt ?? input.now,
+      startedAt: currentLatestTurn.startedAt ?? input.now,
+      status: "running",
+    };
+  }
+
+  if (currentLatestTurnState === "running" || currentLatestTurnState === "pending") {
+    return {
+      ...currentLatestTurn,
+      ...(resolvedTurnId !== null ? { id: resolvedTurnId } : {}),
+      status: input.status === "ready" ? "completed" : input.status,
+      completedAt: input.now,
+    };
+  }
+
+  return Object.keys(currentLatestTurn).length > 0 ? currentLatestTurn : undefined;
+}
+
 function readRuntimePayloadRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -1352,6 +1439,45 @@ const make = Effect.fn("make")(function* () {
           ...errorPresentation,
           createdAt: now,
         });
+        if (isAgentsVxappWorktreePath(thread.worktreePath, worktreeAuthority)) {
+          const ownerSessionStatus = normalizeOwnerThreadSessionStatus(status);
+          const latestTurnPayload = buildOwnerLatestTurnPayload({
+            thread,
+            event,
+            now,
+            status: ownerSessionStatus,
+            nextActiveTurnId,
+            eventTurnId,
+          });
+          yield* Effect.tryPromise({
+            try: () =>
+              requestAgentsVxappThreadEventIngest({
+                threadId: thread.id,
+                session: buildOwnerThreadSessionPayload({
+                  thread,
+                  event,
+                  now,
+                  status: ownerSessionStatus,
+                  nextActiveTurnId,
+                  lastError,
+                }),
+                ...(latestTurnPayload ? { latestTurn: latestTurnPayload } : {}),
+                ownerProvenance: ownerThreadSessionSetProvenance(event),
+              }),
+            catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
+          }).pipe(
+            Effect.catchTag("OwnerCommandFailure", (error) =>
+              appendProviderFailureActivity({
+                threadId: thread.id,
+                kind: "provider.thread.status.sync.failed",
+                summary: "Provider thread session sync failed",
+                detail: ownerErrorDetail(error),
+                turnId: toTurnId(event.turnId) ?? null,
+                createdAt: now,
+              }),
+            ),
+          );
+        }
         yield* providerSessionDirectory.upsert({
           threadId: thread.id,
           provider: event.provider,

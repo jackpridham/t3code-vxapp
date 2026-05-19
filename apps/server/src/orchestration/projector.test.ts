@@ -1206,6 +1206,82 @@ describe("orchestration projector", () => {
     expect(afterReady.threads[0]?.checkpoints[0]?.status).toBe("ready");
   });
 
+  it("clears pending null-id turn placeholders when a thread session settles terminally", async () => {
+    const createdAt = "2026-02-26T18:00:00.000Z";
+    const requestedAt = "2026-02-26T18:00:05.000Z";
+    const stoppedAt = "2026-02-26T18:00:10.000Z";
+    const model = createEmptyReadModel(createdAt);
+
+    const afterEvents = await [
+      makeEvent({
+        sequence: 1,
+        type: "thread.created",
+        aggregateKind: "thread",
+        aggregateId: "thread-pending-null-turn",
+        occurredAt: createdAt,
+        commandId: "cmd-pending-null-turn-1",
+        payload: {
+          threadId: "thread-pending-null-turn",
+          projectId: "project-1",
+          title: "demo",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5.3-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      }),
+      makeEvent({
+        sequence: 2,
+        type: "thread.turn-start-requested",
+        aggregateKind: "thread",
+        aggregateId: "thread-pending-null-turn",
+        occurredAt: requestedAt,
+        commandId: "cmd-pending-null-turn-2",
+        payload: {
+          threadId: "thread-pending-null-turn",
+          messageId: "message-pending-null-turn",
+          runtimeMode: "full-access",
+          createdAt: requestedAt,
+        },
+      }),
+      makeEvent({
+        sequence: 3,
+        type: "thread.session-set",
+        aggregateKind: "thread",
+        aggregateId: "thread-pending-null-turn",
+        occurredAt: stoppedAt,
+        commandId: "cmd-pending-null-turn-3",
+        payload: {
+          threadId: "thread-pending-null-turn",
+          session: {
+            threadId: "thread-pending-null-turn",
+            status: "stopped",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: stoppedAt,
+          },
+          hasActiveError: false,
+          activeError: null,
+          historicalError: null,
+          errorPresentationSource: "none",
+        },
+      }),
+    ].reduce<Promise<ReturnType<typeof createEmptyReadModel>>>(
+      (statePromise, event) =>
+        statePromise.then((state) => Effect.runPromise(projectEvent(state, event))),
+      Promise.resolve(model),
+    );
+
+    expect(afterEvents.threads[0]?.latestTurn).toBeNull();
+  });
+
   it("caps message and checkpoint retention for long-lived threads", async () => {
     const createdAt = "2026-03-01T10:00:00.000Z";
     const model = createEmptyReadModel(createdAt);

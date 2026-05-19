@@ -52,6 +52,7 @@ import {
 import { KeybindingRule } from "./keybindings";
 import { ProjectReadFileInput, ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
+import { VortexErrorResponse } from "./agentsVxappAuthority";
 import {
   ServerConfigUpdatedPayload,
   ServerCreateAgentsVxappProgramInput,
@@ -59,6 +60,7 @@ import {
   ServerDeleteAgentsVxappProgramInput,
   ServerDeleteAgentsVxappTodoInput,
   ServerGetAgentRuntimeSnapshotInput,
+  ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
   ServerGetAgentsVxappControlPlaneSnapshotInput,
   ServerGetAgentsVxappSidebarGraphInput,
   ServerSetAgentsVxappProgramLifecycleInput,
@@ -115,6 +117,7 @@ export const WS_METHODS = {
   serverListVortexApps: "server.listVortexApps",
   serverListVortexAppArtifacts: "server.listVortexAppArtifacts",
   serverGetAgentsVxappSidebarGraph: "server.getAgentsVxappSidebarGraph",
+  serverGetAgentsVxappSidebarAuthoritySnapshot: "server.getAgentsVxappSidebarAuthoritySnapshot",
   serverGetAgentsVxappControlPlaneSnapshot: "server.getAgentsVxappControlPlaneSnapshot",
   serverCreateAgentsVxappProgram: "server.createAgentsVxappProgram",
   serverUpdateAgentsVxappProgram: "server.updateAgentsVxappProgram",
@@ -233,6 +236,10 @@ const WebSocketRequestBody = Schema.Union([
     ServerGetAgentsVxappSidebarGraphInput,
   ),
   tagRequestBody(
+    WS_METHODS.serverGetAgentsVxappSidebarAuthoritySnapshot,
+    ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
+  ),
+  tagRequestBody(
     WS_METHODS.serverGetAgentsVxappControlPlaneSnapshot,
     ServerGetAgentsVxappControlPlaneSnapshotInput,
   ),
@@ -259,11 +266,7 @@ export type WebSocketRequest = typeof WebSocketRequest.Type;
 export const WebSocketResponse = Schema.Struct({
   id: TrimmedNonEmptyString,
   result: Schema.optional(Schema.Unknown),
-  error: Schema.optional(
-    Schema.Struct({
-      message: Schema.String,
-    }),
-  ),
+  error: Schema.optional(VortexErrorResponse),
 });
 export type WebSocketResponse = typeof WebSocketResponse.Type;
 

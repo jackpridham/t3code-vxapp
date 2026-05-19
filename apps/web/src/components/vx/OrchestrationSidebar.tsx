@@ -1,9 +1,10 @@
 import { autoAnimate } from "@formkit/auto-animate";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
   type AgentRuntimeAgentKind,
-  type OrchestrationThreadSummary,
+  type ServerGetAgentRuntimeSnapshotResult,
+  type ServerGetWorkerRuntimeSnapshotResult,
   type ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -17,16 +18,15 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
 import { isElectron } from "~/env";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings } from "~/hooks/useSettings";
 import { useThreadActions } from "~/hooks/useThreadActions";
-import { agentsVxappControlPlaneSnapshotQueryOptions } from "~/lib/agentsVxappControlPlaneReactQuery";
-import { agentsVxappSidebarGraphQueryOptions } from "~/lib/agentsVxappSidebarReactQuery";
 import { agentRuntimeSnapshotQueryOptions } from "~/lib/agentRuntimeReactQuery";
-import { orchestrationSessionThreadsQueryOptions } from "~/lib/orchestrationReactQuery";
 import { resolveNoThreadRouteTarget, resolveThreadRouteTarget } from "~/lib/sidebarWindow";
 import { cn, newCommandId } from "~/lib/utils";
+import { workerRuntimeSnapshotQueryOptions } from "~/lib/workerRuntimeReactQuery";
 import { readNativeApi } from "~/nativeApi";
 import { derivePendingApprovals, derivePendingUserInputs } from "~/session-logic";
 import { useStore } from "~/store";
@@ -61,7 +61,6 @@ import {
 import { toastManager } from "../ui/toast";
 import {
   buildOrchestrationSidebarModel,
-  resolveSidebarRootThreadIds,
   type SidebarAgentRuntimeState,
   type SidebarNotificationItem,
   type SidebarProgramLaneNode,
@@ -69,7 +68,11 @@ import {
 } from "./orchestrationSidebarModel";
 import { ProgramInfoDialog } from "./ProgramInfoDialog";
 import { ProgramTodosDialog } from "./ProgramTodosDialog";
+import { AgentRuntimeDetailsPanel } from "./AgentRuntimeDetailsPanel";
 import { deriveAgentRuntimeDialogState } from "./agentRuntimeDialogState";
+import { deriveWorkerRuntimeDialogState } from "./workerRuntimeDialogState";
+import { WorkerRuntimeDetailsPanel } from "./WorkerRuntimeDetailsPanel";
+import { VortexErrorBanner } from "./VortexErrorBanner";
 
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -86,14 +89,6 @@ function WakeBadge({ state }: { state: "pending" | "delivering" | null }) {
   return <Badge className={CHIP_CLASSNAME}>{state}</Badge>;
 }
 
-function RuntimeSourceBadge({ label }: { label: string; status: string }) {
-  return (
-    <Badge className="h-5 border border-border/70 bg-background/70 px-1.5 text-[10px] font-medium">
-      {label}
-    </Badge>
-  );
-}
-
 function formatGeneratedAge(value: string | null) {
   return value ? formatRelativeTimeLabel(value) : null;
 }
@@ -105,6 +100,18 @@ function agentRuntimeStateBadgeClasses(state: SidebarAgentRuntimeState) {
         badge: "text-muted-foreground/80",
         label: "runtime",
         title: "Agent runtime can be inspected.",
+      };
+    case "degraded":
+      return {
+        badge: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        label: "degraded",
+        title: "Agent runtime is partially available.",
+      };
+    case "unavailable":
+      return {
+        badge: "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300",
+        label: "unavailable",
+        title: "Agent runtime is unavailable.",
       };
     case "pending-worktree":
       return {
@@ -146,52 +153,33 @@ function RuntimeStateBadge({
   );
 }
 
-function RuntimeValueCard({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">{label}</p>
-      <p className="mt-1 text-xs font-medium text-foreground/90">{value ?? "unknown"}</p>
-    </div>
-  );
-}
-
-function RuntimeBadgeList({ emptyLabel, items }: { emptyLabel: string; items: readonly string[] }) {
-  return (
-    <div className="mt-2 flex flex-wrap gap-1">
-      {items.length > 0 ? (
-        items.map((item) => (
-          <Badge
-            key={item}
-            variant="outline"
-            className="h-5 px-1.5 text-[10px] font-medium leading-none text-muted-foreground/80"
-          >
-            {item}
-          </Badge>
-        ))
-      ) : (
-        <span className="text-[11px] text-muted-foreground/70">{emptyLabel}</span>
-      )}
-    </div>
-  );
-}
-
 function AgentRuntimeInlineBadges({
   agentKind,
   runtimeState,
   runtimeStateMessage,
   threadId,
+  workspace,
 }: {
   agentKind: AgentRuntimeAgentKind;
   runtimeState: SidebarAgentRuntimeState;
   runtimeStateMessage: string | null;
   threadId: ThreadId | null;
+  workspace?: string | null;
 }) {
-  const runtimeQuery = useQuery(
-    agentRuntimeSnapshotQueryOptions({
-      agentKind,
-      threadId: runtimeState === "inspectable" ? threadId : null,
-    }),
-  );
+  const runtimeQuery =
+    agentKind === "worker"
+      ? useQuery(
+          workerRuntimeSnapshotQueryOptions({
+            threadId: runtimeState === "inspectable" ? threadId : null,
+            workspace: runtimeState === "inspectable" ? (workspace ?? null) : null,
+          }),
+        )
+      : useQuery(
+          agentRuntimeSnapshotQueryOptions({
+            agentKind,
+            threadId: runtimeState === "inspectable" ? threadId : null,
+          }),
+        );
 
   if (runtimeState !== "inspectable") {
     return <RuntimeStateBadge state={runtimeState} message={runtimeStateMessage} />;
@@ -217,37 +205,57 @@ function AgentRuntimeInlineBadges({
   }
 
   const snapshot = runtimeQuery.data;
-  const generatedAge = formatGeneratedAge(snapshot.summary.generatedAt);
+
+  if (snapshot.availability !== "inspectable") {
+    return (
+      <RuntimeStateBadge
+        state={snapshot.availability}
+        message={snapshot.reasonCode ?? runtimeStateMessage}
+      />
+    );
+  }
 
   if (agentKind === "worker") {
+    const workerSnapshot = snapshot as ServerGetWorkerRuntimeSnapshotResult;
+    const workerRepo =
+      workerSnapshot.contextPlan?.repo?.trim() ||
+      workerSnapshot.dispatchContract?.repo?.trim() ||
+      workerSnapshot.installedPacks?.repo?.trim() ||
+      workerSnapshot.audit.repo?.trim() ||
+      null;
+    const validationProfile =
+      workerSnapshot.contextPlan?.validationProfile?.trim() ||
+      workerSnapshot.dispatchContract?.validationProfile?.trim() ||
+      null;
     return (
       <>
-        {snapshot.summary.repo ? (
+        {workerRepo ? (
           <Badge
             variant="outline"
             className="h-4 max-w-24 shrink-0 px-1 text-[8px] text-muted-foreground/80"
-            title={snapshot.summary.repo}
+            title={workerRepo}
           >
-            <span className="truncate">{snapshot.summary.repo}</span>
+            <span className="truncate">{workerRepo}</span>
           </Badge>
         ) : null}
-        {snapshot.workerDetails ? (
-          <Badge className={CHIP_CLASSNAME}>audit {snapshot.workerDetails.auditStatus}</Badge>
-        ) : null}
-        {snapshot.workerDetails?.validationProfile ? (
+        <Badge className={CHIP_CLASSNAME}>audit {workerSnapshot.audit.status}</Badge>
+        {validationProfile ? (
           <Badge variant="outline" className={CHIP_CLASSNAME}>
-            {snapshot.workerDetails.validationProfile}
+            {validationProfile}
           </Badge>
         ) : null}
       </>
     );
   }
 
+  const agentSnapshot = snapshot as ServerGetAgentRuntimeSnapshotResult;
+  const generatedAge = formatGeneratedAge(agentSnapshot.summary.generatedAt);
+
   return (
     <>
-      {snapshot.summary.profile ? (
+      {agentSnapshot.summary.profile ? (
         <Badge variant="outline" className={CHIP_CLASSNAME}>
-          {snapshot.summary.profile}
+          {agentSnapshot.summary.profile}
         </Badge>
       ) : null}
       {generatedAge ? (
@@ -255,14 +263,14 @@ function AgentRuntimeInlineBadges({
           {generatedAge}
         </Badge>
       ) : null}
-      {snapshot.summary.packCount > 0 ? (
+      {agentSnapshot.summary.packCount > 0 ? (
         <Badge variant="outline" className={CHIP_CLASSNAME}>
-          {snapshot.summary.packCount} packs
+          {agentSnapshot.summary.packCount} packs
         </Badge>
       ) : null}
-      {snapshot.summary.skillCount > 0 ? (
+      {agentSnapshot.summary.skillCount > 0 ? (
         <Badge variant="outline" className={CHIP_CLASSNAME}>
-          {snapshot.summary.skillCount} skills
+          {agentSnapshot.summary.skillCount} skills
         </Badge>
       ) : null}
     </>
@@ -274,6 +282,7 @@ function AgentRuntimePopover({
   runtimeState,
   runtimeStateMessage,
   threadId,
+  workspace,
   threadLabel,
   titleLabel,
   triggerClassName,
@@ -282,25 +291,48 @@ function AgentRuntimePopover({
   runtimeState: SidebarAgentRuntimeState;
   runtimeStateMessage: string | null;
   threadId: ThreadId | null;
+  workspace?: string | null;
   threadLabel: string;
   titleLabel: string;
   triggerClassName?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const runtimeLookupEnabled = open && runtimeState === "inspectable";
-  const runtimeQuery = useQuery(
+  const workerRuntimeQuery = useQuery(
+    workerRuntimeSnapshotQueryOptions({
+      threadId: runtimeLookupEnabled && agentKind === "worker" ? threadId : null,
+      workspace: runtimeLookupEnabled && agentKind === "worker" ? (workspace ?? null) : null,
+    }),
+  );
+  const agentRuntimeQuery = useQuery(
     agentRuntimeSnapshotQueryOptions({
       agentKind,
-      threadId: runtimeLookupEnabled ? threadId : null,
+      threadId: runtimeLookupEnabled && agentKind !== "worker" ? threadId : null,
     }),
   );
 
   const content = useMemo(() => {
+    if (agentKind === "worker") {
+      return deriveWorkerRuntimeDialogState({
+        data: workerRuntimeQuery.data,
+        error: workerRuntimeQuery.error instanceof Error ? workerRuntimeQuery.error : null,
+        isError: workerRuntimeQuery.isError,
+        isLoading: workerRuntimeQuery.isLoading,
+        unavailableHint:
+          runtimeState === "inspectable"
+            ? null
+            : {
+                kind: runtimeState,
+                message: runtimeStateMessage,
+              },
+        threadId,
+      });
+    }
     return deriveAgentRuntimeDialogState({
-      data: runtimeQuery.data,
-      error: runtimeQuery.error instanceof Error ? runtimeQuery.error : null,
-      isError: runtimeQuery.isError,
-      isLoading: runtimeQuery.isLoading,
+      data: agentRuntimeQuery.data,
+      error: agentRuntimeQuery.error instanceof Error ? agentRuntimeQuery.error : null,
+      isError: agentRuntimeQuery.isError,
+      isLoading: agentRuntimeQuery.isLoading,
       unavailableHint:
         runtimeState === "inspectable"
           ? null
@@ -311,14 +343,21 @@ function AgentRuntimePopover({
       threadId,
     });
   }, [
-    runtimeQuery.data,
-    runtimeQuery.error,
-    runtimeQuery.isError,
-    runtimeQuery.isLoading,
+    agentKind,
+    agentRuntimeQuery.data,
+    agentRuntimeQuery.error,
+    agentRuntimeQuery.isError,
+    agentRuntimeQuery.isLoading,
     runtimeState,
     runtimeStateMessage,
     threadId,
+    workerRuntimeQuery.data,
+    workerRuntimeQuery.error,
+    workerRuntimeQuery.isError,
+    workerRuntimeQuery.isLoading,
   ]);
+
+  const runtimeQuery = agentKind === "worker" ? workerRuntimeQuery : agentRuntimeQuery;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -359,358 +398,14 @@ function AgentRuntimePopover({
                 {content.message}
               </p>
             </div>
+          ) : agentKind === "worker" ? (
+            <WorkerRuntimeDetailsPanel
+              snapshot={workerRuntimeQuery.data as ServerGetWorkerRuntimeSnapshotResult}
+            />
           ) : (
-            <>
-              <div className="flex flex-wrap gap-1">
-                {runtimeQuery.data.sourceFiles.map((sourceFile) => (
-                  <RuntimeSourceBadge
-                    key={sourceFile.key}
-                    label={sourceFile.label}
-                    status={sourceFile.status}
-                  />
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <RuntimeValueCard label="Repo" value={runtimeQuery.data.summary.repo} />
-                <RuntimeValueCard
-                  label={runtimeQuery.data.runtimeKind === "worker-contract" ? "Task" : "Role"}
-                  value={
-                    runtimeQuery.data.runtimeKind === "worker-contract"
-                      ? runtimeQuery.data.summary.taskClass
-                      : runtimeQuery.data.summary.role
-                  }
-                />
-                <RuntimeValueCard
-                  label={
-                    runtimeQuery.data.runtimeKind === "worker-contract" ? "Context" : "Profile"
-                  }
-                  value={
-                    runtimeQuery.data.runtimeKind === "worker-contract"
-                      ? runtimeQuery.data.summary.contextMode
-                      : runtimeQuery.data.summary.profile
-                  }
-                />
-                <RuntimeValueCard
-                  label={
-                    runtimeQuery.data.runtimeKind === "worker-contract" ? "Closeout" : "Generated"
-                  }
-                  value={
-                    runtimeQuery.data.runtimeKind === "worker-contract"
-                      ? runtimeQuery.data.summary.closeoutAuthority
-                      : runtimeQuery.data.summary.generatedAt
-                  }
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <RuntimeValueCard label="Workspace" value={runtimeQuery.data.workspaceRoot} />
-                <RuntimeValueCard label="Runtime dir" value={runtimeQuery.data.runtimeDir} />
-              </div>
-
-              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Resolution
-                  </p>
-                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                    {runtimeQuery.data.workspaceResolution.kind}
-                  </Badge>
-                </div>
-                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
-                  {runtimeQuery.data.workspaceResolution.detail ??
-                    "No workspace resolution detail."}
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Source Files
-                  </p>
-                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                    {runtimeQuery.data.sourceFiles.length}
-                  </Badge>
-                </div>
-                <div className="mt-2 space-y-1.5">
-                  {runtimeQuery.data.sourceFiles.map((sourceFile) => (
-                    <div
-                      key={sourceFile.key}
-                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1.5"
-                    >
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <RuntimeSourceBadge label={sourceFile.label} status={sourceFile.status} />
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                        >
-                          {sourceFile.status}
-                        </Badge>
-                        <span className="truncate text-[11px] font-medium text-foreground/90">
-                          {sourceFile.fileName}
-                        </span>
-                      </div>
-                      <p className="mt-1 truncate text-[10px] text-muted-foreground/70">
-                        {sourceFile.absolutePath}
-                      </p>
-                      {sourceFile.detail ? (
-                        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
-                          {sourceFile.detail}
-                        </p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                    Selected Packs
-                  </p>
-                  <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                    {runtimeQuery.data.summary.selectedPacks.length}
-                  </Badge>
-                </div>
-                <RuntimeBadgeList
-                  emptyLabel="No packs selected."
-                  items={runtimeQuery.data.summary.selectedPacks}
-                />
-              </div>
-
-              {runtimeQuery.data.runtimeKind === "role-runtime" ? (
-                <>
-                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                        Installed Skills
-                      </p>
-                      <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                        {runtimeQuery.data.summary.installedSkills.length}
-                      </Badge>
-                    </div>
-                    <RuntimeBadgeList
-                      emptyLabel="No runtime skills declared."
-                      items={runtimeQuery.data.summary.installedSkills}
-                    />
-                  </div>
-                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                        Role Runtime
-                      </p>
-                      {runtimeQuery.data.summary.generatedAt ? (
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                        >
-                          {formatGeneratedAge(runtimeQuery.data.summary.generatedAt)}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
-                      {runtimeQuery.data.roleDetails?.selectionReason ??
-                        "No profile selection rationale was recorded."}
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    <RuntimeValueCard
-                      label="Validation"
-                      value={runtimeQuery.data.workerDetails?.validationProfile ?? null}
-                    />
-                    <div className="rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                        Audit
-                      </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Badge className="h-5 border border-border/70 bg-background/70 px-1.5 text-[10px] font-medium">
-                          {runtimeQuery.data.workerDetails?.auditStatus ?? "missing"}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                        >
-                          {runtimeQuery.data.workerDetails?.packAuditIssueCount ?? 0} pack issues
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                        Capabilities
-                      </p>
-                      {runtimeQuery.data.workerDetails?.packAuditStatus ? (
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                        >
-                          {runtimeQuery.data.workerDetails.packAuditStatus}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
-                          Allowed
-                        </p>
-                        <RuntimeBadgeList
-                          emptyLabel="No explicit allowed capabilities."
-                          items={runtimeQuery.data.workerDetails?.allowedCapabilities ?? []}
-                        />
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
-                          Forbidden
-                        </p>
-                        <RuntimeBadgeList
-                          emptyLabel="No explicit forbidden capabilities."
-                          items={runtimeQuery.data.workerDetails?.forbiddenCapabilities ?? []}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
-                          Warnings
-                        </p>
-                        <RuntimeBadgeList
-                          emptyLabel="No runtime warnings."
-                          items={runtimeQuery.data.workerDetails?.warnings ?? []}
-                        />
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/60">
-                          Conflicts
-                        </p>
-                        <RuntimeBadgeList
-                          emptyLabel="No declared conflicts."
-                          items={runtimeQuery.data.workerDetails?.conflicts ?? []}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                        Pack Inventory
-                      </p>
-                      <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                        {runtimeQuery.data.workerDetails?.packs.length ?? 0}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 space-y-1.5">
-                      {(runtimeQuery.data.workerDetails?.packs ?? []).length > 0 ? (
-                        (runtimeQuery.data.workerDetails?.packs ?? []).map((pack) => (
-                          <div
-                            key={pack.id}
-                            className="rounded-md border border-border/60 bg-background/40 px-2 py-1.5"
-                          >
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[11px] font-medium text-foreground/90">
-                                {pack.name ?? pack.slug}
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                              >
-                                {pack.id}
-                              </Badge>
-                              {pack.scope ? (
-                                <Badge
-                                  variant="outline"
-                                  className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                                >
-                                  {pack.scope}
-                                </Badge>
-                              ) : null}
-                            </div>
-                            <p className="mt-1 text-[10px] text-muted-foreground/70">
-                              {pack.repo ?? "No repo"} · {pack.link}
-                            </p>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-[11px] text-muted-foreground/70">
-                          No installed packs were recorded.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-border/70 bg-secondary/15 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/60">
-                        Audit Findings
-                      </p>
-                      <Badge className="h-5 border-0 bg-secondary px-1.5 text-[10px] font-medium text-foreground/80">
-                        {runtimeQuery.data.workerDetails?.auditFindings.length ?? 0}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 space-y-1.5">
-                      {(runtimeQuery.data.workerDetails?.auditFindings ?? []).length > 0 ? (
-                        (runtimeQuery.data.workerDetails?.auditFindings ?? []).map((finding) => (
-                          <div
-                            key={`${finding.code ?? "finding"}:${finding.kind ?? "kind"}:${finding.detail ?? "detail"}`}
-                            className="rounded-md border border-border/60 bg-background/40 px-2 py-1.5"
-                          >
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {finding.severity ? (
-                                <Badge
-                                  className={cn(
-                                    "h-5 border-0 px-1.5 text-[10px] font-medium",
-                                    finding.severity === "error"
-                                      ? "bg-red-500/12 text-red-700 dark:text-red-300"
-                                      : finding.severity === "warning"
-                                        ? "bg-amber-500/12 text-amber-700 dark:text-amber-300"
-                                        : "bg-muted text-muted-foreground",
-                                  )}
-                                >
-                                  {finding.severity}
-                                </Badge>
-                              ) : null}
-                              {finding.code ? (
-                                <Badge
-                                  variant="outline"
-                                  className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                                >
-                                  {finding.code}
-                                </Badge>
-                              ) : null}
-                              {finding.kind ? (
-                                <Badge
-                                  variant="outline"
-                                  className="h-4 px-1 text-[9px] text-muted-foreground/80"
-                                >
-                                  {finding.kind}
-                                </Badge>
-                              ) : null}
-                            </div>
-                            {finding.detail ? (
-                              <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
-                                {finding.detail}
-                              </p>
-                            ) : null}
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-[11px] text-muted-foreground/70">
-                          No audit findings were recorded.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-            </>
+            <AgentRuntimeDetailsPanel
+              snapshot={agentRuntimeQuery.data as ServerGetAgentRuntimeSnapshotResult}
+            />
           )}
         </div>
       </PopoverPopup>
@@ -942,28 +637,61 @@ function resolveSidebarThreadStatus(input: {
 
 function SidebarThreadActivityMeta({
   activityAt,
+  isActiveNow = false,
   status,
 }: {
   activityAt: string | null;
+  isActiveNow?: boolean;
   status: SidebarThreadStatus | null;
 }) {
-  if (!status && !activityAt) {
+  if (!status && !activityAt && !isActiveNow) {
     return null;
   }
 
-  const showsLiveRuntime = status?.label === "Working" || status?.label === "Connecting";
+  const showsLiveRuntime = hasSidebarLiveRuntimeStatus(status, isActiveNow);
   const activityLabel = activityAt
     ? `${showsLiveRuntime ? "updated" : "last active"} ${formatRelativeTimeLabel(activityAt)}`
     : null;
 
   return (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/70">
-      {status ? <ThreadStatusLabel status={status} compact /> : null}
+      {status ? (
+        <ThreadStatusLabel status={status} compact />
+      ) : showsLiveRuntime ? (
+        <span className="relative inline-flex size-2 shrink-0">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500/60 dark:bg-sky-300/60" />
+          <span className="relative inline-flex size-2 rounded-full bg-sky-500 dark:bg-sky-300" />
+        </span>
+      ) : null}
       {status ? (
         <span className="truncate">{showsLiveRuntime ? `${status.label} now` : status.label}</span>
+      ) : showsLiveRuntime ? (
+        <span className="truncate">Active now</span>
       ) : null}
       {activityLabel ? <span className="truncate">{activityLabel}</span> : null}
     </div>
+  );
+}
+
+function hasSidebarLiveRuntimeStatus(status: SidebarThreadStatus | null, isActiveNow = false) {
+  return isActiveNow || status?.label === "Working" || status?.label === "Connecting";
+}
+
+function SidebarActiveRuntimeRail({
+  status,
+  isActiveNow = false,
+}: {
+  status: SidebarThreadStatus | null;
+  isActiveNow?: boolean;
+}) {
+  if (!hasSidebarLiveRuntimeStatus(status, isActiveNow)) {
+    return null;
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-sky-500/80 shadow-[0_0_10px_color-mix(in_srgb,var(--color-sky-500)_55%,transparent)] animate-pulse"
+    />
   );
 }
 
@@ -998,6 +726,7 @@ function resolveAutoExpandedSidebarItems(input: {
 }
 
 export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
+  useAgentsVxappSidebarAuthorityBootstrap();
   const settings = useSettings();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1005,14 +734,15 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     strict: false,
     select: (params) => (params.threadId ? (params.threadId as ThreadId) : null),
   });
-  const controlPlaneQuery = useQuery(agentsVxappControlPlaneSnapshotQueryOptions());
-  const sqliteGraphQuery = useQuery(agentsVxappSidebarGraphQueryOptions());
-  const programs = useStore((store) => store.programs ?? []);
+  const authoritySnapshot = useAgentsVxappStore((store) => store.snapshot);
+  const authorityStatus = useAgentsVxappStore((store) => store.status);
+  const authorityError = useAgentsVxappStore((store) => store.error);
+  const programs = useMemo(
+    () => authoritySnapshot?.programs.map((card) => card.program) ?? [],
+    [authoritySnapshot],
+  );
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
-  const programNotifications = useStore((store) => store.programNotifications ?? []);
-  const ctoAttentionItems = useStore((store) => store.ctoAttentionItems ?? []);
-  const wakeItems = useStore((store) => store.orchestratorWakeItems);
   const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
   const markThreadUnread = useUiStateStore((store) => store.markThreadUnread);
   const selectedThreadIds = useThreadSelectionStore((store) => store.selectedThreadIds);
@@ -1040,59 +770,21 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     animatedListsRef.current.add(node);
   }, []);
 
-  const rootThreadIds = useMemo(
-    () =>
-      resolveSidebarRootThreadIds({
-        programs,
-      }),
-    [programs],
-  );
-  const sessionQueries = useQueries({
-    queries: rootThreadIds.map((rootThreadId) =>
-      orchestrationSessionThreadsQueryOptions({
-        includeArchived: true,
-        rootThreadId,
-      }),
-    ),
-  });
-  const sessionWorkerThreadsByRootId = useMemo(() => {
-    const next = new Map<string, readonly OrchestrationThreadSummary[]>();
-    rootThreadIds.forEach((rootThreadId, index) => {
-      const query = sessionQueries[index];
-      next.set(
-        rootThreadId,
-        (query?.data ?? []).filter(
-          (thread: OrchestrationThreadSummary) => thread.id !== rootThreadId,
-        ),
-      );
-    });
-    return next;
-  }, [rootThreadIds, sessionQueries]);
-
   const model = useMemo(
     () =>
       buildOrchestrationSidebarModel({
-        ctoAttentionItems,
-        currentTodos: controlPlaneQuery.data?.currentTodos ?? [],
-        programNotifications,
+        authoritySnapshot,
+        ctoAttentionItems: [],
+        currentTodos: authoritySnapshot?.currentTodos ?? [],
+        programNotifications: [],
         programs,
         projects,
-        sessionWorkerThreadsByRootId,
-        sqliteGraph: sqliteGraphQuery.data ?? null,
+        sessionWorkerThreadsByRootId: new Map(),
+        sqliteGraph: null,
         threads,
-        wakeItems,
+        wakeItems: [],
       }),
-    [
-      ctoAttentionItems,
-      controlPlaneQuery.data?.currentTodos,
-      programNotifications,
-      programs,
-      projects,
-      sessionWorkerThreadsByRootId,
-      sqliteGraphQuery.data,
-      threads,
-      wakeItems,
-    ],
+    [authoritySnapshot, programs, projects, threads],
   );
 
   const orderedWorkerThreadIds = useMemo(
@@ -1392,6 +1084,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
             runtimeState={worker.runtimeState}
             runtimeStateMessage={worker.runtimeStateMessage}
             threadId={workerThreadId}
+            workspace={worker.worktreePathHint}
           />
           <WakeBadge state={worker.wakeState} />
           {renamingThreadId === worker.id && thread ? (
@@ -1426,6 +1119,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
           runtimeState={worker.runtimeState}
           runtimeStateMessage={worker.runtimeStateMessage}
           threadId={workerThreadId}
+          workspace={worker.worktreePathHint}
           threadLabel={worker.title}
           titleLabel={worker.title}
         />
@@ -1455,10 +1149,11 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
         />
         <div
           className={cn(
-            "flex items-start gap-1 rounded-lg hover:bg-accent/40",
+            "relative isolate flex items-start gap-1 rounded-lg hover:bg-accent/40",
             routeThreadId === lane.id ? "bg-accent/60" : "",
           )}
         >
+          <SidebarActiveRuntimeRail status={laneStatus} isActiveNow={lane.isActiveNow} />
           <button
             type="button"
             aria-label={
@@ -1485,6 +1180,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                {laneStatus ? <ThreadStatusLabel status={laneStatus} compact /> : null}
                 <span className="truncate text-[11px] font-medium text-foreground/90">
                   {lane.title}
                 </span>
@@ -1503,7 +1199,11 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                   threadId={lane.id as ThreadId | null}
                 />
               </div>
-              <SidebarThreadActivityMeta activityAt={lane.activityAt} status={laneStatus} />
+              <SidebarThreadActivityMeta
+                activityAt={lane.activityAt}
+                isActiveNow={lane.isActiveNow}
+                status={laneStatus}
+              />
             </div>
           </button>
           <div className="mr-1 mt-1 flex shrink-0 items-center gap-1">
@@ -1562,6 +1262,20 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       <SidebarBrandHeader isElectron={isElectron} isStandaloneWindow={isStandaloneWindow} />
       <SidebarContent className="gap-0">
         <SidebarGroup className="px-2 py-2" data-testid="vx-orchestration-sidebar">
+          {authorityStatus === "error" ? (
+            <div className="mb-2">
+              <VortexErrorBanner
+                heading="Owner data unavailable"
+                error={authorityError}
+                fallbackMessage="Failed to load agents-vxapp authority state."
+              />
+            </div>
+          ) : null}
+          {authorityStatus === "loading" && authoritySnapshot === null ? (
+            <div className="mb-2 rounded-lg border border-dashed border-border/70 bg-secondary/20 px-2.5 py-2 text-[11px] text-muted-foreground/80">
+              Loading agents-vxapp authority state.
+            </div>
+          ) : null}
           {staleMirrorDescription ? (
             <div className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
               <div className="flex items-start gap-2">
@@ -1590,7 +1304,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                   <SidebarMenuButton
                     size="sm"
                     className={cn(
-                      "h-auto min-h-7 gap-2 px-2 py-1.5 pr-16",
+                      "relative isolate h-auto min-h-7 gap-2 px-2 py-1.5 pr-16",
                       executive.threadId ? "cursor-pointer" : "",
                     )}
                     render={executive.threadId ? <button type="button" /> : <div />}
@@ -1603,11 +1317,18 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                         : undefined
                     }
                   >
+                    <SidebarActiveRuntimeRail
+                      status={executiveStatus}
+                      isActiveNow={executive.isActiveNow}
+                    />
                     <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-md bg-fuchsia-500/10 text-fuchsia-500 dark:text-fuchsia-300">
                       <BotIcon className="size-3" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
+                        {executiveStatus ? (
+                          <ThreadStatusLabel status={executiveStatus} compact />
+                        ) : null}
                         <span className="truncate text-[11px] font-medium text-foreground/90">
                           {executive.label}
                         </span>
@@ -1623,6 +1344,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                       </div>
                       <SidebarThreadActivityMeta
                         activityAt={executive.activityAt}
+                        isActiveNow={executive.isActiveNow}
                         status={executiveStatus}
                       />
                     </div>

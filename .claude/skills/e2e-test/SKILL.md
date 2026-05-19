@@ -35,9 +35,13 @@ Prefer other skills for pure route authoring, TanStack Router structure, or isol
 In `t3code-vxapp`:
 
 - `apps/web/src/routes/__root.tsx`
+- `apps/web/src/agentsVxappStore.ts`
+- `apps/web/src/lib/agentsVxappStoreBridge.ts`
 - `apps/web/src/store.ts`
 - `apps/web/src/components/vx/OrchestrationSidebar.tsx`
 - `apps/web/src/components/vx/orchestrationSidebarModel.ts`
+- `apps/web/src/components/vx/ProgramInfoDialog.tsx`
+- `apps/web/src/components/vx/ProgramTodosDialog.tsx`
 - `apps/web/src/wsNativeApi.ts`
 - `apps/server/src/wsServer.ts`
 - `apps/server/src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts`
@@ -127,8 +131,17 @@ Look for:
 
 - `orchestration.getBootstrapSummary`
 - `orchestration.getCurrentState`
+- `server.getAgentsVxappSidebarAuthoritySnapshot`
+- `server.getAgentRuntimeSnapshot`
+- `server.getWorkerRuntimeSnapshot`
+
+Treat these as deprecated semantic read paths for VX program/sidebar state:
+
 - `server.getAgentsVxappControlPlaneSnapshot`
 - `server.getAgentsVxappSidebarGraph`
+
+If they still appear during a VX sidebar/program debug session, confirm whether
+an old consumer path is still mounted.
 
 Then determine:
 
@@ -170,8 +183,11 @@ For startup-safe or strict owner surfaces, run the owner command directly.
 Examples:
 
 ```bash
-/home/gizmo/agents-vxapp/scripts/tools/t3-control-plane-owner t3code-projects-list --json
-/home/gizmo/agents-vxapp/scripts/tools/t3-control-plane-owner t3code-external-role-authority-snapshot --json
+/home/gizmo/agents-vxapp/scripts/tools/t3-control-plane-owner t3code-sidebar-authority-snapshot --json
+/home/gizmo/agents-vxapp/scripts/tools/t3-control-plane-owner programs-runtime-view --program <id> --json
+/home/gizmo/agents-vxapp/scripts/tools/t3-control-plane-owner t3code-program-runtime-allocations --program <id> --json
+/home/gizmo/agents-vxapp/scripts/tools/t3-control-plane-owner t3code-agent-runtime-snapshot --payload-json '{"agentKind":"orchestrator","threadId":"<id>"}'
+/home/gizmo/agents-vxapp/scripts/tools/t3-control-plane-owner t3code-worker-runtime-snapshot --payload-json '{"threadId":"<id>","workspace":"/abs/path"}'
 ```
 
 When the live UI depends on owner-backed data:
@@ -179,6 +195,10 @@ When the live UI depends on owner-backed data:
 - do not assume the query layer is correct if the owner command is failing
 - do not broaden strict surfaces into startup-safe truth
 - do not route strict reads through startup-safe snapshots
+- do not patch missing owner fields by rejoining local sidebar graph or browser
+  store state
+- do not accept a worker runtime failure until you have verified the exact
+  owner payload being sent, including authoritative `workspace`
 
 ### 5. Check whether the app is serving stale assets
 
@@ -250,7 +270,10 @@ Suspect:
 Suspect:
 
 - missing live mirror into `agents-vxapp`
-- production code wired only to local projection, not strict owner materialization
+- production code wired to a stale consumer path instead of the centralized
+  `agentsVxappStore` authority boundary
+- a component or model still mounting deprecated `getAgentsVxappSidebarGraph`
+  or `getAgentsVxappControlPlaneSnapshot` reads
 
 Do not “fix” this by weakening the strict contract.
 
@@ -276,9 +299,9 @@ Avoid adding indirect tests that only restate already-passing helpers.
 For repo changes, finish with:
 
 ```bash
-bun fmt -- --check
+bun fmt
 bun lint
-bun run --filter t3 typecheck
+bun typecheck
 ```
 
 If you changed `agents-vxapp`, run the smallest focused validation that covers the touched owner surface and report the exact selected pytest hook if supplemental validation extends the run.

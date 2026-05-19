@@ -9,6 +9,19 @@ export type AgentRuntimeDialogMode =
   | WorkerRuntimeUnavailableHint
   | "ready";
 
+function describeRuntimeReasonCode(reasonCode: string | null): string {
+  switch (reasonCode) {
+    case "runtime_files_missing":
+      return "Runtime files are missing.";
+    case "runtime_payload_invalid":
+      return "Runtime payload is invalid.";
+    case "runtime_authority_missing":
+      return "Runtime authority is missing.";
+    default:
+      return "Runtime details are not available yet.";
+  }
+}
+
 export function deriveAgentRuntimeDialogState(input: {
   data: ServerGetAgentRuntimeSnapshotResult | null | undefined;
   error: Error | null;
@@ -51,6 +64,12 @@ export function deriveAgentRuntimeDialogState(input: {
     return {
       mode: "missing",
       message: "Runtime details are not available yet.",
+    };
+  }
+  if (input.data.availability !== "inspectable") {
+    return {
+      mode: input.data.availability,
+      message: describeRuntimeReasonCode(input.data.reasonCode),
     };
   }
 

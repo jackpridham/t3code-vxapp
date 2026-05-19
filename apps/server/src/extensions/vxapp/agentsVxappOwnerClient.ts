@@ -9,6 +9,7 @@ import type {
   ServerCreateAgentsVxappTodoInput,
   ServerDeleteAgentsVxappProgramInput,
   ServerDeleteAgentsVxappTodoInput,
+  ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   ServerGetAgentsVxappControlPlaneSnapshotResult,
   ServerSetAgentsVxappProgramLifecycleInput,
   ServerUpdateAgentsVxappProgramInput,
@@ -594,6 +595,14 @@ export async function fetchAgentsVxappSidebarGraphSnapshot() {
     .payload;
 }
 
+export async function fetchAgentsVxappSidebarAuthoritySnapshot() {
+  return (
+    await callManifestCommand<ServerGetAgentsVxappSidebarAuthoritySnapshotResult>(
+      "sidebar_authority_snapshot",
+    )
+  ).payload;
+}
+
 export async function fetchAgentsVxappControlPlaneSnapshot() {
   return (await callManifestCommand<JsonRecord>("control_plane_snapshot")).payload;
 }
@@ -693,6 +702,67 @@ export async function requestAgentsVxappProjectEventIngest(input: Readonly<JsonR
     await callManifestCommandByName<JsonRecord>({
       command: "t3code-projects-event-ingest",
       surface: "projects",
+      payloadJson: input,
+    })
+  ).payload;
+}
+
+export async function requestAgentsVxappWakeMutation(
+  input:
+    | {
+        readonly action: "upsert";
+        readonly wakeId: string;
+        readonly orchestratorThreadId: string;
+        readonly orchestratorProjectId?: string;
+        readonly programId?: string;
+        readonly workerThreadId?: string;
+        readonly workerProjectId?: string;
+        readonly workerTurnId?: string;
+        readonly workflowId?: string;
+        readonly workerTitleSnapshot?: string;
+        readonly outcome?: "completed" | "failed" | "interrupted";
+        readonly summary?: string;
+        readonly state?: "pending" | "delivering" | "delivered" | "consumed" | "dropped";
+        readonly stateSource?: "owner_payload" | "sqlite" | "projection_import";
+        readonly reason?: string;
+        readonly routingKind?: "worker_to_orchestrator" | "review_refresh" | "manual";
+      }
+    | {
+        readonly action: "deliver";
+        readonly wakeId: string;
+        readonly programId?: string;
+        readonly orchestratorThreadId?: string;
+        readonly stateSource?: "owner_payload" | "sqlite" | "projection_import";
+      }
+    | {
+        readonly action: "consume";
+        readonly wakeId: string;
+        readonly programId?: string;
+        readonly orchestratorThreadId?: string;
+        readonly reason:
+          | "worker_rechecked"
+          | "worker_superseded_by_new_turn"
+          | "worker_deleted"
+          | "worker_reparented"
+          | "orchestrator_missing"
+          | "orchestrator_deleted"
+          | "orchestrator_mismatch"
+          | "duplicate"
+          | "manual_dismiss";
+      }
+    | {
+        readonly action: "drop";
+        readonly wakeId: string;
+        readonly programId?: string;
+        readonly orchestratorThreadId?: string;
+        readonly reason?: string;
+        readonly stateSource?: "owner_payload" | "sqlite" | "projection_import";
+      },
+) {
+  return (
+    await callManifestCommandByName<JsonRecord>({
+      command: "t3code-wake-mutate",
+      surface: "wakes",
       payloadJson: input,
     })
   ).payload;

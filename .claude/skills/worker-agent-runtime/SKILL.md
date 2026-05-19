@@ -1,13 +1,13 @@
 ---
 name: worker-agent-runtime
-description: Use when adding, changing, debugging, reviewing, or displaying worker agent runtime contract data in T3 Code, especially `.agents/runtime/*.json`, selected worker runtime snapshots, installed packs, capabilities, context mode, closeout authority, audit findings, or the `server.getWorkerRuntimeSnapshot` flow. Trigger on worker runtime, agent runtime, runtime contract, selectedPacks, allowedCapabilities, forbiddenCapabilities, context-plan.json, dispatch-contract.json, installed-packs.json, instruction-stack-audit.json, or requests to surface worker runtime data in the web UI.
+description: Use when adding, changing, debugging, reviewing, or displaying worker agent runtime contract data in T3 Code, especially owner-backed worker runtime snapshots, `.agents/runtime/*.json`, installed packs, capabilities, context mode, closeout authority, audit findings, or the `server.getWorkerRuntimeSnapshot` flow. Trigger on worker runtime, agent runtime, runtime contract, selectedPacks, allowedCapabilities, forbiddenCapabilities, context-plan.json, dispatch-contract.json, installed-packs.json, instruction-stack-audit.json, runtime workspace resolution, or requests to surface worker runtime data in the web UI.
 ---
 
 # Worker Agent Runtime
 
-Use this skill when the task is about reading or surfacing the runtime contract artifacts that exist inside a worker worktree under `.agents/runtime/`.
+Use this skill when the task is about reading or surfacing owner-backed worker runtime contract data for a worker workspace under `.agents/runtime/`.
 
-T3 does not own runtime policy. `vortex-scripts` produces the runtime contract files. T3 only reads, normalizes, transports, and displays them for selected worker threads.
+T3 does not own runtime policy. `agents-vxapp` owns the runtime read contract, and its worker-runtime/role-session owners remain authoritative for workspace resolution and audit semantics. T3 should only transport, normalize, and display the owner-backed result.
 
 ## What This Skill Covers
 
@@ -31,6 +31,7 @@ Server:
 
 - `apps/server/src/workerRuntime/Services/WorkerRuntime.ts`
 - `apps/server/src/workerRuntime/Layers/WorkerRuntime.ts`
+- `apps/server/src/extensions/vxapp/agentsVxappOwnerClient.ts`
 - `apps/server/src/wsServer.ts`
 - `apps/server/src/serverLayers.ts`
 
@@ -38,6 +39,8 @@ Web:
 
 - `apps/web/src/wsNativeApi.ts`
 - `apps/web/src/lib/workerRuntimeReactQuery.ts`
+- `apps/web/src/components/vx/workerRuntimeDialogState.ts`
+- `apps/web/src/components/vx/OrchestrationSidebar.tsx`
 
 Fixtures and tests:
 
@@ -53,7 +56,7 @@ Fixtures and tests:
 The canonical runtime directory for a worker thread is:
 
 ```text
-<thread.worktreePath>/.agents/runtime/
+<workspace>/.agents/runtime/
 ```
 
 The current runtime file set is:
@@ -69,23 +72,21 @@ Do not invent alternate file locations unless the upstream runtime producer chan
 
 The current implementation is intentionally bounded:
 
-- input is a selected `threadId`
-- server resolves the thread from orchestration state
-- only `spawnRole === "worker"` threads are allowed
-- server reads runtime files from the worker `worktreePath`
-- server returns a normalized snapshot through `server.getWorkerRuntimeSnapshot`
+- input should be an authoritative worker runtime target: `threadId` plus canonical `workspace`
+- that target should come from `agents-vxapp` owner-backed program/sidebar/runtime reads, not from local project or thread heuristics
+- the server routes the request through `agentsVxappOwnerClient.ts`
+- `agents-vxapp` resolves runtime files and audits from the worker `workspace`
+- T3 returns the normalized snapshot through `server.getWorkerRuntimeSnapshot`
 - browser consumes that through `workerRuntimeSnapshotQueryOptions`
 
-This data is not part of the orchestration projection or sidebar snapshot model in v1.
-
-Keep it feature-local unless there is a concrete need to promote it.
+If a compact vxapp surface such as worker chips in the VX sidebar needs runtime state, render it from owner-provided runtime targets and availability. Do not reintroduce local `thread.worktreePath` heuristics into the sidebar model.
 
 ## Normalized Snapshot Shape
 
 The RPC returns a `WorkerRuntimeSnapshot` with:
 
 - `threadId`
-- `worktreePath`
+- `workspace`
 - `runtimeDir`
 - `sourceFiles`
 - `summary`
@@ -126,25 +127,23 @@ When building compact UI, prefer these before exposing raw path metadata.
 
 ### 1. Start from the selected worker thread
 
-Do not try to resolve runtime data from project rows, program rows, or free-form workspace guesses first.
+Do not derive runtime data from project rows, local store state, or free-form workspace guesses first.
 
 Preferred path:
 
-1. identify the selected worker `threadId`
-2. call `server.getWorkerRuntimeSnapshot({ threadId })`
+1. resolve the worker's owner-backed runtime target
+2. call `server.getWorkerRuntimeSnapshot({ threadId, workspace })`
 3. render the normalized result
 
-### 2. Keep runtime reads out of orchestration projections unless required
+### 2. Keep runtime reads owner-backed
 
-Do not add runtime contract fields to:
+Do not reimplement worker runtime authority in:
 
-- orchestration snapshots
-- sidebar thread models
-- persistent projection tables
+- orchestration projections
+- browser store state
+- local thread/worktree heuristics
 
-unless the feature explicitly needs orchestration-wide querying or indexing.
-
-For single-worker inspection, the dedicated RPC is the correct boundary.
+For single-worker inspection and compact VX runtime display, the dedicated owner-backed RPC is the correct boundary.
 
 ### 3. Prefer the normalized result over ad hoc file parsing in UI code
 
@@ -189,10 +188,11 @@ Treat these cases distinctly:
 
 - thread not found
 - thread is not a worker
-- worker has no `worktreePath`
+- worker has no authoritative `workspace`
 - runtime file missing
 - invalid JSON
 - schema decode failure
+- owner-backed runtime authority is unavailable or contradictory
 
 Missing or malformed individual files should not require the whole snapshot request to fail when the rest of the runtime can still be summarized.
 
@@ -211,7 +211,7 @@ Avoid defaulting this into:
 - global project lists
 - orchestration projections
 
-unless the feature specifically needs cross-worker aggregation.
+unless the feature specifically needs owner-backed compact runtime display or cross-worker aggregation.
 
 ## Tests To Prefer
 
@@ -247,7 +247,8 @@ bun run typecheck
 ## Footguns
 
 - Do not read runtime files directly from the browser.
-- Do not couple worker runtime data to sidebar rendering by default.
+- Do not use `agentRuntimeSnapshot` for worker rows when `workerRuntimeSnapshot` is the correct owner surface.
+- Do not derive runtime authority from `thread.worktreePath`, project cwd, or guessed workspaces.
 - Do not add runtime fields to orchestration projections just because a single UI needs them.
 - Do not assume every runtime file is present.
 - Do not drop `sourceFiles` status detail when debugging ingestion failures.
