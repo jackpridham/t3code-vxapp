@@ -5,7 +5,7 @@ import {
 } from "@t3tools/orchestration-core/orchestrator-notify";
 import { Cause, Data, Effect } from "effect";
 
-import { runProcess } from "../processRunner.ts";
+import { runProcess } from "../../processRunner.ts";
 
 const NOTIFY_TIMEOUT_MS = 10_000;
 

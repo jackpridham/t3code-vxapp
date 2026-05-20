@@ -5,7 +5,7 @@ import {
   type OrchestrationReactorShape,
 } from "../Services/OrchestrationReactor.ts";
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
-import { OrchestratorWakeReactor } from "../Services/OrchestratorWakeReactor.ts";
+import { OrchestratorWakeReactor } from "../../extensions/vxapp/Services/OrchestratorWakeReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 

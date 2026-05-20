@@ -14,7 +14,7 @@ import {
 
 const fixturesRoot = path.resolve(
   import.meta.dirname,
-  "../../../apps/web/src/lib/workerRuntime/__fixtures__",
+  "../../../apps/web/src/features/vxapp/workerRuntime/__fixtures__",
 );
 const snapshotsRoot = path.join(fixturesRoot, "snapshots");
 

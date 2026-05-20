@@ -2,7 +2,7 @@ import { ThreadId, type NativeApi } from "@t3tools/contracts";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentRuntimeSnapshotQueryOptions } from "./agentRuntimeReactQuery";
-import * as nativeApi from "../nativeApi";
+import * as nativeApi from "~/nativeApi";
 
 afterEach(() => {
   vi.restoreAllMocks();

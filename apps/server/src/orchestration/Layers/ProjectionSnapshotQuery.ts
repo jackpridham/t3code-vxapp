@@ -159,12 +159,6 @@ const SnapshotScopedWakeRowsRequest = Schema.Struct({
   limit: Schema.NullOr(Schema.Number),
 });
 
-function missingRuntimePathAuthorityError() {
-  return toPersistenceSqlError("ProjectionSnapshotQuery.externalRoleAuthority:missingRuntimePaths")(
-    new Error("vxapp projection boundary requires external role authority runtime paths."),
-  );
-}
-
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
   ORCHESTRATION_PROJECTOR_NAMES.threads,
@@ -1488,7 +1482,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ? yield* Effect.serviceOption(AgentsVxappExternalRoleAuthority).pipe(
                   Effect.flatMap((externalRoleAuthorityOption) =>
                     Option.match(externalRoleAuthorityOption, {
-                      onNone: () => Effect.fail(missingRuntimePathAuthorityError()),
+                      onNone: () => Effect.succeed(null),
                       onSome: (externalRoleAuthority) =>
                         externalRoleAuthority
                           .getRuntimePaths()

@@ -4,16 +4,16 @@ import { createEmptyReadModel } from "@t3tools/orchestration-core/projector";
 import { Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
-} from "../../provider/Services/ProviderService.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+} from "../../../provider/Services/ProviderService.ts";
+import { ServerSettingsService } from "../../../serverSettings.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
-} from "../Services/OrchestrationEngine.ts";
+} from "../../../orchestration/Services/OrchestrationEngine.ts";
 import { OrchestratorWakeReactor } from "../Services/OrchestratorWakeReactor.ts";
 import { OrchestratorWakeReactorLive } from "./OrchestratorWakeReactor.ts";
 

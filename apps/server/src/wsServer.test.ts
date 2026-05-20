@@ -18,6 +18,7 @@ import {
 import { describe, expect, it, afterEach, vi } from "vitest";
 
 vi.mock("./extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
+  AgentsVxappOwnerClientError: class AgentsVxappOwnerClientError extends Error {},
   bootstrapAgentsVxappOwnerManifest: vi.fn(),
   fetchAgentsVxappAgentRuntimeSnapshot: vi.fn(),
   fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
@@ -112,7 +113,7 @@ const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 const workerRuntimeFixturesRoot = path.resolve(
   import.meta.dirname,
-  "../../web/src/lib/workerRuntime/__fixtures__/snapshots",
+  "../../web/src/features/vxapp/workerRuntime/__fixtures__/snapshots",
 );
 const mockedControlPlaneSnapshot = vi.mocked(fetchAgentsVxappControlPlaneSnapshot);
 const mockedExternalRoleAuthoritySnapshot = vi.mocked(

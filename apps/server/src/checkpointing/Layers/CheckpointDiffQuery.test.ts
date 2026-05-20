@@ -6,7 +6,7 @@ import {
   ProjectionOperationalQuery,
   type ProjectionOperationalQueryShape,
   type ProjectionThreadCheckpointContext,
-} from "../../orchestration/Services/ProjectionOperationalQuery.ts";
+} from "../../extensions/vxapp/Services/ProjectionOperationalQuery.ts";
 import { checkpointRefForThreadTurn } from "../Utils.ts";
 import { CheckpointDiffQueryLive } from "./CheckpointDiffQuery.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";

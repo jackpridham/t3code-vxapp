@@ -9,8 +9,6 @@ const ownerClientPath = path.resolve(repoRoot, ownerClientRelativePath);
 const scanRoots = [
   "apps/server/src/extensions/vxapp",
   "apps/server/src/orchestration",
-  "apps/server/src/agentRuntime",
-  "apps/server/src/workerRuntime",
   "apps/web/src/features/vxapp",
   "apps/web/src/components/sidebar",
 ] as const;

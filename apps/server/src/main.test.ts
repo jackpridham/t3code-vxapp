@@ -45,8 +45,8 @@ import {
 import {
   ProjectionBootstrapSummaryQuery,
   type ProjectionBootstrapSummaryQueryShape,
-} from "./orchestration/Services/ProjectionBootstrapSummaryQuery";
-import { ProjectionOperationalQuery } from "./orchestration/Services/ProjectionOperationalQuery";
+} from "./extensions/vxapp/Services/ProjectionBootstrapSummaryQuery";
+import { ProjectionOperationalQuery } from "./extensions/vxapp/Services/ProjectionOperationalQuery";
 import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
@@ -58,7 +58,7 @@ import {
 import {
   ProjectHooksService,
   type ProjectHooksShape,
-} from "./projectHooks/Services/ProjectHooksService.ts";
+} from "./extensions/vxapp/Services/ProjectHooksService.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "./provider/Services/ProviderRegistry";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
@@ -66,8 +66,11 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
 import { ServerSettingsService } from "./serverSettings";
 import { VortexApps, type VortexAppsShape } from "./extensions/vxapp/Services/VortexApps";
-import { AgentRuntime, type AgentRuntimeShape } from "./agentRuntime/Services/AgentRuntime.ts";
-import { WorkerRuntime, type WorkerRuntimeShape } from "./workerRuntime/Services/WorkerRuntime.ts";
+import { AgentRuntime, type AgentRuntimeShape } from "./extensions/vxapp/Services/AgentRuntime.ts";
+import {
+  WorkerRuntime,
+  type WorkerRuntimeShape,
+} from "./extensions/vxapp/Services/WorkerRuntime.ts";
 import {
   WorkspaceEntries,
   type WorkspaceEntriesShape,

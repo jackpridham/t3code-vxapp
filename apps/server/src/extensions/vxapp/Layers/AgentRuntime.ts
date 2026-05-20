@@ -1,7 +1,7 @@
 import { GetAgentRuntimeSnapshotResult as GetAgentRuntimeSnapshotResultSchema } from "@t3tools/contracts";
 import { Effect, Layer, Schema } from "effect";
 
-import { fetchAgentsVxappAgentRuntimeSnapshot } from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
+import { fetchAgentsVxappAgentRuntimeSnapshot } from "../agentsVxappOwnerClient.ts";
 import {
   AgentRuntime,
   AgentRuntimeError,

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, "../..");
+const root = resolve(here, "../../..");
 
 function read(relativePath: string): string {
   return readFileSync(resolve(root, relativePath), "utf8");
@@ -35,10 +35,18 @@ describe("agents-vxapp projection authority boundary", () => {
   });
 
   it("uses owner-backed truth for vxapp-backed query paths", () => {
+    const snapshotQuerySource = read("src/orchestration/Layers/ProjectionSnapshotQuery.ts");
+    expect(snapshotQuerySource).toContain("controlPlane.getProgramsProjectionSnapshot()");
+    expect(snapshotQuerySource).toContain("getNotificationSummaryExport()");
+    expect(snapshotQuerySource).toContain("getRuntimePaths()");
+    expect(snapshotQuerySource).toContain("AgentsVxappControlPlane");
+    expect(snapshotQuerySource).toMatch(
+      /ownerPrograms\s*\?\?|ownerSnapshot\.programs\.map\(mapOwnerProgram\)/,
+    );
+
     for (const relativePath of [
-      "src/orchestration/Layers/ProjectionSnapshotQuery.ts",
-      "src/orchestration/Layers/ProjectionOperationalQuery.ts",
-      "src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts",
+      "src/extensions/vxapp/Layers/ProjectionOperationalQuery.ts",
+      "src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts",
     ]) {
       const source = read(relativePath);
       expect(source).toContain("controlPlane.getProgramsProjectionSnapshot()");
@@ -58,7 +66,7 @@ describe("agents-vxapp projection authority boundary", () => {
     expect(read("src/orchestration/Layers/ProjectionSnapshotQuery.ts")).toMatch(
       /vxappBackedProjectRows\.length > 0\s*\?\s*\[\]\s*:\s*orchestratorWakeRows/,
     );
-    expect(read("src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts")).toMatch(
+    expect(read("src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts")).toMatch(
       /const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> =[\s\S]*vxappBacked[\s\S]*\?\s*\[\]/,
     );
   });
@@ -66,8 +74,8 @@ describe("agents-vxapp projection authority boundary", () => {
   it("uses the runtime-path helper instead of repo-root prefix classification", () => {
     for (const relativePath of [
       "src/orchestration/Layers/ProjectionSnapshotQuery.ts",
-      "src/orchestration/Layers/ProjectionOperationalQuery.ts",
-      "src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts",
+      "src/extensions/vxapp/Layers/ProjectionOperationalQuery.ts",
+      "src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts",
     ]) {
       const source = read(relativePath);
       expect(source).toContain("agentsVxappAuthorityPaths.ts");

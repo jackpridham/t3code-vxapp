@@ -30,28 +30,28 @@ import {
   toPersistenceDecodeError,
   toPersistenceSqlError,
   type ProjectionRepositoryError,
-} from "../../persistence/Errors.ts";
+} from "../../../persistence/Errors.ts";
 import {
   decodeProjectionProgramDbRow,
   ProjectionProgramDbRowSchema,
   toOrchestrationProgram,
-} from "../../persistence/programProjectionRow.ts";
-import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
-import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
-import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
-import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
-import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
-import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
-import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+} from "../../../persistence/programProjectionRow.ts";
+import { ProjectionOrchestratorWake } from "../../../persistence/Services/ProjectionOrchestratorWakes.ts";
+import { ProjectionProgramNotification } from "../../../persistence/Services/ProjectionProgramNotifications.ts";
+import { ProjectionProject } from "../../../persistence/Services/ProjectionProjects.ts";
+import { ProjectionState } from "../../../persistence/Services/ProjectionState.ts";
+import { resolveLocalThreadErrorPresentation } from "../../../orchestration/localThreadErrorPresentation.ts";
+import { ProjectionThreadSession } from "../../../persistence/Services/ProjectionThreadSessions.ts";
+import { ProjectionThread } from "../../../persistence/Services/ProjectionThreads.ts";
 import {
   AgentsVxappExternalRoleAuthority,
   buildExternalRoleAuthorityIndex,
   type AgentsVxappRoleSessionRuntimePaths,
   type AgentsVxappExternalRoleAuthoritySnapshot,
-} from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
-import { AgentsVxappControlPlane } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
-import { isAgentsVxappWorkspaceRoot } from "../../extensions/vxapp/agentsVxappAuthorityPaths.ts";
-import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
+} from "../Services/AgentsVxappExternalRoleAuthority.ts";
+import { AgentsVxappControlPlane } from "../Services/AgentsVxappControlPlane.ts";
+import { isAgentsVxappWorkspaceRoot } from "../agentsVxappAuthorityPaths.ts";
+import { ORCHESTRATION_PROJECTOR_NAMES } from "../../../orchestration/Layers/ProjectionPipeline.ts";
 import {
   ProjectionBootstrapSummaryQuery,
   type ProjectionBootstrapSummaryQueryShape,

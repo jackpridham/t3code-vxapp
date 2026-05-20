@@ -14,7 +14,7 @@ export interface ProjectHooksShape {
 export class ProjectHooksService extends ServiceMap.Service<
   ProjectHooksService,
   ProjectHooksShape
->()("t3/projectHooks/Services/ProjectHooksService") {
+>()("t3/extensions/vxapp/Services/ProjectHooksService") {
   static readonly layerTest = Layer.succeed(ProjectHooksService, {
     prepareTurnStartCommand: (command) => Effect.succeed(command),
     handleTurnCompleted: () => Effect.void,

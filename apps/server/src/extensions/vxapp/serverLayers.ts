@@ -3,8 +3,8 @@ import { Layer } from "effect";
 
 import { AgentsVxappExternalRoleAuthorityLive } from "./Layers/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappSidebarLive } from "./Layers/AgentsVxappSidebar.ts";
-import { OrchestratorWakeReactorLive } from "../../orchestration/Layers/OrchestratorWakeReactor";
-import { ProjectHooksLive } from "../../projectHooks/Layers/ProjectHooks.ts";
+import { OrchestratorWakeReactorLive } from "./Layers/OrchestratorWakeReactor";
+import { ProjectHooksLive } from "./Layers/ProjectHooks.ts";
 import { VortexAppsLive } from "./Layers/VortexApps.ts";
 
 export const makeVxappRuntimeServicesLayer = <A, E, R>(

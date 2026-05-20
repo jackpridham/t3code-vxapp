@@ -51,9 +51,9 @@ import { GitManager } from "./git/Services/GitManager.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import { ServerSettingsService } from "./serverSettings";
-import { ProjectionBootstrapSummaryQuery } from "./orchestration/Services/ProjectionBootstrapSummaryQuery";
+import { ProjectionBootstrapSummaryQuery } from "./extensions/vxapp/Services/ProjectionBootstrapSummaryQuery";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
-import { ProjectionOperationalQuery } from "./orchestration/Services/ProjectionOperationalQuery";
+import { ProjectionOperationalQuery } from "./extensions/vxapp/Services/ProjectionOperationalQuery";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProviderService } from "./provider/Services/ProviderService";
@@ -84,7 +84,7 @@ import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolve
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
-import { ProjectHooksService } from "./projectHooks/Services/ProjectHooksService.ts";
+import { ProjectHooksService } from "./extensions/vxapp/Services/ProjectHooksService.ts";
 import { makeVxappWsRouteHandlers, type VxappWsRouteHandlerServices } from "./extensions/vxapp";
 import { buildVortexWebSocketErrorResponse } from "./extensions/vxapp/vortexErrorResponse.ts";
 import {
@@ -96,8 +96,8 @@ import {
   mirrorThreadLifecycleEvent,
 } from "./extensions/vxapp/threadEventMirror.ts";
 import { resolveStartupBootstrapSelection } from "./bootstrapThreadSelection";
-import { AgentRuntime } from "./agentRuntime/Services/AgentRuntime.ts";
-import { WorkerRuntime } from "./workerRuntime/Services/WorkerRuntime.ts";
+import { AgentRuntime } from "./extensions/vxapp/Services/AgentRuntime.ts";
+import { WorkerRuntime } from "./extensions/vxapp/Services/WorkerRuntime.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.

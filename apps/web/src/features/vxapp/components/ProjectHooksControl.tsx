@@ -18,8 +18,8 @@ import {
   PROJECT_HOOK_OUTPUT_PLACEMENT_LABELS,
   PROJECT_HOOK_TRIGGER_LABELS,
   PROJECT_HOOK_TURN_STATE_LABELS,
-} from "~/projectHooks";
-import type { NewProjectHookInput } from "~/projectHooks";
+} from "~/features/vxapp/projectHooks";
+import type { NewProjectHookInput } from "~/features/vxapp/projectHooks";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -28,8 +28,8 @@ import {
   AlertDialogHeader,
   AlertDialogPopup,
   AlertDialogTitle,
-} from "./ui/alert-dialog";
-import { Button } from "./ui/button";
+} from "~/components/ui/alert-dialog";
+import { Button } from "~/components/ui/button";
 import {
   Dialog,
   DialogDescription,
@@ -38,13 +38,19 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from "./ui/dialog";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
-import { Switch } from "./ui/switch";
-import { Textarea } from "./ui/textarea";
+} from "~/components/ui/dialog";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { Switch } from "~/components/ui/switch";
+import { Textarea } from "~/components/ui/textarea";
 
 type ProjectHookTrigger = ProjectHook["trigger"];
 type ProviderFilter = "any" | "codex" | "claudeAgent";
@@ -59,7 +65,7 @@ interface ProjectHooksControlProps {
   onDeleteHook: (hookId: string) => Promise<void> | void;
 }
 
-export type { NewProjectHookInput } from "~/projectHooks";
+export type { NewProjectHookInput } from "~/features/vxapp/projectHooks";
 
 const EXECUTION_TARGET_OPTIONS: ProjectHookExecutionTarget[] = [
   "project-root-or-worktree",

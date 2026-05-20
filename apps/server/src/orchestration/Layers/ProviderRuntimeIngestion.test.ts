@@ -41,11 +41,11 @@ import {
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
+import { ProjectHooksService } from "../../extensions/vxapp/Services/ProjectHooksService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
 import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
-import * as agentsVxappOwnerClient from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
+import * as providerHarnessBridge from "../../extensions/vxapp/providerHarnessBridge.ts";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
@@ -175,14 +175,14 @@ function isMockFunction(value: unknown): boolean {
 }
 
 function ensureDefaultOwnerHelperSpies(): void {
-  if (!isMockFunction(agentsVxappOwnerClient.requestAgentsVxappApprovalRequest)) {
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalRequest").mockResolvedValue({});
+  if (!isMockFunction(providerHarnessBridge.requestAgentsVxappApprovalRequest)) {
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappApprovalRequest").mockResolvedValue({});
   }
-  if (!isMockFunction(agentsVxappOwnerClient.requestAgentsVxappThreadEventIngest)) {
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadEventIngest").mockResolvedValue({});
+  if (!isMockFunction(providerHarnessBridge.requestAgentsVxappThreadEventIngest)) {
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappThreadEventIngest").mockResolvedValue({});
   }
-  if (!isMockFunction(agentsVxappOwnerClient.requestAgentsVxappThreadStatus)) {
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadStatus").mockResolvedValue({});
+  if (!isMockFunction(providerHarnessBridge.requestAgentsVxappThreadStatus)) {
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappThreadStatus").mockResolvedValue({});
   }
 }
 
@@ -839,7 +839,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("checks owner thread status before vxapp-backed lifecycle updates become authoritative", async () => {
     const threadStatusSpy = vi
-      .spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadStatus")
+      .spyOn(providerHarnessBridge, "requestAgentsVxappThreadStatus")
       .mockResolvedValue({});
     const harness = await createHarness({
       vxappBacked: true,
@@ -873,7 +873,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("checks owner thread status for owner-authoritative vxapp worktrees outside role-session roots", async () => {
     const threadStatusSpy = vi
-      .spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadStatus")
+      .spyOn(providerHarnessBridge, "requestAgentsVxappThreadStatus")
       .mockResolvedValue({});
     const worktreePath = "/tmp/custom-vxapp/thread-1/worktree";
     const harness = await createHarness({
@@ -908,7 +908,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("surfaces owner thread-status failures instead of applying vxapp-backed lifecycle state", async () => {
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadStatus").mockRejectedValue(
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappThreadStatus").mockRejectedValue(
       new Error("owner thread status failed"),
     );
     const harness = await createHarness({ vxappBacked: true });
@@ -2431,7 +2431,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("routes pending approval callbacks through the owner helper before local pending state appears", async () => {
     const approvalRequestSpy = vi
-      .spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalRequest")
+      .spyOn(providerHarnessBridge, "requestAgentsVxappApprovalRequest")
       .mockResolvedValue({});
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -2467,7 +2467,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("surfaces owner approval failures instead of creating local pending approval truth", async () => {
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalRequest").mockRejectedValue(
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappApprovalRequest").mockRejectedValue(
       new Error("owner approval request failed"),
     );
     const harness = await createHarness();
@@ -3297,7 +3297,7 @@ describe("ProviderRuntimeIngestion", () => {
 
   it("routes pending user-input callbacks through the owner helper before local pending state appears", async () => {
     const threadEventIngestSpy = vi
-      .spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadEventIngest")
+      .spyOn(providerHarnessBridge, "requestAgentsVxappThreadEventIngest")
       .mockResolvedValue({});
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -3347,7 +3347,7 @@ describe("ProviderRuntimeIngestion", () => {
   });
 
   it("surfaces owner user-input failures instead of creating local pending prompts", async () => {
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappThreadEventIngest").mockRejectedValue(
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappThreadEventIngest").mockRejectedValue(
       new Error("owner user input request failed"),
     );
     const harness = await createHarness();

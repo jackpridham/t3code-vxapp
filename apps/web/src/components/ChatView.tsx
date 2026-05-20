@@ -129,14 +129,14 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { cn, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { toastManager } from "./ui/toast";
-import { type NewProjectHookInput } from "./ProjectHooksControl";
+import { type NewProjectHookInput } from "~/features/vxapp/components/ProjectHooksControl";
 import {
   projectScriptCwd,
   projectScriptRuntimeEnv,
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
-import { nextProjectHookId } from "~/projectHooks";
+import { nextProjectHookId } from "~/features/vxapp/projectHooks";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {

@@ -34,8 +34,8 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { ProjectHooksService } from "../../projectHooks/Services/ProjectHooksService.ts";
-import { notifyOrchestratorChatMessage } from "../orchestratorNotify.ts";
+import { ProjectHooksService } from "../../extensions/vxapp/Services/ProjectHooksService.ts";
+import { notifyOrchestratorChatMessage } from "../../extensions/vxapp/orchestratorNotify.ts";
 import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
 import {
   AgentsVxappExternalRoleAuthority,
@@ -46,7 +46,7 @@ import {
   requestAgentsVxappApprovalRequest,
   requestAgentsVxappThreadEventIngest,
   requestAgentsVxappThreadStatus,
-} from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
+} from "../../extensions/vxapp/providerHarnessBridge.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>

@@ -36,7 +36,7 @@ import {
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as agentsVxappOwnerClient from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
+import * as providerHarnessBridge from "../../extensions/vxapp/providerHarnessBridge.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
@@ -335,7 +335,7 @@ describe("ProviderCommandReactor authority boundary", () => {
     const harness = await createHarness({
       worktreePath: vxappRoleSessionWorktreePath,
     });
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalResponse").mockRejectedValueOnce(
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappApprovalResponse").mockRejectedValueOnce(
       new Error("owner approval response failed"),
     );
 
@@ -380,9 +380,7 @@ describe("ProviderCommandReactor authority boundary", () => {
 
   it("allows provider approval responses after owner acceptance without projected approval authority", async () => {
     const harness = await createHarness();
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappApprovalResponse").mockResolvedValueOnce(
-      {},
-    );
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappApprovalResponse").mockResolvedValueOnce({});
 
     await harness.publishEvent({
       type: "thread.approval-response-requested",
@@ -489,7 +487,7 @@ describe("ProviderCommandReactor authority boundary", () => {
     const harness = await createHarness({
       worktreePath: vxappRoleSessionWorktreePath,
     });
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappUserInputResponse").mockRejectedValueOnce(
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappUserInputResponse").mockRejectedValueOnce(
       new Error("owner user input response failed"),
     );
 
@@ -536,7 +534,7 @@ describe("ProviderCommandReactor authority boundary", () => {
 
   it("allows provider user-input responses after owner acceptance without projected input authority", async () => {
     const harness = await createHarness();
-    vi.spyOn(agentsVxappOwnerClient, "requestAgentsVxappUserInputResponse").mockResolvedValueOnce(
+    vi.spyOn(providerHarnessBridge, "requestAgentsVxappUserInputResponse").mockResolvedValueOnce(
       {},
     );
 

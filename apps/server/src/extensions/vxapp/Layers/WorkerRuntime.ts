@@ -1,7 +1,7 @@
 import { GetWorkerRuntimeSnapshotResult as GetWorkerRuntimeSnapshotResultSchema } from "@t3tools/contracts";
 import { Effect, Layer, Schema } from "effect";
 
-import { fetchAgentsVxappWorkerRuntimeSnapshot } from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
+import { fetchAgentsVxappWorkerRuntimeSnapshot } from "../agentsVxappOwnerClient.ts";
 import {
   WorkerRuntime,
   WorkerRuntimeError,

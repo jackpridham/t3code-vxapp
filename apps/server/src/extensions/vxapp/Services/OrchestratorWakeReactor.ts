@@ -8,4 +8,4 @@ export interface OrchestratorWakeReactorShape {
 export class OrchestratorWakeReactor extends ServiceMap.Service<
   OrchestratorWakeReactor,
   OrchestratorWakeReactorShape
->()("t3/orchestration/Services/OrchestratorWakeReactor/OrchestratorWakeReactor") {}
+>()("t3/extensions/vxapp/Services/OrchestratorWakeReactor") {}

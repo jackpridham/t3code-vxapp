@@ -6,8 +6,8 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
-import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
+import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
+import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { ProjectionBootstrapSummaryQuery } from "../Services/ProjectionBootstrapSummaryQuery.ts";
 import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./ProjectionBootstrapSummaryQuery.ts";
 

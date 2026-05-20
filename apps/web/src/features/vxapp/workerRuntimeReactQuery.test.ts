@@ -7,7 +7,7 @@ import {
   workerRuntimeQueryKeys,
   workerRuntimeSnapshotQueryOptions,
 } from "./workerRuntimeReactQuery";
-import * as nativeApi from "../nativeApi";
+import * as nativeApi from "~/nativeApi";
 
 const threadId = ThreadId.makeUnsafe("worker-thread");
 

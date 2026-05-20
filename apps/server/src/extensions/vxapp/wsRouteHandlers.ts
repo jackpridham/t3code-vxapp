@@ -22,7 +22,7 @@ import {
   type AgentsVxappControlPlaneError,
 } from "./Services/AgentsVxappControlPlane.ts";
 import { AgentsVxappSidebar, type AgentsVxappSidebarError } from "./Services/AgentsVxappSidebar.ts";
-import { ProjectionOperationalQuery } from "../../orchestration/Services/ProjectionOperationalQuery";
+import { ProjectionOperationalQuery } from "./Services/ProjectionOperationalQuery";
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { VortexApps, type VortexAppsError } from "./Services/VortexApps.ts";
 import type { AgentsVxappOwnerClientError } from "./agentsVxappOwnerClient.ts";

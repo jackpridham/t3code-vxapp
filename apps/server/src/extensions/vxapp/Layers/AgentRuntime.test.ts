@@ -2,11 +2,11 @@ import { ThreadId } from "@t3tools/contracts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
+vi.mock("../agentsVxappOwnerClient.ts", () => ({
   fetchAgentsVxappAgentRuntimeSnapshot: vi.fn(),
 }));
 
-import { fetchAgentsVxappAgentRuntimeSnapshot } from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
+import { fetchAgentsVxappAgentRuntimeSnapshot } from "../agentsVxappOwnerClient.ts";
 import { AgentRuntime } from "../Services/AgentRuntime.ts";
 import { AgentRuntimeLive } from "./AgentRuntime.ts";
 

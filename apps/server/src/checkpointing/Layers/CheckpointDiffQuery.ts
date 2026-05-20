@@ -9,7 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Layer, Schema } from "effect";
 
-import { ProjectionOperationalQuery } from "../../orchestration/Services/ProjectionOperationalQuery.ts";
+import { ProjectionOperationalQuery } from "../../extensions/vxapp/Services/ProjectionOperationalQuery.ts";
 import { CheckpointInvariantError, CheckpointUnavailableError } from "../Errors.ts";
 import { checkpointRefForThreadTurn } from "../Utils.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";

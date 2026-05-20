@@ -4,7 +4,7 @@ import type {
 } from "@t3tools/contracts";
 import { Schema, ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import type { ProjectionRepositoryError } from "../../../persistence/Errors.ts";
 
 export class WorkerRuntimeError extends Schema.TaggedErrorClass<WorkerRuntimeError>()(
   "WorkerRuntimeError",
@@ -23,5 +23,5 @@ export interface WorkerRuntimeShape {
 }
 
 export class WorkerRuntime extends ServiceMap.Service<WorkerRuntime, WorkerRuntimeShape>()(
-  "t3/workerRuntime/Services/WorkerRuntime",
+  "t3/extensions/vxapp/Services/WorkerRuntime",
 ) {}

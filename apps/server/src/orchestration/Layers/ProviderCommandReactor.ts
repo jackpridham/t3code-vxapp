@@ -43,7 +43,7 @@ import {
   requestAgentsVxappApprovalResponse,
   requestAgentsVxappThreadEventIngest,
   requestAgentsVxappUserInputResponse,
-} from "../../extensions/vxapp/agentsVxappOwnerClient.ts";
+} from "../../extensions/vxapp/providerHarnessBridge.ts";
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,

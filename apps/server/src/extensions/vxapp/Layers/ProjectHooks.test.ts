@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
-} from "../../orchestration/Services/OrchestrationEngine.ts";
+} from "../../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectHooksService } from "../Services/ProjectHooksService.ts";
 import { makeProjectHooksLive } from "./ProjectHooks.ts";
 

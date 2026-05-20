@@ -16,8 +16,8 @@ import {
 } from "@t3tools/shared/projectHooks";
 import { resolveLoginShell } from "@t3tools/shared/shell";
 import { Cache, Duration, Effect, Layer, Schema } from "effect";
-import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
-import { runProcess, type ProcessRunResult } from "../../processRunner.ts";
+import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
+import { runProcess, type ProcessRunResult } from "../../../processRunner.ts";
 import { ProjectHooksService, type ProjectHooksShape } from "../Services/ProjectHooksService.ts";
 
 const COMPLETED_HOOK_TTL = Duration.hours(12);

@@ -4,7 +4,7 @@ import type {
 } from "@t3tools/contracts";
 import { Schema, ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import type { ProjectionRepositoryError } from "../../../persistence/Errors.ts";
 
 export class AgentRuntimeError extends Schema.TaggedErrorClass<AgentRuntimeError>()(
   "AgentRuntimeError",
@@ -20,5 +20,5 @@ export interface AgentRuntimeShape {
 }
 
 export class AgentRuntime extends ServiceMap.Service<AgentRuntime, AgentRuntimeShape>()(
-  "t3/agentRuntime/Services/AgentRuntime",
+  "t3/extensions/vxapp/Services/AgentRuntime",
 ) {}

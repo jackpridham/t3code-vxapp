@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const serverSrcRoot = resolve(here, "..");
+const serverSrcRoot = resolve(here, "../..");
 const ownerClientPath = resolve(serverSrcRoot, "extensions/vxapp/agentsVxappOwnerClient.ts");
 const repoRootPath = resolve(serverSrcRoot, "extensions/vxapp/agentsVxappRepoRoot.ts");
 const ownerProcessPath = ["scripts", "tools", "t3-control-plane-owner"].join("/");
@@ -37,16 +37,16 @@ describe("provider harness boundary", () => {
     expect(matches).toEqual([ownerClientPath]);
   });
 
-  it("routes provider-harness owner interactions through the owner client helpers", () => {
+  it("routes provider-harness owner interactions through the vxapp bridge helpers", () => {
     const ingestionSource = readSource("orchestration/Layers/ProviderRuntimeIngestion.ts");
     const reactorSource = readSource("orchestration/Layers/ProviderCommandReactor.ts");
 
-    expect(ingestionSource).toContain('from "../../extensions/vxapp/agentsVxappOwnerClient.ts"');
+    expect(ingestionSource).toContain('from "../../extensions/vxapp/providerHarnessBridge.ts"');
     expect(ingestionSource).toContain("requestAgentsVxappApprovalRequest");
     expect(ingestionSource).toContain("requestAgentsVxappThreadEventIngest");
     expect(ingestionSource).toContain("requestAgentsVxappThreadStatus");
 
-    expect(reactorSource).toContain('from "../../extensions/vxapp/agentsVxappOwnerClient.ts"');
+    expect(reactorSource).toContain('from "../../extensions/vxapp/providerHarnessBridge.ts"');
     expect(reactorSource).toContain("requestAgentsVxappApprovalResponse");
     expect(reactorSource).toContain("requestAgentsVxappUserInputResponse");
 

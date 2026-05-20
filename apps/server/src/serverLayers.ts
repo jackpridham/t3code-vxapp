@@ -9,13 +9,13 @@ import { ServerConfig } from "./config";
 import { OrchestrationCommandReceiptRepositoryLive } from "./persistence/Layers/OrchestrationCommandReceipts";
 import { OrchestrationEventStoreLive } from "./persistence/Layers/OrchestrationEventStore";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
-import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./orchestration/Layers/ProjectionBootstrapSummaryQuery";
+import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline";
-import { OrchestrationProjectionOperationalQueryLive } from "./orchestration/Layers/ProjectionOperationalQuery";
+import { OrchestrationProjectionOperationalQueryLive } from "./extensions/vxapp/Layers/ProjectionOperationalQuery";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
@@ -41,8 +41,8 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
-import { AgentRuntimeLive } from "./agentRuntime/Layers/AgentRuntime.ts";
-import { WorkerRuntimeLive } from "./workerRuntime/Layers/WorkerRuntime.ts";
+import { AgentRuntimeLive } from "./extensions/vxapp/Layers/AgentRuntime.ts";
+import { WorkerRuntimeLive } from "./extensions/vxapp/Layers/WorkerRuntime.ts";
 import { AgentsVxappControlPlaneLive } from "./extensions/vxapp/Layers/AgentsVxappControlPlane.ts";
 import { AgentsVxappExternalRoleAuthorityLive } from "./extensions/vxapp/Layers/AgentsVxappExternalRoleAuthority.ts";
 import {

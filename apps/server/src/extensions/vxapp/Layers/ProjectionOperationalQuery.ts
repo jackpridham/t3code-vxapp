@@ -45,36 +45,36 @@ import {
   toPersistenceDecodeError,
   toPersistenceSqlError,
   type ProjectionRepositoryError,
-} from "../../persistence/Errors.ts";
+} from "../../../persistence/Errors.ts";
 import {
   decodeProjectionProgramDbRow,
   ProjectionProgramDbRowSchema,
   toOrchestrationProgram,
-} from "../../persistence/programProjectionRow.ts";
-import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
-import { ProjectionCtoAttention } from "../../persistence/Services/ProjectionCtoAttention.ts";
-import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
-import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
-import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
-import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
-import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
-import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
-import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
-import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+} from "../../../persistence/programProjectionRow.ts";
+import { ProjectionCheckpoint } from "../../../persistence/Services/ProjectionCheckpoints.ts";
+import { ProjectionCtoAttention } from "../../../persistence/Services/ProjectionCtoAttention.ts";
+import { ProjectionOrchestratorWake } from "../../../persistence/Services/ProjectionOrchestratorWakes.ts";
+import { ProjectionProgramNotification } from "../../../persistence/Services/ProjectionProgramNotifications.ts";
+import { ProjectionProject } from "../../../persistence/Services/ProjectionProjects.ts";
+import { ProjectionState } from "../../../persistence/Services/ProjectionState.ts";
+import { ProjectionThreadActivity } from "../../../persistence/Services/ProjectionThreadActivities.ts";
+import { ProjectionThreadMessage } from "../../../persistence/Services/ProjectionThreadMessages.ts";
+import { ProjectionThreadSession } from "../../../persistence/Services/ProjectionThreadSessions.ts";
+import { ProjectionThread } from "../../../persistence/Services/ProjectionThreads.ts";
 import {
   AgentsVxappExternalRoleAuthority,
   buildExternalRoleAuthorityIndex,
   type AgentsVxappRoleSessionRuntimePaths,
   type AgentsVxappExternalRoleAuthoritySnapshot,
-} from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
-import { AgentsVxappControlPlane } from "../../extensions/vxapp/Services/AgentsVxappControlPlane.ts";
+} from "../Services/AgentsVxappExternalRoleAuthority.ts";
+import { AgentsVxappControlPlane } from "../Services/AgentsVxappControlPlane.ts";
 import {
   isAgentsVxappWorkspaceRoot,
   isAgentsVxappWorktreePath,
-} from "../../extensions/vxapp/agentsVxappAuthorityPaths.ts";
-import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
-import { selectOperationalCtoAttentionItems } from "../projectionCtoAttention.ts";
-import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
+} from "../agentsVxappAuthorityPaths.ts";
+import { ORCHESTRATION_PROJECTOR_NAMES } from "../../../orchestration/Layers/ProjectionPipeline.ts";
+import { selectOperationalCtoAttentionItems } from "../../../orchestration/projectionCtoAttention.ts";
+import { resolveLocalThreadErrorPresentation } from "../../../orchestration/localThreadErrorPresentation.ts";
 import {
   ProjectionOperationalQuery,
   type ProjectionOperationalQueryShape,

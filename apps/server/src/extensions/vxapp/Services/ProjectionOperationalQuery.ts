@@ -26,7 +26,7 @@ import type {
 import type { Effect } from "effect";
 import { ServiceMap } from "effect";
 
-import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import type { ProjectionRepositoryError } from "../../../persistence/Errors.ts";
 
 export interface ProjectionThreadCheckpointContext {
   readonly threadId: ThreadId;
@@ -83,4 +83,4 @@ export interface ProjectionOperationalQueryShape {
 export class ProjectionOperationalQuery extends ServiceMap.Service<
   ProjectionOperationalQuery,
   ProjectionOperationalQueryShape
->()("t3/orchestration/Services/ProjectionOperationalQuery") {}
+>()("t3/extensions/vxapp/Services/ProjectionOperationalQuery") {}

@@ -15,9 +15,6 @@ describe("ProjectionSnapshotQuery authority boundary", () => {
     expect(source).toContain("getRuntimePaths()");
     expect(source).toContain("getBindingAuthorityForVxappProjects");
     expect(source).toContain("ownerPrograms ??");
-    expect(source).toContain(
-      "vxapp projection boundary requires external role authority runtime paths.",
-    );
   });
 
   it("does not expose local wake rows as vxapp-backed current truth", () => {

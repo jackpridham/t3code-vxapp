@@ -10,7 +10,9 @@ import {
 } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import ProjectHooksControl, { type NewProjectHookInput } from "../ProjectHooksControl";
+import ProjectHooksControl, {
+  type NewProjectHookInput,
+} from "~/features/vxapp/components/ProjectHooksControl";
 import { Toggle } from "../ui/toggle";
 import { Button } from "../ui/button";
 import { getDisplayThreadLabelEntries } from "../../lib/threadLabels";
