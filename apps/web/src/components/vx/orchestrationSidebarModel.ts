@@ -28,6 +28,7 @@ import {
   summarizeProgramCloseout,
 } from "./programDisplay";
 import {
+  makeExecutiveKey,
   resolveArchivedRoleSessionNameFromPathForDisplay,
   resolveRoleSessionName,
 } from "./programsTodosModel";
@@ -685,6 +686,7 @@ function buildExecutiveAuthorityByProjectId(input: {
 }
 
 function resolveExecutiveAuthority(input: {
+  authorityExecutiveThreadId: string | null;
   executiveAuthority: {
     fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
     threadId: string;
@@ -697,6 +699,17 @@ function resolveExecutiveAuthority(input: {
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
   threadId: string | null;
 } {
+  if (input.authorityExecutiveThreadId !== null) {
+    const fallbackThreadLink =
+      input.threadLinkById.get(input.authorityExecutiveThreadId) ??
+      (input.executiveAuthority?.threadId === input.authorityExecutiveThreadId
+        ? input.executiveAuthority.fallbackThreadLink
+        : null);
+    return {
+      fallbackThreadLink,
+      threadId: input.authorityExecutiveThreadId,
+    };
+  }
   const projectRootThreadId =
     input.executiveProjectId !== null
       ? (input.projectById.get(input.executiveProjectId)?.currentSessionRootThreadId ?? null)
@@ -709,12 +722,7 @@ function resolveExecutiveAuthority(input: {
       threadId: null,
     };
   }
-  const fallbackThreadLink =
-    input.threadLinkById.get(resolvedThreadId) ??
-    (input.executiveAuthority?.threadId === resolvedThreadId
-      ? input.executiveAuthority.fallbackThreadLink
-      : null) ??
-    null;
+  const fallbackThreadLink = input.threadLinkById.get(resolvedThreadId) ?? null;
   return {
     fallbackThreadLink,
     threadId: resolvedThreadId,
@@ -1278,6 +1286,7 @@ export function buildOrchestrationSidebarModel(input: {
 
   for (const program of getProgramList(input)) {
     const authorityCard = authorityProgramCardById.get(program.id) ?? null;
+    const authorityExecutiveTarget = authorityCard?.executive ?? null;
     const executiveProjectId = program.executiveProjectId ?? null;
     const executiveThreadId = program.executiveThreadId ?? null;
     const executiveAuthority =
@@ -1285,6 +1294,7 @@ export function buildOrchestrationSidebarModel(input: {
         ? (executiveAuthorityByProjectId.get(executiveProjectId) ?? null)
         : null;
     const resolvedExecutiveAuthority = resolveExecutiveAuthority({
+      authorityExecutiveThreadId: authorityExecutiveTarget?.threadId ?? null,
       executiveAuthority,
       executiveProjectId,
       executiveThreadId,
@@ -1292,8 +1302,15 @@ export function buildOrchestrationSidebarModel(input: {
       threadLinkById,
     });
     const resolvedExecutiveThreadId = resolvedExecutiveAuthority.threadId;
-    const executiveKey = executiveProjectId ?? "unassigned-executive";
+    const effectiveExecutiveThreadId =
+      authorityExecutiveTarget?.threadId ?? resolvedExecutiveThreadId ?? executiveThreadId;
+    const executiveKey =
+      executiveProjectId !== null && effectiveExecutiveThreadId !== null
+        ? makeExecutiveKey(executiveProjectId, effectiveExecutiveThreadId)
+        : (executiveProjectId ?? effectiveExecutiveThreadId ?? "unassigned-executive");
     const executiveLabel =
+      authorityExecutiveTarget?.displayLabel ??
+      (authorityExecutiveTarget !== null ? "CTO" : null) ??
       (executiveProjectId ? projectById.get(executiveProjectId)?.name : null) ??
       "Unassigned Executive";
 
@@ -1307,7 +1324,7 @@ export function buildOrchestrationSidebarModel(input: {
         authoritativeOwnerRequired: authoritySnapshot !== null,
         fallbackThreadLink: executiveFallbackThreadLink,
         label: "executive thread",
-        runtimeTarget: authorityCard?.executive ?? null,
+        runtimeTarget: authorityExecutiveTarget,
         thread: executiveThread,
       });
       executive = {
@@ -1677,10 +1694,19 @@ export function buildOrchestrationSidebarModel(input: {
         label: executive.label,
         notifications: sortNotifications(
           notifications.filter((item) => {
-            if (executive.projectId) {
+            if (executive.projectId !== null && executive.threadId !== null) {
+              return (
+                item.executiveProjectId === executive.projectId &&
+                item.executiveThreadId === executive.threadId
+              );
+            }
+            if (executive.projectId !== null) {
               return item.executiveProjectId === executive.projectId;
             }
-            return item.executiveProjectId === null;
+            if (executive.threadId !== null) {
+              return item.executiveThreadId === executive.threadId;
+            }
+            return item.executiveProjectId === null && item.executiveThreadId === null;
           }),
         ),
         programs: sortPrograms(executive.programs),

@@ -1,5 +1,6 @@
 import {
   CommandId,
+  EventId,
   ProgramId,
   ProjectId,
   ThreadId,
@@ -13,6 +14,7 @@ import { ServerConfig } from "../../config.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
+import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 
@@ -41,6 +43,69 @@ function programCreatedEvent(): OrchestrationEvent {
       createdAt: now,
       updatedAt: now,
       completedAt: null,
+    },
+  } as unknown as OrchestrationEvent;
+}
+
+function threadCreatedEvent(): OrchestrationEvent {
+  const now = "2026-05-16T00:00:00.000Z";
+  return {
+    type: "thread.created",
+    sequence: 1,
+    eventId: EventId.makeUnsafe("evt-thread-created"),
+    aggregateKind: "thread",
+    aggregateId: ThreadId.makeUnsafe("thread-activity-cap"),
+    commandId: CommandId.makeUnsafe("cmd-thread-created"),
+    correlationId: CommandId.makeUnsafe("cmd-thread-created"),
+    causationEventId: null,
+    actor: { kind: "system", id: "test" },
+    metadata: {},
+    occurredAt: now,
+    payload: {
+      threadId: ThreadId.makeUnsafe("thread-activity-cap"),
+      projectId: ProjectId.makeUnsafe("project-1"),
+      title: "Activity cap",
+      labels: [],
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  } as unknown as OrchestrationEvent;
+}
+
+function threadActivityAppendedEvent(index: number): OrchestrationEvent {
+  const now = `2026-05-16T00:${String(index % 60).padStart(2, "0")}:00.000Z`;
+  return {
+    type: "thread.activity-appended",
+    sequence: index + 2,
+    eventId: EventId.makeUnsafe(`evt-activity-appended-${index}`),
+    aggregateKind: "thread",
+    aggregateId: ThreadId.makeUnsafe("thread-activity-cap"),
+    commandId: CommandId.makeUnsafe(`cmd-activity-appended-${index}`),
+    correlationId: CommandId.makeUnsafe(`cmd-activity-appended-${index}`),
+    causationEventId: null,
+    actor: { kind: "system", id: "test" },
+    metadata: {},
+    occurredAt: now,
+    payload: {
+      threadId: ThreadId.makeUnsafe("thread-activity-cap"),
+      activity: {
+        id: EventId.makeUnsafe(`activity-${String(index).padStart(4, "0")}`),
+        tone: "info",
+        kind: "test.activity",
+        summary: `Activity ${index}`,
+        payload: {},
+        turnId: null,
+        sequence: index,
+        createdAt: now,
+      },
     },
   } as unknown as OrchestrationEvent;
 }
@@ -83,5 +148,27 @@ describe("OrchestrationProjectionPipeline authority boundary", () => {
         "projection.orchestrator-wakes",
       ]),
     );
+  });
+
+  it("caps persisted thread activities to match the read-model retention window", async () => {
+    const rows = await Effect.runPromise(
+      Effect.gen(function* () {
+        const pipeline = yield* OrchestrationProjectionPipeline;
+        const activities = yield* ProjectionThreadActivityRepository;
+
+        yield* pipeline.projectEvents([
+          threadCreatedEvent(),
+          ...Array.from({ length: 505 }, (_, index) => threadActivityAppendedEvent(index)),
+        ]);
+
+        return yield* activities.listByThreadId({
+          threadId: ThreadId.makeUnsafe("thread-activity-cap"),
+        });
+      }).pipe(Effect.provide(TestLayer)),
+    );
+
+    expect(rows).toHaveLength(500);
+    expect(rows[0]?.activityId).toBe(EventId.makeUnsafe("activity-0005"));
+    expect(rows.at(-1)?.activityId).toBe(EventId.makeUnsafe("activity-0504"));
   });
 });

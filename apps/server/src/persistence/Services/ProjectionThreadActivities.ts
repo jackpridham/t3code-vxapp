@@ -43,6 +43,12 @@ export const DeleteProjectionThreadActivitiesInput = Schema.Struct({
 export type DeleteProjectionThreadActivitiesInput =
   typeof DeleteProjectionThreadActivitiesInput.Type;
 
+export const PruneProjectionThreadActivitiesInput = Schema.Struct({
+  threadId: ThreadId,
+  retainCount: NonNegativeInt,
+});
+export type PruneProjectionThreadActivitiesInput = typeof PruneProjectionThreadActivitiesInput.Type;
+
 /**
  * ProjectionThreadActivityRepositoryShape - Service API for projected thread activity.
  */
@@ -71,6 +77,14 @@ export interface ProjectionThreadActivityRepositoryShape {
    */
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadActivitiesInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Delete older projected thread activity rows, retaining the newest rows by
+   * the same sequence/created-at ordering used by the read model.
+   */
+  readonly pruneByThreadId: (
+    input: PruneProjectionThreadActivitiesInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 

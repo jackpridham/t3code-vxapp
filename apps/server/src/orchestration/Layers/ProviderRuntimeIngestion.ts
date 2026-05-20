@@ -59,6 +59,12 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
+const STREAMING_ASSISTANT_DELTA_FLUSH_CHARS = 512;
+const MAX_ACTIVITY_DATA_DEPTH = 6;
+const MAX_ACTIVITY_DATA_OBJECT_KEYS = 80;
+const MAX_ACTIVITY_DATA_ARRAY_ITEMS = 80;
+const MAX_ACTIVITY_DATA_STRING_CHARS = 8_192;
+const MAX_ACTIVITY_DATA_OUTPUT_CHARS = 4_096;
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== "0";
 
 function resolveProviderLocalThreadErrorPresentation(input: {
@@ -263,6 +269,65 @@ function persistedSessionBindingPruneReason(
 
 function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+}
+
+function truncateActivityDataString(value: string, limit: number): string {
+  if (value.length <= limit) {
+    return value;
+  }
+  return `${value.slice(0, limit)}\n[truncated ${value.length - limit} chars]`;
+}
+
+function activityDataStringLimit(key: string | undefined): number {
+  const normalized = key?.toLowerCase() ?? "";
+  if (
+    normalized === "aggregatedoutput" ||
+    normalized === "output" ||
+    normalized === "stdout" ||
+    normalized === "stderr" ||
+    normalized.endsWith("output")
+  ) {
+    return MAX_ACTIVITY_DATA_OUTPUT_CHARS;
+  }
+  return MAX_ACTIVITY_DATA_STRING_CHARS;
+}
+
+function sanitizeActivityData(
+  value: unknown,
+  options: {
+    readonly depth?: number;
+    readonly key?: string;
+  } = {},
+): unknown {
+  const depth = options.depth ?? 0;
+  if (typeof value === "string") {
+    return truncateActivityDataString(value, activityDataStringLimit(options.key));
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (depth >= MAX_ACTIVITY_DATA_DEPTH) {
+    return Array.isArray(value) ? "[truncated nested array]" : "[truncated nested object]";
+  }
+  if (Array.isArray(value)) {
+    const sanitized = value
+      .slice(0, MAX_ACTIVITY_DATA_ARRAY_ITEMS)
+      .map((entry) => sanitizeActivityData(entry, { depth: depth + 1 }));
+    if (value.length > MAX_ACTIVITY_DATA_ARRAY_ITEMS) {
+      sanitized.push(`[truncated ${value.length - MAX_ACTIVITY_DATA_ARRAY_ITEMS} items]`);
+    }
+    return sanitized;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>);
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, entryValue] of entries.slice(0, MAX_ACTIVITY_DATA_OBJECT_KEYS)) {
+    sanitized[key] = sanitizeActivityData(entryValue, { depth: depth + 1, key });
+  }
+  if (entries.length > MAX_ACTIVITY_DATA_OBJECT_KEYS) {
+    sanitized.__truncatedKeys = entries.length - MAX_ACTIVITY_DATA_OBJECT_KEYS;
+  }
+  return sanitized;
 }
 
 function ownerErrorDetail(error: unknown): string {
@@ -657,7 +722,9 @@ function runtimeEventToActivities(
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: sanitizeActivityData(event.payload.data) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -679,7 +746,9 @@ function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: sanitizeActivityData(event.payload.data) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -701,7 +770,9 @@ function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: sanitizeActivityData(event.payload.data) }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -949,7 +1020,11 @@ const make = Effect.fn("make")(function* () {
   const clearAssistantMessageIdsForTurn = (threadId: ThreadId, turnId: TurnId) =>
     Cache.invalidate(turnMessageIdsByTurnKey, providerTurnKey(threadId, turnId));
 
-  const appendBufferedAssistantText = (messageId: MessageId, delta: string) =>
+  const appendBufferedAssistantText = (
+    messageId: MessageId,
+    delta: string,
+    flushThreshold = MAX_BUFFERED_ASSISTANT_CHARS,
+  ) =>
     Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
       Effect.flatMap(
         Effect.fn("appendBufferedAssistantText")(function* (existingText) {
@@ -957,7 +1032,7 @@ const make = Effect.fn("make")(function* () {
             onNone: () => delta,
             onSome: (text) => `${text}${delta}`,
           });
-          if (nextText.length <= MAX_BUFFERED_ASSISTANT_CHARS) {
+          if (nextText.length < flushThreshold && nextText.length <= MAX_BUFFERED_ASSISTANT_CHARS) {
             yield* Cache.set(bufferedAssistantTextByMessageId, messageId, nextText);
             return "";
           }
@@ -1539,15 +1614,25 @@ const make = Effect.fn("make")(function* () {
           });
         }
       } else {
-        yield* orchestrationEngine.dispatch({
-          type: "thread.message.assistant.delta",
-          commandId: providerCommandId(event, "assistant-delta"),
-          threadId: thread.id,
-          messageId: assistantMessageId,
-          delta: assistantDelta,
-          ...(turnId ? { turnId } : {}),
-          createdAt: now,
-        });
+        const hasPersistedAssistantMessage = thread.messages.some(
+          (message) => message.id === assistantMessageId,
+        );
+        const streamingChunk = yield* appendBufferedAssistantText(
+          assistantMessageId,
+          assistantDelta,
+          hasPersistedAssistantMessage ? STREAMING_ASSISTANT_DELTA_FLUSH_CHARS : 1,
+        );
+        if (streamingChunk.length > 0) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.message.assistant.delta",
+            commandId: providerCommandId(event, "assistant-delta-batch"),
+            threadId: thread.id,
+            messageId: assistantMessageId,
+            delta: streamingChunk,
+            ...(turnId ? { turnId } : {}),
+            createdAt: now,
+          });
+        }
       }
     }
 

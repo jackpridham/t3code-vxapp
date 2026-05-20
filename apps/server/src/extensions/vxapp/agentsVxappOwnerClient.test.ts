@@ -8,9 +8,10 @@ vi.mock("../../processRunner.ts", () => ({
 import { runProcess } from "../../processRunner.ts";
 import {
   bootstrapAgentsVxappOwnerManifest,
+  fetchAgentsVxappAgentRuntimeSnapshot,
   fetchAgentsVxappSidebarGraphSnapshot,
-  fetchAgentsVxappWorkerRuntimeSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
+  fetchAgentsVxappWorkerRuntimeSnapshot,
   requestAgentsVxappApprovalRequest,
   requestAgentsVxappApprovalResponse,
   requestAgentsVxappProjectEventIngest,
@@ -302,6 +303,44 @@ describe("agentsVxappOwnerClient", () => {
       ],
       expect.objectContaining({}),
     );
+  });
+
+  it("keeps the agent runtime route explicit on the owner manifest surface", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-agent-runtime-snapshot", "agent_runtime", {
+            threadId: "thread-cto-current",
+            runtimeKind: "role-runtime",
+            agentKind: "executive",
+            workspace: "/runtime/role-sessions/cto/current/workspace",
+            availability: "inspectable",
+            reasonCode: null,
+          }),
+        ),
+      );
+
+    await fetchAgentsVxappAgentRuntimeSnapshot({
+      agentKind: "executive",
+      threadId: ThreadId.makeUnsafe("thread-cto-current"),
+    });
+
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      [
+        "t3code-agent-runtime-snapshot",
+        "--json",
+        "--payload-json",
+        expect.stringContaining('"agentKind":"executive"'),
+      ],
+      expect.objectContaining({}),
+    );
+    const secondCall = mockedRunProcess.mock.calls[1];
+    expect(secondCall?.[1]?.[3]).toContain('"threadId":"thread-cto-current"');
   });
 
   it("routes new authority helpers through the manifest-selected commands", async () => {

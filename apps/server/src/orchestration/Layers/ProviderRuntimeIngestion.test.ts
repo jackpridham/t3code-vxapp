@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type {
+  OrchestrationEvent,
   OrchestrationReadModel,
   ProviderRuntimeEvent,
   ProviderSession,
@@ -2098,6 +2099,123 @@ describe("ProviderRuntimeIngestion", () => {
     expect(finalMessage?.streaming).toBe(false);
   });
 
+  it("batches subsequent assistant streaming deltas after the first live update", async () => {
+    const harness = await createHarness({
+      serverSettings: { enableAssistantStreaming: true },
+    });
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-streaming-batched"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-streaming-batched"),
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-streaming-batched",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-streaming-batched-1"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-streaming-batched"),
+      itemId: asItemId("item-streaming-batched"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "a",
+      },
+    });
+    await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-streaming-batched" &&
+          message.streaming &&
+          message.text === "a",
+      ),
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-streaming-batched-2"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-streaming-batched"),
+      itemId: asItemId("item-streaming-batched"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "b",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-streaming-batched-3"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-streaming-batched"),
+      itemId: asItemId("item-streaming-batched"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "c",
+      },
+    });
+    await harness.drain();
+
+    const beforeCompletion = await Effect.runPromise(harness.engine.getReadModel());
+    const beforeCompletionMessage = beforeCompletion.threads[0]?.messages.find(
+      (message) => message.id === "assistant:item-streaming-batched",
+    );
+    expect(beforeCompletionMessage?.text).toBe("a");
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-streaming-batched"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-streaming-batched"),
+      itemId: asItemId("item-streaming-batched"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+
+    const finalThread = await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-streaming-batched" &&
+          !message.streaming &&
+          message.text === "abc",
+      ),
+    );
+    const finalMessage = finalThread.messages.find(
+      (message: ProviderRuntimeTestMessage) => message.id === "assistant:item-streaming-batched",
+    );
+    expect(finalMessage?.text).toBe("abc");
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    );
+    const persistedMessageEvents = events.filter(
+      (event): event is Extract<OrchestrationEvent, { type: "thread.message-sent" }> =>
+        event.type === "thread.message-sent" &&
+        event.payload.messageId === "assistant:item-streaming-batched",
+    );
+    expect(persistedMessageEvents.map((event) => event.payload.text)).toEqual(["a", "bc", ""]);
+  });
+
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -2532,6 +2650,80 @@ describe("ProviderRuntimeIngestion", () => {
         (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
       ),
     ).toBe(true);
+  });
+
+  it("sanitizes oversized tool activity data before it reaches orchestration persistence", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+    const aggregatedOutput = "x".repeat(20_000);
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-tool-completed-large-output"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-large-output"),
+      itemId: asItemId("item-large-output"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Ran command",
+        detail: "printf lots",
+        data: {
+          item: {
+            type: "commandExecution",
+            id: "item-large-output",
+            command: "printf lots",
+            aggregatedOutput,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some((activity) => activity.id === "evt-tool-completed-large-output"),
+    );
+    const activity = thread.activities.find(
+      (entry) => entry.id === "evt-tool-completed-large-output",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : {};
+    const data =
+      payload.data && typeof payload.data === "object"
+        ? (payload.data as Record<string, unknown>)
+        : {};
+    const item =
+      data.item && typeof data.item === "object" ? (data.item as Record<string, unknown>) : {};
+    expect(item.aggregatedOutput).toContain("[truncated 15904 chars]");
+    expect(String(item.aggregatedOutput).length).toBeLessThan(4_200);
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    );
+    const persistedActivityEvent = events.find(
+      (event): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> =>
+        event.type === "thread.activity-appended" &&
+        event.payload.activity.id === "evt-tool-completed-large-output",
+    );
+    const eventPayload =
+      persistedActivityEvent?.payload.activity.payload &&
+      typeof persistedActivityEvent.payload.activity.payload === "object"
+        ? (persistedActivityEvent.payload.activity.payload as Record<string, unknown>)
+        : {};
+    const eventData =
+      eventPayload.data && typeof eventPayload.data === "object"
+        ? (eventPayload.data as Record<string, unknown>)
+        : {};
+    const eventItem =
+      eventData.item && typeof eventData.item === "object"
+        ? (eventData.item as Record<string, unknown>)
+        : {};
+    expect(eventItem.aggregatedOutput).toBe(item.aggregatedOutput);
   });
 
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {

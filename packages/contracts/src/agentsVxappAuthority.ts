@@ -93,6 +93,7 @@ export const AgentsVxappRuntimeTargetField = {
   Workspace: "workspace",
   Availability: "availability",
   ReasonCode: "reasonCode",
+  DisplayLabel: "displayLabel",
 } as const;
 
 export const AgentsVxappRuntimeTargetKindValue = {
@@ -173,6 +174,9 @@ export const AgentsVxappSidebarAuthorityRuntimeTarget = Schema.Struct({
   workspace: Schema.NullOr(TrimmedNonEmptyString),
   availability: AgentsVxappRuntimeAvailability,
   reasonCode: Schema.NullOr(AgentsVxappRuntimeReasonCode),
+  displayLabel: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type AgentsVxappSidebarAuthorityRuntimeTarget =
   typeof AgentsVxappSidebarAuthorityRuntimeTarget.Type;

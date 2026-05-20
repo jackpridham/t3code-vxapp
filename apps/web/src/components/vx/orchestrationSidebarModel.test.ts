@@ -490,6 +490,204 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.executives[0]?.programs[0]?.currentLane?.workers).toEqual([]);
   });
 
+  it("uses owner executive identity for authority-backed cards instead of stale T3 project label", () => {
+    const executiveProjectId = ProjectId.makeUnsafe("project-cto");
+    const ownerExecutiveThreadId = ThreadId.makeUnsafe("thread-cto-current");
+    const staleProjectRootThreadId = ThreadId.makeUnsafe("thread-cto-archived");
+
+    const model = buildOrchestrationSidebarModel({
+      authoritySnapshot: makeAuthoritySnapshot({
+        programs: [
+          {
+            activeAllocations: [],
+            attentionItems: [],
+            currentTodo: null,
+            display: null,
+            executive: makeAuthorityRuntimeTarget({
+              agentKind: "executive",
+              kind: "executive",
+              threadId: ownerExecutiveThreadId,
+              workspace: "/runtime/role-sessions/cto/current/workspace",
+              displayLabel: "CTO",
+            }),
+            notifications: [],
+            openWakes: [],
+            orchestrator: makeAuthorityRuntimeTarget({
+              agentKind: "orchestrator",
+              kind: "orchestrator",
+              threadId: ThreadId.makeUnsafe("thread-jasper"),
+              workspace: "/runtime/role-sessions/jasper/current/workspace",
+            }),
+            ownerDiagnostics: [],
+            program: makeProgram({
+              currentOrchestratorThreadId: ThreadId.makeUnsafe("thread-jasper"),
+              executiveProjectId,
+              executiveThreadId: ownerExecutiveThreadId,
+              id: ProgramId.makeUnsafe("program-current"),
+              status: "active",
+              title: "Current Program",
+            }),
+            watchProjection: null,
+            workers: [],
+          },
+        ],
+      }),
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          currentOrchestratorThreadId: ThreadId.makeUnsafe("thread-jasper"),
+          executiveProjectId,
+          executiveThreadId: ownerExecutiveThreadId,
+          id: ProgramId.makeUnsafe("program-current"),
+          status: "active",
+          title: "Current Program",
+        }),
+      ],
+      projects: [
+        makeProject({
+          currentSessionRootThreadId: staleProjectRootThreadId,
+          cwd: "/executive",
+          id: executiveProjectId,
+          name: "CTOv2",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: null,
+      threads: [
+        makeThread({
+          id: ownerExecutiveThreadId,
+          projectId: executiveProjectId,
+          title: "Executive live",
+        }),
+        makeThread({
+          id: ThreadId.makeUnsafe("thread-jasper"),
+          projectId: executiveProjectId,
+          title: "Orchestrator live",
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.label).toBe("CTO");
+    expect(model.executives[0]?.threadId).toBe(ownerExecutiveThreadId);
+    expect(model.executives[0]?.threadId).not.toBe(staleProjectRootThreadId);
+  });
+
+  it("does not collapse authority-backed executives that share a project but disagree on thread", () => {
+    const executiveProjectId = ProjectId.makeUnsafe("project-cto");
+    const firstExecutiveThreadId = ThreadId.makeUnsafe("thread-cto-a");
+    const secondExecutiveThreadId = ThreadId.makeUnsafe("thread-cto-b");
+
+    const model = buildOrchestrationSidebarModel({
+      authoritySnapshot: makeAuthoritySnapshot({
+        programs: [
+          {
+            activeAllocations: [],
+            attentionItems: [],
+            currentTodo: null,
+            display: null,
+            executive: makeAuthorityRuntimeTarget({
+              agentKind: "executive",
+              kind: "executive",
+              threadId: firstExecutiveThreadId,
+              workspace: "/runtime/role-sessions/cto/a/workspace",
+              displayLabel: "CTO",
+            }),
+            notifications: [],
+            openWakes: [],
+            orchestrator: null,
+            ownerDiagnostics: [],
+            program: makeProgram({
+              executiveProjectId,
+              executiveThreadId: firstExecutiveThreadId,
+              id: ProgramId.makeUnsafe("program-a"),
+              status: "active",
+              title: "Program A",
+            }),
+            watchProjection: null,
+            workers: [],
+          },
+          {
+            activeAllocations: [],
+            attentionItems: [],
+            currentTodo: null,
+            display: null,
+            executive: makeAuthorityRuntimeTarget({
+              agentKind: "executive",
+              kind: "executive",
+              threadId: secondExecutiveThreadId,
+              workspace: "/runtime/role-sessions/cto/b/workspace",
+              displayLabel: "CTO",
+            }),
+            notifications: [],
+            openWakes: [],
+            orchestrator: null,
+            ownerDiagnostics: [],
+            program: makeProgram({
+              executiveProjectId,
+              executiveThreadId: secondExecutiveThreadId,
+              id: ProgramId.makeUnsafe("program-b"),
+              status: "active",
+              title: "Program B",
+            }),
+            watchProjection: null,
+            workers: [],
+          },
+        ],
+      }),
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          executiveProjectId,
+          executiveThreadId: firstExecutiveThreadId,
+          id: ProgramId.makeUnsafe("program-a"),
+          status: "active",
+          title: "Program A",
+        }),
+        makeProgram({
+          executiveProjectId,
+          executiveThreadId: secondExecutiveThreadId,
+          id: ProgramId.makeUnsafe("program-b"),
+          status: "active",
+          title: "Program B",
+        }),
+      ],
+      projects: [
+        makeProject({
+          cwd: "/executive",
+          id: executiveProjectId,
+          name: "CTO",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: null,
+      threads: [
+        makeThread({
+          id: firstExecutiveThreadId,
+          projectId: executiveProjectId,
+          title: "Executive A",
+        }),
+        makeThread({
+          id: secondExecutiveThreadId,
+          projectId: executiveProjectId,
+          title: "Executive B",
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.executives).toHaveLength(2);
+    expect(model.executives.map((executive) => executive.threadId).toSorted()).toEqual([
+      firstExecutiveThreadId,
+      secondExecutiveThreadId,
+    ]);
+    expect(
+      model.executives.flatMap((executive) => executive.programs.map((program) => program.id)),
+    ).toEqual([ProgramId.makeUnsafe("program-a"), ProgramId.makeUnsafe("program-b")]);
+  });
+
   it("attaches current todo, watch state, closeout summary, and worker counts to programs", () => {
     const model = buildOrchestrationSidebarModel({
       ctoAttentionItems: [],

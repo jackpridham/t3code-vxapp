@@ -65,6 +65,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
 } as const;
 
 const CORE_PROJECTOR_NAME_SET = new Set<string>(Object.values(ORCHESTRATION_PROJECTOR_NAMES));
+const MAX_PERSISTED_THREAD_ACTIVITIES = 500;
 
 type ProjectorEventType = OrchestrationEvent["type"];
 
@@ -906,6 +907,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ? { sequence: event.payload.activity.sequence }
               : {}),
             createdAt: event.payload.activity.createdAt,
+          });
+          yield* projectionThreadActivityRepository.pruneByThreadId({
+            threadId: event.payload.threadId,
+            retainCount: MAX_PERSISTED_THREAD_ACTIVITIES,
           });
           return;
 

@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
-import { AgentsVxappMutationRequest, AgentsVxappOwnerResultEnvelope } from "./agentsVxappAuthority";
+import {
+  AgentsVxappMutationRequest,
+  AgentsVxappOwnerResultEnvelope,
+  AgentsVxappSidebarAuthorityRuntimeTarget,
+} from "./agentsVxappAuthority";
 
 const decodeEffect = <TSchema extends Schema.Schema<any>>(schema: TSchema) =>
   Schema.decodeUnknownEffect(schema as never) as (
@@ -12,6 +16,7 @@ const decodeEffect = <TSchema extends Schema.Schema<any>>(schema: TSchema) =>
 
 const decodeMutationRequest = decodeEffect(AgentsVxappMutationRequest);
 const decodeOwnerResultEnvelope = decodeEffect(AgentsVxappOwnerResultEnvelope);
+const decodeSidebarAuthorityRuntimeTarget = decodeEffect(AgentsVxappSidebarAuthorityRuntimeTarget);
 const authoritySourcePath = path.resolve(import.meta.dirname, "agentsVxappAuthority.ts");
 
 it.effect("rejects owner result envelopes when required fields are missing", () =>
@@ -163,6 +168,37 @@ it.effect("requires legacyFallbackUsed and enforces it as a boolean", () =>
 
     assert.strictEqual(missing._tag, "Failure");
     assert.strictEqual(wrongType._tag, "Failure");
+  }),
+);
+
+it.effect("decodes sidebar authority runtime target display labels", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeSidebarAuthorityRuntimeTarget({
+      kind: "executive",
+      agentKind: "executive",
+      threadId: "thread-cto",
+      workspace: "/runtime/role-sessions/cto/current/workspace",
+      availability: "inspectable",
+      reasonCode: null,
+      displayLabel: "CTO",
+    });
+
+    assert.strictEqual(decoded.displayLabel, "CTO");
+  }),
+);
+
+it.effect("defaults sidebar authority runtime target display labels to null", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeSidebarAuthorityRuntimeTarget({
+      kind: "executive",
+      agentKind: "executive",
+      threadId: "thread-cto",
+      workspace: "/runtime/role-sessions/cto/current/workspace",
+      availability: "inspectable",
+      reasonCode: null,
+    });
+
+    assert.strictEqual(decoded.displayLabel, null);
   }),
 );
 
