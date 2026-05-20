@@ -1,6 +1,6 @@
 import { useSettings } from "~/hooks/useSettings";
 import ProjectSidebar from "./ProjectSidebar";
-import VxOrchestrationSidebar from "./vx/OrchestrationSidebar";
+import VxOrchestrationSidebar from "~/features/vxapp/components/OrchestrationSidebar";
 
 export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
   const appSettings = useSettings();

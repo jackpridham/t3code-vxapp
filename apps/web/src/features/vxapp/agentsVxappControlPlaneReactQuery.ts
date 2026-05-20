@@ -8,7 +8,7 @@ import type {
   ServerUpdateAgentsVxappProgramInput,
   ServerUpdateAgentsVxappTodoInput,
 } from "@t3tools/contracts";
-import { invalidateAgentsVxappStore, refreshAgentsVxappStore } from "~/agentsVxappStore";
+import { invalidateAgentsVxappStore, refreshAgentsVxappStore } from "./agentsVxappStore";
 import { ensureNativeApi } from "~/nativeApi";
 import { agentsVxappSidebarQueryKeys } from "./agentsVxappSidebarReactQuery";
 

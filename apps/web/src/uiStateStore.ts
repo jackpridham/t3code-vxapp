@@ -30,10 +30,11 @@ const LEGACY_PERSISTED_STATE_KEYS = [
   "codething:renderer-state:v1",
 ] as const;
 
-interface PersistedUiState {
+export interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   orchestratorProjectCwds?: string[];
+  threadLastVisitedAtById?: Record<string, string>;
   labelFiltersByProject?: Record<string, string[]>;
   notificationPreferences?: NotificationPreferences;
 }
@@ -129,6 +130,7 @@ const initialState: UiState = {
 const persistedExpandedProjectCwds = new Set<string>();
 const persistedProjectOrderCwds: string[] = [];
 const persistedOrchestratorProjectCwds = new Set<string>();
+let persistedThreadLastVisitedAtById: Record<string, string> = {};
 let persistedLabelFiltersByProject: Record<string, string[]> = {};
 let persistedNotificationPreferences: NotificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
 const currentProjectCwdById = new Map<ProjectId, string>();
@@ -150,6 +152,7 @@ function readPersistedState(): UiState {
         return {
           ...initialState,
           orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+          threadLastVisitedAtById: { ...persistedThreadLastVisitedAtById },
           labelFiltersByProject: persistedLabelFiltersByProject,
           notificationPreferences: persistedNotificationPreferences,
         };
@@ -157,6 +160,7 @@ function readPersistedState(): UiState {
       return {
         ...initialState,
         orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+        threadLastVisitedAtById: { ...persistedThreadLastVisitedAtById },
         labelFiltersByProject: persistedLabelFiltersByProject,
         notificationPreferences: persistedNotificationPreferences,
       };
@@ -167,6 +171,7 @@ function readPersistedState(): UiState {
     return {
       ...initialState,
       orchestratorProjectCwds: [...persistedOrchestratorProjectCwds],
+      threadLastVisitedAtById: { ...persistedThreadLastVisitedAtById },
       labelFiltersByProject: persistedLabelFiltersByProject,
       notificationPreferences: persistedNotificationPreferences,
     };
@@ -179,6 +184,7 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
   persistedExpandedProjectCwds.clear();
   persistedProjectOrderCwds.length = 0;
   persistedOrchestratorProjectCwds.clear();
+  persistedThreadLastVisitedAtById = {};
   persistedLabelFiltersByProject = {};
   persistedNotificationPreferences = DEFAULT_NOTIFICATION_PREFERENCES;
   for (const cwd of parsed.expandedProjectCwds ?? []) {
@@ -208,7 +214,47 @@ function hydratePersistedProjectState(parsed: PersistedUiState): void {
       }
     }
   }
+  const threadLastVisitedAtById = parsed.threadLastVisitedAtById;
+  if (
+    threadLastVisitedAtById &&
+    typeof threadLastVisitedAtById === "object" &&
+    !Array.isArray(threadLastVisitedAtById)
+  ) {
+    for (const [threadId, visitedAt] of Object.entries(threadLastVisitedAtById)) {
+      if (typeof threadId === "string" && threadId.length > 0 && isValidIsoTimestamp(visitedAt)) {
+        persistedThreadLastVisitedAtById[threadId] = visitedAt;
+      }
+    }
+  }
   persistedNotificationPreferences = mergeNotificationPreferences(parsed.notificationPreferences);
+}
+
+function isValidIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && Number.isFinite(Date.parse(value));
+}
+
+export function buildPersistedUiState(
+  state: UiState,
+  projectCwdById: ReadonlyMap<ProjectId, string> = currentProjectCwdById,
+): PersistedUiState {
+  const expandedProjectCwds = Object.entries(state.projectExpandedById)
+    .filter(([, expanded]) => expanded)
+    .flatMap(([projectId]) => {
+      const cwd = projectCwdById.get(projectId as ProjectId);
+      return cwd ? [cwd] : [];
+    });
+  const projectOrderCwds = state.projectOrder.flatMap((projectId) => {
+    const cwd = projectCwdById.get(projectId);
+    return cwd ? [cwd] : [];
+  });
+  return {
+    expandedProjectCwds,
+    projectOrderCwds,
+    orchestratorProjectCwds: state.orchestratorProjectCwds,
+    threadLastVisitedAtById: state.threadLastVisitedAtById,
+    labelFiltersByProject: state.labelFiltersByProject,
+    notificationPreferences: state.notificationPreferences,
+  };
 }
 
 function persistState(state: UiState): void {
@@ -216,26 +262,7 @@ function persistState(state: UiState): void {
     return;
   }
   try {
-    const expandedProjectCwds = Object.entries(state.projectExpandedById)
-      .filter(([, expanded]) => expanded)
-      .flatMap(([projectId]) => {
-        const cwd = currentProjectCwdById.get(projectId as ProjectId);
-        return cwd ? [cwd] : [];
-      });
-    const projectOrderCwds = state.projectOrder.flatMap((projectId) => {
-      const cwd = currentProjectCwdById.get(projectId);
-      return cwd ? [cwd] : [];
-    });
-    window.localStorage.setItem(
-      PERSISTED_STATE_KEY,
-      JSON.stringify({
-        expandedProjectCwds,
-        projectOrderCwds,
-        orchestratorProjectCwds: state.orchestratorProjectCwds,
-        labelFiltersByProject: state.labelFiltersByProject,
-        notificationPreferences: state.notificationPreferences,
-      } satisfies PersistedUiState),
-    );
+    window.localStorage.setItem(PERSISTED_STATE_KEY, JSON.stringify(buildPersistedUiState(state)));
     if (!legacyKeysCleanedUp) {
       legacyKeysCleanedUp = true;
       for (const legacyKey of LEGACY_PERSISTED_STATE_KEYS) {

@@ -19,7 +19,7 @@ import {
   AgentsVxappRuntimeAvailabilityValue,
   AgentsVxappRuntimeReasonCodeValue,
 } from "@t3tools/contracts";
-import { isThreadRuntimeActive } from "../Sidebar.logic";
+import { isThreadRuntimeActive } from "~/components/Sidebar.logic";
 import { collapseThreadToCanonicalProject } from "~/lib/orchestrationMode";
 import type { CtoAttentionItem, ProgramNotification, Project, Thread } from "~/types";
 import {

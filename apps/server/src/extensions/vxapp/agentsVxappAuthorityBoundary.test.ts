@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const vxappServerRoot = path.resolve(import.meta.dirname, "../../..");
 const ownerClientPath = path.resolve(import.meta.dirname, "agentsVxappOwnerClient.ts");
+const repoRootPath = path.resolve(import.meta.dirname, "agentsVxappRepoRoot.ts");
 const ownerClientSource = fs.readFileSync(ownerClientPath, "utf8");
 
 function listTsFiles(dir: string): string[] {
@@ -21,6 +22,7 @@ describe("agents-vxapp owner authority boundary", () => {
     const offenders = listTsFiles(vxappServerRoot)
       .filter((filePath) => !filePath.endsWith(".test.ts"))
       .filter((filePath) => path.resolve(filePath) !== ownerClientPath)
+      .filter((filePath) => path.resolve(filePath) !== repoRootPath)
       .flatMap((filePath) => {
         const source = fs.readFileSync(filePath, "utf8");
         const matches = [

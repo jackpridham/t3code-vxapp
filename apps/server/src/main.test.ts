@@ -65,7 +65,7 @@ import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 import { Server, type ServerShape } from "./wsServer";
 import { ServerSettingsService } from "./serverSettings";
-import { VortexApps, type VortexAppsShape } from "./vortexApps/Services/VortexApps";
+import { VortexApps, type VortexAppsShape } from "./extensions/vxapp/Services/VortexApps";
 import { AgentRuntime, type AgentRuntimeShape } from "./agentRuntime/Services/AgentRuntime.ts";
 import { WorkerRuntime, type WorkerRuntimeShape } from "./workerRuntime/Services/WorkerRuntime.ts";
 import {

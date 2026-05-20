@@ -1,6 +1,6 @@
 import type { ServerGetAgentRuntimeSnapshotResult } from "@t3tools/contracts";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
-import { Badge } from "../ui/badge";
+import { Badge } from "~/components/ui/badge";
 import {
   RuntimeBadgeList,
   RuntimeSourceBadge,

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { buildArtifactsTargetHref } from "~/lib/artifactsRoute";
-import { vortexAppsListQueryOptions } from "~/lib/vortexAppsReactQuery";
+import { vortexAppsListQueryOptions } from "~/features/vxapp/vortexAppsReactQuery";
 
 export function ArtifactsPage() {
   const appsQuery = useQuery(vortexAppsListQueryOptions());

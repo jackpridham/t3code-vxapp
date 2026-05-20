@@ -19,5 +19,5 @@ export interface VortexAppsShape {
 }
 
 export class VortexApps extends ServiceMap.Service<VortexApps, VortexAppsShape>()(
-  "t3/vortexApps/Services/VortexApps",
+  "t3/extensions/vxapp/Services/VortexApps",
 ) {}

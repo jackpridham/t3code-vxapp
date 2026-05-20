@@ -29,7 +29,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate } from "@tanstack/react-router";
-import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
+import {
+  useAgentsVxappSidebarAuthorityBootstrap,
+  useAgentsVxappStore,
+} from "~/features/vxapp/agentsVxappStore";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions } from "~/lib/serverReactQuery";

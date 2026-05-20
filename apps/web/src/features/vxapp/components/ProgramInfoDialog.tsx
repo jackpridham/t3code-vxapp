@@ -1,5 +1,8 @@
 import { InfoIcon } from "lucide-react";
-import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
+import {
+  useAgentsVxappSidebarAuthorityBootstrap,
+  useAgentsVxappStore,
+} from "~/features/vxapp/agentsVxappStore";
 import {
   Dialog,
   DialogDescription,

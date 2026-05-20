@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_NOTIFICATION_PREFERENCES } from "./notificationSettings";
 import {
+  buildPersistedUiState,
   clearProjectLabelFilters,
   clearSelectedOrchestrationSessionRoot,
   clearThreadUi,
@@ -196,6 +197,21 @@ describe("uiStateStore pure functions", () => {
     ]);
 
     expect(next.threadLastVisitedAtById).toEqual({
+      [thread1]: "2026-02-25T12:35:00.000Z",
+    });
+  });
+
+  it("persists thread visit state so completed workers stay read across reloads", () => {
+    const thread1 = ThreadId.makeUnsafe("thread-1");
+    const state = makeUiState({
+      threadLastVisitedAtById: {
+        [thread1]: "2026-02-25T12:35:00.000Z",
+      },
+    });
+
+    const persisted = buildPersistedUiState(state);
+
+    expect(persisted.threadLastVisitedAtById).toEqual({
       [thread1]: "2026-02-25T12:35:00.000Z",
     });
   });

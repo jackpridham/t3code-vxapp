@@ -10,8 +10,8 @@ import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
-import { ServerConfig } from "../../config";
-import { runProcess } from "../../processRunner";
+import { ServerConfig } from "../../../config";
+import { runProcess } from "../../../processRunner";
 import { VortexApps, VortexAppsError, type VortexAppsShape } from "../Services/VortexApps";
 
 const VORTEX_APPS_CACHE_KEY = "vortex.apps.list";

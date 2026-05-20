@@ -45,7 +45,10 @@ import {
 } from "@t3tools/contracts";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
+import {
+  useAgentsVxappSidebarAuthorityBootstrap,
+  useAgentsVxappStore,
+} from "~/features/vxapp/agentsVxappStore";
 import { isElectron } from "../env";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isLinuxPlatform, isMacPlatform, newCommandId } from "../lib/utils";

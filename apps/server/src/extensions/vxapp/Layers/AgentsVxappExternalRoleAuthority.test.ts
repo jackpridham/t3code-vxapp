@@ -5,20 +5,22 @@ vi.mock("../agentsVxappOwnerClient.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../agentsVxappOwnerClient.ts")>();
   return {
     ...actual,
-    fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
+    fetchAgentsVxappExternalRoleAuthoritySnapshot: vi.fn(),
     fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
   };
 });
 
 import {
-  fetchAgentsVxappControlPlaneSnapshot,
+  fetchAgentsVxappExternalRoleAuthoritySnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
 } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappOwnerClientError } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappExternalRoleAuthorityLive } from "./AgentsVxappExternalRoleAuthority.ts";
 
-const mockedControlPlaneSnapshot = vi.mocked(fetchAgentsVxappControlPlaneSnapshot);
+const mockedExternalRoleAuthoritySnapshot = vi.mocked(
+  fetchAgentsVxappExternalRoleAuthoritySnapshot,
+);
 const mockedRuntimePaths = vi.mocked(fetchAgentsVxappRoleSessionRuntimePaths);
 
 afterEach(() => {
@@ -27,7 +29,7 @@ afterEach(() => {
 
 describe("AgentsVxappExternalRoleAuthorityLive", () => {
   it("loads snapshot authority through the owner client", async () => {
-    mockedControlPlaneSnapshot.mockResolvedValueOnce({
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValueOnce({
       externalRoleAuthority: {
         projects: [{ id: "project-owner", workspaceRoot: "/tmp/owner" }],
         threadSummaries: [{ id: "thread-owner", worktreePath: "/tmp/owner" }],
@@ -43,7 +45,7 @@ describe("AgentsVxappExternalRoleAuthorityLive", () => {
 
     expect(snapshot.projects).toHaveLength(1);
     expect(snapshot.threadSummaries).toHaveLength(1);
-    expect(mockedControlPlaneSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockedExternalRoleAuthoritySnapshot).toHaveBeenCalledTimes(1);
   });
 
   it("loads role-session runtime paths through the owner client", async () => {

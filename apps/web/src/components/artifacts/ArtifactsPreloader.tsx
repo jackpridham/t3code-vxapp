@@ -7,7 +7,7 @@ import {
   hasFreshArtifactPreload,
   refreshArtifactPreloadCache,
 } from "../../lib/artifactPreloadCache";
-import { vortexAppsListQueryOptions } from "../../lib/vortexAppsReactQuery";
+import { vortexAppsListQueryOptions } from "~/features/vxapp/vortexAppsReactQuery";
 
 export function ArtifactsPreloader() {
   const appsQuery = useQuery({

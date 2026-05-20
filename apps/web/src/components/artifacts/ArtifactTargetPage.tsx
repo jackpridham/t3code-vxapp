@@ -12,7 +12,7 @@ import {
 import {
   vortexAppArtifactsQueryOptions,
   vortexAppsListQueryOptions,
-} from "~/lib/vortexAppsReactQuery";
+} from "~/features/vxapp/vortexAppsReactQuery";
 
 interface ArtifactTargetPageProps {
   targetId: string;

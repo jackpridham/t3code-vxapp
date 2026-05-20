@@ -5,7 +5,7 @@ import { AgentsVxappExternalRoleAuthorityLive } from "./Layers/AgentsVxappExtern
 import { AgentsVxappSidebarLive } from "./Layers/AgentsVxappSidebar.ts";
 import { OrchestratorWakeReactorLive } from "../../orchestration/Layers/OrchestratorWakeReactor";
 import { ProjectHooksLive } from "../../projectHooks/Layers/ProjectHooks.ts";
-import { VortexAppsLive } from "../../vortexApps/Layers/VortexApps.ts";
+import { VortexAppsLive } from "./Layers/VortexApps.ts";
 
 export const makeVxappRuntimeServicesLayer = <A, E, R>(
   runtimeServicesBaseLayer: Layer.Layer<A, E, R>,

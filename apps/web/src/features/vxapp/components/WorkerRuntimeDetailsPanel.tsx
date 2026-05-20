@@ -4,7 +4,7 @@ import type {
   WorkerRuntimeInstalledPack,
 } from "@t3tools/contracts";
 import { cn } from "~/lib/utils";
-import { Badge } from "../ui/badge";
+import { Badge } from "~/components/ui/badge";
 import {
   RuntimeBadgeList,
   RuntimeSourceBadge,

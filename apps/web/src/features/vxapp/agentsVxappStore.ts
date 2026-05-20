@@ -14,7 +14,7 @@ import {
   fetchAgentsVxappSidebarAuthoritySnapshotFromOwner,
   normalizeAgentsVxappSidebarAuthoritySnapshot,
   type AgentsVxappSidebarAuthorityNormalizedSnapshot,
-} from "./lib/agentsVxappStoreBridge";
+} from "./agentsVxappStoreBridge";
 
 const AGENTS_VXAPP_SIDEBAR_AUTHORITY_STALE_TIME_MS = 10_000;
 type SidebarTodoList = ServerGetAgentsVxappSidebarAuthoritySnapshotResult["todos"][number][];

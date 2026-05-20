@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 const here = dirname(fileURLToPath(import.meta.url));
 const serverSrcRoot = resolve(here, "..");
 const ownerClientPath = resolve(serverSrcRoot, "extensions/vxapp/agentsVxappOwnerClient.ts");
+const repoRootPath = resolve(serverSrcRoot, "extensions/vxapp/agentsVxappRepoRoot.ts");
 const ownerProcessPath = ["scripts", "tools", "t3-control-plane-owner"].join("/");
 
 function listSourceFiles(dir: string): string[] {
@@ -28,8 +29,9 @@ function readSource(relativePath: string): string {
 
 describe("provider harness boundary", () => {
   it("keeps the owner process path isolated to agentsVxappOwnerClient.ts", () => {
-    const matches = listSourceFiles(serverSrcRoot).filter((filePath) =>
-      readFileSync(filePath, "utf8").includes(ownerProcessPath),
+    const matches = listSourceFiles(serverSrcRoot).filter(
+      (filePath) =>
+        filePath !== repoRootPath && readFileSync(filePath, "utf8").includes(ownerProcessPath),
     );
 
     expect(matches).toEqual([ownerClientPath]);

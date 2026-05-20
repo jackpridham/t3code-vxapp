@@ -18,7 +18,10 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
+import {
+  useAgentsVxappSidebarAuthorityBootstrap,
+  useAgentsVxappStore,
+} from "~/features/vxapp/agentsVxappStore";
 import { isElectron } from "~/env";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings } from "~/hooks/useSettings";
@@ -34,11 +37,14 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { useThreadSelectionStore } from "~/threadSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
 import type { Thread } from "~/types";
-import { buildCopyThreadIdErrorDescription, resolveThreadStatusPill } from "../Sidebar.logic";
-import { SidebarBrandHeader } from "../sidebar/SidebarBrandHeader";
-import { ThreadStatusLabel, type SidebarThreadStatus } from "../sidebar/SidebarThreadRow";
-import { Badge } from "../ui/badge";
-import { DialogCloseButton } from "../ui/dialog-close-button";
+import {
+  buildCopyThreadIdErrorDescription,
+  resolveThreadStatusPill,
+} from "~/components/Sidebar.logic";
+import { SidebarBrandHeader } from "~/components/sidebar/SidebarBrandHeader";
+import { ThreadStatusLabel, type SidebarThreadStatus } from "~/components/sidebar/SidebarThreadRow";
+import { Badge } from "~/components/ui/badge";
+import { DialogCloseButton } from "~/components/ui/dialog-close-button";
 import {
   Popover,
   PopoverClose,
@@ -46,7 +52,7 @@ import {
   PopoverPopup,
   PopoverTitle,
   PopoverTrigger,
-} from "../ui/popover";
+} from "~/components/ui/popover";
 import {
   SidebarContent,
   SidebarGroup,
@@ -57,8 +63,8 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-} from "../ui/sidebar";
-import { toastManager } from "../ui/toast";
+} from "~/components/ui/sidebar";
+import { toastManager } from "~/components/ui/toast";
 import {
   buildOrchestrationSidebarModel,
   type SidebarAgentRuntimeState,

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { ProgramsTodosView } from "~/components/vx/ProgramsTodosView";
+import { ProgramsTodosView } from "~/features/vxapp/components/ProgramsTodosView";
 import { SidebarInset, SidebarTrigger } from "~/components/ui/sidebar";
 
 function ProgramsRouteView() {

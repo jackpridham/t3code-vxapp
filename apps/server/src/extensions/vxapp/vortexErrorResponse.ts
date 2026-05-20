@@ -4,7 +4,7 @@ import {
   resolveVortexErrorDisplay,
   sanitizeVortexErrorMessage,
 } from "@t3tools/shared/vortexErrors";
-import { VortexAppsError } from "../../vortexApps/Services/VortexApps.ts";
+import { VortexAppsError } from "./Services/VortexApps.ts";
 import { AgentsVxappOwnerClientError } from "./agentsVxappOwnerClient.ts";
 import { AgentsVxappControlPlaneError } from "./Services/AgentsVxappControlPlane.ts";
 import { AgentsVxappSidebarError } from "./Services/AgentsVxappSidebar.ts";

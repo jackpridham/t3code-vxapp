@@ -32,7 +32,7 @@ import {
 import {
   vortexAppArtifactsQueryOptions,
   vortexAppsListQueryOptions,
-} from "~/lib/vortexAppsReactQuery";
+} from "~/features/vxapp/vortexAppsReactQuery";
 import { ScrollArea } from "../ui/scroll-area";
 
 interface ArtifactDetailPageProps {

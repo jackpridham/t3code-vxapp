@@ -14,7 +14,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import { cn } from "../../lib/utils";
 import { buildArtifactsTargetHref } from "../../lib/artifactsRoute";
-import { vortexAppsListQueryOptions } from "../../lib/vortexAppsReactQuery";
+import { vortexAppsListQueryOptions } from "~/features/vxapp/vortexAppsReactQuery";
 import { SETTINGS_NAV_ITEMS, type SettingsSectionPath } from "../settings/SettingsSidebarNav";
 import { Button } from "../ui/button";
 import {

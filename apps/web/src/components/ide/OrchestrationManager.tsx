@@ -19,7 +19,7 @@ import {
 import { Sheet, SheetHeader, SheetPopup, SheetTitle } from "../ui/sheet";
 import { useStore } from "../../store";
 import { collapseThreadToCanonicalProject } from "../../lib/orchestrationMode";
-import { vortexAppsListQueryOptions } from "../../lib/vortexAppsReactQuery";
+import { vortexAppsListQueryOptions } from "~/features/vxapp/vortexAppsReactQuery";
 import { cn } from "../../lib/utils";
 import { resolveSidebarProjectKind } from "../Sidebar.logic";
 import type { Project, Thread } from "../../types";

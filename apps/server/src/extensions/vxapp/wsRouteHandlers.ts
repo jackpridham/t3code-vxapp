@@ -24,7 +24,7 @@ import {
 import { AgentsVxappSidebar, type AgentsVxappSidebarError } from "./Services/AgentsVxappSidebar.ts";
 import { ProjectionOperationalQuery } from "../../orchestration/Services/ProjectionOperationalQuery";
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
-import { VortexApps, type VortexAppsError } from "../../vortexApps/Services/VortexApps.ts";
+import { VortexApps, type VortexAppsError } from "./Services/VortexApps.ts";
 import type { AgentsVxappOwnerClientError } from "./agentsVxappOwnerClient.ts";
 
 export type VxappWsRouteHandlerError =

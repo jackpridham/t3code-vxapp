@@ -1,6 +1,9 @@
 import type { ServerGetAgentsVxappSidebarAuthoritySnapshotResult } from "@t3tools/contracts";
 import { Badge } from "~/components/ui/badge";
-import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
+import {
+  useAgentsVxappSidebarAuthorityBootstrap,
+  useAgentsVxappStore,
+} from "~/features/vxapp/agentsVxappStore";
 import {
   Dialog,
   DialogDescription,

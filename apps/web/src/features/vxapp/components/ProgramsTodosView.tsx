@@ -24,7 +24,10 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
-import { useAgentsVxappSidebarAuthorityBootstrap, useAgentsVxappStore } from "~/agentsVxappStore";
+import {
+  useAgentsVxappSidebarAuthorityBootstrap,
+  useAgentsVxappStore,
+} from "~/features/vxapp/agentsVxappStore";
 import { useStore } from "~/store";
 import type { Project, Thread } from "~/types";
 import {
@@ -37,7 +40,7 @@ import {
   setAgentsVxappProgramLifecycleMutationOptions,
   updateAgentsVxappProgramMutationOptions,
   updateAgentsVxappTodoMutationOptions,
-} from "~/lib/agentsVxappControlPlaneReactQuery";
+} from "~/features/vxapp/agentsVxappControlPlaneReactQuery";
 import { buildAppDocumentTitle, useDocumentTitle } from "~/lib/documentTitle";
 import { randomUUID, cn } from "~/lib/utils";
 import { toastManager } from "~/components/ui/toast";
