@@ -100,9 +100,24 @@ interface OwnerCallerContractEntry {
 
 export interface AgentsVxappOwnerManifest {
   readonly commandsByName: ReadonlyMap<string, OwnerCallerContractEntry>;
+  readonly commandsByWrapperKey: ReadonlyMap<string, OwnerCallerContractEntry>;
 }
 
 let cachedManifest: AgentsVxappOwnerManifest | null = null;
+const TODO_MUTATE_WRAPPER_KEY = "todo_mutate";
+const TODO_MUTATE_ACTIONS = [
+  "create",
+  "update",
+  "delete",
+  "show",
+  "list",
+  "recent",
+  "search",
+  "current",
+  "link_plan",
+  "unlink_plan",
+] as const;
+type TodoMutateAction = (typeof TODO_MUTATE_ACTIONS)[number];
 
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -399,6 +414,7 @@ function parseManifest(payload: unknown): AgentsVxappOwnerManifest {
   const root = asRecord(payload);
   const ownerEntries = new Map<string, OwnerManifestEntry>();
   const callerEntries = new Map<string, OwnerCallerContractEntry>();
+  const wrapperEntries = new Map<string, OwnerCallerContractEntry>();
   const wrapperKeys = new Set<string>();
   if (!Array.isArray(root?.ownerCommandManifest)) {
     throw new Error("Owner manifest must provide ownerCommandManifest[].");
@@ -436,10 +452,14 @@ function parseManifest(payload: unknown): AgentsVxappOwnerManifest {
       );
     }
     callerEntries.set(entry.command, entry);
+    wrapperEntries.set(entry.wrapperKey, entry);
     wrapperKeys.add(entry.wrapperKey);
   }
 
-  return { commandsByName: callerEntries };
+  return {
+    commandsByName: callerEntries,
+    commandsByWrapperKey: wrapperEntries,
+  };
 }
 
 export function resetAgentsVxappOwnerManifestForTests(): void {
@@ -590,6 +610,52 @@ async function callManifestCommandByName<T>(input: {
   return authorityPayload as AgentsVxappOwnerAuthorityPayload<T>;
 }
 
+async function callManifestCommandByWrapperKey<T>(input: {
+  readonly wrapperKey: string;
+  readonly surface: Exclude<OwnerSurface, "contract_manifest">;
+  readonly args?: readonly string[];
+  readonly payloadJson?: unknown;
+}): Promise<AgentsVxappOwnerAuthorityPayload<T>> {
+  const manifest = await bootstrapAgentsVxappOwnerManifest();
+  const entry = manifest.commandsByWrapperKey.get(input.wrapperKey);
+  if (!entry) {
+    fail({
+      authoritySurface: input.surface,
+      message: `Owner manifest did not provide wrapperKey '${input.wrapperKey}'.`,
+      ownerCommand: input.wrapperKey,
+    });
+  }
+  if (entry.surface !== input.surface) {
+    fail({
+      authoritySurface: input.surface,
+      message: `Owner manifest wrapperKey '${input.wrapperKey}' did not match surface '${input.surface}'.`,
+      ownerCommand: entry.command,
+    });
+  }
+  const { envelope, result } = await executeOwnerCommand({
+    command: entry.command,
+    ...(input.args ? { args: input.args } : {}),
+    ...(input.payloadJson !== undefined ? { payloadJson: input.payloadJson } : {}),
+    surface: entry.surface,
+    tool: entry.tool,
+  });
+  const authorityPayload = validateAuthorityPayload(
+    entry.command,
+    entry.surface,
+    envelope.result,
+    result,
+  );
+  if (authorityPayload.surface !== entry.surface) {
+    fail({
+      authoritySurface: entry.surface,
+      message: `Owner command '${entry.command}' returned surface '${authorityPayload.surface}'.`,
+      ownerCommand: entry.command,
+      result,
+    });
+  }
+  return authorityPayload as AgentsVxappOwnerAuthorityPayload<T>;
+}
+
 export async function fetchAgentsVxappSidebarGraphSnapshot() {
   return (await callManifestCommand<AgentsVxappSidebarOwnerGraphSnapshot>("sidebar_graph_snapshot"))
     .payload;
@@ -649,19 +715,36 @@ export async function requestAgentsVxappProgramMutation(
 export async function requestAgentsVxappTodoMutation(
   input:
     | {
-        readonly action: "create";
+        readonly action: TodoMutateAction;
         readonly input: ServerCreateAgentsVxappTodoInput;
       }
     | {
-        readonly action: "update";
+        readonly action: TodoMutateAction;
         readonly input: ServerUpdateAgentsVxappTodoInput;
       }
     | {
-        readonly action: "delete";
+        readonly action: TodoMutateAction;
         readonly input: ServerDeleteAgentsVxappTodoInput;
+      }
+    | {
+        readonly action: TodoMutateAction;
+        readonly input: Readonly<Record<string, unknown>>;
       },
 ) {
-  return (await callManifestCommand<ServerAgentsVxappOwnerMutationResult>("todos", input)).payload;
+  if (!TODO_MUTATE_ACTIONS.includes(input.action)) {
+    fail({
+      authoritySurface: "todos",
+      message: `Unsupported TODO mutation action '${String(input.action)}'.`,
+      ownerCommand: TODO_MUTATE_WRAPPER_KEY,
+    });
+  }
+  return (
+    await callManifestCommandByWrapperKey<ServerAgentsVxappOwnerMutationResult>({
+      wrapperKey: TODO_MUTATE_WRAPPER_KEY,
+      surface: "todos",
+      payloadJson: input,
+    })
+  ).payload;
 }
 
 export async function fetchAgentsVxappRoleSessionRuntimePaths<T>() {

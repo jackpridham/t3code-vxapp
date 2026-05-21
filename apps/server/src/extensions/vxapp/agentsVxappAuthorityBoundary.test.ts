@@ -4,8 +4,13 @@ import { describe, expect, it } from "vitest";
 
 const vxappServerRoot = path.resolve(import.meta.dirname, "../../..");
 const ownerClientPath = path.resolve(import.meta.dirname, "agentsVxappOwnerClient.ts");
+const controlPlaneLayerPath = path.resolve(
+  import.meta.dirname,
+  "Layers/AgentsVxappControlPlane.ts",
+);
 const repoRootPath = path.resolve(import.meta.dirname, "agentsVxappRepoRoot.ts");
 const ownerClientSource = fs.readFileSync(ownerClientPath, "utf8");
+const controlPlaneLayerSource = fs.readFileSync(controlPlaneLayerPath, "utf8");
 
 function listTsFiles(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -66,5 +71,44 @@ describe("agents-vxapp owner authority boundary", () => {
     expect(ownerClientSource).not.toContain("root?.ownerCommands");
     expect(ownerClientSource).toContain("Owner manifest must provide ownerCommandManifest[]");
     expect(ownerClientSource).toContain("Owner manifest must provide callerContractManifest[]");
+  });
+
+  it("routes all TODO owner actions through manifest wrapper key todo_mutate", () => {
+    expect(ownerClientSource).toContain('const TODO_MUTATE_WRAPPER_KEY = "todo_mutate"');
+    expect(ownerClientSource).toContain("commandsByWrapperKey");
+    expect(ownerClientSource).toContain("callManifestCommandByWrapperKey");
+    expect(ownerClientSource).not.toContain(
+      'callManifestCommand<ServerAgentsVxappOwnerMutationResult>("todos", input)',
+    );
+
+    for (const action of [
+      "create",
+      "update",
+      "delete",
+      "show",
+      "list",
+      "recent",
+      "search",
+      "current",
+      "link_plan",
+      "unlink_plan",
+    ]) {
+      expect(ownerClientSource).toContain(`"${action}"`);
+    }
+  });
+
+  it("does not fall back from owner-backed TODO snapshots to projection data", () => {
+    const todosSnapshotStart = controlPlaneLayerSource.indexOf("getProgramsTodosSnapshot: () =>");
+    const todosSnapshotEnd = controlPlaneLayerSource.indexOf("createProgram: (input) =>");
+
+    expect(todosSnapshotStart).toBeGreaterThanOrEqual(0);
+    expect(todosSnapshotEnd).toBeGreaterThan(todosSnapshotStart);
+
+    const todosSnapshotBlock = controlPlaneLayerSource.slice(todosSnapshotStart, todosSnapshotEnd);
+    expect(todosSnapshotBlock).toContain("fetchAgentsVxappProgramsTodosSnapshot()");
+    expect(todosSnapshotBlock).not.toContain("fetchAgentsVxappProgramsProjectionSnapshot()");
+    expect(todosSnapshotBlock).toContain(
+      'ownerPromise("ownerControlPlane.programsTodos.getProgramsTodosSnapshot", () =>',
+    );
   });
 });
