@@ -26,6 +26,10 @@ const forbiddenProgramProjectionNeedles = [
   "projection_program_notifications",
   "projection_cto_attention",
   "programs_projection_snapshot",
+  "ProjectionProgramRepository",
+  "ProjectionProgramNotificationRepository",
+  "ProjectionCtoAttentionRepository",
+  "programProjectionRow",
 ] as const;
 
 function listSourceFiles(dir: string): string[] {
