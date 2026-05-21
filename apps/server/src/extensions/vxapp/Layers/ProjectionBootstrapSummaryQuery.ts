@@ -26,9 +26,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import {
+  PersistenceSqlError,
   isPersistenceError,
   toPersistenceDecodeError,
-  toPersistenceSqlError,
   type ProjectionRepositoryError,
 } from "../../../persistence/Errors.ts";
 import {
@@ -148,11 +148,47 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
   return (cause: unknown): ProjectionRepositoryError =>
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause);
+      : toProjectionSqlError(sqlOperation, cause);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function projectionSqlErrorDetail(operation: string, cause: unknown): string {
+  const causeRecord = asRecord(cause);
+  const detail =
+    asString(causeRecord?.detail) ??
+    (cause instanceof Error && cause.message.trim().length > 0 ? cause.message : null);
+  const ownerCommand = asString(causeRecord?.ownerCommand);
+  const authoritySurface = asString(causeRecord?.authoritySurface);
+  const ownerErrorCode = asString(causeRecord?.ownerErrorCode);
+  const diagnostics = [
+    ownerCommand ? `ownerCommand=${ownerCommand}` : null,
+    authoritySurface ? `authoritySurface=${authoritySurface}` : null,
+    ownerErrorCode ? `ownerErrorCode=${ownerErrorCode}` : null,
+  ].filter((value): value is string => value !== null);
+  const baseDetail = detail ?? `Failed to execute ${operation}`;
+  return diagnostics.length > 0 ? `${baseDetail} (${diagnostics.join(", ")})` : baseDetail;
+}
+
+function toProjectionSqlError(operation: string, cause: unknown): PersistenceSqlError {
+  return new PersistenceSqlError({
+    operation,
+    detail: projectionSqlErrorDetail(operation, cause),
+    cause,
+  });
 }
 
 function missingRuntimePathAuthorityError() {
-  return toPersistenceSqlError("ProjectionBootstrapSummaryQuery.getRuntimePaths:missingAuthority")(
+  return toProjectionSqlError(
+    "ProjectionBootstrapSummaryQuery.getRuntimePaths:missingAuthority",
     new Error("vxapp projection boundary requires external role authority runtime paths."),
   );
 }
@@ -604,9 +640,10 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
               .getSnapshot()
               .pipe(
                 Effect.mapError((error) =>
-                  toPersistenceSqlError(
+                  toProjectionSqlError(
                     "ProjectionBootstrapSummaryQuery.externalRoleAuthority:query",
-                  )(error),
+                    error,
+                  ),
                 ),
               ),
         }),
@@ -624,8 +661,11 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             externalRoleAuthority
               .getRuntimePaths()
               .pipe(
-                Effect.mapError(
-                  toPersistenceSqlError("ProjectionBootstrapSummaryQuery.getRuntimePaths:query"),
+                Effect.mapError((error) =>
+                  toProjectionSqlError(
+                    "ProjectionBootstrapSummaryQuery.getRuntimePaths:query",
+                    error,
+                  ),
                 ),
               ),
         }),
@@ -1010,7 +1050,8 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           if (isPersistenceError(error)) {
             return error;
           }
-          return toPersistenceSqlError("ProjectionBootstrapSummaryQuery.getBootstrapSummary:query")(
+          return toProjectionSqlError(
+            "ProjectionBootstrapSummaryQuery.getBootstrapSummary:query",
             error,
           );
         }),

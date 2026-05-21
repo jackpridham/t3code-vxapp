@@ -6,7 +6,13 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { ProjectionProjectRepositoryLive } from "../../../persistence/Layers/ProjectionProjects.ts";
 import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
+import { ProjectionProjectRepository } from "../../../persistence/Services/ProjectionProjects.ts";
+import {
+  AgentsVxappControlPlane,
+  AgentsVxappControlPlaneError,
+} from "../Services/AgentsVxappControlPlane.ts";
 import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { ProjectionBootstrapSummaryQuery } from "../Services/ProjectionBootstrapSummaryQuery.ts";
 import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./ProjectionBootstrapSummaryQuery.ts";
@@ -134,5 +140,135 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
       }),
     ]);
     expect(readModel.orchestratorWakeItems).toEqual([]);
+  });
+
+  it("surfaces owner command diagnostics clearly when bootstrap startup authority fails", async () => {
+    const sqliteBackedLayer = Layer.mergeAll(
+      ProjectionProjectRepositoryLive,
+      OrchestrationProjectionBootstrapSummaryQueryLive,
+    ).pipe(Layer.provide(SqlitePersistenceMemory));
+    const layer = Layer.mergeAll(
+      sqliteBackedLayer,
+      Layer.succeed(AgentsVxappExternalRoleAuthority, {
+        getSnapshot: () =>
+          Effect.succeed({
+            projects: [],
+            threadSummaries: [],
+          }),
+        getRuntimePaths: () =>
+          Effect.succeed({
+            runtimeRoot: "/runtime",
+            roleSessionsRoot: "/runtime/role-sessions",
+            roleStateRoot: "/runtime/role-state",
+            workspaceRuntimeMetadataDir: ".agents/runtime",
+            env: {
+              runtimeRoot: "VX_AGENTS_ROLE_SESSION_RUNTIME_ROOT",
+              stateRoot: "VX_AGENTS_ROLE_SESSION_STATE_ROOT",
+            },
+            roles: {
+              cto: {
+                role: "cto" as const,
+                generatedWorkspaceRoot: "/runtime/role-sessions/cto",
+                stateRoot: "/runtime/role-state/cto",
+                sessionsRoot: "/runtime/role-state/cto/sessions",
+                reservationsRoot: "/runtime/role-state/cto/reservations",
+              },
+              jasper: {
+                role: "jasper" as const,
+                generatedWorkspaceRoot: "/runtime/role-sessions/jasper",
+                stateRoot: "/runtime/role-state/jasper",
+                sessionsRoot: "/runtime/role-state/jasper/sessions",
+                reservationsRoot: "/runtime/role-state/jasper/reservations",
+              },
+            },
+          }),
+      }),
+      Layer.succeed(AgentsVxappControlPlane, {
+        getBindingAuthorityExport: () =>
+          Effect.succeed({
+            authorityStore: "sqlite",
+            authoritySource: "owner-command",
+            legacyFallbackUsed: false as const,
+            diagnostics: null,
+            jasper: {
+              currentThread: {
+                id: "thread-owner",
+                programId: "program-owner",
+                projectId: "project-owner",
+              },
+              project: {
+                currentSessionRootThreadId: "thread-owner",
+              },
+            },
+          }),
+        getProgramAuthorityExport: () => Effect.die("unexpected control-plane call"),
+        getAttentionSummaryExport: () => Effect.die("unexpected control-plane call"),
+        getNotificationSummaryExport: () =>
+          Effect.succeed({
+            authorityStore: "sqlite",
+            authoritySource: "owner-command",
+            legacyFallbackUsed: false as const,
+            notifications: [],
+            attention: [],
+          }),
+        getWatchSummaryExport: () => Effect.die("unexpected control-plane call"),
+        getProjectionAuthoritySnapshot: () => Effect.die("unexpected control-plane call"),
+        getProgramsProjectionSnapshot: () =>
+          Effect.fail(
+            new AgentsVxappControlPlaneError({
+              operation: "ownerControlPlane.programsProjection.getSnapshot",
+              detail: "bootstrap owner snapshot failed",
+              ownerCommand: "t3code-programs-projection-snapshot",
+              authoritySurface: "programs_projection_snapshot",
+              ownerErrorCode: "program_projection_failed",
+              authorityStore: "sqlite",
+              authoritySource: "owner-command",
+              contractFamily: "agents-vxapp-t3code-authority",
+              contractVersion: "v1",
+              exitCode: 17,
+              stdout: '{"ok":false}',
+              stderr: "stderr detail",
+            }),
+          ),
+        getProgramsTodosSnapshot: () => Effect.die("unexpected control-plane call"),
+        createProgram: () => Effect.die("unexpected control-plane call"),
+        updateProgram: () => Effect.die("unexpected control-plane call"),
+        deleteProgram: () => Effect.die("unexpected control-plane call"),
+        setProgramLifecycle: () => Effect.die("unexpected control-plane call"),
+        createTodo: () => Effect.die("unexpected control-plane call"),
+        updateTodo: () => Effect.die("unexpected control-plane call"),
+        deleteTodo: () => Effect.die("unexpected control-plane call"),
+      }),
+    );
+
+    await expect(
+      Effect.gen(function* () {
+        const repository = yield* ProjectionProjectRepository;
+        yield* repository.upsert({
+          projectId: ProjectId.makeUnsafe("project-external"),
+          title: "External Project",
+          workspaceRoot: "/runtime/role-sessions/jasper/workspace/project-external",
+          kind: "project",
+          sidebarParentProjectId: null,
+          currentSessionRootThreadId: null,
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: "2026-05-18T04:00:00.000Z",
+          updatedAt: "2026-05-18T04:02:00.000Z",
+          deletedAt: null,
+        });
+        const query = yield* ProjectionBootstrapSummaryQuery;
+        return yield* query.getBootstrapSummary();
+      }).pipe(Effect.provide(layer), Effect.runPromise),
+    ).rejects.toMatchObject({
+      operation: "ProjectionBootstrapSummaryQuery.getBootstrapSummary:query",
+      detail: expect.stringContaining("bootstrap owner snapshot failed"),
+      cause: expect.objectContaining({
+        ownerCommand: "t3code-programs-projection-snapshot",
+        authoritySurface: "programs_projection_snapshot",
+        ownerErrorCode: "program_projection_failed",
+      }),
+    });
   });
 });

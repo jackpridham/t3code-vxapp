@@ -41,9 +41,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import {
+  PersistenceSqlError,
   isPersistenceError,
   toPersistenceDecodeError,
-  toPersistenceSqlError,
   type ProjectionRepositoryError,
 } from "../../../persistence/Errors.ts";
 import {
@@ -188,7 +188,8 @@ function asIsoDateTime(value: unknown): string | null {
 }
 
 function missingRuntimePathAuthorityError() {
-  return toPersistenceSqlError("ProjectionOperationalQuery.getRuntimePaths:missingAuthority")(
+  return toProjectionSqlError(
+    "ProjectionOperationalQuery.getRuntimePaths:missingAuthority",
     new Error("vxapp projection boundary requires external role authority runtime paths."),
   );
 }
@@ -219,16 +220,18 @@ function getBindingAuthorityForVxappProjectRows(
   return Effect.gen(function* () {
     const controlPlaneOption = yield* Effect.serviceOption(AgentsVxappControlPlane);
     if (Option.isNone(controlPlaneOption)) {
-      return yield* toPersistenceSqlError(
+      return yield* toProjectionSqlError(
         "ProjectionOperationalQuery.getBindingAuthorityForVxappProjectRows:missingControlPlane",
-      )(new Error("vxapp-backed snapshot requires external control plane service."));
+        new Error("vxapp-backed snapshot requires external control plane service."),
+      );
     }
     const bindingAuthority = yield* controlPlaneOption.value
       .getBindingAuthorityExport()
       .pipe(
-        Effect.mapError(
-          toPersistenceSqlError(
+        Effect.mapError((error) =>
+          toProjectionSqlError(
             "ProjectionOperationalQuery.getBindingAuthorityForVxappProjectRows:readOwnerExport",
+            error,
           ),
         ),
       );
@@ -607,7 +610,32 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
   return (cause: unknown): ProjectionRepositoryError =>
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause);
+      : toProjectionSqlError(sqlOperation, cause);
+}
+
+function projectionSqlErrorDetail(operation: string, cause: unknown): string {
+  const causeRecord = asJsonRecord(cause);
+  const detail =
+    asString(causeRecord?.detail) ??
+    (cause instanceof Error && cause.message.trim().length > 0 ? cause.message : null);
+  const ownerCommand = asString(causeRecord?.ownerCommand);
+  const authoritySurface = asString(causeRecord?.authoritySurface);
+  const ownerErrorCode = asString(causeRecord?.ownerErrorCode);
+  const diagnostics = [
+    ownerCommand ? `ownerCommand=${ownerCommand}` : null,
+    authoritySurface ? `authoritySurface=${authoritySurface}` : null,
+    ownerErrorCode ? `ownerErrorCode=${ownerErrorCode}` : null,
+  ].filter((value): value is string => value !== null);
+  const baseDetail = detail ?? `Failed to execute ${operation}`;
+  return diagnostics.length > 0 ? `${baseDetail} (${diagnostics.join(", ")})` : baseDetail;
+}
+
+function toProjectionSqlError(operation: string, cause: unknown): PersistenceSqlError {
+  return new PersistenceSqlError({
+    operation,
+    detail: projectionSqlErrorDetail(operation, cause),
+    cause,
+  });
 }
 
 function mapThreadSummaryRows(input: {
@@ -1987,7 +2015,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               .getSnapshot()
               .pipe(
                 Effect.mapError((error) =>
-                  toPersistenceSqlError("ProjectionOperationalQuery.externalRoleAuthority:query")(
+                  toProjectionSqlError(
+                    "ProjectionOperationalQuery.externalRoleAuthority:query",
                     error,
                   ),
                 ),
@@ -2007,8 +2036,8 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             externalRoleAuthority
               .getRuntimePaths()
               .pipe(
-                Effect.mapError(
-                  toPersistenceSqlError("ProjectionOperationalQuery.getRuntimePaths:query"),
+                Effect.mapError((error) =>
+                  toProjectionSqlError("ProjectionOperationalQuery.getRuntimePaths:query", error),
                 ),
               ),
         }),
@@ -2289,7 +2318,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           if (isPersistenceError(error)) {
             return error;
           }
-          return toPersistenceSqlError("ProjectionOperationalQuery.getCurrentState:query")(error);
+          return toProjectionSqlError("ProjectionOperationalQuery.getCurrentState:query", error);
         }),
       );
 

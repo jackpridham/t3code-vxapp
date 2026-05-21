@@ -1,10 +1,49 @@
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../agentsVxappOwnerClient.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../agentsVxappOwnerClient.ts")>();
+vi.mock("../agentsVxappOwnerClient.ts", () => {
+  class AgentsVxappOwnerClientError extends Error {
+    readonly ownerCommand: string;
+    readonly authoritySurface: string;
+    readonly ownerErrorCode: string | null;
+    readonly authorityStore: string | null;
+    readonly authoritySource: string | null;
+    readonly contractFamily: string | null;
+    readonly contractVersion: string | null;
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly exitCode: number | null;
+
+    constructor(input: {
+      readonly authoritySurface: string;
+      readonly authoritySource?: string | null;
+      readonly authorityStore?: string | null;
+      readonly contractFamily?: string | null;
+      readonly contractVersion?: string | null;
+      readonly exitCode?: number | null;
+      readonly message: string;
+      readonly ownerCommand: string;
+      readonly ownerErrorCode?: string | null;
+      readonly stderr?: string;
+      readonly stdout?: string;
+    }) {
+      super(input.message);
+      this.name = "AgentsVxappOwnerClientError";
+      this.ownerCommand = input.ownerCommand;
+      this.authoritySurface = input.authoritySurface;
+      this.ownerErrorCode = input.ownerErrorCode ?? null;
+      this.authorityStore = input.authorityStore ?? null;
+      this.authoritySource = input.authoritySource ?? null;
+      this.contractFamily = input.contractFamily ?? null;
+      this.contractVersion = input.contractVersion ?? null;
+      this.stdout = input.stdout ?? "";
+      this.stderr = input.stderr ?? "";
+      this.exitCode = input.exitCode ?? null;
+    }
+  }
+
   return {
-    ...actual,
+    AgentsVxappOwnerClientError,
     fetchAgentsVxappExternalRoleAuthoritySnapshot: vi.fn(),
     fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
   };
@@ -120,6 +159,43 @@ describe("AgentsVxappExternalRoleAuthorityLive", () => {
       contractFamily: "agents-vxapp-role-session-authority",
       contractVersion: "v1",
       exitCode: 4,
+      stdout: '{"ok":false}',
+      stderr: "stderr detail",
+    });
+  });
+
+  it("preserves owner diagnostics when the external-role snapshot lookup fails", async () => {
+    mockedExternalRoleAuthoritySnapshot.mockRejectedValueOnce(
+      new AgentsVxappOwnerClientError({
+        message: "external-role snapshot failed",
+        ownerCommand: "t3code-external-role-authority-snapshot",
+        authoritySurface: "external_role_authority_snapshot",
+        ownerErrorCode: "external_role_snapshot_failed",
+        authorityStore: "sqlite",
+        authoritySource: "owner-command",
+        contractFamily: "agents-vxapp-t3code-authority",
+        contractVersion: "v1",
+        exitCode: 9,
+        stdout: '{"ok":false}',
+        stderr: "stderr detail",
+      }),
+    );
+
+    await expect(
+      Effect.gen(function* () {
+        const authority = yield* AgentsVxappExternalRoleAuthority;
+        return yield* authority.getSnapshot();
+      }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive), Effect.runPromise),
+    ).rejects.toMatchObject({
+      detail: "external-role snapshot failed",
+      ownerCommand: "t3code-external-role-authority-snapshot",
+      authoritySurface: "external_role_authority_snapshot",
+      ownerErrorCode: "external_role_snapshot_failed",
+      authorityStore: "sqlite",
+      authoritySource: "owner-command",
+      contractFamily: "agents-vxapp-t3code-authority",
+      contractVersion: "v1",
+      exitCode: 9,
       stdout: '{"ok":false}',
       stderr: "stderr detail",
     });
