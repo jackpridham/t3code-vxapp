@@ -7,10 +7,25 @@ const repoRoot = path.resolve(import.meta.dirname, "../../../../..");
 const ownerClientRelativePath = "apps/server/src/extensions/vxapp/agentsVxappOwnerClient.ts";
 const ownerClientPath = path.resolve(repoRoot, ownerClientRelativePath);
 const scanRoots = [
+  "apps/server/src",
+  "packages/contracts/src",
   "apps/server/src/extensions/vxapp",
   "apps/server/src/orchestration",
   "apps/web/src/features/vxapp",
   "apps/web/src/components/sidebar",
+] as const;
+const historicalProgramProjectionMigrationPaths = new Set([
+  "apps/server/src/persistence/Migrations/027_ProjectionPrograms.ts",
+  "apps/server/src/persistence/Migrations/029_ProjectionProgramNotifications.ts",
+  "apps/server/src/persistence/Migrations/031_ProjectionCtoAttention.ts",
+  "apps/server/src/persistence/Migrations/032_ProjectionProgramDeliveryEvidence.ts",
+  "apps/server/src/persistence/Migrations/033_DropVxappProgramProjectionTables.ts",
+]);
+const forbiddenProgramProjectionNeedles = [
+  "projection_programs",
+  "projection_program_notifications",
+  "projection_cto_attention",
+  "programs_projection_snapshot",
 ] as const;
 
 function listSourceFiles(dir: string): string[] {
@@ -133,15 +148,27 @@ function collectViolations(filePath: string, source: string) {
     });
   }
 
+  if (!historicalProgramProjectionMigrationPaths.has(relativePath)) {
+    for (const needle of forbiddenProgramProjectionNeedles) {
+      if (source.includes(needle)) {
+        violations.push({
+          category: `retired Program projection authority reference: ${needle}`,
+          relativePath,
+        });
+      }
+    }
+  }
+
   return violations;
 }
 
 describe("forbidden agents-vxapp authority sources", () => {
   it("keeps cutover surfaces free of forbidden legacy authority paths", () => {
-    const violations = scanRoots.flatMap((relativeRoot) =>
-      listSourceFiles(path.resolve(repoRoot, relativeRoot)).flatMap((filePath) =>
-        collectViolations(filePath, fs.readFileSync(filePath, "utf8")),
-      ),
+    const scannedFiles = new Set(
+      scanRoots.flatMap((relativeRoot) => listSourceFiles(path.resolve(repoRoot, relativeRoot))),
+    );
+    const violations = [...scannedFiles].flatMap((filePath) =>
+      collectViolations(filePath, fs.readFileSync(filePath, "utf8")),
     );
 
     assert.deepStrictEqual(violations, []);

@@ -4,7 +4,6 @@ import {
   ModelSelection,
   OrchestrationProjectKind,
   OrchestrationReadModel,
-  ProgramNotificationEvidence,
   ProgramId,
   ProgramNotificationId,
   ProjectId,
@@ -31,13 +30,7 @@ import {
   toPersistenceDecodeError,
   type ProjectionRepositoryError,
 } from "../../../persistence/Errors.ts";
-import {
-  decodeProjectionProgramDbRow,
-  ProjectionProgramDbRowSchema,
-  toOrchestrationProgram,
-} from "../../../persistence/programProjectionRow.ts";
 import { ProjectionOrchestratorWake } from "../../../persistence/Services/ProjectionOrchestratorWakes.ts";
-import { ProjectionProgramNotification } from "../../../persistence/Services/ProjectionProgramNotifications.ts";
 import { ProjectionProject } from "../../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../../persistence/Services/ProjectionState.ts";
 import { resolveLocalThreadErrorPresentation } from "../../../orchestration/localThreadErrorPresentation.ts";
@@ -67,14 +60,6 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     hooks: Schema.fromJsonString(ProjectHooks),
-  }),
-);
-
-const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.mapFields(
-  Struct.assign({
-    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
-    consumeReason: Schema.NullOr(Schema.String),
-    dropReason: Schema.NullOr(Schema.String),
   }),
 );
 
@@ -438,77 +423,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
       `,
   });
 
-  const listProgramRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionProgramDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          program_id AS "programId",
-          title,
-          objective,
-          status,
-          declared_repos_json AS "declaredRepos",
-          affected_app_targets_json AS "affectedAppTargets",
-          required_local_suites_json AS "requiredLocalSuites",
-          required_external_e2e_suites_json AS "requiredExternalE2ESuites",
-          require_development_deploy AS "requireDevelopmentDeploy",
-          require_external_e2e AS "requireExternalE2E",
-          require_clean_post_flight AS "requireCleanPostFlight",
-          require_pr_per_repo AS "requirePrPerRepo",
-          executive_project_id AS "executiveProjectId",
-          executive_thread_id AS "executiveThreadId",
-          current_orchestrator_thread_id AS "currentOrchestratorThreadId",
-          repo_prs_json AS "repoPrs",
-          local_validation_json AS "localValidation",
-          app_validations_json AS "appValidations",
-          observed_repos_json AS "observedRepos",
-          post_flight_json AS "postFlight",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          completed_at AS "completedAt",
-          cancel_reason AS "cancelReason",
-          cancelled_at AS "cancelledAt",
-          superseded_by_program_id AS "supersededByProgramId",
-          deleted_at AS "deletedAt"
-        FROM projection_programs
-        WHERE deleted_at IS NULL
-        ORDER BY created_at ASC, program_id ASC
-      `,
-  });
-
-  const listProgramNotificationRows = SqlSchema.findAll({
-    // Local mirror path for native/non-vxapp workspaces only.
-    Request: Schema.Void,
-    Result: ProjectionProgramNotificationDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          notification_id AS "notificationId",
-          program_id AS "programId",
-          executive_project_id AS "executiveProjectId",
-          executive_thread_id AS "executiveThreadId",
-          orchestrator_thread_id AS "orchestratorThreadId",
-          kind,
-          severity,
-          summary,
-          evidence_json AS "evidence",
-          state,
-          queued_at AS "queuedAt",
-          delivered_at AS "deliveredAt",
-          consumed_at AS "consumedAt",
-          dropped_at AS "droppedAt",
-          consume_reason AS "consumeReason",
-          drop_reason AS "dropReason",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_program_notifications
-        WHERE state IN ('pending', 'delivering', 'delivered')
-        ORDER BY queued_at DESC, notification_id ASC
-        LIMIT 100
-      `,
-  });
-
   const listThreadRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadDbRowSchema,
@@ -685,7 +599,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             ),
           );
           const [
-            programRows,
             threadRows,
             sessionRows,
             latestTurnRows,
@@ -694,14 +607,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             externalSnapshot,
             runtimePaths,
           ] = yield* Effect.all([
-            listProgramRows(undefined).pipe(
-              Effect.mapError(
-                toPersistenceSqlOrDecodeError(
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:query",
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listPrograms:decodeRows",
-                ),
-              ),
-            ),
             listThreadRows(undefined).pipe(
               Effect.mapError(
                 toPersistenceSqlOrDecodeError(
@@ -762,26 +667,27 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
               };
             };
           } | null = null;
-          let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
-          let ownerPrograms: ReadonlyArray<OrchestrationProgram> | null = null;
+          const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
+            Effect.flatMap((controlPlaneOption) =>
+              Option.match(controlPlaneOption, {
+                onNone: () =>
+                  Effect.fail(
+                    new Error("bootstrap requires agents-vxapp control plane authority service."),
+                  ),
+                onSome: (service) => Effect.succeed(service),
+              }),
+            ),
+          );
+          const [notificationSummaryExport, ownerSnapshot] = yield* Effect.all([
+            controlPlane.getNotificationSummaryExport(),
+            controlPlane.getProgramsAuthoritySnapshot(),
+          ]);
+          const programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> =
+            notificationSummaryExport.notifications.map(mapOwnerProgramNotification);
+          const ownerPrograms: ReadonlyArray<OrchestrationProgram> =
+            ownerSnapshot.programs.map(mapOwnerProgram);
           if (vxappBacked) {
-            const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
-              Effect.flatMap((controlPlaneOption) =>
-                Option.match(controlPlaneOption, {
-                  onNone: () =>
-                    Effect.fail(
-                      new Error("vxapp-backed bootstrap requires external control plane service."),
-                    ),
-                  onSome: (service) => Effect.succeed(service),
-                }),
-              ),
-            );
-            const [bindingAuthorityExport, notificationSummaryExport, ownerSnapshot] =
-              yield* Effect.all([
-                controlPlane.getBindingAuthorityExport(),
-                controlPlane.getNotificationSummaryExport(),
-                controlPlane.getProgramsProjectionSnapshot(),
-              ]);
+            const bindingAuthorityExport = yield* controlPlane.getBindingAuthorityExport();
             bindingAuthority = {
               jasper: {
                 currentThread: {
@@ -790,39 +696,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 },
               },
             };
-            programNotificationRows = notificationSummaryExport.notifications.map(
-              mapOwnerProgramNotification,
-            );
-            ownerPrograms = ownerSnapshot.programs.map(mapOwnerProgram);
-          } else {
-            const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
-              Effect.mapError(
-                toPersistenceSqlOrDecodeError(
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:query",
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listProgramNotifications:decodeRows",
-                ),
-              ),
-            );
-            programNotificationRows = localProgramNotificationRows.map((row) => ({
-              notificationId: row.notificationId,
-              programId: row.programId,
-              executiveProjectId: row.executiveProjectId,
-              executiveThreadId: row.executiveThreadId,
-              orchestratorThreadId: row.orchestratorThreadId,
-              kind: row.kind,
-              severity: row.severity,
-              summary: row.summary,
-              evidence: row.evidence,
-              state: row.state,
-              queuedAt: row.queuedAt,
-              deliveredAt: row.deliveredAt,
-              consumedAt: row.consumedAt,
-              droppedAt: row.droppedAt,
-              consumeReason: row.consumeReason ?? undefined,
-              dropReason: row.dropReason ?? undefined,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-            }));
           }
 
           for (const row of latestTurnRows) {
@@ -870,7 +743,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           for (const row of projectRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
-          for (const row of ownerPrograms ?? programRows) {
+          for (const row of ownerPrograms) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
           for (const row of programNotificationRows) {
@@ -912,9 +785,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             bindingAuthority,
           );
 
-          const programs: ReadonlyArray<OrchestrationProgram> =
-            ownerPrograms ??
-            programRows.map((row) => toOrchestrationProgram(decodeProjectionProgramDbRow(row)));
+          const programs: ReadonlyArray<OrchestrationProgram> = ownerPrograms;
 
           const programNotifications = programNotificationRows;
 

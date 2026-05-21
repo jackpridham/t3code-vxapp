@@ -12,6 +12,7 @@ import Migration0029 from "../../persistence/Migrations/029_ProjectionProgramNot
 import Migration0030 from "../../persistence/Migrations/030_RuntimeTtlCache.ts";
 import Migration0031 from "../../persistence/Migrations/031_ProjectionCtoAttention.ts";
 import Migration0032 from "../../persistence/Migrations/032_ProjectionProgramDeliveryEvidence.ts";
+import Migration0033 from "../../persistence/Migrations/033_DropVxappProgramProjectionTables.ts";
 
 export const vxappMigrationEntries = [
   [19, "ProjectionProjectHooks", Migration0019],
@@ -28,4 +29,5 @@ export const vxappMigrationEntries = [
   [30, "RuntimeTtlCache", Migration0030],
   [31, "ProjectionCtoAttention", Migration0031],
   [32, "ProjectionProgramDeliveryEvidence", Migration0032],
+  [33, "DropVxappProgramProjectionTables", Migration0033],
 ] as const;

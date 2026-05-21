@@ -9,6 +9,7 @@ import { runProcess } from "../../processRunner.ts";
 import {
   bootstrapAgentsVxappOwnerManifest,
   fetchAgentsVxappAgentRuntimeSnapshot,
+  fetchAgentsVxappProgramsAuthoritySnapshot,
   fetchAgentsVxappSidebarGraphSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   fetchAgentsVxappWorkerRuntimeSnapshot,
@@ -28,6 +29,7 @@ t3code-contract-manifest	contract_manifest
 t3code-bootstrap-snapshot	bootstrap_snapshot
 t3code-control-plane-snapshot	control_plane_snapshot
 t3code-programs-todos-snapshot	programs_todos_snapshot
+t3code-programs-authority-snapshot	programs_authority_snapshot
 t3code-sidebar-graph-snapshot	sidebar_graph_snapshot
 t3code-cto-status	cto
 t3code-cto-ensure	cto
@@ -190,6 +192,7 @@ describe("agentsVxappOwnerClient", () => {
         "t3code-cto-status",
         "t3code-projects-list",
         "t3code-sidebar-graph-snapshot",
+        "t3code-programs-authority-snapshot",
         "t3code-worker-dispatch",
         "t3code-provider-ws-request",
         "t3code-orchestrator-status",
@@ -204,6 +207,9 @@ describe("agentsVxappOwnerClient", () => {
     expect(manifest.commandsByName.get("t3code-thread-event-ingest")?.surface).toBe("threads");
     expect(manifest.commandsByName.get("t3code-sidebar-graph-snapshot")?.surface).toBe(
       "sidebar_graph_snapshot",
+    );
+    expect(manifest.commandsByName.get("t3code-programs-authority-snapshot")?.surface).toBe(
+      "programs_authority_snapshot",
     );
     expect(manifest.commandsByName.get("t3code-contract-manifest")?.surface).toBe(
       "contract_manifest",
@@ -476,6 +482,39 @@ describe("agentsVxappOwnerClient", () => {
       2,
       expect.stringMatching(/t3-control-plane-owner$/),
       ["t3code-sidebar-graph-snapshot", "--json"],
+      expect.objectContaining({}),
+    );
+  });
+
+  it("routes Program authority snapshots through the dedicated owner command", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-programs-authority-snapshot", "programs_authority_snapshot", {
+            programs: [{ id: "program-owner", title: "Owner Program", status: "active" }],
+            pagination: { page: 1, limit: 20, total: 1, hasMore: false },
+            authority: {
+              source: "vx_sqlite_program_authority",
+              legacyFallbackUsed: false,
+            },
+            hints: [],
+          }),
+        ),
+      );
+
+    const payload = await fetchAgentsVxappProgramsAuthoritySnapshot();
+
+    expect(payload).toMatchObject({
+      programs: [{ id: "program-owner" }],
+      authority: { legacyFallbackUsed: false },
+    });
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      ["t3code-programs-authority-snapshot", "--json"],
       expect.objectContaining({}),
     );
   });

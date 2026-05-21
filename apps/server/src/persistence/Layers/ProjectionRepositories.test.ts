@@ -1,28 +1,15 @@
-import {
-  CtoAttentionId,
-  MessageId,
-  ProgramId,
-  ProgramNotificationId,
-  ProjectId,
-  ThreadId,
-  TurnId,
-} from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { vxappMigrationEntries } from "../../extensions/vxapp/migrations.ts";
 import { SqlitePersistenceMemory } from "./Sqlite.ts";
-import { ProjectionCtoAttentionRepositoryLive } from "./ProjectionCtoAttention.ts";
 import { ProjectionOrchestratorWakeRepositoryLive } from "./ProjectionOrchestratorWakes.ts";
-import { ProjectionCtoAttentionRepository } from "../Services/ProjectionCtoAttention.ts";
-import { ProjectionProgramNotificationRepositoryLive } from "./ProjectionProgramNotifications.ts";
-import { ProjectionProgramRepositoryLive } from "./ProjectionPrograms.ts";
 import { ProjectionProjectRepositoryLive } from "./ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./ProjectionThreads.ts";
 import { ProjectionTurnRepositoryLive } from "./ProjectionTurns.ts";
 import { ProjectionOrchestratorWakeRepository } from "../Services/ProjectionOrchestratorWakes.ts";
-import { ProjectionProgramNotificationRepository } from "../Services/ProjectionProgramNotifications.ts";
-import { ProjectionProgramRepository } from "../Services/ProjectionPrograms.ts";
 import { ProjectionProjectRepository } from "../Services/ProjectionProjects.ts";
 import { ProjectionThreadRepository } from "../Services/ProjectionThreads.ts";
 import { ProjectionTurnRepository } from "../Services/ProjectionTurns.ts";
@@ -30,9 +17,6 @@ import { ProjectionTurnRepository } from "../Services/ProjectionTurns.ts";
 const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-    ProjectionProgramRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-    ProjectionProgramNotificationRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
-    ProjectionCtoAttentionRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionTurnRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionOrchestratorWakeRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
@@ -41,6 +25,39 @@ const projectionRepositoriesLayer = it.layer(
 );
 
 projectionRepositoriesLayer("Projection repositories", (it) => {
+  it("keeps vxapp migrations append-only and registers the Program projection drop", () => {
+    const ids = vxappMigrationEntries.map(([id]) => id);
+
+    assert.deepEqual(
+      ids,
+      [...ids].toSorted((left, right) => left - right),
+    );
+    assert.deepEqual(vxappMigrationEntries.at(-1)?.slice(0, 2), [
+      33,
+      "DropVxappProgramProjectionTables",
+    ]);
+  });
+
+  it.effect("drops retired vxapp Program projection tables from the final schema", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+
+      const rows = yield* sql<{ readonly name: string }>`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN (
+            'projection_programs',
+            'projection_program_notifications',
+            'projection_cto_attention'
+          )
+        ORDER BY name
+      `;
+
+      assert.deepEqual(rows, []);
+    }),
+  );
+
   it.effect("stores SQL NULL for missing project model options", () =>
     Effect.gen(function* () {
       const projects = yield* ProjectionProjectRepository;
@@ -160,205 +177,6 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         provider: "claudeAgent",
         model: "claude-opus-4-6",
       });
-    }),
-  );
-
-  it.effect("persists executive programs for snapshot replay", () =>
-    Effect.gen(function* () {
-      const programs = yield* ProjectionProgramRepository;
-      const sql = yield* SqlClient.SqlClient;
-
-      yield* programs.upsert({
-        programId: ProgramId.makeUnsafe("program-cto"),
-        title: "Founder task",
-        objective: "Convert founder request into Jasper orchestration.",
-        status: "active",
-        declaredRepos: ["t3code-vxapp"],
-        affectedAppTargets: ["web"],
-        requiredLocalSuites: [],
-        requiredExternalE2ESuites: [],
-        requireDevelopmentDeploy: true,
-        requireExternalE2E: false,
-        requireCleanPostFlight: true,
-        requirePrPerRepo: true,
-        executiveProjectId: ProjectId.makeUnsafe("project-cto"),
-        executiveThreadId: ThreadId.makeUnsafe("thread-cto"),
-        currentOrchestratorThreadId: ThreadId.makeUnsafe("thread-jasper"),
-        repoPrs: [],
-        localValidation: [],
-        appValidations: [],
-        observedRepos: [],
-        postFlight: {
-          status: "clean",
-          summary: "Post-flight checks passed",
-          recordedAt: "2026-04-20T00:00:01.000Z",
-        },
-        createdAt: "2026-04-20T00:00:00.000Z",
-        updatedAt: "2026-04-20T00:00:01.000Z",
-        completedAt: null,
-        cancelReason: null,
-        cancelledAt: null,
-        supersededByProgramId: null,
-        deletedAt: null,
-      });
-
-      const rows = yield* sql<{
-        readonly programId: string;
-        readonly objective: string | null;
-        readonly currentOrchestratorThreadId: string | null;
-        readonly declaredRepos: string;
-        readonly postFlight: string | null;
-      }>`
-        SELECT
-          program_id AS "programId",
-          objective,
-          current_orchestrator_thread_id AS "currentOrchestratorThreadId",
-          declared_repos_json AS "declaredRepos",
-          post_flight_json AS "postFlight"
-        FROM projection_programs
-        WHERE program_id = 'program-cto'
-      `;
-      assert.deepEqual(rows, [
-        {
-          programId: "program-cto",
-          objective: "Convert founder request into Jasper orchestration.",
-          currentOrchestratorThreadId: "thread-jasper",
-          declaredRepos: '["t3code-vxapp"]',
-          postFlight:
-            '{"status":"clean","summary":"Post-flight checks passed","recordedAt":"2026-04-20T00:00:01.000Z"}',
-        },
-      ]);
-
-      const persisted = yield* programs.getById({
-        programId: ProgramId.makeUnsafe("program-cto"),
-      });
-      assert.strictEqual(Option.getOrNull(persisted)?.status, "active");
-      assert.strictEqual(Option.getOrNull(persisted)?.executiveThreadId, "thread-cto");
-      assert.deepStrictEqual(Option.getOrNull(persisted)?.declaredRepos, ["t3code-vxapp"]);
-      assert.strictEqual(Option.getOrNull(persisted)?.postFlight?.status, "clean");
-    }),
-  );
-
-  it.effect("persists program notifications with structured evidence", () =>
-    Effect.gen(function* () {
-      const notifications = yield* ProjectionProgramNotificationRepository;
-      const sql = yield* SqlClient.SqlClient;
-
-      yield* notifications.upsert({
-        notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
-        programId: ProgramId.makeUnsafe("program-cto"),
-        executiveProjectId: ProjectId.makeUnsafe("project-cto"),
-        executiveThreadId: ThreadId.makeUnsafe("thread-cto"),
-        orchestratorThreadId: ThreadId.makeUnsafe("thread-jasper"),
-        kind: "decision_required",
-        severity: "warning",
-        summary: "Choose the deployment lane.",
-        evidence: { workerThreadId: "thread-worker" },
-        state: "pending",
-        queuedAt: "2026-04-20T00:01:00.000Z",
-        deliveredAt: null,
-        consumedAt: null,
-        droppedAt: null,
-        consumeReason: undefined,
-        dropReason: undefined,
-        createdAt: "2026-04-20T00:01:00.000Z",
-        updatedAt: "2026-04-20T00:01:00.000Z",
-      });
-
-      const rows = yield* sql<{
-        readonly notificationId: string;
-        readonly evidenceJson: string;
-        readonly state: string;
-      }>`
-        SELECT
-          notification_id AS "notificationId",
-          evidence_json AS "evidenceJson",
-          state
-        FROM projection_program_notifications
-        WHERE notification_id = 'notif-cto'
-      `;
-      assert.deepEqual(rows, [
-        {
-          notificationId: "notif-cto",
-          evidenceJson: JSON.stringify({ workerThreadId: "thread-worker" }),
-          state: "pending",
-        },
-      ]);
-
-      const persisted = yield* notifications.getById({
-        notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
-      });
-      assert.deepStrictEqual(Option.getOrNull(persisted)?.evidence, {
-        workerThreadId: "thread-worker",
-      });
-      assert.strictEqual(Option.getOrNull(persisted)?.kind, "decision_required");
-    }),
-  );
-
-  it.effect("upserts CTO attention rows by stable attention key", () =>
-    Effect.gen(function* () {
-      const ctoAttention = yield* ProjectionCtoAttentionRepository;
-      const sql = yield* SqlClient.SqlClient;
-
-      const firstRow = {
-        attentionId: CtoAttentionId.makeUnsafe(
-          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
-        ),
-        attentionKey:
-          "program:program-cto|kind:final_review_ready|source-thread:thread-worker|source-role:worker|correlation:notif-cto",
-        notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
-        programId: ProgramId.makeUnsafe("program-cto"),
-        executiveProjectId: ProjectId.makeUnsafe("project-cto"),
-        executiveThreadId: ThreadId.makeUnsafe("thread-cto"),
-        sourceThreadId: ThreadId.makeUnsafe("thread-worker"),
-        sourceRole: "worker",
-        kind: "final_review_ready",
-        severity: "info",
-        summary: "The review is ready.",
-        evidence: { workerThreadId: "thread-worker" },
-        state: "required",
-        queuedAt: "2026-04-20T00:01:00.000Z",
-        acknowledgedAt: null,
-        resolvedAt: null,
-        droppedAt: null,
-        createdAt: "2026-04-20T00:01:00.000Z",
-        updatedAt: "2026-04-20T00:01:00.000Z",
-      } as const;
-
-      yield* ctoAttention.upsert(firstRow);
-      yield* ctoAttention.upsert({
-        ...firstRow,
-        state: "acknowledged",
-        acknowledgedAt: "2026-04-20T00:02:00.000Z",
-        updatedAt: "2026-04-20T00:02:00.000Z",
-      });
-
-      const rows = yield* sql<{
-        readonly attentionId: string;
-        readonly attentionKey: string;
-        readonly state: string;
-        readonly acknowledgedAt: string | null;
-      }>`
-        SELECT
-          attention_id AS "attentionId",
-          attention_key AS "attentionKey",
-          state,
-          acknowledged_at AS "acknowledgedAt"
-        FROM projection_cto_attention
-      `;
-      assert.deepEqual(rows, [
-        {
-          attentionId: firstRow.attentionId,
-          attentionKey: firstRow.attentionKey,
-          state: "acknowledged",
-          acknowledgedAt: "2026-04-20T00:02:00.000Z",
-        },
-      ]);
-
-      const persisted = yield* ctoAttention.getByNotificationId({
-        notificationId: ProgramNotificationId.makeUnsafe("notif-cto"),
-      });
-      assert.strictEqual(Option.getOrNull(persisted)?.state, "acknowledged");
     }),
   );
 

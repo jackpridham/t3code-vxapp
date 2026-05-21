@@ -36,26 +36,22 @@ describe("agents-vxapp projection authority boundary", () => {
 
   it("uses owner-backed truth for vxapp-backed query paths", () => {
     const snapshotQuerySource = read("src/orchestration/Layers/ProjectionSnapshotQuery.ts");
-    expect(snapshotQuerySource).toContain("controlPlane.getProgramsProjectionSnapshot()");
+    expect(snapshotQuerySource).toContain("controlPlane.getProgramsAuthoritySnapshot()");
     expect(snapshotQuerySource).toContain("getNotificationSummaryExport()");
     expect(snapshotQuerySource).toContain("getRuntimePaths()");
     expect(snapshotQuerySource).toContain("AgentsVxappControlPlane");
-    expect(snapshotQuerySource).toMatch(
-      /ownerPrograms\s*\?\?|ownerSnapshot\.programs\.map\(mapOwnerProgram\)/,
-    );
+    expect(snapshotQuerySource).toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
 
     for (const relativePath of [
       "src/extensions/vxapp/Layers/ProjectionOperationalQuery.ts",
       "src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts",
     ]) {
       const source = read(relativePath);
-      expect(source).toContain("controlPlane.getProgramsProjectionSnapshot()");
+      expect(source).toContain("controlPlane.getProgramsAuthoritySnapshot()");
       expect(source).toContain("getNotificationSummaryExport()");
       expect(source).toContain("getRuntimePaths()");
       expect(source).toContain("AgentsVxappControlPlane");
-      expect(source).toMatch(
-        /ownerPrograms\s*\?\?|ownerSnapshot\.programs\.map\(mapOwnerProgram\)/,
-      );
+      expect(source).toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
       expect(source).toContain(
         "vxapp projection boundary requires external role authority runtime paths.",
       );

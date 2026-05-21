@@ -22,23 +22,24 @@ const source = readFileSync(resolve(here, "ProjectionOperationalQuery.ts"), "utf
 
 describe("ProjectionOperationalQuery authority boundary", () => {
   it("uses owner-backed current Program, notification, attention, and binding truth for vxapp rows", () => {
-    expect(source).toContain("controlPlane.getProgramsProjectionSnapshot()");
+    expect(source).toContain("controlPlane.getProgramsAuthoritySnapshot()");
     expect(source).toContain("controlPlane.getNotificationSummaryExport()");
     expect(source).toContain("controlPlane.getAttentionSummaryExport()");
     expect(source).toContain("getRuntimePaths()");
     expect(source).toContain("getBindingAuthorityForVxappProjectRows");
-    expect(source).toContain("programs = ownerSnapshot.programs.map(mapOwnerProgram)");
+    expect(source).toMatch(
+      /const programs: ReadonlyArray<OrchestrationProgram> =\s*ownerSnapshot\.programs\.map\(mapOwnerProgram\)/,
+    );
     expect(source).toContain(
       "vxapp projection boundary requires external role authority runtime paths.",
     );
   });
 
-  it("keeps local Program repository reads inside the non-vxapp branch", () => {
-    const vxappBranch = source.slice(
-      source.indexOf("if (vxappBacked)"),
-      source.indexOf("} else {", source.indexOf("if (vxappBacked)")),
-    );
-    expect(vxappBranch).not.toContain("listProgramRows");
+  it("does not query retired local Program projection tables", () => {
+    expect(source).not.toContain("listProgramRows");
+    expect(source).not.toContain("projection_programs");
+    expect(source).not.toContain("projection_program_notifications");
+    expect(source).not.toContain("projection_cto_attention");
   });
 
   it("surfaces owner command diagnostics clearly when current-state startup authority fails", async () => {
@@ -101,11 +102,35 @@ describe("ProjectionOperationalQuery authority boundary", () => {
             }),
           ),
         getProgramAuthorityExport: () => Effect.die("unexpected control-plane call"),
-        getAttentionSummaryExport: () => Effect.die("unexpected control-plane call"),
-        getNotificationSummaryExport: () => Effect.die("unexpected control-plane call"),
+        getAttentionSummaryExport: () =>
+          Effect.succeed({
+            authorityStore: "sqlite",
+            authoritySource: "owner-command",
+            legacyFallbackUsed: false as const,
+            attention: [],
+            resolvedAttention: [],
+            passiveNotifications: [],
+          }),
+        getNotificationSummaryExport: () =>
+          Effect.succeed({
+            authorityStore: "sqlite",
+            authoritySource: "owner-command",
+            legacyFallbackUsed: false as const,
+            notifications: [],
+            attention: [],
+          }),
         getWatchSummaryExport: () => Effect.die("unexpected control-plane call"),
         getProjectionAuthoritySnapshot: () => Effect.die("unexpected control-plane call"),
-        getProgramsProjectionSnapshot: () => Effect.die("unexpected control-plane call"),
+        getProgramsAuthoritySnapshot: () =>
+          Effect.succeed({
+            programs: [],
+            pagination: { page: 1, limit: 20, total: 0, hasMore: false },
+            authority: {
+              source: "vx_sqlite_program_authority",
+              legacyFallbackUsed: false,
+            },
+            hints: [],
+          }),
         getProgramsTodosSnapshot: () => Effect.die("unexpected control-plane call"),
         createProgram: () => Effect.die("unexpected control-plane call"),
         updateProgram: () => Effect.die("unexpected control-plane call"),

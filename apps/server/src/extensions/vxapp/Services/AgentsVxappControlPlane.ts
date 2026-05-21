@@ -96,7 +96,7 @@ export interface AgentsVxappWatchSummaryExport extends AgentsVxappOwnerExportEnv
   readonly wakeDecision: JsonRecord | null;
 }
 
-export interface AgentsVxappProgramsProjectionProgram extends JsonRecord {
+export interface AgentsVxappProgramsAuthorityProgram extends JsonRecord {
   readonly id: ProgramId;
   readonly title: string;
   readonly objective: string | null;
@@ -110,8 +110,11 @@ export interface AgentsVxappProgramsProjectionProgram extends JsonRecord {
   readonly deletedAt: string | null;
 }
 
-export interface AgentsVxappProgramsProjectionSnapshot {
-  readonly programs: ReadonlyArray<AgentsVxappProgramsProjectionProgram>;
+export interface AgentsVxappProgramsAuthoritySnapshot extends JsonRecord {
+  readonly programs: ReadonlyArray<AgentsVxappProgramsAuthorityProgram>;
+  readonly pagination?: JsonRecord;
+  readonly authority?: JsonRecord;
+  readonly hints?: ReadonlyArray<unknown>;
 }
 
 export interface AgentsVxappControlPlaneShape {
@@ -139,8 +142,8 @@ export interface AgentsVxappControlPlaneShape {
     AgentsVxappOwnerProjectionAuthoritySnapshot,
     AgentsVxappControlPlaneError
   >;
-  readonly getProgramsProjectionSnapshot: () => Effect.Effect<
-    AgentsVxappProgramsProjectionSnapshot,
+  readonly getProgramsAuthoritySnapshot: () => Effect.Effect<
+    AgentsVxappProgramsAuthoritySnapshot,
     AgentsVxappControlPlaneError
   >;
   readonly getProgramsTodosSnapshot: (

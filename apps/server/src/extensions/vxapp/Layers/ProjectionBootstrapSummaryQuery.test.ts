@@ -22,10 +22,10 @@ const source = readFileSync(resolve(here, "ProjectionBootstrapSummaryQuery.ts"),
 
 describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
   it("uses owner-backed Program and notification truth for vxapp bootstrap rows", () => {
-    expect(source).toContain("controlPlane.getProgramsProjectionSnapshot()");
+    expect(source).toContain("controlPlane.getProgramsAuthoritySnapshot()");
     expect(source).toContain("controlPlane.getNotificationSummaryExport()");
     expect(source).toContain("getRuntimePaths()");
-    expect(source).toContain("ownerPrograms ??");
+    expect(source).toMatch(/const programs: ReadonlyArray<OrchestrationProgram> =\s*ownerPrograms/);
     expect(source).toContain(
       "vxapp projection boundary requires external role authority runtime paths.",
     );
@@ -113,6 +113,39 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
               },
             },
           }),
+      }),
+      Layer.succeed(AgentsVxappControlPlane, {
+        getBindingAuthorityExport: () => Effect.die("unexpected control-plane call"),
+        getProgramAuthorityExport: () => Effect.die("unexpected control-plane call"),
+        getAttentionSummaryExport: () => Effect.die("unexpected control-plane call"),
+        getNotificationSummaryExport: () =>
+          Effect.succeed({
+            authorityStore: "sqlite",
+            authoritySource: "owner-command",
+            legacyFallbackUsed: false as const,
+            notifications: [],
+            attention: [],
+          }),
+        getWatchSummaryExport: () => Effect.die("unexpected control-plane call"),
+        getProjectionAuthoritySnapshot: () => Effect.die("unexpected control-plane call"),
+        getProgramsAuthoritySnapshot: () =>
+          Effect.succeed({
+            programs: [],
+            pagination: { page: 1, limit: 20, total: 0, hasMore: false },
+            authority: {
+              source: "vx_sqlite_program_authority",
+              legacyFallbackUsed: false,
+            },
+            hints: [],
+          }),
+        getProgramsTodosSnapshot: () => Effect.die("unexpected control-plane call"),
+        createProgram: () => Effect.die("unexpected control-plane call"),
+        updateProgram: () => Effect.die("unexpected control-plane call"),
+        deleteProgram: () => Effect.die("unexpected control-plane call"),
+        setProgramLifecycle: () => Effect.die("unexpected control-plane call"),
+        createTodo: () => Effect.die("unexpected control-plane call"),
+        updateTodo: () => Effect.die("unexpected control-plane call"),
+        deleteTodo: () => Effect.die("unexpected control-plane call"),
       }),
     );
 
@@ -213,14 +246,14 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
           }),
         getWatchSummaryExport: () => Effect.die("unexpected control-plane call"),
         getProjectionAuthoritySnapshot: () => Effect.die("unexpected control-plane call"),
-        getProgramsProjectionSnapshot: () =>
+        getProgramsAuthoritySnapshot: () =>
           Effect.fail(
             new AgentsVxappControlPlaneError({
-              operation: "ownerControlPlane.programsProjection.getSnapshot",
+              operation: "ownerControlPlane.programsAuthority.getSnapshot",
               detail: "bootstrap owner snapshot failed",
-              ownerCommand: "t3code-programs-projection-snapshot",
-              authoritySurface: "programs_projection_snapshot",
-              ownerErrorCode: "program_projection_failed",
+              ownerCommand: "t3code-programs-authority-snapshot",
+              authoritySurface: "programs_authority_snapshot",
+              ownerErrorCode: "program_authority_failed",
               authorityStore: "sqlite",
               authoritySource: "owner-command",
               contractFamily: "agents-vxapp-t3code-authority",
@@ -265,9 +298,9 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
       operation: "ProjectionBootstrapSummaryQuery.getBootstrapSummary:query",
       detail: expect.stringContaining("bootstrap owner snapshot failed"),
       cause: expect.objectContaining({
-        ownerCommand: "t3code-programs-projection-snapshot",
-        authoritySurface: "programs_projection_snapshot",
-        ownerErrorCode: "program_projection_failed",
+        ownerCommand: "t3code-programs-authority-snapshot",
+        authoritySurface: "programs_authority_snapshot",
+        ownerErrorCode: "program_authority_failed",
       }),
     });
   });

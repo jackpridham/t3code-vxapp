@@ -12,7 +12,6 @@ import {
   ProjectHooks,
   ProjectScript,
   OrchestrationProjectKind,
-  ProgramNotificationEvidence,
   OrchestratorWakeItem,
   OrchestrationSnapshotProfile,
   ProgramId,
@@ -42,14 +41,7 @@ import {
   toPersistenceSqlError,
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
-import {
-  decodeProjectionProgramDbRow,
-  ProjectionProgramDbRowSchema,
-  toOrchestrationProgram,
-} from "../../persistence/programProjectionRow.ts";
 import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
-import { ProjectionCtoAttention } from "../../persistence/Services/ProjectionCtoAttention.ts";
-import { ProjectionProgramNotification } from "../../persistence/Services/ProjectionProgramNotifications.ts";
 import { ProjectionProject } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionOrchestratorWake } from "../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
@@ -83,18 +75,6 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
     hooks: Schema.fromJsonString(ProjectHooks),
-  }),
-);
-const ProjectionProgramNotificationDbRowSchema = ProjectionProgramNotification.mapFields(
-  Struct.assign({
-    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
-    consumeReason: Schema.NullOr(Schema.String),
-    dropReason: Schema.NullOr(Schema.String),
-  }),
-);
-const ProjectionCtoAttentionDbRowSchema = ProjectionCtoAttention.mapFields(
-  Struct.assign({
-    evidence: Schema.fromJsonString(ProgramNotificationEvidence),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -624,106 +604,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           deleted_at AS "deletedAt"
         FROM projection_projects
         ORDER BY created_at ASC, project_id ASC
-      `,
-  });
-
-  const listProgramRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionProgramDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          program_id AS "programId",
-          title,
-          objective,
-          status,
-          declared_repos_json AS "declaredRepos",
-          affected_app_targets_json AS "affectedAppTargets",
-          required_local_suites_json AS "requiredLocalSuites",
-          required_external_e2e_suites_json AS "requiredExternalE2ESuites",
-          require_development_deploy AS "requireDevelopmentDeploy",
-          require_external_e2e AS "requireExternalE2E",
-          require_clean_post_flight AS "requireCleanPostFlight",
-          require_pr_per_repo AS "requirePrPerRepo",
-          executive_project_id AS "executiveProjectId",
-          executive_thread_id AS "executiveThreadId",
-          current_orchestrator_thread_id AS "currentOrchestratorThreadId",
-          repo_prs_json AS "repoPrs",
-          local_validation_json AS "localValidation",
-          app_validations_json AS "appValidations",
-          observed_repos_json AS "observedRepos",
-          post_flight_json AS "postFlight",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          completed_at AS "completedAt",
-          cancel_reason AS "cancelReason",
-          cancelled_at AS "cancelledAt",
-          superseded_by_program_id AS "supersededByProgramId",
-          deleted_at AS "deletedAt"
-        FROM projection_programs
-        WHERE deleted_at IS NULL
-        ORDER BY created_at ASC, program_id ASC
-      `,
-  });
-
-  const listProgramNotificationRows = SqlSchema.findAll({
-    // Local mirror path for native/non-vxapp workspaces only.
-    Request: Schema.Void,
-    Result: ProjectionProgramNotificationDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          notification_id AS "notificationId",
-          program_id AS "programId",
-          executive_project_id AS "executiveProjectId",
-          executive_thread_id AS "executiveThreadId",
-          orchestrator_thread_id AS "orchestratorThreadId",
-          kind,
-          severity,
-          summary,
-          evidence_json AS "evidence",
-          state,
-          queued_at AS "queuedAt",
-          delivered_at AS "deliveredAt",
-          consumed_at AS "consumedAt",
-          dropped_at AS "droppedAt",
-          consume_reason AS "consumeReason",
-          drop_reason AS "dropReason",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_program_notifications
-        ORDER BY queued_at DESC, notification_id ASC
-      `,
-  });
-
-  const listCtoAttentionRows = SqlSchema.findAll({
-    // Local mirror path for native/non-vxapp workspaces only.
-    Request: Schema.Void,
-    Result: ProjectionCtoAttentionDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          attention_id AS "attentionId",
-          attention_key AS "attentionKey",
-          notification_id AS "notificationId",
-          program_id AS "programId",
-          executive_project_id AS "executiveProjectId",
-          executive_thread_id AS "executiveThreadId",
-          source_thread_id AS "sourceThreadId",
-          source_role AS "sourceRole",
-          kind,
-          severity,
-          summary,
-          evidence_json AS "evidence",
-          state,
-          queued_at AS "queuedAt",
-          acknowledged_at AS "acknowledgedAt",
-          resolved_at AS "resolvedAt",
-          dropped_at AS "droppedAt",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM projection_cto_attention
-        ORDER BY updated_at DESC, attention_id ASC
       `,
   });
 
@@ -1308,7 +1188,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           };
           const [
             projectRows,
-            programRows,
             threadRows,
             messageRows,
             messageCountRows,
@@ -1329,14 +1208,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 toPersistenceSqlOrDecodeError(
                   "ProjectionSnapshotQuery.getSnapshot:listProjects:query",
                   "ProjectionSnapshotQuery.getSnapshot:listProjects:decodeRows",
-                ),
-              ),
-            ),
-            listProgramRows(undefined).pipe(
-              Effect.mapError(
-                toPersistenceSqlOrDecodeError(
-                  "ProjectionSnapshotQuery.getSnapshot:listPrograms:query",
-                  "ProjectionSnapshotQuery.getSnapshot:listPrograms:decodeRows",
                 ),
               ),
             ),
@@ -1533,73 +1404,37 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             vxappBackedProjectRows,
             runtimePaths,
           );
-          let programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> = [];
-          let ctoAttentionRows: ReadonlyArray<OrchestrationCtoAttentionItem> = [];
-          let ownerPrograms: ReadonlyArray<OrchestrationProgram> | null = null;
-          if (vxappBackedProjectRows.length > 0) {
-            const controlPlane = yield* Effect.serviceOption(AgentsVxappControlPlane).pipe(
-              Effect.flatMap((controlPlaneOption) =>
-                Option.match(controlPlaneOption, {
-                  onNone: () =>
-                    Effect.fail(
-                      new Error("vxapp-backed snapshot requires external control plane service."),
-                    ),
-                  onSome: (service) => Effect.succeed(service),
-                }),
-              ),
+          const controlPlaneOption = yield* Effect.serviceOption(AgentsVxappControlPlane);
+          if (Option.isNone(controlPlaneOption) && vxappBackedProjectRows.length > 0) {
+            return yield* Effect.fail(
+              new Error("snapshot requires agents-vxapp control plane authority service."),
             );
-            const [notificationSummaryExport, attentionSummaryExport, ownerSnapshot] =
-              yield* Effect.all([
-                controlPlane.getNotificationSummaryExport(),
-                controlPlane.getAttentionSummaryExport(),
-                controlPlane.getProgramsProjectionSnapshot(),
-              ]);
-            programNotificationRows = notificationSummaryExport.notifications.map(
-              mapOwnerProgramNotification,
-            );
-            ctoAttentionRows = selectSnapshotCtoAttentionItems(
-              attentionSummaryExport.attention.map(mapOwnerCtoAttentionItem),
-            );
-            ownerPrograms = ownerSnapshot.programs.map(mapOwnerProgram);
-          } else {
-            const localProgramNotificationRows = yield* listProgramNotificationRows(undefined).pipe(
-              Effect.mapError(
-                toPersistenceSqlOrDecodeError(
-                  "ProjectionSnapshotQuery.getSnapshot:listProgramNotifications:query",
-                  "ProjectionSnapshotQuery.getSnapshot:listProgramNotifications:decodeRows",
-                ),
-              ),
-            );
-            const localCtoAttentionRows = yield* listCtoAttentionRows(undefined).pipe(
-              Effect.mapError(
-                toPersistenceSqlOrDecodeError(
-                  "ProjectionSnapshotQuery.getSnapshot:listCtoAttention:query",
-                  "ProjectionSnapshotQuery.getSnapshot:listCtoAttention:decodeRows",
-                ),
-              ),
-            );
-            programNotificationRows = localProgramNotificationRows.map((row) => ({
-              notificationId: row.notificationId,
-              programId: row.programId,
-              executiveProjectId: row.executiveProjectId,
-              executiveThreadId: row.executiveThreadId,
-              orchestratorThreadId: row.orchestratorThreadId,
-              kind: row.kind,
-              severity: row.severity,
-              summary: row.summary,
-              evidence: row.evidence,
-              state: row.state,
-              queuedAt: row.queuedAt,
-              deliveredAt: row.deliveredAt,
-              consumedAt: row.consumedAt,
-              droppedAt: row.droppedAt,
-              consumeReason: row.consumeReason ?? undefined,
-              dropReason: row.dropReason ?? undefined,
-              createdAt: row.createdAt,
-              updatedAt: row.updatedAt,
-            }));
-            ctoAttentionRows = selectSnapshotCtoAttentionItems(localCtoAttentionRows);
           }
+          const [programNotificationRows, ctoAttentionRows, ownerPrograms] = Option.isSome(
+            controlPlaneOption,
+          )
+            ? yield* Effect.all([
+                controlPlaneOption.value
+                  .getNotificationSummaryExport()
+                  .pipe(
+                    Effect.map((snapshot) =>
+                      snapshot.notifications.map(mapOwnerProgramNotification),
+                    ),
+                  ),
+                controlPlaneOption.value
+                  .getAttentionSummaryExport()
+                  .pipe(
+                    Effect.map((snapshot) =>
+                      selectSnapshotCtoAttentionItems(
+                        snapshot.attention.map(mapOwnerCtoAttentionItem),
+                      ),
+                    ),
+                  ),
+                controlPlaneOption.value
+                  .getProgramsAuthoritySnapshot()
+                  .pipe(Effect.map((snapshot) => snapshot.programs.map(mapOwnerProgram))),
+              ])
+            : [[], [], []];
 
           const messagesByThread = new Map<string, Array<OrchestrationMessage>>();
           const messageCountByThread = new Map(
@@ -1629,7 +1464,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             }
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
-          for (const row of ownerPrograms ?? programRows) {
+          for (const row of ownerPrograms) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
           for (const row of scopedThreadRows) {
@@ -1839,9 +1674,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               : localProjects;
           const boundProjects = applyBindingCurrentThreadToProjects(projects, bindingAuthority);
 
-          const programs: ReadonlyArray<OrchestrationProgram> =
-            ownerPrograms ??
-            programRows.map((row) => toOrchestrationProgram(decodeProjectionProgramDbRow(row)));
+          const programs: ReadonlyArray<OrchestrationProgram> = ownerPrograms;
 
           const programNotifications: ReadonlyArray<OrchestrationProgramNotification> =
             programNotificationRows.map((row) => ({

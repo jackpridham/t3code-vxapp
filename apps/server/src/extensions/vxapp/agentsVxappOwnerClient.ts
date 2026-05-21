@@ -685,8 +685,13 @@ export async function fetchAgentsVxappProgramsTodosSnapshot() {
   ).payload;
 }
 
-export async function fetchAgentsVxappProgramsProjectionSnapshot() {
-  return (await callManifestCommand<JsonRecord>("programs_projection_snapshot")).payload;
+export async function fetchAgentsVxappProgramsAuthoritySnapshot() {
+  return (
+    await callManifestCommandByWrapperKey<JsonRecord>({
+      wrapperKey: "programs_authority_snapshot",
+      surface: "programs_authority_snapshot",
+    })
+  ).payload;
 }
 
 export async function requestAgentsVxappProgramMutation(

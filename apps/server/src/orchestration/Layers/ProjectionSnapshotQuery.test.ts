@@ -9,12 +9,12 @@ const source = readFileSync(resolve(here, "ProjectionSnapshotQuery.ts"), "utf8")
 
 describe("ProjectionSnapshotQuery authority boundary", () => {
   it("consumes owner-backed Program, notification, attention, and binding truth for vxapp rows", () => {
-    expect(source).toContain("controlPlane.getProgramsProjectionSnapshot()");
-    expect(source).toContain("controlPlane.getNotificationSummaryExport()");
-    expect(source).toContain("controlPlane.getAttentionSummaryExport()");
+    expect(source).toContain("getProgramsAuthoritySnapshot()");
+    expect(source).toContain("getNotificationSummaryExport()");
+    expect(source).toContain("getAttentionSummaryExport()");
     expect(source).toContain("getRuntimePaths()");
     expect(source).toContain("getBindingAuthorityForVxappProjects");
-    expect(source).toContain("ownerPrograms ??");
+    expect(source).toMatch(/const programs: ReadonlyArray<OrchestrationProgram> =\s*ownerPrograms/);
   });
 
   it("does not expose local wake rows as vxapp-backed current truth", () => {

@@ -7,7 +7,7 @@ vi.mock("../agentsVxappOwnerClient.ts", async (importOriginal) => {
   return {
     ...actual,
     fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
-    fetchAgentsVxappProgramsProjectionSnapshot: vi.fn(),
+    fetchAgentsVxappProgramsAuthoritySnapshot: vi.fn(),
     fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
     requestAgentsVxappProgramMutation: vi.fn(),
     requestAgentsVxappTodoMutation: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock("../agentsVxappOwnerClient.ts", async (importOriginal) => {
 });
 
 import {
-  fetchAgentsVxappProgramsProjectionSnapshot,
+  fetchAgentsVxappProgramsAuthoritySnapshot,
   fetchAgentsVxappProgramsTodosSnapshot,
   requestAgentsVxappProgramMutation,
   requestAgentsVxappTodoMutation,
@@ -24,7 +24,7 @@ import { AgentsVxappControlPlane } from "../Services/AgentsVxappControlPlane.ts"
 import { AgentsVxappOwnerClientError } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappControlPlaneLive } from "./AgentsVxappControlPlane.ts";
 
-const mockedProgramsProjection = vi.mocked(fetchAgentsVxappProgramsProjectionSnapshot);
+const mockedProgramsAuthority = vi.mocked(fetchAgentsVxappProgramsAuthoritySnapshot);
 const mockedProgramsTodos = vi.mocked(fetchAgentsVxappProgramsTodosSnapshot);
 const mockedProgramMutation = vi.mocked(requestAgentsVxappProgramMutation);
 const mockedTodoMutation = vi.mocked(requestAgentsVxappTodoMutation);
@@ -44,22 +44,22 @@ afterEach(() => {
 });
 
 describe("AgentsVxappControlPlaneLive", () => {
-  it("fetches startup-safe Program projection snapshots through the owner client", async () => {
-    mockedProgramsProjection.mockResolvedValueOnce({
+  it("fetches startup-safe Program authority snapshots through the owner client", async () => {
+    mockedProgramsAuthority.mockResolvedValueOnce({
       programs: [{ id: "program-owner", title: "Owner Program", status: "active" }],
     });
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const controlPlane = yield* AgentsVxappControlPlane;
-        return yield* controlPlane.getProgramsProjectionSnapshot();
+        return yield* controlPlane.getProgramsAuthoritySnapshot();
       }).pipe(Effect.provide(AgentsVxappControlPlaneLive)),
     );
 
     expect(result).toEqual({
       programs: [{ id: "program-owner", title: "Owner Program", status: "active" }],
     });
-    expect(mockedProgramsProjection).toHaveBeenCalledTimes(1);
+    expect(mockedProgramsAuthority).toHaveBeenCalledTimes(1);
   });
 
   it("fetches strict Program and TODO snapshots through the owner client", async () => {
