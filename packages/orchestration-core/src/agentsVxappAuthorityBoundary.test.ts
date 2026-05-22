@@ -252,6 +252,9 @@ describe("agents-vxapp authority boundary", () => {
     for (const source of [deciderSource, invariantsSource, projectorSource]) {
       expect(source).not.toMatch(/from\s+["'][^"']*agentsVxappOwnerClient(?:\.ts)?["']/);
       expect(source).not.toMatch(/t3code-[a-z0-9-]+/);
+      expect(source).not.toMatch(
+        /thread_(?:create|turn_start|turn_interrupt|session_stop|revert|archive|delete|lineage_update)/,
+      );
     }
   });
 });

@@ -126,6 +126,48 @@ const TODO_MUTATE_ACTIONS = [
   "unlink_plan",
 ] as const;
 type TodoMutateAction = (typeof TODO_MUTATE_ACTIONS)[number];
+const THREAD_LIFECYCLE_PROVIDER_REQUEST_KINDS = [
+  "thread_create",
+  "thread_turn_start",
+  "thread_turn_interrupt",
+  "thread_session_stop",
+  "thread_revert",
+  "thread_archive",
+  "thread_delete",
+  "thread_lineage_update",
+] as const;
+type ThreadLifecycleProviderRequestKind = (typeof THREAD_LIFECYCLE_PROVIDER_REQUEST_KINDS)[number];
+export type AgentsVxappThreadLifecycleOwnerCommand =
+  | "t3code-threads-create"
+  | "t3code-threads-start"
+  | "t3code-threads-interrupt"
+  | "t3code-threads-stop"
+  | "t3code-threads-revert"
+  | "t3code-threads-archive"
+  | "t3code-threads-delete"
+  | "t3code-threads-lineage-update";
+
+const THREAD_LIFECYCLE_OWNER_COMMAND_KINDS = {
+  "t3code-threads-create": "thread_create",
+  "t3code-threads-start": "thread_turn_start",
+  "t3code-threads-interrupt": "thread_turn_interrupt",
+  "t3code-threads-stop": "thread_session_stop",
+  "t3code-threads-revert": "thread_revert",
+  "t3code-threads-archive": "thread_archive",
+  "t3code-threads-delete": "thread_delete",
+  "t3code-threads-lineage-update": "thread_lineage_update",
+} as const satisfies Record<
+  AgentsVxappThreadLifecycleOwnerCommand,
+  ThreadLifecycleProviderRequestKind
+>;
+
+export interface AgentsVxappThreadLifecycleProviderPayload extends JsonRecord {
+  readonly legacyFallbackUsed: false;
+  readonly providerRequest: JsonRecord & {
+    readonly kind: ThreadLifecycleProviderRequestKind;
+    readonly requestId: string;
+  };
+}
 
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -308,6 +350,127 @@ function validateAuthorityPayload<T>(
     display: payload.display,
     options: payload.options,
   };
+}
+
+function isThreadLifecycleProviderRequestKind(
+  value: unknown,
+): value is ThreadLifecycleProviderRequestKind {
+  return (
+    typeof value === "string" &&
+    THREAD_LIFECYCLE_PROVIDER_REQUEST_KINDS.includes(value as ThreadLifecycleProviderRequestKind)
+  );
+}
+
+function requiredThreadLifecycleProviderFields(
+  kind: ThreadLifecycleProviderRequestKind,
+): readonly string[] {
+  switch (kind) {
+    case "thread_create":
+      return ["projectId", "title"];
+    case "thread_turn_start":
+      return ["threadId", "message"];
+    case "thread_revert":
+      return ["threadId", "revertToTurnId"];
+    case "thread_archive":
+      return ["threadId", "archiveCurrent"];
+    case "thread_lineage_update":
+      return ["threadId", "lineage"];
+    case "thread_turn_interrupt":
+    case "thread_session_stop":
+    case "thread_delete":
+      return ["threadId"];
+  }
+}
+
+function validateLifecycleProviderRequestField(input: {
+  readonly field: string;
+  readonly ownerCommand: AgentsVxappThreadLifecycleOwnerCommand;
+  readonly providerRequest: JsonRecord;
+}): string | null {
+  const value = input.providerRequest[input.field];
+  if (input.field === "archiveCurrent") {
+    return typeof value === "boolean" ? null : input.field;
+  }
+  if (input.field === "lineage") {
+    const lineage = asRecord(value);
+    return lineage && lineage.legacyFallbackUsed === false ? null : input.field;
+  }
+  return asString(value) ? null : input.field;
+}
+
+function validateThreadLifecycleProviderPayload(input: {
+  readonly ownerCommand: AgentsVxappThreadLifecycleOwnerCommand;
+  readonly payload: unknown;
+}): AgentsVxappThreadLifecycleProviderPayload {
+  const payload = asRecord(input.payload);
+  if (!payload) {
+    fail({
+      authoritySurface: "threads",
+      message: "Owner lifecycle payload must be a JSON object.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  if (payload.legacyFallbackUsed !== false) {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "threads",
+      message: "Owner lifecycle payload used a legacy fallback.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  const providerRequest = asRecord(payload.providerRequest);
+  if (!providerRequest) {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "threads",
+      message: "Owner lifecycle payload is missing providerRequest.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  const expectedKind = THREAD_LIFECYCLE_OWNER_COMMAND_KINDS[input.ownerCommand];
+  if (!isThreadLifecycleProviderRequestKind(providerRequest.kind)) {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "threads",
+      message: "Owner lifecycle providerRequest has an unsupported kind.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  if (providerRequest.kind !== expectedKind) {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "threads",
+      message: `Owner lifecycle providerRequest kind '${providerRequest.kind}' did not match '${expectedKind}'.`,
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  const requestId = asString(providerRequest.requestId);
+  if (!requestId) {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "threads",
+      message: "Owner lifecycle providerRequest is missing requestId.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  const missingFields = requiredThreadLifecycleProviderFields(providerRequest.kind)
+    .map((field) =>
+      validateLifecycleProviderRequestField({
+        field,
+        ownerCommand: input.ownerCommand,
+        providerRequest,
+      }),
+    )
+    .filter((field): field is string => field !== null);
+  if (missingFields.length > 0) {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "threads",
+      message: `Owner lifecycle providerRequest is malformed; missing ${missingFields.join(", ")}.`,
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  return payload as AgentsVxappThreadLifecycleProviderPayload;
 }
 
 async function executeOwnerCommand(input: {
@@ -833,6 +996,21 @@ export async function requestAgentsVxappThreadEventIngest(input: Readonly<JsonRe
   ).payload;
 }
 
+export async function requestAgentsVxappThreadLifecycleProviderRequest(input: {
+  readonly command: AgentsVxappThreadLifecycleOwnerCommand;
+  readonly payloadJson: Readonly<JsonRecord>;
+}): Promise<AgentsVxappThreadLifecycleProviderPayload> {
+  const authorityPayload = await callManifestCommandByName<JsonRecord>({
+    command: input.command,
+    surface: "threads",
+    payloadJson: input.payloadJson,
+  });
+  return validateThreadLifecycleProviderPayload({
+    ownerCommand: input.command,
+    payload: authorityPayload.payload,
+  });
+}
+
 export async function requestAgentsVxappProjectEventIngest(input: Readonly<JsonRecord>) {
   return (
     await callManifestCommandByName<JsonRecord>({
@@ -900,6 +1078,27 @@ export async function requestAgentsVxappWakeMutation(
       command: "t3code-wake-mutate",
       surface: "wakes",
       payloadJson: input,
+    })
+  ).payload;
+}
+
+export async function requestAgentsVxappCtoProviderRequest(input: {
+  readonly command:
+    | "t3code-cto-attention-list"
+    | "t3code-cto-notifications-list"
+    | "t3code-cto-operate-once"
+    | "t3code-cto-yacht-watch-inspect"
+    | "t3code-cto-yacht-watch-periodic-check";
+  readonly surface: "cto" | "cto_operate" | "cto_yacht_watch";
+  readonly args?: readonly string[];
+  readonly payloadJson?: unknown;
+}) {
+  return (
+    await callManifestCommandByName<JsonRecord>({
+      command: input.command,
+      surface: input.surface,
+      ...(input.args ? { args: input.args } : {}),
+      ...(input.payloadJson !== undefined ? { payloadJson: input.payloadJson } : {}),
     })
   ).payload;
 }

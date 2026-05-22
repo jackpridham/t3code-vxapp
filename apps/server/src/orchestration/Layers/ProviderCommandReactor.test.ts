@@ -11,7 +11,9 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationSession,
   type OrchestrationThreadActivity,
+  type ProviderSendTurnInput,
   type ProviderRespondToRequestInput,
   type ProviderRespondToUserInputInput,
   type ServerSettings,
@@ -157,10 +159,26 @@ describe("ProviderCommandReactor authority boundary", () => {
     const respondToUserInput = vi.fn(
       (_input: ProviderRespondToUserInputInput) => Effect.void,
     ) satisfies ProviderServiceShape["respondToUserInput"];
+    const startSession = vi.fn((threadId: ThreadId) =>
+      Effect.succeed({
+        threadId,
+        provider: "codex" as const,
+        status: "ready" as const,
+        runtimeMode: "full-access" as const,
+        createdAt: "2026-05-16T00:00:00.000Z",
+        updatedAt: "2026-05-16T00:00:00.000Z",
+      }),
+    ) satisfies ProviderServiceShape["startSession"];
+    const sendTurn = vi.fn((_input: ProviderSendTurnInput) =>
+      Effect.succeed({
+        threadId,
+        turnId: "turn-owner-request" as never,
+      }),
+    ) satisfies ProviderServiceShape["sendTurn"];
 
     const providerService: ProviderServiceShape = {
-      startSession: () => unsupportedEffect("ProviderService.startSession"),
-      sendTurn: () => unsupportedEffect("ProviderService.sendTurn"),
+      startSession,
+      sendTurn,
       interruptTurn: () => unsupportedEffect("ProviderService.interruptTurn"),
       respondToRequest,
       respondToUserInput,
@@ -212,7 +230,7 @@ describe("ProviderCommandReactor authority boundary", () => {
         activeTurnId: null,
         lastError: null,
         updatedAt: "2026-05-16T00:00:00.000Z",
-      },
+      } as OrchestrationSession,
       hasActiveError: options?.initialHasActiveError ?? false,
       activeError: options?.initialActiveError ?? null,
       historicalError: options?.initialHistoricalError ?? null,
@@ -238,17 +256,35 @@ describe("ProviderCommandReactor authority boundary", () => {
       getReadModel: () => Effect.succeed(buildReadModel()),
       readEvents: () => Stream.empty,
       dispatch: (command: OrchestrationCommand) => {
-        if (command.type !== "thread.activity.append") {
-          return unsupportedEffect(`OrchestrationEngine.dispatch(${command.type})`);
+        if (command.type === "thread.session.set") {
+          if (threadState.id !== command.threadId) {
+            return Effect.die(new Error(`Thread '${command.threadId}' not found in read model`));
+          }
+          threadState.session = command.session;
+          threadState.hasActiveError = command.hasActiveError ?? false;
+          threadState.activeError = command.activeError ?? null;
+          threadState.historicalError = command.historicalError ?? null;
+          threadState.errorPresentationSource =
+            command.errorPresentationSource === "owner" ||
+            command.errorPresentationSource === "session"
+              ? command.errorPresentationSource
+              : "none";
+          threadState.updatedAt = command.createdAt;
+          readModelUpdatedAt = command.createdAt;
+          snapshotSequence += 1;
+          return Effect.succeed({ sequence: snapshotSequence });
         }
-        if (threadState.id !== command.threadId) {
-          return Effect.die(new Error(`Thread '${command.threadId}' not found in read model`));
+        if (command.type === "thread.activity.append") {
+          if (threadState.id !== command.threadId) {
+            return Effect.die(new Error(`Thread '${command.threadId}' not found in read model`));
+          }
+          threadState.activities = [...threadState.activities, command.activity];
+          threadState.updatedAt = command.createdAt;
+          readModelUpdatedAt = command.createdAt;
+          snapshotSequence += 1;
+          return Effect.succeed({ sequence: snapshotSequence });
         }
-        threadState.activities = [...threadState.activities, command.activity];
-        threadState.updatedAt = command.createdAt;
-        readModelUpdatedAt = command.createdAt;
-        snapshotSequence += 1;
-        return Effect.succeed({ sequence: snapshotSequence });
+        return unsupportedEffect(`OrchestrationEngine.dispatch(${command.type})`);
       },
       dryRunDispatch: () => unsupportedEffect("OrchestrationEngine.dryRunDispatch"),
       streamDomainEvents: Stream.fromPubSub(domainEventPubSub),
@@ -328,8 +364,121 @@ describe("ProviderCommandReactor authority boundary", () => {
       readThread,
       respondToRequest,
       respondToUserInput,
+      sendTurn,
+      startSession,
     };
   }
+
+  it("executes owner-issued thread.turn.start provider requests without local prompt synthesis", async () => {
+    const harness = await createHarness();
+
+    await harness.publishEvent({
+      type: "thread.turn-start-requested",
+      eventId: EventId.makeUnsafe("evt-owner-provider-ready"),
+      sequence: 7,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:07.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        messageId: "owner-message-not-used",
+        providerRequestStatus: "ready",
+        providerRequest: {
+          kind: "thread.turn.start",
+          requestId: "owner-request-1",
+          threadId: "thread-1",
+          message: "owner provided message",
+          runtimeMode: "full-access",
+          interactionMode: "plan",
+        },
+        createdAt: "2026-05-16T00:00:07.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-owner-provider-ready"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).toHaveBeenCalledWith({
+      threadId: asThreadId("thread-1"),
+      input: "owner provided message",
+      interactionMode: "plan",
+    });
+
+    const thread = await harness.readThread();
+    expect(thread.activities).toEqual([]);
+    expect(thread.session?.runtimeMode).toBe("full-access");
+  });
+
+  it("fails closed when owner marks provider request ready without a thread.turn.start request", async () => {
+    const harness = await createHarness();
+
+    await harness.publishEvent({
+      type: "thread.turn-start-requested",
+      eventId: EventId.makeUnsafe("evt-owner-provider-malformed"),
+      sequence: 8,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:08.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        messageId: "owner-message-not-used",
+        providerRequestStatus: "ready",
+        createdAt: "2026-05-16T00:00:08.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-owner-provider-malformed"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const thread = await harness.readThread();
+    expect(thread.activities).toContainEqual(
+      expect.objectContaining({
+        kind: "provider.turn.start.failed",
+        summary: "Owner provider request failed closed",
+      }),
+    );
+  });
+
+  it("surfaces blocked owner provider request diagnostics without executing provider turns", async () => {
+    const harness = await createHarness();
+
+    await harness.publishEvent({
+      type: "thread.turn-start-requested",
+      eventId: EventId.makeUnsafe("evt-owner-provider-blocked"),
+      sequence: 9,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:09.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        messageId: "owner-message-not-used",
+        providerRequestStatus: "blocked",
+        failureCode: "busy_thread",
+        failureMessage: "Thread is busy.",
+        legacyFallbackUsed: false,
+        createdAt: "2026-05-16T00:00:09.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-owner-provider-blocked"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const thread = await harness.readThread();
+    expect(thread.activities).toContainEqual(
+      expect.objectContaining({
+        kind: "provider.turn.start.failed",
+        summary: "Owner provider request blocked",
+        payload: expect.objectContaining({
+          detail: "busy_thread: Thread is busy.",
+        }),
+      }),
+    );
+  });
 
   it("blocks provider approval responses when the owner helper fails and appends failure activity", async () => {
     const harness = await createHarness({
@@ -575,5 +724,15 @@ describe("ProviderCommandReactor authority boundary", () => {
         requestId: "req-user-input-success",
       }),
     ).toEqual([]);
+  });
+
+  it("keeps Phase 08 lifecycle ownership out of the provider reactor", () => {
+    const source = fs.readFileSync(new URL("./ProviderCommandReactor.ts", import.meta.url), "utf8");
+
+    expect(source).not.toContain("t3code-threads-create");
+    expect(source).not.toContain("t3code-threads-start");
+    expect(source).not.toContain("thread_create");
+    expect(source).not.toContain("thread_lineage_update");
+    expect(source).not.toContain("buildThreadLifecycleProviderRequest");
   });
 });

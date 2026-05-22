@@ -123,6 +123,56 @@ it.effect("accepts arbitrary owner transport strings and opaque payload records"
   }),
 );
 
+it.effect("keeps thread lifecycle provider requests as owner opaque payload records", () =>
+  Effect.gen(function* () {
+    const success = yield* decodeOwnerResultEnvelope({
+      ok: true,
+      contract_family: "agents-vxapp-t3code-authority",
+      contract_version: "v1",
+      command: "t3code-threads-start",
+      meta: {},
+      result: {
+        contractFamily: "agents-vxapp-t3code-authority",
+        contractVersion: "v1",
+        authorityStore: "owner-store/custom",
+        authoritySource: "owner-source/custom",
+        legacyFallbackUsed: false,
+        surface: "threads",
+        payload: {
+          legacyFallbackUsed: false,
+          providerRequest: {
+            kind: "thread_turn_start",
+            requestId: "req-start",
+            threadId: "thread-cto",
+            message: "Run task",
+          },
+        },
+        display: {},
+        options: {},
+      },
+    });
+
+    assert.strictEqual(success.ok, true);
+    assert.deepStrictEqual(success.result.payload, {
+      legacyFallbackUsed: false,
+      providerRequest: {
+        kind: "thread_turn_start",
+        requestId: "req-start",
+        threadId: "thread-cto",
+        message: "Run task",
+      },
+    });
+  }),
+);
+
+it("does not add local thread lifecycle command reconstruction to contracts", () => {
+  const source = fs.readFileSync(authoritySourcePath, "utf8");
+
+  assert.doesNotMatch(source, /thread_turn_start/);
+  assert.doesNotMatch(source, /thread_create/);
+  assert.doesNotMatch(source, /ThreadLifecycleProviderRequest/);
+});
+
 it.effect("requires legacyFallbackUsed and enforces it as a boolean", () =>
   Effect.gen(function* () {
     const missing = yield* Effect.exit(

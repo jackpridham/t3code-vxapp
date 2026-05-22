@@ -17,6 +17,7 @@ import {
   requestAgentsVxappApprovalRequest,
   requestAgentsVxappApprovalResponse,
   requestAgentsVxappProjectEventIngest,
+  requestAgentsVxappThreadLifecycleProviderRequest,
   requestAgentsVxappThreadEventIngest,
   requestAgentsVxappThreadStatus,
   requestAgentsVxappUserInputResponse,
@@ -456,6 +457,195 @@ describe("agentsVxappOwnerClient", () => {
       ],
       expect.objectContaining({}),
     );
+  });
+
+  it("validates owner-issued thread lifecycle provider requests for every Phase 08 kind", async () => {
+    const lifecycleCases = [
+      {
+        command: "t3code-threads-create",
+        kind: "thread_create",
+        providerRequest: {
+          kind: "thread_create",
+          requestId: "req-create",
+          projectId: "project-1",
+          title: "Worker",
+        },
+      },
+      {
+        command: "t3code-threads-start",
+        kind: "thread_turn_start",
+        providerRequest: {
+          kind: "thread_turn_start",
+          requestId: "req-start",
+          threadId: "thread-1",
+          message: "Run task",
+        },
+      },
+      {
+        command: "t3code-threads-interrupt",
+        kind: "thread_turn_interrupt",
+        providerRequest: {
+          kind: "thread_turn_interrupt",
+          requestId: "req-interrupt",
+          threadId: "thread-1",
+        },
+      },
+      {
+        command: "t3code-threads-stop",
+        kind: "thread_session_stop",
+        providerRequest: {
+          kind: "thread_session_stop",
+          requestId: "req-stop",
+          threadId: "thread-1",
+        },
+      },
+      {
+        command: "t3code-threads-revert",
+        kind: "thread_revert",
+        providerRequest: {
+          kind: "thread_revert",
+          requestId: "req-revert",
+          threadId: "thread-1",
+          revertToTurnId: "turn-1",
+        },
+      },
+      {
+        command: "t3code-threads-archive",
+        kind: "thread_archive",
+        providerRequest: {
+          kind: "thread_archive",
+          requestId: "req-archive",
+          threadId: "thread-1",
+          archiveCurrent: false,
+        },
+      },
+      {
+        command: "t3code-threads-delete",
+        kind: "thread_delete",
+        providerRequest: {
+          kind: "thread_delete",
+          requestId: "req-delete",
+          threadId: "thread-1",
+        },
+      },
+      {
+        command: "t3code-threads-lineage-update",
+        kind: "thread_lineage_update",
+        providerRequest: {
+          kind: "thread_lineage_update",
+          requestId: "req-lineage",
+          threadId: "thread-1",
+          lineage: { spawnRole: "worker", legacyFallbackUsed: false },
+        },
+      },
+    ] as const;
+
+    mockedRunProcess.mockResolvedValueOnce(
+      processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+    );
+    for (const lifecycleCase of lifecycleCases) {
+      mockedRunProcess.mockResolvedValueOnce(
+        processResult(
+          envelope(lifecycleCase.command, "threads", {
+            legacyFallbackUsed: false,
+            providerRequest: lifecycleCase.providerRequest,
+          }),
+        ),
+      );
+    }
+
+    for (const lifecycleCase of lifecycleCases) {
+      const payload = await requestAgentsVxappThreadLifecycleProviderRequest({
+        command: lifecycleCase.command,
+        payloadJson: { threadId: "thread-1" },
+      });
+
+      expect(payload.providerRequest.kind).toBe(lifecycleCase.kind);
+      expect(payload.providerRequest.requestId).toBe(lifecycleCase.providerRequest.requestId);
+      expect(payload.legacyFallbackUsed).toBe(false);
+    }
+
+    for (const [index, lifecycleCase] of lifecycleCases.entries()) {
+      expect(mockedRunProcess).toHaveBeenNthCalledWith(
+        index + 2,
+        expect.stringMatching(/t3-control-plane-owner$/),
+        [
+          lifecycleCase.command,
+          "--json",
+          "--payload-json",
+          expect.stringContaining('"threadId":"thread-1"'),
+        ],
+        expect.objectContaining({}),
+      );
+    }
+  });
+
+  it("fails closed on missing, malformed, legacy, or mismatched lifecycle provider requests", async () => {
+    const invalidPayloads = [
+      [
+        "missing providerRequest",
+        {
+          legacyFallbackUsed: false,
+        },
+        "missing providerRequest",
+      ],
+      [
+        "malformed providerRequest",
+        {
+          legacyFallbackUsed: false,
+          providerRequest: { kind: "thread_turn_start", requestId: "req-start", threadId: "t1" },
+        },
+        "missing message",
+      ],
+      [
+        "legacy lifecycle payload",
+        {
+          legacyFallbackUsed: true,
+          providerRequest: {
+            kind: "thread_turn_start",
+            requestId: "req-start",
+            threadId: "t1",
+            message: "Run",
+          },
+        },
+        "legacy fallback",
+      ],
+      [
+        "mismatched providerRequest kind",
+        {
+          legacyFallbackUsed: false,
+          providerRequest: {
+            kind: "thread_delete",
+            requestId: "req-delete",
+            threadId: "t1",
+          },
+        },
+        "did not match",
+      ],
+    ] as const;
+
+    for (const [, payload, message] of invalidPayloads) {
+      resetAgentsVxappOwnerManifestForTests();
+      mockedRunProcess.mockReset();
+      mockedRunProcess
+        .mockResolvedValueOnce(
+          processResult(
+            envelope("t3code-contract-manifest", "contract_manifest", manifestPayload()),
+          ),
+        )
+        .mockResolvedValueOnce(processResult(envelope("t3code-threads-start", "threads", payload)));
+
+      await expect(
+        requestAgentsVxappThreadLifecycleProviderRequest({
+          command: "t3code-threads-start",
+          payloadJson: { threadId: "t1" },
+        }),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining(message),
+        ownerCommand: "t3code-threads-start",
+        authoritySurface: "threads",
+      });
+    }
   });
 
   it("routes the sidebar graph helper through the dedicated startup-safe owner command", async () => {

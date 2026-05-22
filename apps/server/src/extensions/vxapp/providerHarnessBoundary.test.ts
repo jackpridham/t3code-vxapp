@@ -67,4 +67,38 @@ describe("provider harness boundary", () => {
     expect(ingestionSource).not.toContain("threadStatusByThreadId");
     expect(reactorSource).not.toContain("threadStatusByThreadId");
   });
+
+  it("keeps CTO provider request transport owner-backed and fail-closed", () => {
+    const ownerClientSource = readSource("extensions/vxapp/agentsVxappOwnerClient.ts");
+    const reactorSource = readSource("orchestration/Layers/ProviderCommandReactor.ts");
+
+    expect(ownerClientSource).toContain("requestAgentsVxappCtoProviderRequest");
+    expect(reactorSource).toContain('record.kind !== "thread.turn.start"');
+    expect(reactorSource).toContain("Owner provider request failed closed");
+    expect(reactorSource).not.toContain("vx t3 cto operate --once --json");
+  });
+
+  it("keeps Phase 08 thread lifecycle provider transport owner-backed and fail-closed", () => {
+    const ownerClientSource = readSource("extensions/vxapp/agentsVxappOwnerClient.ts");
+    const reactorSource = readSource("orchestration/Layers/ProviderCommandReactor.ts");
+
+    expect(ownerClientSource).toContain("requestAgentsVxappThreadLifecycleProviderRequest");
+    for (const kind of [
+      "thread_create",
+      "thread_turn_start",
+      "thread_turn_interrupt",
+      "thread_session_stop",
+      "thread_revert",
+      "thread_archive",
+      "thread_delete",
+      "thread_lineage_update",
+    ]) {
+      expect(ownerClientSource).toContain(kind);
+    }
+    expect(ownerClientSource).toContain("Owner lifecycle payload used a legacy fallback");
+    expect(ownerClientSource).toContain("Owner lifecycle payload is missing providerRequest");
+    expect(ownerClientSource).toContain("Owner lifecycle providerRequest is malformed");
+    expect(reactorSource).not.toContain("build_thread_start_request");
+    expect(reactorSource).not.toContain("buildThreadLifecycleProviderRequest");
+  });
 });

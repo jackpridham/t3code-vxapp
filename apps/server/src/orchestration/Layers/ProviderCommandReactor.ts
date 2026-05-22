@@ -9,7 +9,10 @@ import {
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
-  type RuntimeMode,
+  ProviderInteractionMode,
+  type ProviderInteractionMode as ProviderInteractionModeType,
+  RuntimeMode,
+  type RuntimeMode as RuntimeModeType,
   type TurnId,
 } from "@t3tools/contracts";
 import { threadHasLiveActiveTurn } from "@t3tools/orchestration-core/command-invariants";
@@ -96,6 +99,84 @@ type SessionBoundaryFence = {
   readonly recentTerminalTurnIds: ReadonlyArray<TurnId>;
 };
 
+type OwnerProviderRequestStatus = "ready" | "blocked";
+
+type OwnerThreadTurnStartProviderRequest = {
+  readonly kind: "thread.turn.start";
+  readonly requestId: string;
+  readonly threadId: ThreadId;
+  readonly message: string;
+  readonly runtimeMode?: RuntimeModeType;
+  readonly interactionMode?: ProviderInteractionModeType;
+};
+
+type OwnerProviderRequestPayload = {
+  readonly providerRequestStatus: OwnerProviderRequestStatus;
+  readonly providerRequest?: unknown;
+  readonly failureCode?: unknown;
+  readonly failureMessage?: unknown;
+  readonly legacyFallbackUsed?: unknown;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function ownerProviderRequestPayload(value: unknown): OwnerProviderRequestPayload | null {
+  const record = asRecord(value);
+  const providerRequestStatus = record ? asNonEmptyString(record.providerRequestStatus) : null;
+  if (providerRequestStatus !== "ready" && providerRequestStatus !== "blocked") {
+    return null;
+  }
+  return {
+    providerRequestStatus,
+    providerRequest: record?.providerRequest,
+    failureCode: record?.failureCode,
+    failureMessage: record?.failureMessage,
+    legacyFallbackUsed: record?.legacyFallbackUsed,
+  };
+}
+
+function ownerProviderRequestDiagnostic(payload: OwnerProviderRequestPayload): string {
+  const failureCode = asNonEmptyString(payload.failureCode);
+  const failureMessage = asNonEmptyString(payload.failureMessage);
+  if (failureCode && failureMessage) {
+    return `${failureCode}: ${failureMessage}`;
+  }
+  return failureMessage ?? failureCode ?? "Owner provider request was blocked.";
+}
+
+function decodeOwnerThreadTurnStartProviderRequest(
+  value: unknown,
+): OwnerThreadTurnStartProviderRequest | null {
+  const record = asRecord(value);
+  if (!record || record.kind !== "thread.turn.start") {
+    return null;
+  }
+  const requestId = asNonEmptyString(record.requestId);
+  const threadId = asNonEmptyString(record.threadId);
+  const message = asNonEmptyString(record.message);
+  if (!requestId || !threadId || !message) {
+    return null;
+  }
+  return {
+    kind: "thread.turn.start",
+    requestId,
+    threadId: ThreadId.makeUnsafe(threadId),
+    message,
+    ...(Schema.is(RuntimeMode)(record.runtimeMode) ? { runtimeMode: record.runtimeMode } : {}),
+    ...(Schema.is(ProviderInteractionMode)(record.interactionMode)
+      ? { interactionMode: record.interactionMode }
+      : {}),
+  };
+}
+
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : undefined;
@@ -152,7 +233,7 @@ const serverCommandId = (tag: string): CommandId =>
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const SESSION_BOUNDARY_FENCE_TERMINAL_TURN_MAX = 4;
-const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
+const DEFAULT_RUNTIME_MODE: RuntimeModeType = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 const DEFAULT_THREAD_TITLE = "New thread";
@@ -443,6 +524,7 @@ const make = Effect.gen(function* () {
     createdAt: string,
     options?: {
       readonly modelSelection?: ModelSelection;
+      readonly runtimeMode?: RuntimeModeType;
     },
   ) {
     const readModel = yield* orchestrationEngine.getReadModel();
@@ -451,7 +533,7 @@ const make = Effect.gen(function* () {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
 
-    const desiredRuntimeMode = thread.runtimeMode;
+    const desiredRuntimeMode = options?.runtimeMode ?? thread.runtimeMode;
     const currentProvider: ProviderKind | undefined = Schema.is(ProviderKind)(
       thread.session?.providerName,
     )
@@ -602,6 +684,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
+    readonly runtimeMode?: RuntimeModeType;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -612,7 +695,12 @@ const make = Effect.gen(function* () {
     yield* ensureSessionForThread(
       input.threadId,
       input.createdAt,
-      input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
+      input.modelSelection !== undefined || input.runtimeMode !== undefined
+        ? {
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+            ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+          }
+        : {},
     );
     const preparedThread = (yield* resolveThread(input.threadId)) ?? thread;
     yield* ensureThreadHasNoLiveActiveTurn(preparedThread, "sendTurnForThread:pre-send");
@@ -784,6 +872,62 @@ const make = Effect.gen(function* () {
   ) {
     const key = turnStartKeyForEvent(event);
     if (yield* hasHandledTurnStartRecently(key)) {
+      return;
+    }
+
+    const ownerPayload = ownerProviderRequestPayload(event.payload);
+    if (ownerPayload) {
+      if (ownerPayload.providerRequestStatus === "blocked") {
+        yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Owner provider request blocked",
+          detail: ownerProviderRequestDiagnostic(ownerPayload),
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        });
+        return;
+      }
+
+      const providerRequest = decodeOwnerThreadTurnStartProviderRequest(
+        ownerPayload.providerRequest,
+      );
+      if (!providerRequest) {
+        yield* appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: "provider.turn.start.failed",
+          summary: "Owner provider request failed closed",
+          detail:
+            "Owner providerRequestStatus was ready, but providerRequest.kind was not thread.turn.start or required fields were missing.",
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        });
+        return;
+      }
+
+      yield* sendTurnForThread({
+        threadId: providerRequest.threadId,
+        messageText: providerRequest.message,
+        ...(providerRequest.runtimeMode !== undefined
+          ? { runtimeMode: providerRequest.runtimeMode }
+          : {}),
+        ...(providerRequest.interactionMode !== undefined
+          ? { interactionMode: providerRequest.interactionMode }
+          : {}),
+        createdAt: event.payload.createdAt,
+      }).pipe(
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: providerRequest.threadId,
+            kind: "provider.turn.start.failed",
+            summary: "Owner provider request failed",
+            detail: Cause.pretty(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+            requestId: providerRequest.requestId,
+          }),
+        ),
+      );
       return;
     }
 
