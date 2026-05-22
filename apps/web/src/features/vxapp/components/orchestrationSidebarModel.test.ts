@@ -116,7 +116,9 @@ function makeAuthoritySnapshot(
 ): ServerGetAgentsVxappSidebarAuthoritySnapshotResult {
   return {
     currentTodos: [],
+    hints: [],
     ownerDiagnostics: [],
+    pagination: null,
     programs: [],
     todos: [],
     ...overrides,

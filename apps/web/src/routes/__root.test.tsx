@@ -199,6 +199,7 @@ function makeThreadDetailApi(overrides: Partial<NativeApi["orchestration"]> = {}
         updatedAt: "2026-04-06T00:00:00.000Z",
       },
     ]),
+    listThreadCheckpoints: vi.fn().mockResolvedValue([]),
     listThreadActivities: vi.fn().mockResolvedValue([]),
     listThreadSessions: vi.fn().mockResolvedValue([]),
     listSessionThreads: vi.fn().mockResolvedValue([]),
@@ -245,7 +246,12 @@ describe("bootstrapOrchestrationState", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 1000,
+      limit: 200,
+    });
+    expect(threadDetailApi.listThreadActivities).toHaveBeenCalledWith({
+      threadId: rootThreadId,
+      limit: 200,
+      payloadMode: "compact",
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(1, bootstrapSummary);
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
@@ -407,7 +413,7 @@ describe("bootstrapOrchestrationState", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: ThreadId.makeUnsafe("thread-root"),
-      limit: 1000,
+      limit: 200,
     });
     expect(syncServerReadModel).toHaveBeenCalledTimes(1);
     expect(syncServerReadModel).toHaveBeenCalledWith(bootstrapSummary);
@@ -459,11 +465,11 @@ describe("bootstrapOrchestrationState", () => {
     });
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: routeThreadId,
-      limit: 1000,
+      limit: 200,
     });
     expect(threadDetailApi.listThreadMessages).not.toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 1000,
+      limit: 200,
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
       2,

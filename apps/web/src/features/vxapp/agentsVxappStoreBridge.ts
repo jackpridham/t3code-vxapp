@@ -17,6 +17,10 @@ import { WebSocketRequestError } from "~/wsTransport";
 
 type SidebarAuthoritySnapshot = ServerGetAgentsVxappSidebarAuthoritySnapshotResult;
 type SidebarTodoList = SidebarAuthoritySnapshot["todos"][number][];
+export type AgentsVxappAuthorityPageRequest = {
+  readonly limit?: number | undefined;
+  readonly page?: number | undefined;
+};
 
 export interface AgentsVxappSidebarAuthorityNormalizedSnapshot {
   readonly attentionItems: readonly ServerAgentsVxappSidebarAttentionItem[];
@@ -44,6 +48,7 @@ function makeBoundaryError(input: {
   readonly message: string;
   readonly ownerErrorCode?: string | null;
   readonly title?: string;
+  readonly hints?: readonly Record<string, unknown>[];
 }): AgentsVxappOwnerBoundaryError {
   const display =
     input.code !== undefined && input.title !== undefined
@@ -61,7 +66,42 @@ function makeBoundaryError(input: {
     ...(input.ownerErrorCode !== undefined ? { ownerErrorCode: input.ownerErrorCode } : {}),
     ...(input.title !== undefined || display ? { title: input.title ?? display?.title } : {}),
     ...(input.details !== undefined ? { details: input.details } : {}),
+    ...(input.hints !== undefined ? { hints: [...input.hints] } : {}),
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is Record<string, unknown> =>
+          entry !== null && typeof entry === "object" && !Array.isArray(entry),
+      )
+    : [];
+}
+
+function ownerPayloadError(value: unknown): AgentsVxappOwnerBoundaryError | null {
+  const error = asRecord(value);
+  if (!error) {
+    return null;
+  }
+  const code = typeof error.code === "string" ? error.code : null;
+  const message =
+    typeof error.message === "string" && error.message.trim().length > 0
+      ? error.message
+      : "Owner returned an error for the sidebar authority snapshot.";
+  return makeBoundaryError({
+    kind: "owner_contract_error",
+    message,
+    ownerErrorCode: code,
+    details: error,
+    hints: asRecordArray(error.hints),
+  });
 }
 
 function validateSidebarAuthoritySnapshot(
@@ -112,10 +152,16 @@ function normalizeTodosByProgramId(
   return next;
 }
 
-export async function fetchAgentsVxappSidebarAuthoritySnapshotFromOwner(): Promise<SidebarAuthoritySnapshot> {
+export async function fetchAgentsVxappSidebarAuthoritySnapshotFromOwner(
+  input: AgentsVxappAuthorityPageRequest = {},
+): Promise<SidebarAuthoritySnapshot> {
   try {
-    const snapshot = await ensureNativeApi().server.getAgentsVxappSidebarAuthoritySnapshot({});
+    const snapshot = await ensureNativeApi().server.getAgentsVxappSidebarAuthoritySnapshot(input);
     validateSidebarAuthoritySnapshot(snapshot);
+    const payloadError = ownerPayloadError(snapshot.error);
+    if (payloadError) {
+      throw payloadError;
+    }
     return snapshot;
   } catch (error) {
     if (error instanceof WebSocketRequestError) {
@@ -131,6 +177,8 @@ export async function fetchAgentsVxappSidebarAuthoritySnapshotFromOwner(): Promi
         title: display.title,
         message: display.message,
         ownerErrorCode: display.ownerErrorCode,
+        details: error.details,
+        hints: error.hints,
       });
     }
     if (
@@ -158,7 +206,6 @@ export async function fetchAgentsVxappSidebarAuthoritySnapshotFromOwner(): Promi
     });
   }
 }
-
 export function normalizeAgentsVxappSidebarAuthoritySnapshot(
   snapshot: SidebarAuthoritySnapshot,
 ): AgentsVxappSidebarAuthorityNormalizedSnapshot {

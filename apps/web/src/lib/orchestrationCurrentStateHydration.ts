@@ -1,6 +1,7 @@
 import {
   type NativeApi,
   NonNegativeInt,
+  type OrchestrationCheckpointSummary,
   type OrchestrationListThreadActivitiesResult,
   type OrchestrationListThreadMessagesResult,
   type OrchestrationReadModel,
@@ -9,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 
 const CURRENT_THREAD_HISTORY_PAGE_LIMIT = NonNegativeInt.makeUnsafe(1000);
+const CURRENT_THREAD_INITIAL_HISTORY_LIMIT = NonNegativeInt.makeUnsafe(200);
 const CURRENT_THREAD_WAKE_LIMIT = NonNegativeInt.makeUnsafe(100);
 
 function hasThread(readModel: OrchestrationReadModel, threadId: ThreadId): boolean {
@@ -121,6 +123,37 @@ async function listAllThreadActivities(
   });
 }
 
+async function listInitialThreadMessages(
+  api: NativeApi,
+  threadId: ThreadId,
+): Promise<OrchestrationListThreadMessagesResult> {
+  return api.orchestration.listThreadMessages({
+    threadId,
+    limit: CURRENT_THREAD_INITIAL_HISTORY_LIMIT,
+  });
+}
+
+async function listInitialThreadActivities(
+  api: NativeApi,
+  threadId: ThreadId,
+): Promise<OrchestrationListThreadActivitiesResult> {
+  return api.orchestration.listThreadActivities({
+    threadId,
+    limit: CURRENT_THREAD_INITIAL_HISTORY_LIMIT,
+    payloadMode: "compact",
+  });
+}
+
+async function listThreadCheckpoints(
+  api: NativeApi,
+  threadId: ThreadId,
+): Promise<readonly OrchestrationCheckpointSummary[]> {
+  return api.orchestration.listThreadCheckpoints({
+    threadId,
+    limit: CURRENT_THREAD_HISTORY_PAGE_LIMIT,
+  });
+}
+
 async function ensureThreadInReadModel(
   api: NativeApi,
   readModel: OrchestrationReadModel,
@@ -147,13 +180,19 @@ export async function addThreadDetailToReadModel(
   threadId: ThreadId,
   options: {
     includeOrchestratorWakes?: boolean;
+    historyMode?: "full" | "initial";
   } = {},
 ): Promise<OrchestrationReadModel> {
   const includeOrchestratorWakes = options.includeOrchestratorWakes ?? true;
+  const historyMode = options.historyMode ?? "full";
   const detailReadModel = await ensureThreadInReadModel(api, readModel, threadId);
   const [messages, activities, sessions, orchestratorWakeItems] = await Promise.all([
-    listAllThreadMessages(api, threadId),
-    listAllThreadActivities(api, threadId),
+    historyMode === "full"
+      ? listAllThreadMessages(api, threadId)
+      : listInitialThreadMessages(api, threadId),
+    historyMode === "full"
+      ? listAllThreadActivities(api, threadId)
+      : listInitialThreadActivities(api, threadId),
     api.orchestration.listThreadSessions({ threadId }),
     includeOrchestratorWakes
       ? api.orchestration.listOrchestratorWakes({
@@ -174,14 +213,16 @@ export async function addThreadDetailToReadModel(
       session: sessions[0] ?? thread.session,
       snapshotCoverage: {
         messageCount: messages.length,
-        messageLimit: null,
-        messagesTruncated: false,
+        messageLimit: historyMode === "full" ? null : CURRENT_THREAD_INITIAL_HISTORY_LIMIT,
+        messagesTruncated:
+          historyMode !== "full" && messages.length >= CURRENT_THREAD_INITIAL_HISTORY_LIMIT,
         proposedPlanCount: thread.proposedPlans.length,
         proposedPlanLimit: 0,
         proposedPlansTruncated: false,
         activityCount: activities.length,
-        activityLimit: null,
-        activitiesTruncated: false,
+        activityLimit: historyMode === "full" ? null : CURRENT_THREAD_INITIAL_HISTORY_LIMIT,
+        activitiesTruncated:
+          historyMode !== "full" && activities.length >= CURRENT_THREAD_INITIAL_HISTORY_LIMIT,
         checkpointCount: thread.checkpoints.length,
         checkpointLimit: 0,
         checkpointsTruncated: false,
@@ -222,12 +263,90 @@ export async function addOrchestratorSessionWorkerDetailsToReadModel(
   return nextReadModel;
 }
 
+export async function addOrchestratorSessionWorkerChangesToReadModel(
+  api: NativeApi,
+  readModel: OrchestrationReadModel,
+  rootThreadId: ThreadId,
+  existingSessionThreads?: readonly OrchestrationThreadSummary[],
+): Promise<OrchestrationReadModel> {
+  const sessionThreads =
+    existingSessionThreads ??
+    (await api.orchestration.listSessionThreads({
+      rootThreadId,
+      includeArchived: true,
+      includeDeleted: false,
+    }));
+  const workerThreadIds = sessionThreads
+    .filter((thread) => thread.id !== rootThreadId && thread.spawnRole === "worker")
+    .map((thread) => thread.id);
+  let nextReadModel = mergeSessionThreadsIntoReadModel(readModel, sessionThreads);
+  const checkpointsByThreadId = new Map(
+    await Promise.all(
+      workerThreadIds.map(async (workerThreadId) => {
+        const checkpoints = await listThreadCheckpoints(api, workerThreadId);
+        return [workerThreadId, checkpoints] as const;
+      }),
+    ),
+  );
+
+  nextReadModel = {
+    ...nextReadModel,
+    threads: nextReadModel.threads.map((thread) => {
+      if (thread.id === rootThreadId) {
+        return {
+          ...thread,
+          snapshotCoverage: {
+            messageCount: thread.messages.length,
+            messageLimit: thread.snapshotCoverage?.messageLimit ?? 0,
+            messagesTruncated: thread.snapshotCoverage?.messagesTruncated ?? false,
+            proposedPlanCount: thread.proposedPlans.length,
+            proposedPlanLimit: thread.snapshotCoverage?.proposedPlanLimit ?? 0,
+            proposedPlansTruncated: thread.snapshotCoverage?.proposedPlansTruncated ?? false,
+            activityCount: thread.activities.length,
+            activityLimit: thread.snapshotCoverage?.activityLimit ?? 0,
+            activitiesTruncated: thread.snapshotCoverage?.activitiesTruncated ?? false,
+            checkpointCount: thread.snapshotCoverage?.checkpointCount ?? 0,
+            checkpointLimit: null,
+            checkpointsTruncated: false,
+          },
+        };
+      }
+      const checkpoints = checkpointsByThreadId.get(thread.id);
+      if (!checkpoints) {
+        return thread;
+      }
+      return {
+        ...thread,
+        checkpoints: [...checkpoints],
+        snapshotCoverage: {
+          messageCount: thread.messages.length,
+          messageLimit: thread.snapshotCoverage?.messageLimit ?? 0,
+          messagesTruncated: thread.snapshotCoverage?.messagesTruncated ?? false,
+          proposedPlanCount: thread.proposedPlans.length,
+          proposedPlanLimit: thread.snapshotCoverage?.proposedPlanLimit ?? 0,
+          proposedPlansTruncated: thread.snapshotCoverage?.proposedPlansTruncated ?? false,
+          activityCount: thread.activities.length,
+          activityLimit: thread.snapshotCoverage?.activityLimit ?? 0,
+          activitiesTruncated: thread.snapshotCoverage?.activitiesTruncated ?? false,
+          checkpointCount: checkpoints.length,
+          checkpointLimit: null,
+          checkpointsTruncated: false,
+        },
+      };
+    }),
+  };
+
+  return nextReadModel;
+}
+
 export async function loadCurrentStateWithThreadDetail(
   api: NativeApi,
   threadId: ThreadId,
 ): Promise<OrchestrationReadModel> {
   const currentState = await api.orchestration.getCurrentState();
-  return addThreadDetailToReadModel(api, currentState, threadId);
+  return addThreadDetailToReadModel(api, currentState, threadId, {
+    historyMode: "initial",
+  });
 }
 
 export async function loadCurrentStateWithOrchestratorSessionDetail(
@@ -235,6 +354,18 @@ export async function loadCurrentStateWithOrchestratorSessionDetail(
   threadId: ThreadId,
 ): Promise<OrchestrationReadModel> {
   const currentState = await api.orchestration.getCurrentState();
-  const rootReadModel = await addThreadDetailToReadModel(api, currentState, threadId);
-  return addOrchestratorSessionWorkerDetailsToReadModel(api, rootReadModel, threadId);
+  const rootReadModel = await addThreadDetailToReadModel(api, currentState, threadId, {
+    historyMode: "initial",
+  });
+  const sessionThreads = await api.orchestration.listSessionThreads({
+    rootThreadId: threadId,
+    includeArchived: true,
+    includeDeleted: false,
+  });
+  return addOrchestratorSessionWorkerChangesToReadModel(
+    api,
+    mergeSessionThreadsIntoReadModel(rootReadModel, sessionThreads),
+    threadId,
+    sessionThreads,
+  );
 }

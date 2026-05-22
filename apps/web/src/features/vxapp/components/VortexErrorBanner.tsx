@@ -9,6 +9,7 @@ export function VortexErrorBanner(props: {
   const code = props.error?.code ?? null;
   const title = props.error?.title ?? null;
   const message = props.error?.message ?? props.fallbackMessage;
+  const hints = props.error?.hints ?? [];
 
   return (
     <div className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-2 text-[11px] leading-relaxed text-red-800 dark:text-red-200">
@@ -31,6 +32,26 @@ export function VortexErrorBanner(props: {
             <p className="mt-1 text-[10px] text-red-700/80 dark:text-red-200/70">
               owner code: <code>{props.error.ownerErrorCode}</code>
             </p>
+          ) : null}
+          {hints.length > 0 ? (
+            <div className="mt-1 space-y-0.5 text-[10px] text-red-700/80 dark:text-red-200/70">
+              {hints.map((hint) => {
+                const command = typeof hint.command === "string" ? hint.command : null;
+                const reason = typeof hint.reason === "string" ? hint.reason : null;
+                const key = command ?? reason ?? JSON.stringify(hint);
+                return (
+                  <p key={key.length > 0 ? key : "owner-hint"}>
+                    {reason ?? "Owner hint"}
+                    {command ? (
+                      <>
+                        {": "}
+                        <code>{command}</code>
+                      </>
+                    ) : null}
+                  </p>
+                );
+              })}
+            </div>
           ) : null}
         </div>
       </div>

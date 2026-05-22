@@ -76,6 +76,8 @@ function makeControlPlaneSnapshotWithOptions(options: Record<string, unknown>) {
     programs: [],
     todos: [],
     currentTodos: [],
+    hints: [],
+    pagination: null,
     options,
   } as ServerGetAgentsVxappControlPlaneSnapshotResult & { options: Record<string, unknown> };
 }

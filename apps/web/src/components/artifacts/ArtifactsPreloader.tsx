@@ -9,9 +9,10 @@ import {
 } from "../../lib/artifactPreloadCache";
 import { vortexAppsListQueryOptions } from "~/features/vxapp/vortexAppsReactQuery";
 
-export function ArtifactsPreloader() {
+export function ArtifactsPreloader({ enabled }: { enabled: boolean }) {
   const appsQuery = useQuery({
     ...vortexAppsListQueryOptions(),
+    enabled,
     refetchInterval: ARTIFACT_PRELOAD_TTL_MS,
     staleTime: ARTIFACT_PRELOAD_TTL_MS,
   });
@@ -19,6 +20,7 @@ export function ArtifactsPreloader() {
   const projectSignature = projects.map((project) => project.target_id).join("\0");
 
   useEffect(() => {
+    if (!enabled) return;
     if (projects.length === 0) return;
 
     let cancelled = false;
@@ -59,7 +61,7 @@ export function ArtifactsPreloader() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [projectSignature, projects]);
+  }, [enabled, projectSignature, projects]);
 
   return null;
 }

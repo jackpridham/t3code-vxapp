@@ -20,6 +20,7 @@ import {
   OrchestrationListProjectThreadsInput,
   OrchestrationListSessionThreadsInput,
   OrchestrationListThreadActivitiesInput,
+  OrchestrationListThreadCheckpointsInput,
   OrchestrationListThreadMessagesInput,
   OrchestrationListThreadSessionsInput,
   OrchestrationListProjectsInput,
@@ -170,6 +171,10 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(ORCHESTRATION_WS_METHODS.getThreadById, OrchestrationGetThreadByIdInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listSessionThreads, OrchestrationListSessionThreadsInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listThreadMessages, OrchestrationListThreadMessagesInput),
+  tagRequestBody(
+    ORCHESTRATION_WS_METHODS.listThreadCheckpoints,
+    OrchestrationListThreadCheckpointsInput,
+  ),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.listThreadActivities,
     OrchestrationListThreadActivitiesInput,

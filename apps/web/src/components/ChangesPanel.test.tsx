@@ -907,6 +907,67 @@ describe("buildOrchestratorWorkerChangesInput", () => {
     });
     expect(result?.persistedFileChanges[0]?.path).toBe("Worker Project/Worker One/src/index.ts");
   });
+
+  it("surfaces an error when orchestrator workers exist but checkpoint metadata is missing", () => {
+    const rootThreadId = ThreadId.makeUnsafe("thread-1");
+    const workerId = ThreadId.makeUnsafe("worker-1");
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const result = buildOrchestratorWorkerChangesInput({
+      projects: [{ id: projectId, name: "Worker Project", cwd: "/repo" }] as any,
+      threads: [
+        {
+          id: rootThreadId,
+          projectId,
+          title: "Root",
+          spawnRole: "orchestrator",
+          sessionWorkerThreadCount: 1,
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+        },
+        {
+          id: workerId,
+          projectId,
+          title: "Worker One",
+          spawnRole: "worker",
+          orchestratorThreadId: rootThreadId,
+          worktreePath: "/repo/worktree",
+          messages: [],
+          persistedFileChanges: [],
+          turnDiffSummaries: [],
+          snapshotCoverage: {
+            messageCount: 0,
+            messageLimit: 0,
+            messagesTruncated: false,
+            proposedPlanCount: 0,
+            proposedPlanLimit: 0,
+            proposedPlansTruncated: false,
+            activityCount: 0,
+            activityLimit: 0,
+            activitiesTruncated: false,
+            checkpointCount: 0,
+            checkpointLimit: 0,
+            checkpointsTruncated: false,
+          },
+        },
+      ] as any,
+      activeThread: {
+        id: rootThreadId,
+        projectId,
+        title: "Root",
+        spawnRole: "orchestrator",
+        sessionWorkerThreadCount: 1,
+        messages: [],
+        persistedFileChanges: [],
+        turnDiffSummaries: [],
+      } as any,
+    });
+
+    expect(result?.emptyState).toEqual({
+      title: "Worker changes unavailable.",
+      description: "Checkpoint metadata has not loaded for 1 worker thread.",
+    });
+  });
 });
 
 // ── Persisted file changes merge ────────────────────────────────────────────

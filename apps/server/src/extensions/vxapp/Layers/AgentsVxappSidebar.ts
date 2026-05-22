@@ -100,6 +100,8 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
         ownerCommand: cause.ownerCommand,
         authoritySurface: cause.authoritySurface,
         ownerErrorCode: cause.ownerErrorCode,
+        details: cause.details,
+        hints: [...cause.hints],
       });
     }
     return new AgentsVxappSidebarError({ message });
@@ -155,9 +157,9 @@ const makeAgentsVxappSidebar = Effect.gen(function* () {
       } satisfies ServerGetAgentsVxappSidebarGraphResult;
     });
 
-  const getAuthoritySnapshot: AgentsVxappSidebarShape["getAuthoritySnapshot"] = () =>
+  const getAuthoritySnapshot: AgentsVxappSidebarShape["getAuthoritySnapshot"] = (input) =>
     Effect.tryPromise({
-      try: () => fetchAgentsVxappSidebarAuthoritySnapshot(),
+      try: () => fetchAgentsVxappSidebarAuthoritySnapshot(input),
       catch: (error) =>
         mapSidebarError(
           error instanceof Error

@@ -16,7 +16,8 @@ const AGENTS_VXAPP_CONTROL_PLANE_STALE_TIME_MS = 10_000;
 
 export const agentsVxappControlPlaneQueryKeys = {
   all: ["agents-vxapp-control-plane"] as const,
-  snapshot: () => ["agents-vxapp-control-plane", "snapshot"] as const,
+  snapshot: (input: { limit?: number; page?: number } = {}) =>
+    ["agents-vxapp-control-plane", "snapshot", input.page ?? 1, input.limit ?? 20] as const,
 };
 
 export function invalidateAgentsVxappControlPlaneQueries(queryClient: QueryClient) {
@@ -28,11 +29,13 @@ export function invalidateAgentsVxappControlPlaneQueries(queryClient: QueryClien
   ]);
 }
 
-export function agentsVxappControlPlaneSnapshotQueryOptions() {
+export function agentsVxappControlPlaneSnapshotQueryOptions(
+  input: { limit?: number; page?: number } = {},
+) {
   return queryOptions({
-    queryKey: agentsVxappControlPlaneQueryKeys.snapshot(),
+    queryKey: agentsVxappControlPlaneQueryKeys.snapshot(input),
     staleTime: AGENTS_VXAPP_CONTROL_PLANE_STALE_TIME_MS,
-    queryFn: async () => ensureNativeApi().server.getAgentsVxappControlPlaneSnapshot({}),
+    queryFn: async () => ensureNativeApi().server.getAgentsVxappControlPlaneSnapshot(input),
   });
 }
 

@@ -16,6 +16,8 @@ import type {
   OrchestrationListSessionThreadsResult,
   OrchestrationListThreadActivitiesInput,
   OrchestrationListThreadActivitiesResult,
+  OrchestrationListThreadCheckpointsInput,
+  OrchestrationListThreadCheckpointsResult,
   OrchestrationListThreadMessagesInput,
   OrchestrationListThreadMessagesResult,
   OrchestrationListThreadSessionsInput,
@@ -66,6 +68,9 @@ export interface ProjectionOperationalQueryShape {
   readonly listThreadMessages: (
     input: OrchestrationListThreadMessagesInput,
   ) => Effect.Effect<OrchestrationListThreadMessagesResult, ProjectionRepositoryError>;
+  readonly listThreadCheckpoints: (
+    input: OrchestrationListThreadCheckpointsInput,
+  ) => Effect.Effect<OrchestrationListThreadCheckpointsResult, ProjectionRepositoryError>;
   readonly listThreadActivities: (
     input: OrchestrationListThreadActivitiesInput,
   ) => Effect.Effect<OrchestrationListThreadActivitiesResult, ProjectionRepositoryError>;

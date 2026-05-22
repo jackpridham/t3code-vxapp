@@ -33,6 +33,8 @@ export class AgentsVxappControlPlaneError extends Schema.TaggedErrorClass<Agents
     exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
     stdout: Schema.optional(Schema.String),
     stderr: Schema.optional(Schema.String),
+    details: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown))),
+    hints: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
   },
 ) {}
 

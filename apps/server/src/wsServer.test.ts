@@ -139,6 +139,8 @@ const emptyOwnerProgramsTodosSnapshot = {
   programs: [],
   todos: [],
   currentTodos: [],
+  hints: [],
+  pagination: null,
 } as Awaited<ReturnType<typeof fetchAgentsVxappProgramsTodosSnapshot>>;
 
 const emptyOwnerExternalRoleAuthoritySnapshot = {

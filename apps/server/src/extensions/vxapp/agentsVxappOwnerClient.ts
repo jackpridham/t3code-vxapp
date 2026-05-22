@@ -9,6 +9,8 @@ import type {
   ServerCreateAgentsVxappTodoInput,
   ServerDeleteAgentsVxappProgramInput,
   ServerDeleteAgentsVxappTodoInput,
+  ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
+  ServerGetAgentsVxappControlPlaneSnapshotInput,
   ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   ServerGetAgentsVxappControlPlaneSnapshotResult,
   ServerSetAgentsVxappProgramLifecycleInput,
@@ -43,6 +45,8 @@ export class AgentsVxappOwnerClientError extends Error {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number | null;
+  readonly details: JsonRecord | null;
+  readonly hints: readonly JsonRecord[];
 
   constructor(input: {
     readonly authoritySurface: string;
@@ -55,6 +59,8 @@ export class AgentsVxappOwnerClientError extends Error {
     readonly message: string;
     readonly ownerCommand: string;
     readonly ownerErrorCode?: string | null;
+    readonly details?: JsonRecord | null;
+    readonly hints?: readonly JsonRecord[];
     readonly stderr?: string;
     readonly stdout?: string;
   }) {
@@ -70,6 +76,8 @@ export class AgentsVxappOwnerClientError extends Error {
     this.stdout = input.stdout ?? "";
     this.stderr = input.stderr ?? "";
     this.exitCode = input.exitCode ?? null;
+    this.details = input.details ?? null;
+    this.hints = input.hints ?? [];
   }
 }
 
@@ -133,6 +141,15 @@ function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
+function asRecordArray(value: unknown): JsonRecord[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is JsonRecord =>
+          entry !== null && typeof entry === "object" && !Array.isArray(entry),
+      )
+    : [];
+}
+
 function ownerPath(tool: OwnerTool): string {
   return path.join(
     AGENTS_VXAPP_REPO_ROOT,
@@ -171,6 +188,8 @@ function extractOwnerDiagnostics(input: {
     stdout: input.result?.stdout ?? "",
     stderr: input.result?.stderr ?? "",
     exitCode: input.result?.code ?? null,
+    details: errorDetails,
+    hints: asRecordArray(error?.hints ?? errorDetails?.hints),
   };
 }
 
@@ -195,9 +214,25 @@ function fail(input: {
     message: input.message,
     ownerCommand: diagnostics.ownerCommand,
     ownerErrorCode: diagnostics.ownerErrorCode,
+    details: diagnostics.details,
+    hints: diagnostics.hints,
     stderr: diagnostics.stderr,
     stdout: diagnostics.stdout,
   });
+}
+
+function paginationArgs(input: {
+  readonly page?: number | undefined;
+  readonly limit?: number | undefined;
+}): string[] {
+  const args: string[] = [];
+  if (input.page !== undefined) {
+    args.push("--page", String(input.page));
+  }
+  if (input.limit !== undefined) {
+    args.push("--limit", String(input.limit));
+  }
+  return args;
 }
 
 function parseJson(ownerCommand: string, authoritySurface: string, result: ProcessRunResult) {
@@ -512,6 +547,7 @@ export async function bootstrapAgentsVxappOwnerManifest(): Promise<AgentsVxappOw
 async function callManifestCommand<T>(
   surface: Exclude<OwnerSurface, "contract_manifest">,
   input?: unknown,
+  args?: readonly string[],
 ): Promise<AgentsVxappOwnerAuthorityPayload<T>> {
   const manifest = await bootstrapAgentsVxappOwnerManifest();
   const matchingEntries = [...manifest.commandsByName.values()].filter(
@@ -534,6 +570,7 @@ async function callManifestCommand<T>(
   }
   const { envelope, result } = await executeOwnerCommand({
     command: entry.command,
+    ...(args ? { args } : {}),
     ...(input !== undefined ? { payloadJson: input } : {}),
     surface: entry.surface,
     tool: entry.tool,
@@ -661,10 +698,14 @@ export async function fetchAgentsVxappSidebarGraphSnapshot() {
     .payload;
 }
 
-export async function fetchAgentsVxappSidebarAuthoritySnapshot() {
+export async function fetchAgentsVxappSidebarAuthoritySnapshot(
+  input: ServerGetAgentsVxappSidebarAuthoritySnapshotInput = {},
+) {
   return (
     await callManifestCommand<ServerGetAgentsVxappSidebarAuthoritySnapshotResult>(
       "sidebar_authority_snapshot",
+      undefined,
+      paginationArgs(input),
     )
   ).payload;
 }
@@ -677,17 +718,24 @@ export async function fetchAgentsVxappExternalRoleAuthoritySnapshot() {
   return (await callManifestCommand<JsonRecord>("external_role_authority_snapshot")).payload;
 }
 
-export async function fetchAgentsVxappProgramsTodosSnapshot() {
+export async function fetchAgentsVxappProgramsTodosSnapshot(
+  input: ServerGetAgentsVxappControlPlaneSnapshotInput = {},
+) {
   return (
     await callManifestCommand<ServerGetAgentsVxappControlPlaneSnapshotResult>(
       "programs_todos_snapshot",
+      undefined,
+      paginationArgs(input),
     )
   ).payload;
 }
 
-export async function fetchAgentsVxappProgramsAuthoritySnapshot() {
+export async function fetchAgentsVxappProgramsAuthoritySnapshot(
+  input: ServerGetAgentsVxappControlPlaneSnapshotInput = {},
+) {
   return (
     await callManifestCommandByWrapperKey<JsonRecord>({
+      args: paginationArgs(input),
       wrapperKey: "programs_authority_snapshot",
       surface: "programs_authority_snapshot",
     })

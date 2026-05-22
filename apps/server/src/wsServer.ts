@@ -983,6 +983,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* projectionOperationalQuery.listThreadActivities(body);
       }
 
+      case ORCHESTRATION_WS_METHODS.listThreadCheckpoints: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.listThreadCheckpoints(body);
+      }
+
       case ORCHESTRATION_WS_METHODS.listThreadSessions: {
         const body = stripRequestTag(request.body);
         return yield* projectionOperationalQuery.listThreadSessions(body);

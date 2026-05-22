@@ -102,6 +102,7 @@ export function buildOrchestratorWorkerChangesInput(input: {
   persistedFileChanges: readonly PersistedFileChange[];
   title: string;
   worktreePath: string | null;
+  emptyState?: { title: string; description: string } | undefined;
 } | null {
   const activeThread = input.activeThread;
   if (!activeThread || activeThread.spawnRole !== "orchestrator") {
@@ -115,6 +116,16 @@ export function buildOrchestratorWorkerChangesInput(input: {
   const projectsById = new Map(input.projects.map((project) => [project.id, project] as const));
   const groupsBySection = new Map<ChangesSectionKind, ChangesPanelGroup>();
   const persistedFileChanges: PersistedFileChange[] = [];
+  const expectedWorkerCount = activeThread.sessionWorkerThreadCount ?? 0;
+  const workerThreads = input.threads.filter(
+    (thread) =>
+      thread.id !== activeThread.id &&
+      sessionThreadIds.has(thread.id) &&
+      thread.spawnRole !== "orchestrator",
+  );
+  const workersWithoutCheckpointMetadata = workerThreads.filter(
+    (thread) => thread.snapshotCoverage?.checkpointLimit !== null,
+  );
 
   function getGroup(section: ChangesSectionKind): ChangesPanelGroup {
     const existing = groupsBySection.get(section);
@@ -219,6 +230,22 @@ export function buildOrchestratorWorkerChangesInput(input: {
     persistedFileChanges,
     title: "Worker Changes",
     worktreePath: null,
+    ...(expectedWorkerCount > 0 && workerThreads.length === 0
+      ? {
+          emptyState: {
+            title: "Worker changes unavailable.",
+            description: `Expected ${expectedWorkerCount} worker ${expectedWorkerCount === 1 ? "thread" : "threads"}, but worker session metadata has not loaded.`,
+          },
+        }
+      : {}),
+    ...(workersWithoutCheckpointMetadata.length > 0
+      ? {
+          emptyState: {
+            title: "Worker changes unavailable.",
+            description: `Checkpoint metadata has not loaded for ${workersWithoutCheckpointMetadata.length} worker ${workersWithoutCheckpointMetadata.length === 1 ? "thread" : "threads"}.`,
+          },
+        }
+      : {}),
   };
 }
 
@@ -354,6 +381,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   return (
     <ChangesBrowser
       title={orchestratorWorkerChangesInput?.title}
+      emptyState={orchestratorWorkerChangesInput?.emptyState}
       threadId={activeThread?.id ?? null}
       worktreePath={effectiveWorktreePath}
       messages={effectiveMessages}

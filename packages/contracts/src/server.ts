@@ -1,6 +1,7 @@
 import { Schema, SchemaTransformation } from "effect";
 import {
   AgentsVxappDisplayDescriptor,
+  AgentsVxappJsonRecord,
   AgentsVxappMutationResult,
   AgentsVxappSidebarAuthorityDiagnostic,
   AgentsVxappSidebarAuthorityRuntimeTarget,
@@ -391,7 +392,18 @@ export const ServerAgentsVxappCurrentTodoProjection = Schema.Struct({
 export type ServerAgentsVxappCurrentTodoProjection =
   typeof ServerAgentsVxappCurrentTodoProjection.Type;
 
-export const ServerGetAgentsVxappControlPlaneSnapshotInput = Schema.Struct({});
+export const ServerAgentsVxappPagination = Schema.Struct({
+  page: NonNegativeInt,
+  limit: NonNegativeInt,
+  total: NonNegativeInt,
+  hasMore: Schema.Boolean,
+});
+export type ServerAgentsVxappPagination = typeof ServerAgentsVxappPagination.Type;
+
+export const ServerGetAgentsVxappControlPlaneSnapshotInput = Schema.Struct({
+  page: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(NonNegativeInt),
+});
 export type ServerGetAgentsVxappControlPlaneSnapshotInput =
   typeof ServerGetAgentsVxappControlPlaneSnapshotInput.Type;
 
@@ -403,6 +415,11 @@ export const ServerGetAgentsVxappControlPlaneSnapshotResult = Schema.Struct({
   programs: Schema.Array(ServerAgentsVxappProgramSnapshot),
   todos: Schema.Array(ServerAgentsVxappTodoSnapshot),
   currentTodos: Schema.Array(ServerAgentsVxappCurrentTodoProjection),
+  error: Schema.optional(Schema.NullOr(AgentsVxappJsonRecord)),
+  hints: Schema.Array(AgentsVxappJsonRecord).pipe(Schema.withDecodingDefault(() => [])),
+  pagination: Schema.NullOr(ServerAgentsVxappPagination).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type ServerGetAgentsVxappControlPlaneSnapshotResult =
   typeof ServerGetAgentsVxappControlPlaneSnapshotResult.Type;
@@ -440,7 +457,10 @@ export const ServerAgentsVxappSidebarAuthorityProgramCard = Schema.Struct({
 export type ServerAgentsVxappSidebarAuthorityProgramCard =
   typeof ServerAgentsVxappSidebarAuthorityProgramCard.Type;
 
-export const ServerGetAgentsVxappSidebarAuthoritySnapshotInput = Schema.Struct({});
+export const ServerGetAgentsVxappSidebarAuthoritySnapshotInput = Schema.Struct({
+  page: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(NonNegativeInt),
+});
 export type ServerGetAgentsVxappSidebarAuthoritySnapshotInput =
   typeof ServerGetAgentsVxappSidebarAuthoritySnapshotInput.Type;
 
@@ -454,6 +474,11 @@ export const ServerGetAgentsVxappSidebarAuthoritySnapshotResult = Schema.Struct(
   ),
   ownerDiagnostics: Schema.Array(AgentsVxappSidebarAuthorityDiagnostic).pipe(
     Schema.withDecodingDefault(() => []),
+  ),
+  error: Schema.optional(Schema.NullOr(AgentsVxappJsonRecord)),
+  hints: Schema.Array(AgentsVxappJsonRecord).pipe(Schema.withDecodingDefault(() => [])),
+  pagination: Schema.NullOr(ServerAgentsVxappPagination).pipe(
+    Schema.withDecodingDefault(() => null),
   ),
 });
 export type ServerGetAgentsVxappSidebarAuthoritySnapshotResult =

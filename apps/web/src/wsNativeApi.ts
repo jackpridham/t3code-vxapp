@@ -262,6 +262,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(ORCHESTRATION_WS_METHODS.listSessionThreads, input),
       listThreadMessages: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.listThreadMessages, input),
+      listThreadCheckpoints: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.listThreadCheckpoints, input),
       listThreadActivities: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.listThreadActivities, input),
       listThreadSessions: (input) =>

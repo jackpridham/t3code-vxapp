@@ -16,12 +16,21 @@ export function threadNeedsRouteHistoryHydration(thread: Thread | null | undefin
     thread.session !== null ||
     thread.activities.length > 0 ||
     thread.proposedPlans.length > 0 ||
-    thread.turnDiffSummaries.length > 0;
+    thread.turnDiffSummaries.length > 0 ||
+    thread.spawnRole === "orchestrator";
   if (!hasStarted) {
     return false;
   }
   const coverage = thread.snapshotCoverage;
   if (coverage === undefined) {
+    return true;
+  }
+
+  const needsWorkerChangesDetail =
+    thread.spawnRole === "orchestrator" &&
+    (thread.sessionWorkerThreadCount ?? 0) > 0 &&
+    coverage.checkpointLimit !== null;
+  if (needsWorkerChangesDetail) {
     return true;
   }
 

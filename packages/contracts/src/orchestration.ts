@@ -32,6 +32,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getThreadById: "orchestration.getThreadById",
   listSessionThreads: "orchestration.listSessionThreads",
   listThreadMessages: "orchestration.listThreadMessages",
+  listThreadCheckpoints: "orchestration.listThreadCheckpoints",
   listThreadActivities: "orchestration.listThreadActivities",
   listThreadSessions: "orchestration.listThreadSessions",
   listOrchestratorWakes: "orchestration.listOrchestratorWakes",
@@ -625,6 +626,9 @@ export const OrchestrationThread = Schema.Struct({
   programId: Schema.optional(ProgramId).pipe(Schema.withDecodingDefault(() => undefined)),
   executiveProjectId: Schema.optional(ProjectId).pipe(Schema.withDecodingDefault(() => undefined)),
   executiveThreadId: Schema.optional(ThreadId).pipe(Schema.withDecodingDefault(() => undefined)),
+  sessionWorkerThreadCount: Schema.optional(NonNegativeInt).pipe(
+    Schema.withDecodingDefault(() => undefined),
+  ),
   ...OrchestrationThreadErrorPresentationFields,
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
@@ -1932,6 +1936,8 @@ export type OrchestrationListSessionThreadsResult =
 const OrchestrationPageLimit = NonNegativeInt.check(Schema.isLessThanOrEqualTo(1000)).pipe(
   Schema.withDecodingDefault(() => 250),
 );
+export const OrchestrationActivityPayloadMode = Schema.Literals(["full", "compact"]);
+export type OrchestrationActivityPayloadMode = typeof OrchestrationActivityPayloadMode.Type;
 
 export const OrchestrationListThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
@@ -1943,10 +1949,25 @@ export const OrchestrationListThreadMessagesResult = Schema.Array(OrchestrationM
 export type OrchestrationListThreadMessagesResult =
   typeof OrchestrationListThreadMessagesResult.Type;
 
+export const OrchestrationListThreadCheckpointsInput = Schema.Struct({
+  threadId: ThreadId,
+  limit: OrchestrationPageLimit,
+});
+export type OrchestrationListThreadCheckpointsInput =
+  typeof OrchestrationListThreadCheckpointsInput.Type;
+export const OrchestrationListThreadCheckpointsResult = Schema.Array(
+  OrchestrationCheckpointSummary,
+);
+export type OrchestrationListThreadCheckpointsResult =
+  typeof OrchestrationListThreadCheckpointsResult.Type;
+
 export const OrchestrationListThreadActivitiesInput = Schema.Struct({
   threadId: ThreadId,
   limit: OrchestrationPageLimit,
   beforeSequence: Schema.optional(NonNegativeInt),
+  payloadMode: Schema.optional(OrchestrationActivityPayloadMode).pipe(
+    Schema.withDecodingDefault(() => "full" as const),
+  ),
 });
 export type OrchestrationListThreadActivitiesInput =
   typeof OrchestrationListThreadActivitiesInput.Type;
@@ -2077,6 +2098,10 @@ export const OrchestrationRpcSchemas = {
   listThreadMessages: {
     input: OrchestrationListThreadMessagesInput,
     output: OrchestrationListThreadMessagesResult,
+  },
+  listThreadCheckpoints: {
+    input: OrchestrationListThreadCheckpointsInput,
+    output: OrchestrationListThreadCheckpointsResult,
   },
   listThreadActivities: {
     input: OrchestrationListThreadActivitiesInput,

@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   addOrchestratorSessionWorkerDetailsToReadModel,
+  addOrchestratorSessionWorkerChangesToReadModel,
   addThreadDetailToReadModel,
 } from "./orchestrationCurrentStateHydration";
 
@@ -103,6 +104,7 @@ function makeApi(overrides: Partial<NativeApi["orchestration"]> = {}) {
           updatedAt: "2026-04-14T00:00:01.000Z",
         },
       ]),
+      listThreadCheckpoints: vi.fn().mockResolvedValue([]),
       listThreadActivities: vi.fn().mockResolvedValue([
         {
           id: EventId.makeUnsafe("activity-1"),
@@ -221,6 +223,58 @@ describe("orchestration current-state hydration", () => {
         orchestratorThreadId: rootThreadId,
         messages: [expect.objectContaining({ text: "loaded history" })],
         activities: [expect.objectContaining({ summary: "history activity" })],
+      }),
+    );
+  });
+
+  it("hydrates worker checkpoints for orchestrator Worker Changes without loading worker histories", async () => {
+    const orchestratorSummary = makeThreadSummary(rootThreadId, {
+      spawnRole: "orchestrator",
+    });
+    const workerSummary = makeThreadSummary(workerThreadId, {
+      parentThreadId: rootThreadId,
+      orchestratorThreadId: rootThreadId,
+      spawnRole: "worker",
+      workflowId: "wf-root-thread",
+    });
+    const checkpoint = {
+      turnId: TurnId.makeUnsafe("turn-1"),
+      checkpointTurnCount: 4,
+      checkpointRef: "checkpoint-1",
+      status: "ready",
+      files: [
+        {
+          path: "apps/web/src/sidebar.tsx",
+          kind: "modified",
+          additions: 12,
+          deletions: 3,
+        },
+      ],
+      assistantMessageId: MessageId.makeUnsafe("message-1"),
+      completedAt: "2026-04-14T00:00:02.000Z",
+    };
+    const api = makeApi({
+      listSessionThreads: vi.fn().mockResolvedValue([orchestratorSummary, workerSummary]),
+      listThreadCheckpoints: vi.fn().mockResolvedValue([checkpoint]),
+    });
+    const readModel = makeReadModel([makeThread(rootThreadId, { spawnRole: "orchestrator" })]);
+
+    const next = await addOrchestratorSessionWorkerChangesToReadModel(api, readModel, rootThreadId);
+
+    const worker = next.threads.find((entry) => entry.id === workerThreadId);
+    expect(api.orchestration.listThreadCheckpoints).toHaveBeenCalledWith({
+      threadId: workerThreadId,
+      limit: 1000,
+    });
+    expect(api.orchestration.listThreadMessages).not.toHaveBeenCalled();
+    expect(api.orchestration.listThreadActivities).not.toHaveBeenCalled();
+    expect(worker?.checkpoints).toEqual([checkpoint]);
+    expect(worker?.snapshotCoverage).toEqual(
+      expect.objectContaining({
+        checkpointCount: 1,
+        checkpointLimit: null,
+        messageLimit: 0,
+        activityLimit: 0,
       }),
     );
   });

@@ -10,6 +10,7 @@ import {
   bootstrapAgentsVxappOwnerManifest,
   fetchAgentsVxappAgentRuntimeSnapshot,
   fetchAgentsVxappProgramsAuthoritySnapshot,
+  fetchAgentsVxappSidebarAuthoritySnapshot,
   fetchAgentsVxappSidebarGraphSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   fetchAgentsVxappWorkerRuntimeSnapshot,
@@ -31,6 +32,7 @@ t3code-control-plane-snapshot	control_plane_snapshot
 t3code-programs-todos-snapshot	programs_todos_snapshot
 t3code-programs-authority-snapshot	programs_authority_snapshot
 t3code-sidebar-graph-snapshot	sidebar_graph_snapshot
+t3code-sidebar-authority-snapshot	sidebar_authority_snapshot
 t3code-cto-status	cto
 t3code-cto-ensure	cto
 t3code-cto-request-orchestration	cto
@@ -519,6 +521,63 @@ describe("agentsVxappOwnerClient", () => {
     );
   });
 
+  it("passes bounded pagination to Program authority owner snapshots", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-programs-authority-snapshot", "programs_authority_snapshot", {
+            programs: [],
+            pagination: { page: 2, limit: 20, total: 30, hasMore: false },
+            authority: {
+              source: "vx_sqlite_program_authority",
+              legacyFallbackUsed: false,
+            },
+            hints: [],
+          }),
+        ),
+      );
+
+    await fetchAgentsVxappProgramsAuthoritySnapshot({ page: 2, limit: 20 });
+
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      ["t3code-programs-authority-snapshot", "--json", "--page", "2", "--limit", "20"],
+      expect.objectContaining({}),
+    );
+  });
+
+  it("passes bounded pagination to sidebar authority owner snapshots", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-sidebar-authority-snapshot", "sidebar_authority_snapshot", {
+            programs: [],
+            todos: [],
+            currentTodos: [],
+            ownerDiagnostics: [],
+            pagination: { page: 3, limit: 20, total: 60, hasMore: false },
+            hints: [],
+          }),
+        ),
+      );
+
+    await fetchAgentsVxappSidebarAuthoritySnapshot({ page: 3, limit: 20 });
+
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      ["t3code-sidebar-authority-snapshot", "--json", "--page", "3", "--limit", "20"],
+      expect.objectContaining({}),
+    );
+  });
+
   it("keeps role-session runtime paths on the separate role-session owner surface", async () => {
     mockedRunProcess.mockResolvedValueOnce(
       processResult({
@@ -718,7 +777,11 @@ describe("agentsVxappOwnerClient", () => {
             contract_family: "agents-vxapp-t3code-authority",
             contract_version: "v1",
             command: "t3code-approval-request",
-            error: { message: "owner failure" },
+            error: {
+              message: "owner failure",
+              details: { authoritySurface: "approvals" },
+              hints: [{ command: "vx t3 approvals inspect --json", reason: "Inspect approval." }],
+            },
           },
           1,
         ),
@@ -729,6 +792,7 @@ describe("agentsVxappOwnerClient", () => {
       message: "owner failure",
       ownerCommand: "t3code-approval-request",
       ownerErrorCode: null,
+      hints: [{ command: "vx t3 approvals inspect --json", reason: "Inspect approval." }],
     });
   });
 });

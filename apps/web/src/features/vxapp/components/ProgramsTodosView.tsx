@@ -808,6 +808,7 @@ export function ProgramsTodosView() {
     [authoritySnapshot],
   );
   const todos = authoritySnapshot?.todos ?? EMPTY_TODOS;
+  const programsPagination = authoritySnapshot?.pagination ?? null;
 
   const executiveOptions = useMemo(
     () =>
@@ -886,14 +887,11 @@ export function ProgramsTodosView() {
   }, [deferredProgramSearch, groupCards]);
 
   useEffect(() => {
-    if (visibleGroupCards.length === 0) {
-      if (selectedGroupKey.length > 0) {
-        setSelectedGroupKey("");
-      }
-      return;
-    }
-    if (!visibleGroupCards.some((card) => card.group.key === selectedGroupKey)) {
-      setSelectedGroupKey(visibleGroupCards[0]!.group.key);
+    if (
+      selectedGroupKey.length > 0 &&
+      !visibleGroupCards.some((card) => card.group.key === selectedGroupKey)
+    ) {
+      setSelectedGroupKey("");
     }
   }, [selectedGroupKey, visibleGroupCards]);
 
@@ -901,8 +899,6 @@ export function ProgramsTodosView() {
     () => groupCards.find((card) => card.group.key === selectedGroupKey) ?? null,
     [groupCards, selectedGroupKey],
   );
-  const selectedProgram =
-    selectedGroupCard?.group.kind === "program" ? selectedGroupCard.group.program : null;
 
   const visibleTodos = useMemo(() => {
     const groupTodos = selectedGroupCard?.group.todos ?? EMPTY_TODOS;
@@ -952,21 +948,33 @@ export function ProgramsTodosView() {
   );
 
   const createScopeTemplate = useMemo(() => {
-    const preferredPrograms = selectedProgram
-      ? [selectedProgram, ...programs.filter((program) => program.id !== selectedProgram.id)]
-      : [...programs];
-    return chooseCreateProgramScopeTemplate(preferredPrograms);
-  }, [programs, selectedProgram]);
+    return chooseCreateProgramScopeTemplate(programs);
+  }, [programs]);
 
   const refreshControlPlaneData = useCallback(async () => {
     await Promise.all([
-      refreshSidebarAuthority({ force: true }),
+      refreshSidebarAuthority({
+        force: true,
+        limit: programsPagination?.limit,
+        page: programsPagination?.page ?? 1,
+      }),
       queryClient.refetchQueries({
-        queryKey: agentsVxappControlPlaneQueryKeys.snapshot(),
+        queryKey: agentsVxappControlPlaneQueryKeys.all,
         type: "active",
       }),
     ]);
-  }, [queryClient, refreshSidebarAuthority]);
+  }, [programsPagination, queryClient, refreshSidebarAuthority]);
+
+  const loadNextProgramsPage = useCallback(async () => {
+    if (!programsPagination?.hasMore) {
+      return;
+    }
+    await refreshSidebarAuthority({
+      force: true,
+      limit: programsPagination.limit,
+      page: programsPagination.page + 1,
+    });
+  }, [programsPagination, refreshSidebarAuthority]);
 
   const patchProgramSnapshot = useCallback(
     (
@@ -1392,8 +1400,25 @@ export function ProgramsTodosView() {
                 <div className="mt-2 text-2xl font-semibold">{snapshot?.agents.length ?? 0}</div>
               </div>
             </CardPanel>
-            <CardFooter className="border-t bg-muted/20 text-xs text-muted-foreground">
-              Control plane: {snapshot?.dbPath ?? "unavailable"}
+            <CardFooter className="flex-wrap gap-2 border-t bg-muted/20 text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1 truncate">
+                Control plane: {snapshot?.dbPath ?? "unavailable"}
+              </span>
+              {programsPagination ? (
+                <span>
+                  Page {programsPagination.page} · {programs.length} of {programsPagination.total}
+                </span>
+              ) : null}
+              {programsPagination?.hasMore ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={authorityStatus === "loading"}
+                  onClick={() => void loadNextProgramsPage()}
+                >
+                  Next page
+                </Button>
+              ) : null}
             </CardFooter>
           </Card>
 

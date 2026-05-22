@@ -1,5 +1,5 @@
 import { autoAnimate } from "@formkit/auto-animate";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
   type AgentRuntimeAgentKind,
@@ -161,56 +161,53 @@ function RuntimeStateBadge({
 
 function AgentRuntimeInlineBadges({
   agentKind,
+  fallbackLabel,
   runtimeState,
   runtimeStateMessage,
   threadId,
   workspace,
 }: {
   agentKind: AgentRuntimeAgentKind;
+  fallbackLabel?: string | null;
   runtimeState: SidebarAgentRuntimeState;
   runtimeStateMessage: string | null;
   threadId: ThreadId | null;
   workspace?: string | null;
 }) {
-  const runtimeQuery =
-    agentKind === "worker"
-      ? useQuery(
-          workerRuntimeSnapshotQueryOptions({
-            threadId: runtimeState === "inspectable" ? threadId : null,
-            workspace: runtimeState === "inspectable" ? (workspace ?? null) : null,
-          }),
-        )
-      : useQuery(
-          agentRuntimeSnapshotQueryOptions({
-            agentKind,
-            threadId: runtimeState === "inspectable" ? threadId : null,
-          }),
-        );
+  const queryClient = useQueryClient();
 
   if (runtimeState !== "inspectable") {
     return <RuntimeStateBadge state={runtimeState} message={runtimeStateMessage} />;
   }
 
-  if (runtimeQuery.isLoading) {
-    return (
-      <Badge variant="outline" className="h-4 shrink-0 px-1 text-[8px] text-muted-foreground/80">
-        loading
-      </Badge>
-    );
+  const runtimeOptions =
+    agentKind === "worker"
+      ? workerRuntimeSnapshotQueryOptions({
+          threadId,
+          workspace: workspace ?? null,
+        })
+      : agentRuntimeSnapshotQueryOptions({
+          agentKind,
+          threadId,
+        });
+  const snapshot = queryClient.getQueryData(runtimeOptions.queryKey) as
+    | ServerGetAgentRuntimeSnapshotResult
+    | ServerGetWorkerRuntimeSnapshotResult
+    | undefined;
+  if (!snapshot) {
+    if (agentKind === "worker" && fallbackLabel) {
+      return (
+        <Badge
+          variant="outline"
+          className="h-4 max-w-24 shrink-0 px-1 text-[8px] text-muted-foreground/80"
+          title={fallbackLabel}
+        >
+          <span className="truncate">{fallbackLabel}</span>
+        </Badge>
+      );
+    }
+    return <RuntimeStateBadge state={runtimeState} message={runtimeStateMessage} />;
   }
-
-  if (runtimeQuery.isError || !runtimeQuery.data) {
-    return (
-      <Badge
-        variant="outline"
-        className="h-4 shrink-0 border-red-500/25 bg-red-500/10 px-1 text-[8px] text-red-700 dark:text-red-300"
-      >
-        runtime error
-      </Badge>
-    );
-  }
-
-  const snapshot = runtimeQuery.data;
 
   if (snapshot.availability !== "inspectable") {
     return (
@@ -743,10 +740,12 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const authoritySnapshot = useAgentsVxappStore((store) => store.snapshot);
   const authorityStatus = useAgentsVxappStore((store) => store.status);
   const authorityError = useAgentsVxappStore((store) => store.error);
+  const refreshSidebarAuthority = useAgentsVxappStore((store) => store.refreshSidebarAuthority);
   const programs = useMemo(
     () => authoritySnapshot?.programs.map((card) => card.program) ?? [],
     [authoritySnapshot],
   );
+  const programsPagination = authoritySnapshot?.pagination ?? null;
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
   const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
@@ -1087,6 +1086,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
           {threadStatus ? <ThreadStatusLabel status={threadStatus} compact /> : null}
           <AgentRuntimeInlineBadges
             agentKind="worker"
+            fallbackLabel={worker.provenanceLabel}
             runtimeState={worker.runtimeState}
             runtimeStateMessage={worker.runtimeStateMessage}
             threadId={workerThreadId}
@@ -1280,6 +1280,29 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
           {authorityStatus === "loading" && authoritySnapshot === null ? (
             <div className="mb-2 rounded-lg border border-dashed border-border/70 bg-secondary/20 px-2.5 py-2 text-[11px] text-muted-foreground/80">
               Loading agents-vxapp authority state.
+            </div>
+          ) : null}
+          {programsPagination ? (
+            <div className="mb-2 flex items-center gap-2 rounded-lg border border-border/70 bg-secondary/20 px-2.5 py-2 text-[11px] text-muted-foreground/80">
+              <span className="min-w-0 flex-1 truncate">
+                Program page {programsPagination.page}: {programs.length} of{" "}
+                {programsPagination.total}
+              </span>
+              {programsPagination.hasMore ? (
+                <button
+                  className="shrink-0 rounded border border-border/70 bg-background/70 px-1.5 py-0.5 font-medium text-foreground/80 hover:bg-accent"
+                  type="button"
+                  onClick={() =>
+                    void refreshSidebarAuthority({
+                      force: true,
+                      limit: programsPagination.limit,
+                      page: programsPagination.page + 1,
+                    })
+                  }
+                >
+                  Next
+                </button>
+              ) : null}
             </div>
           ) : null}
           {staleMirrorDescription ? (

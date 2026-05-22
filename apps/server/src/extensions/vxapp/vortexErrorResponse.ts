@@ -24,30 +24,42 @@ function buildGenericErrorResponse(message: string): VortexErrorResponse {
 
 export function buildVortexWebSocketErrorResponse(error: unknown): VortexErrorResponse {
   if (error instanceof AgentsVxappOwnerClientError) {
-    return resolveVortexErrorDisplay({
-      authoritySurface: error.authoritySurface,
-      kind: "owner_contract_error",
-      message: error.message,
-      ownerErrorCode: error.ownerErrorCode,
-    });
+    return {
+      ...resolveVortexErrorDisplay({
+        authoritySurface: error.authoritySurface,
+        kind: "owner_contract_error",
+        message: error.message,
+        ownerErrorCode: error.ownerErrorCode,
+      }),
+      details: error.details,
+      hints: [...error.hints],
+    };
   }
 
   if (isAgentsVxappSidebarError(error)) {
-    return resolveVortexErrorDisplay({
-      authoritySurface: error.authoritySurface ?? null,
-      kind: "owner_contract_error",
-      message: error.message,
-      ownerErrorCode: error.ownerErrorCode ?? null,
-    });
+    return {
+      ...resolveVortexErrorDisplay({
+        authoritySurface: error.authoritySurface ?? null,
+        kind: "owner_contract_error",
+        message: error.message,
+        ownerErrorCode: error.ownerErrorCode ?? null,
+      }),
+      details: error.details ?? null,
+      hints: error.hints ?? [],
+    };
   }
 
   if (isAgentsVxappControlPlaneError(error)) {
-    return resolveVortexErrorDisplay({
-      authoritySurface: error.authoritySurface ?? null,
-      kind: "owner_contract_error",
-      message: error.detail,
-      ownerErrorCode: error.ownerErrorCode ?? null,
-    });
+    return {
+      ...resolveVortexErrorDisplay({
+        authoritySurface: error.authoritySurface ?? null,
+        kind: "owner_contract_error",
+        message: error.detail,
+        ownerErrorCode: error.ownerErrorCode ?? null,
+      }),
+      details: error.details ?? null,
+      hints: error.hints ?? [],
+    };
   }
 
   if (isVortexAppsError(error)) {

@@ -57,6 +57,7 @@ import {
 import { buildAppDocumentTitle } from "../lib/documentTitle";
 import {
   addThreadDetailToReadModel,
+  loadCurrentStateWithOrchestratorSessionDetail,
   loadCurrentStateWithThreadDetail,
 } from "../lib/orchestrationCurrentStateHydration";
 import { resolveThreadSessionRootId } from "../lib/orchestrationMode";
@@ -189,6 +190,7 @@ function RootRouteView() {
     ideModeEnabled: settings.ideModeEnabled,
     isChatThreadRoute,
   });
+  const shouldPreloadArtifacts = isArtifactsPath(pathname) || isArtifactWindowPath(pathname);
 
   if (!readNativeApi()) {
     return (
@@ -207,7 +209,7 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
-        <ArtifactsPreloader />
+        <ArtifactsPreloader enabled={shouldPreloadArtifacts} />
         {isStandaloneWindowRoute ? (
           <Outlet />
         ) : isSidebarWindowRoute ? (
@@ -402,7 +404,12 @@ export async function bootstrapOrchestrationState({
   if (summaryApplied) {
     const activeThreadId = getCurrentThreadId?.() ?? findCurrentSessionRootThreadId(summaryApplied);
     if (activeThreadId) {
-      await runSnapshotRecovery(() => loadCurrentStateWithThreadDetail(api, activeThreadId));
+      const activeThread = summaryApplied.threads.find((thread) => thread.id === activeThreadId);
+      await runSnapshotRecovery(() =>
+        activeThread?.spawnRole === "orchestrator"
+          ? loadCurrentStateWithOrchestratorSessionDetail(api, activeThreadId)
+          : loadCurrentStateWithThreadDetail(api, activeThreadId),
+      );
     }
     return;
   }
@@ -412,7 +419,12 @@ export async function bootstrapOrchestrationState({
     ? (getCurrentThreadId?.() ?? findCurrentSessionRootThreadId(currentState))
     : null;
   if (currentState && activeThreadId) {
-    await runSnapshotRecovery(() => addThreadDetailToReadModel(api, currentState, activeThreadId));
+    const activeThread = currentState.threads.find((thread) => thread.id === activeThreadId);
+    await runSnapshotRecovery(() =>
+      activeThread?.spawnRole === "orchestrator"
+        ? loadCurrentStateWithOrchestratorSessionDetail(api, activeThreadId)
+        : addThreadDetailToReadModel(api, currentState, activeThreadId),
+    );
   }
 }
 
@@ -591,8 +603,13 @@ function EventRouter() {
 
       try {
         const currentThreadId = resolveCurrentThreadId();
+        const currentThread = currentThreadId
+          ? useStore.getState().threads.find((thread) => thread.id === currentThreadId)
+          : undefined;
         const readModel = currentThreadId
-          ? await loadCurrentStateWithThreadDetail(api, currentThreadId)
+          ? currentThread?.spawnRole === "orchestrator"
+            ? await loadCurrentStateWithOrchestratorSessionDetail(api, currentThreadId)
+            : await loadCurrentStateWithThreadDetail(api, currentThreadId)
           : await api.orchestration.getCurrentState();
         if (!disposed) {
           syncServerReadModel(readModel);

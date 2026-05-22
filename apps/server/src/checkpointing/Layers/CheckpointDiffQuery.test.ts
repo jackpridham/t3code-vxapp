@@ -50,6 +50,7 @@ function makeProjectionOperationalQuery(
     listProjectThreads: unused,
     listSessionThreads: unused,
     listThreadMessages: unused,
+    listThreadCheckpoints: unused,
     listThreadActivities: unused,
     listThreadSessions: unused,
     listOrchestratorWakes: unused,

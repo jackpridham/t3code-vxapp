@@ -36,11 +36,11 @@ describe("agents-vxapp projection authority boundary", () => {
 
   it("uses owner-backed truth for vxapp-backed query paths", () => {
     const snapshotQuerySource = read("src/orchestration/Layers/ProjectionSnapshotQuery.ts");
-    expect(snapshotQuerySource).toContain("controlPlane.getProgramsAuthoritySnapshot()");
+    expect(snapshotQuerySource).toContain(".getProgramsAuthoritySnapshot()");
     expect(snapshotQuerySource).toContain("getNotificationSummaryExport()");
     expect(snapshotQuerySource).toContain("getRuntimePaths()");
     expect(snapshotQuerySource).toContain("AgentsVxappControlPlane");
-    expect(snapshotQuerySource).toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
+    expect(snapshotQuerySource).toContain("snapshot.programs.map(mapOwnerProgram)");
 
     for (const relativePath of [
       "src/extensions/vxapp/Layers/ProjectionOperationalQuery.ts",

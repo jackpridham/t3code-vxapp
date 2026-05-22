@@ -13,6 +13,8 @@ export class AgentsVxappSidebarError extends Schema.TaggedErrorClass<AgentsVxapp
     ownerCommand: Schema.optional(Schema.String),
     authoritySurface: Schema.optional(Schema.String),
     ownerErrorCode: Schema.optional(Schema.NullOr(Schema.String)),
+    details: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown))),
+    hints: Schema.optional(Schema.Array(Schema.Record(Schema.String, Schema.Unknown))),
   },
 ) {}
 

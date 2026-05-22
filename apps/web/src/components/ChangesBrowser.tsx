@@ -541,6 +541,7 @@ function ChangesPreviewBody(props: {
 
 export interface ChangesBrowserProps {
   title?: string | undefined;
+  emptyState?: { title: string; description: string } | undefined;
   threadId: ThreadId | null;
   worktreePath: string | null;
   messages: readonly ChatMessage[];
@@ -562,6 +563,7 @@ export interface ChangesBrowserProps {
 
 export const ChangesBrowser = memo(function ChangesBrowser({
   title = "Changes",
+  emptyState,
   threadId,
   worktreePath,
   messages,
@@ -789,9 +791,12 @@ export const ChangesBrowser = memo(function ChangesBrowser({
             <div className="space-y-1 p-2">
               {nonEmptyGroups.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <p className="text-[13px] text-muted-foreground/40">No file references found.</p>
+                  <p className="text-[13px] text-muted-foreground/40">
+                    {emptyState?.title ?? "No file references found."}
+                  </p>
                   <p className="mt-1 text-[11px] text-muted-foreground/30">
-                    References will appear as the conversation progresses.
+                    {emptyState?.description ??
+                      "References will appear as the conversation progresses."}
                   </p>
                 </div>
               ) : (

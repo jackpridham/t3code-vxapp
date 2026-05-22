@@ -235,6 +235,8 @@ export const VortexErrorResponse = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString),
   message: TrimmedNonEmptyString,
   ownerErrorCode: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  details: Schema.optional(Schema.NullOr(AgentsVxappJsonRecord)),
+  hints: Schema.optional(Schema.Array(AgentsVxappJsonRecord)),
 });
 export type VortexErrorResponse = typeof VortexErrorResponse.Type;
 
@@ -245,6 +247,7 @@ export const AgentsVxappOwnerBoundaryError = Schema.Struct({
   message: TrimmedNonEmptyString,
   ownerErrorCode: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   details: Schema.optional(Schema.NullOr(AgentsVxappJsonRecord)),
+  hints: Schema.optional(Schema.Array(AgentsVxappJsonRecord)),
 });
 export type AgentsVxappOwnerBoundaryError = typeof AgentsVxappOwnerBoundaryError.Type;
 

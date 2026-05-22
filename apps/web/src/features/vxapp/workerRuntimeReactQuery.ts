@@ -2,7 +2,7 @@ import { type ServerGetWorkerRuntimeSnapshotResult, type ThreadId } from "@t3too
 import { queryOptions } from "@tanstack/react-query";
 import { ensureNativeApi } from "~/nativeApi";
 
-const WORKER_RUNTIME_STALE_TIME_MS = 30_000;
+const WORKER_RUNTIME_STALE_TIME_MS = 5 * 60_000;
 
 export const workerRuntimeQueryKeys = {
   all: ["worker-runtime"] as const,

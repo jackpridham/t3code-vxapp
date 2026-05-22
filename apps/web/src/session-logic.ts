@@ -1095,9 +1095,15 @@ function formatWorkLogPayload(payload: Record<string, unknown> | null): string |
   if (!payload) {
     return undefined;
   }
+  if (payload.compacted === true) {
+    return undefined;
+  }
   try {
     const serialized = JSON.stringify(payload, null, 2);
-    return serialized.length > 0 ? serialized : undefined;
+    if (serialized.length === 0 || serialized.length > 20_000) {
+      return undefined;
+    }
+    return serialized;
   } catch {
     return undefined;
   }

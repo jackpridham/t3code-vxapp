@@ -55,18 +55,24 @@ export class WebSocketRequestError extends Error {
   readonly code: VortexErrorCode | null;
   readonly title: string | null;
   readonly ownerErrorCode: string | null;
+  readonly details: Record<string, unknown> | null;
+  readonly hints: readonly Record<string, unknown>[];
 
   constructor(input: {
     readonly message: string;
     readonly code?: VortexErrorCode | null;
     readonly title?: string | null;
     readonly ownerErrorCode?: string | null;
+    readonly details?: Record<string, unknown> | null;
+    readonly hints?: readonly Record<string, unknown>[];
   }) {
     super(input.message);
     this.name = "WebSocketRequestError";
     this.code = input.code ?? null;
     this.title = input.title ?? null;
     this.ownerErrorCode = input.ownerErrorCode ?? null;
+    this.details = input.details ?? null;
+    this.hints = input.hints ?? [];
   }
 }
 
@@ -278,6 +284,8 @@ export class WsTransport {
           code: message.error.code ?? null,
           title: message.error.title ?? null,
           ownerErrorCode: message.error.ownerErrorCode ?? null,
+          details: message.error.details ?? null,
+          hints: message.error.hints ?? [],
         }),
       );
       return;

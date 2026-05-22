@@ -157,6 +157,7 @@ function makeApi(): NativeApi {
           updatedAt: "2026-04-14T00:00:02.000Z",
         },
       ]),
+      listThreadCheckpoints: vi.fn().mockResolvedValue([]),
       listThreadActivities: vi.fn().mockResolvedValue([]),
       listThreadSessions: vi.fn().mockResolvedValue([]),
       listOrchestratorWakes: vi.fn().mockResolvedValue([]),
@@ -167,6 +168,28 @@ function makeApi(): NativeApi {
 describe("route thread history hydration", () => {
   it("does not hydrate empty never-started draft-like threads", () => {
     expect(threadNeedsRouteHistoryHydration(makeThread())).toBe(false);
+  });
+
+  it("hydrates empty orchestrator threads when worker sessions exist", () => {
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          spawnRole: "orchestrator",
+          sessionWorkerThreadCount: 2,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("hydrates empty orchestrator route summaries because worker sessions may exist", () => {
+    expect(
+      threadNeedsRouteHistoryHydration(
+        makeThread({
+          spawnRole: "orchestrator",
+          snapshotCoverage: makeSummaryCoverage(),
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("hydrates started summary-only threads reached by route navigation", async () => {
@@ -185,7 +208,12 @@ describe("route thread history hydration", () => {
     expect(api.orchestration.getCurrentState).toHaveBeenCalledTimes(1);
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId,
-      limit: 1000,
+      limit: 200,
+    });
+    expect(api.orchestration.listThreadActivities).toHaveBeenCalledWith({
+      threadId,
+      limit: 200,
+      payloadMode: "compact",
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -195,7 +223,7 @@ describe("route thread history hydration", () => {
             messages: [expect.objectContaining({ text: "loaded after navigation" })],
             snapshotCoverage: expect.objectContaining({
               messageCount: 1,
-              messageLimit: null,
+              messageLimit: 200,
             }),
           }),
         ],
@@ -255,7 +283,7 @@ describe("route thread history hydration", () => {
     expect(syncServerReadModel).not.toHaveBeenCalled();
   });
 
-  it("hydrates worker session history when navigating to an orchestrator thread", async () => {
+  it("hydrates orchestrator route history and worker checkpoints without loading every worker history", async () => {
     const workerThreadId = ThreadId.makeUnsafe("worker-1");
     const api = makeApi();
     vi.mocked(api.orchestration.listSessionThreads).mockResolvedValue([
@@ -326,15 +354,26 @@ describe("route thread history hydration", () => {
       includeDeleted: false,
     });
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
+      threadId,
+      limit: 200,
+    });
+    expect(api.orchestration.listThreadMessages).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.listThreadCheckpoints).toHaveBeenCalledWith({
       threadId: workerThreadId,
       limit: 1000,
     });
+    expect(api.orchestration.listThreadActivities).toHaveBeenCalledWith({
+      threadId,
+      limit: 200,
+      payloadMode: "compact",
+    });
+    expect(api.orchestration.listThreadActivities).toHaveBeenCalledTimes(1);
     expect(syncServerReadModel).toHaveBeenCalledWith(
       expect.objectContaining({
         threads: expect.arrayContaining([
           expect.objectContaining({
             id: workerThreadId,
-            messages: [expect.objectContaining({ text: "loaded after navigation" })],
+            messages: [],
           }),
         ]),
       }),

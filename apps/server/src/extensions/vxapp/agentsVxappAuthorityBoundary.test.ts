@@ -98,14 +98,14 @@ describe("agents-vxapp owner authority boundary", () => {
   });
 
   it("does not fall back from owner-backed TODO snapshots to projection data", () => {
-    const todosSnapshotStart = controlPlaneLayerSource.indexOf("getProgramsTodosSnapshot: () =>");
+    const todosSnapshotStart = controlPlaneLayerSource.indexOf("getProgramsTodosSnapshot:");
     const todosSnapshotEnd = controlPlaneLayerSource.indexOf("createProgram: (input) =>");
 
     expect(todosSnapshotStart).toBeGreaterThanOrEqual(0);
     expect(todosSnapshotEnd).toBeGreaterThan(todosSnapshotStart);
 
     const todosSnapshotBlock = controlPlaneLayerSource.slice(todosSnapshotStart, todosSnapshotEnd);
-    expect(todosSnapshotBlock).toContain("fetchAgentsVxappProgramsTodosSnapshot()");
+    expect(todosSnapshotBlock).toContain("fetchAgentsVxappProgramsTodosSnapshot(input)");
     expect(todosSnapshotBlock).not.toContain("fetchAgentsVxappProgramsProjectionSnapshot()");
     expect(todosSnapshotBlock).toContain(
       'ownerPromise("ownerControlPlane.programsTodos.getProgramsTodosSnapshot", () =>',

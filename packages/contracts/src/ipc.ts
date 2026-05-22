@@ -86,6 +86,8 @@ import type {
   OrchestrationListSessionThreadsResult,
   OrchestrationListThreadActivitiesInput,
   OrchestrationListThreadActivitiesResult,
+  OrchestrationListThreadCheckpointsInput,
+  OrchestrationListThreadCheckpointsResult,
   OrchestrationListThreadMessagesInput,
   OrchestrationListThreadMessagesResult,
   OrchestrationListThreadSessionsInput,
@@ -295,6 +297,9 @@ export interface NativeApi {
     listThreadMessages: (
       input: OrchestrationListThreadMessagesInput,
     ) => Promise<OrchestrationListThreadMessagesResult>;
+    listThreadCheckpoints: (
+      input: OrchestrationListThreadCheckpointsInput,
+    ) => Promise<OrchestrationListThreadCheckpointsResult>;
     listThreadActivities: (
       input: OrchestrationListThreadActivitiesInput,
     ) => Promise<OrchestrationListThreadActivitiesResult>;

@@ -13,10 +13,12 @@ import { create } from "zustand";
 import {
   fetchAgentsVxappSidebarAuthoritySnapshotFromOwner,
   normalizeAgentsVxappSidebarAuthoritySnapshot,
+  type AgentsVxappAuthorityPageRequest,
   type AgentsVxappSidebarAuthorityNormalizedSnapshot,
 } from "./agentsVxappStoreBridge";
 
 const AGENTS_VXAPP_SIDEBAR_AUTHORITY_STALE_TIME_MS = 10_000;
+const AGENTS_VXAPP_PROGRAM_PAGE_LIMIT = 20;
 type SidebarTodoList = ServerGetAgentsVxappSidebarAuthoritySnapshotResult["todos"][number][];
 type SidebarWakeSummary = {
   openWakeCount: number;
@@ -38,7 +40,9 @@ type AgentsVxappStoreState = {
     string,
     ServerAgentsVxappSidebarAuthorityProgramCard["executive"]
   >;
-  refreshSidebarAuthority: (input?: { force?: boolean }) => Promise<void>;
+  refreshSidebarAuthority: (
+    input?: AgentsVxappAuthorityPageRequest & { force?: boolean },
+  ) => Promise<void>;
   setNormalizedSnapshot: (snapshot: AgentsVxappSidebarAuthorityNormalizedSnapshot) => void;
   snapshot: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null;
   status: AgentsVxappOwnerLoadStatus;
@@ -155,7 +159,10 @@ export const useAgentsVxappStore = create<AgentsVxappStoreState>((set, get) => (
         error: null,
       }));
       try {
-        const snapshot = await fetchAgentsVxappSidebarAuthoritySnapshotFromOwner();
+        const snapshot = await fetchAgentsVxappSidebarAuthoritySnapshotFromOwner({
+          limit: input?.limit ?? AGENTS_VXAPP_PROGRAM_PAGE_LIMIT,
+          page: input?.page ?? 1,
+        });
         get().setNormalizedSnapshot(normalizeAgentsVxappSidebarAuthoritySnapshot(snapshot));
       } catch (error) {
         const boundaryError: AgentsVxappOwnerBoundaryError =

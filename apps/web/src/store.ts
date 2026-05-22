@@ -283,6 +283,7 @@ function mapProjectHooks(hooks: ReadonlyArray<Project["hooks"][number]>): Projec
 
 type OrchestrationThreadWithLabels = OrchestrationThread & {
   labels?: readonly string[] | undefined;
+  sessionWorkerThreadCount?: number | undefined;
 };
 
 function mapThreadLabels(labels?: readonly string[] | null): string[] {
@@ -432,6 +433,7 @@ function mapThread(thread: OrchestrationThreadWithLabels): Thread {
     programId: thread.programId,
     executiveProjectId: thread.executiveProjectId,
     executiveThreadId: thread.executiveThreadId,
+    sessionWorkerThreadCount: thread.sessionWorkerThreadCount,
   };
 }
 
