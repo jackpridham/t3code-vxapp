@@ -87,6 +87,25 @@ describe("AgentsVxappExternalRoleAuthorityLive", () => {
     expect(mockedExternalRoleAuthoritySnapshot).toHaveBeenCalledTimes(1);
   });
 
+  it("fails closed when the owner snapshot payload is malformed", async () => {
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValueOnce({
+      externalRoleAuthority: {
+        projects: null,
+        threadSummaries: [],
+      },
+    });
+
+    await expect(
+      Effect.gen(function* () {
+        const authority = yield* AgentsVxappExternalRoleAuthority;
+        return yield* authority.getSnapshot();
+      }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive), Effect.runPromise),
+    ).rejects.toMatchObject({
+      detail: "agents-vxapp external role authority snapshot is missing projects.",
+      operation: "AgentsVxappExternalRoleAuthority.getSnapshot",
+    });
+  });
+
   it("loads role-session runtime paths through the owner client", async () => {
     const runtimePaths = {
       runtimeRoot: "/runtime",

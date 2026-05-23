@@ -181,11 +181,13 @@ function missingRuntimePathAuthorityError() {
 function mergeProjectsWithExternal(
   localProjects: ReadonlyArray<OrchestrationProject>,
   externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
+  runtimePaths: AgentsVxappRoleSessionRuntimePaths | null,
 ): OrchestrationProject[] {
   const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
   return [
     ...localProjects.filter(
       (project) =>
+        !isAgentsVxappWorkspaceRoot(project.workspaceRoot, runtimePaths) &&
         !externalIndex.projectIds.has(project.id) &&
         !externalIndex.workspaceRoots.has(project.workspaceRoot),
     ),
@@ -781,7 +783,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             ),
           );
           const projects = applyBindingCurrentThreadToProjects(
-            mergeProjectsWithExternal(localProjects, externalSnapshot),
+            mergeProjectsWithExternal(localProjects, externalSnapshot, runtimePaths),
             bindingAuthority,
           );
 

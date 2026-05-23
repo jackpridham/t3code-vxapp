@@ -23,10 +23,6 @@ function asRecord(value: unknown): JsonRecord | null {
     : null;
 }
 
-function asArray(value: unknown): readonly unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 function mapError(operation: string, cause: unknown): AgentsVxappExternalRoleAuthorityError {
   if (isAgentsVxappExternalRoleAuthorityError(cause)) {
     return cause;
@@ -65,12 +61,24 @@ function ownerPromise<T>(
 
 function buildSnapshot(payload: unknown): AgentsVxappExternalRoleAuthoritySnapshot {
   const root = asRecord(payload);
-  const authority = asRecord(root?.externalRoleAuthority) ?? root;
-  const projects = asArray(authority?.projects);
-  const threadSummaries = asArray(authority?.threadSummaries);
+  if (!root) {
+    throw new Error("agents-vxapp external role authority snapshot is not an object.");
+  }
+  const authority =
+    root.externalRoleAuthority === undefined ? root : asRecord(root.externalRoleAuthority);
+  if (!authority) {
+    throw new Error("agents-vxapp external role authority payload is malformed.");
+  }
+  if (!Array.isArray(authority.projects)) {
+    throw new Error("agents-vxapp external role authority snapshot is missing projects.");
+  }
+  if (!Array.isArray(authority.threadSummaries)) {
+    throw new Error("agents-vxapp external role authority snapshot is missing threadSummaries.");
+  }
   return {
-    projects: projects as AgentsVxappExternalRoleAuthoritySnapshot["projects"],
-    threadSummaries: threadSummaries as AgentsVxappExternalRoleAuthoritySnapshot["threadSummaries"],
+    projects: authority.projects as AgentsVxappExternalRoleAuthoritySnapshot["projects"],
+    threadSummaries:
+      authority.threadSummaries as AgentsVxappExternalRoleAuthoritySnapshot["threadSummaries"],
   };
 }
 

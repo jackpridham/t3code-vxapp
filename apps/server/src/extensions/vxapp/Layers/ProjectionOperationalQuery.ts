@@ -503,10 +503,12 @@ function mapProjectToSummary(
 function mergeProjectRowsWithExternal(
   localRows: ReadonlyArray<ProjectionProjectDbRow>,
   externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
+  runtimePaths: AgentsVxappRoleSessionRuntimePaths | null,
 ): OrchestrationReadModel["projects"] {
   const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
   const filteredLocalRows = localRows.filter(
     (row) =>
+      !isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths) &&
       !externalIndex.projectIds.has(row.projectId) &&
       !externalIndex.workspaceRoots.has(row.workspaceRoot),
   );
@@ -548,8 +550,11 @@ function mergeThreadSummariesWithExternal(input: {
 function mergeProjectSummariesWithExternal(
   localRows: ReadonlyArray<ProjectionProjectDbRow>,
   externalSnapshot: AgentsVxappExternalRoleAuthoritySnapshot,
+  runtimePaths: AgentsVxappRoleSessionRuntimePaths | null,
 ): OrchestrationListProjectsResult {
-  return mergeProjectRowsWithExternal(localRows, externalSnapshot).map(mapProjectToSummary);
+  return mergeProjectRowsWithExternal(localRows, externalSnapshot, runtimePaths).map(
+    mapProjectToSummary,
+  );
 }
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
@@ -2287,7 +2292,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             runtimePaths,
           });
           const mergedProjects = applyBindingCurrentThreadToProjects(
-            mergeProjectRowsWithExternal(projectRows, externalSnapshot),
+            mergeProjectRowsWithExternal(projectRows, externalSnapshot, runtimePaths),
             bindingAuthority,
           );
           const mergedThreadSummaries = mergeThreadSummariesWithExternal({
@@ -2375,7 +2380,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           Effect.map(
             (bindingAuthority): OrchestrationListProjectsResult =>
               applyBindingCurrentThreadToProjectSummaries(
-                mergeProjectSummariesWithExternal(projectRows, externalSnapshot),
+                mergeProjectSummariesWithExternal(projectRows, externalSnapshot, runtimePaths),
                 bindingAuthority,
               ),
           ),
@@ -2416,7 +2421,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             return applyBindingCurrentThreadToProjectSummary(
               Option.match(projectRow, {
                 onNone: (): null => null,
-                onSome: mapProjectRowToSummary,
+                onSome: (row) =>
+                  isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths)
+                    ? null
+                    : mapProjectRowToSummary(row),
               }),
               bindingAuthority,
             );
@@ -2462,7 +2470,10 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             return applyBindingCurrentThreadToProjectSummary(
               Option.match(projectRow, {
                 onNone: () => null,
-                onSome: mapProjectRowToSummary,
+                onSome: (row) =>
+                  isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths)
+                    ? null
+                    : mapProjectRowToSummary(row),
               }),
               bindingAuthority,
             );
