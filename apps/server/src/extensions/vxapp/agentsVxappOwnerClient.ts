@@ -147,6 +147,13 @@ export type AgentsVxappThreadLifecycleOwnerCommand =
   | "t3code-threads-delete"
   | "t3code-threads-lineage-update";
 
+export type AgentsVxappWakeOwnerCommand =
+  | "t3code-wake-enqueue"
+  | "t3code-wake-delivery-plan"
+  | "t3code-wake-drain-ready"
+  | "t3code-wake-reconcile-startup"
+  | "t3code-wake-provider-request";
+
 const THREAD_LIFECYCLE_OWNER_COMMAND_KINDS = {
   "t3code-threads-create": "thread_create",
   "t3code-threads-start": "thread_turn_start",
@@ -167,6 +174,18 @@ export interface AgentsVxappThreadLifecycleProviderPayload extends JsonRecord {
     readonly kind: ThreadLifecycleProviderRequestKind;
     readonly requestId: string;
   };
+}
+
+export interface AgentsVxappWakeOwnerPayload extends JsonRecord {
+  readonly legacyFallbackUsed: false;
+}
+
+export interface AgentsVxappWakeProviderRequestPayload extends AgentsVxappWakeOwnerPayload {
+  readonly providerRequestStatus: "ready" | "blocked";
+  readonly providerRequest?: JsonRecord;
+  readonly ownerDiagnostics?: JsonRecord;
+  readonly failureCode?: string;
+  readonly failureMessage?: string;
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -471,6 +490,68 @@ function validateThreadLifecycleProviderPayload(input: {
     });
   }
   return payload as AgentsVxappThreadLifecycleProviderPayload;
+}
+
+function validateWakeOwnerPayload(input: {
+  readonly ownerCommand: AgentsVxappWakeOwnerCommand;
+  readonly payload: unknown;
+}): AgentsVxappWakeOwnerPayload {
+  const payload = asRecord(input.payload);
+  if (!payload) {
+    fail({
+      authoritySurface: "wakes",
+      message: "Owner wake payload must be a JSON object.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  if (payload.legacyFallbackUsed !== false) {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "wakes",
+      message: "Owner wake payload used a legacy fallback.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  return payload as AgentsVxappWakeOwnerPayload;
+}
+
+function validateWakeProviderRequestPayload(input: {
+  readonly ownerCommand: AgentsVxappWakeOwnerCommand;
+  readonly payload: unknown;
+}): AgentsVxappWakeProviderRequestPayload {
+  const payload = validateWakeOwnerPayload(input);
+  const status = asString(payload.providerRequestStatus);
+  if (status !== "ready" && status !== "blocked") {
+    fail({
+      authorityPayload: payload,
+      authoritySurface: "wakes",
+      message: "Owner wake provider payload is missing providerRequestStatus.",
+      ownerCommand: input.ownerCommand,
+    });
+  }
+  if (status === "ready") {
+    const providerRequest = asRecord(payload.providerRequest);
+    if (!providerRequest || providerRequest.kind !== "thread.turn.start") {
+      fail({
+        authorityPayload: payload,
+        authoritySurface: "wakes",
+        message: "Owner wake provider payload is missing thread.turn.start providerRequest.",
+        ownerCommand: input.ownerCommand,
+      });
+    }
+    const missingFields = ["requestId", "threadId", "messageId", "message"].filter(
+      (field) => !asString(providerRequest[field]),
+    );
+    if (missingFields.length > 0) {
+      fail({
+        authorityPayload: payload,
+        authoritySurface: "wakes",
+        message: `Owner wake provider payload is malformed; missing ${missingFields.join(", ")}.`,
+        ownerCommand: input.ownerCommand,
+      });
+    }
+  }
+  return payload as AgentsVxappWakeProviderRequestPayload;
 }
 
 async function executeOwnerCommand(input: {
@@ -1080,6 +1161,63 @@ export async function requestAgentsVxappWakeMutation(
       payloadJson: input,
     })
   ).payload;
+}
+
+async function requestAgentsVxappWakeOwnerCommand(input: {
+  readonly command: AgentsVxappWakeOwnerCommand;
+  readonly payloadJson: Readonly<JsonRecord>;
+}): Promise<AgentsVxappWakeOwnerPayload> {
+  const authorityPayload = await callManifestCommandByName<JsonRecord>({
+    command: input.command,
+    surface: "wakes",
+    payloadJson: input.payloadJson,
+  });
+  return validateWakeOwnerPayload({
+    ownerCommand: input.command,
+    payload: authorityPayload.payload,
+  });
+}
+
+export async function requestAgentsVxappWakeEnqueue(input: Readonly<JsonRecord>) {
+  return requestAgentsVxappWakeOwnerCommand({
+    command: "t3code-wake-enqueue",
+    payloadJson: input,
+  });
+}
+
+export async function requestAgentsVxappWakeDeliveryPlan(input: Readonly<JsonRecord>) {
+  return requestAgentsVxappWakeOwnerCommand({
+    command: "t3code-wake-delivery-plan",
+    payloadJson: input,
+  });
+}
+
+export async function requestAgentsVxappWakeDrainReady(input: Readonly<JsonRecord>) {
+  return requestAgentsVxappWakeOwnerCommand({
+    command: "t3code-wake-drain-ready",
+    payloadJson: input,
+  });
+}
+
+export async function requestAgentsVxappWakeReconcileStartup(input: Readonly<JsonRecord>) {
+  return requestAgentsVxappWakeOwnerCommand({
+    command: "t3code-wake-reconcile-startup",
+    payloadJson: input,
+  });
+}
+
+export async function requestAgentsVxappWakeProviderRequest(
+  input: Readonly<JsonRecord>,
+): Promise<AgentsVxappWakeProviderRequestPayload> {
+  const authorityPayload = await callManifestCommandByName<JsonRecord>({
+    command: "t3code-wake-provider-request",
+    surface: "wakes",
+    payloadJson: input,
+  });
+  return validateWakeProviderRequestPayload({
+    ownerCommand: "t3code-wake-provider-request",
+    payload: authorityPayload.payload,
+  });
 }
 
 export async function requestAgentsVxappCtoProviderRequest(input: {

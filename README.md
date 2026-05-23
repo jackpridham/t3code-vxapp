@@ -123,6 +123,7 @@ For vxapp-backed executive/runtime surfaces, authority is split intentionally:
 - **T3** owns transport, eventing, provider sessions, local projections, and browser rendering.
 - **`agents-vxapp`** owns Program/TODO/notification/attention/wake/thread-selection/runtime truth and exposes that through the owner command family behind `scripts/tools/t3-control-plane-owner`.
 - **T3 UI must not rebuild that owner truth from local browser store state or ad hoc projection joins.**
+- **Wake and thread lifecycle transport is owner-issued.** For vxapp-backed wakes, T3 calls the `t3code-wake-*` owner commands, executes only owner-issued provider requests, records transport receipts and diagnostics, and does not own wake queue, dedupe, batch, prompt, delivery, lifecycle, or projection fallback policy.
 
 ---
 

@@ -67,6 +67,19 @@ describe("agents-vxapp projection authority boundary", () => {
     );
   });
 
+  it("keeps CTO provider request and wake authority outside projection synthesis", () => {
+    const wakeReactorSource = read("src/extensions/vxapp/Layers/OrchestratorWakeReactor.ts");
+    const providerReactorSource = read("src/orchestration/Layers/ProviderCommandReactor.ts");
+
+    expect(providerReactorSource).toContain("providerRequestStatus");
+    expect(providerReactorSource).toContain("Owner provider request failed closed");
+    expect(wakeReactorSource).toContain("requestAgentsVxappWakeProviderRequest");
+    expect(wakeReactorSource).not.toContain("readModel.orchestratorWakeItems");
+    expect(wakeReactorSource).not.toContain("notifyActiveOrchestratorOnRejectedWorkerWake");
+    expect(wakeReactorSource).not.toContain("diagnostic_worker_wake_rejected");
+    expect(wakeReactorSource).not.toContain("program-link-sync");
+  });
+
   it("uses the runtime-path helper instead of repo-root prefix classification", () => {
     for (const relativePath of [
       "src/orchestration/Layers/ProjectionSnapshotQuery.ts",

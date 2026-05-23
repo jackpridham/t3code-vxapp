@@ -21,6 +21,10 @@ import {
   requestAgentsVxappThreadEventIngest,
   requestAgentsVxappThreadStatus,
   requestAgentsVxappUserInputResponse,
+  requestAgentsVxappWakeDeliveryPlan,
+  requestAgentsVxappWakeEnqueue,
+  requestAgentsVxappWakeProviderRequest,
+  requestAgentsVxappWakeReconcileStartup,
   resetAgentsVxappOwnerManifestForTests,
 } from "./agentsVxappOwnerClient.ts";
 
@@ -60,6 +64,11 @@ t3code-todo-mutate	todos
 t3code-notification-mutate	notifications
 t3code-attention-mutate	attention
 t3code-wake-mutate	wakes
+t3code-wake-enqueue	wakes
+t3code-wake-delivery-plan	wakes
+t3code-wake-drain-ready	wakes
+t3code-wake-reconcile-startup	wakes
+t3code-wake-provider-request	wakes
 t3code-program-notifications-snapshot	program_residuals
 t3code-program-attention-snapshot	program_residuals
 t3code-program-runtime-allocations	program_residuals
@@ -204,6 +213,8 @@ describe("agentsVxappOwnerClient", () => {
         "t3code-approval-request",
         "t3code-approval-respond",
         "t3code-user-input-respond",
+        "t3code-wake-enqueue",
+        "t3code-wake-provider-request",
       ]),
     );
     expect(manifest.commandsByName.get("t3code-thread-status")?.surface).toBe("threads");
@@ -457,6 +468,133 @@ describe("agentsVxappOwnerClient", () => {
       ],
       expect.objectContaining({}),
     );
+  });
+
+  it("routes wake owner helpers by command name and fails closed on provider payloads", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-wake-enqueue", "wakes", {
+            legacyFallbackUsed: false,
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-wake-delivery-plan", "wakes", {
+            legacyFallbackUsed: false,
+            status: "ready",
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-wake-reconcile-startup", "wakes", {
+            legacyFallbackUsed: false,
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-wake-provider-request", "wakes", {
+            legacyFallbackUsed: false,
+            providerRequestStatus: "ready",
+            providerRequest: {
+              kind: "thread.turn.start",
+              requestId: "owner-wake-request",
+              threadId: "thread-orchestrator",
+              messageId: "message-owner-wake",
+              message: "Review worker result",
+            },
+          }),
+        ),
+      );
+
+    await requestAgentsVxappWakeEnqueue({ workerThreadId: "thread-worker" });
+    await requestAgentsVxappWakeDeliveryPlan({ orchestratorThreadId: "thread-orchestrator" });
+    await requestAgentsVxappWakeReconcileStartup({ orchestratorThreadId: "thread-orchestrator" });
+    const payload = await requestAgentsVxappWakeProviderRequest({
+      orchestratorThreadId: "thread-orchestrator",
+    });
+
+    expect(payload.legacyFallbackUsed).toBe(false);
+    expect(payload.providerRequestStatus).toBe("ready");
+    expect(payload.providerRequest?.requestId).toBe("owner-wake-request");
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      [
+        "t3code-wake-enqueue",
+        "--json",
+        "--payload-json",
+        expect.stringContaining('"workerThreadId":"thread-worker"'),
+      ],
+      expect.objectContaining({}),
+    );
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      5,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      [
+        "t3code-wake-provider-request",
+        "--json",
+        "--payload-json",
+        expect.stringContaining('"orchestratorThreadId":"thread-orchestrator"'),
+      ],
+      expect.objectContaining({}),
+    );
+
+    resetAgentsVxappOwnerManifestForTests();
+    mockedRunProcess.mockReset();
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-wake-provider-request", "wakes", {
+            legacyFallbackUsed: false,
+            providerRequestStatus: "ready",
+            providerRequest: {
+              kind: "thread.turn.start",
+              requestId: "owner-wake-request",
+            },
+          }),
+        ),
+      );
+
+    await expect(
+      requestAgentsVxappWakeProviderRequest({ orchestratorThreadId: "thread-orchestrator" }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("missing threadId, messageId, message"),
+      ownerCommand: "t3code-wake-provider-request",
+      authoritySurface: "wakes",
+    });
+
+    resetAgentsVxappOwnerManifestForTests();
+    mockedRunProcess.mockReset();
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-wake-provider-request", "wakes", {
+            legacyFallbackUsed: true,
+            providerRequestStatus: "blocked",
+          }),
+        ),
+      );
+
+    await expect(
+      requestAgentsVxappWakeProviderRequest({ orchestratorThreadId: "thread-orchestrator" }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("legacy fallback"),
+      ownerCommand: "t3code-wake-provider-request",
+      authoritySurface: "wakes",
+    });
   });
 
   it("validates owner-issued thread lifecycle provider requests for every Phase 08 kind", async () => {

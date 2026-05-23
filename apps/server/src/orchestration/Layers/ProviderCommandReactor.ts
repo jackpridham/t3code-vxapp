@@ -113,6 +113,10 @@ type OwnerThreadTurnStartProviderRequest = {
 type OwnerProviderRequestPayload = {
   readonly providerRequestStatus: OwnerProviderRequestStatus;
   readonly providerRequest?: unknown;
+  readonly ownerRequestId?: unknown;
+  readonly ownerDiagnostics?: unknown;
+  readonly providerThreadId?: unknown;
+  readonly providerTurnId?: unknown;
   readonly failureCode?: unknown;
   readonly failureMessage?: unknown;
   readonly legacyFallbackUsed?: unknown;
@@ -137,6 +141,10 @@ function ownerProviderRequestPayload(value: unknown): OwnerProviderRequestPayloa
   return {
     providerRequestStatus,
     providerRequest: record?.providerRequest,
+    ownerRequestId: record?.ownerRequestId,
+    ownerDiagnostics: record?.ownerDiagnostics,
+    providerThreadId: record?.providerThreadId,
+    providerTurnId: record?.providerTurnId,
     failureCode: record?.failureCode,
     failureMessage: record?.failureMessage,
     legacyFallbackUsed: record?.legacyFallbackUsed,
@@ -150,6 +158,18 @@ function ownerProviderRequestDiagnostic(payload: OwnerProviderRequestPayload): s
     return `${failureCode}: ${failureMessage}`;
   }
   return failureMessage ?? failureCode ?? "Owner provider request was blocked.";
+}
+
+function ownerProviderRequestId(payload: OwnerProviderRequestPayload): string | null {
+  const providerRequest = asRecord(payload.providerRequest);
+  return asNonEmptyString(providerRequest?.requestId) ?? asNonEmptyString(payload.ownerRequestId);
+}
+
+function ownerProviderThreadId(
+  payload: OwnerProviderRequestPayload,
+  fallbackThreadId: ThreadId,
+): ThreadId {
+  return ThreadId.makeUnsafe(asNonEmptyString(payload.providerThreadId) ?? fallbackThreadId);
 }
 
 function decodeOwnerThreadTurnStartProviderRequest(
@@ -406,6 +426,13 @@ const make = Effect.gen(function* () {
     readonly turnId: TurnId | null;
     readonly createdAt: string;
     readonly requestId?: string;
+    readonly ownerRequestId?: string | null;
+    readonly transportStatus?: "failed" | "rejected";
+    readonly providerThreadId?: ThreadId;
+    readonly providerTurnId?: string | null;
+    readonly error?: string;
+    readonly ownerDiagnostics?: unknown;
+    readonly legacyFallbackUsed?: unknown;
   }) =>
     orchestrationEngine.dispatch({
       type: "thread.activity.append",
@@ -419,6 +446,17 @@ const make = Effect.gen(function* () {
         payload: {
           detail: input.detail,
           ...(input.requestId ? { requestId: input.requestId } : {}),
+          ...(input.ownerRequestId ? { ownerRequestId: input.ownerRequestId } : {}),
+          ...(input.transportStatus ? { transportStatus: input.transportStatus } : {}),
+          ...(input.providerThreadId ? { providerThreadId: input.providerThreadId } : {}),
+          ...(input.providerTurnId !== undefined ? { providerTurnId: input.providerTurnId } : {}),
+          ...(input.error ? { error: input.error } : {}),
+          ...(input.ownerDiagnostics !== undefined
+            ? { ownerDiagnostics: input.ownerDiagnostics }
+            : {}),
+          ...(input.legacyFallbackUsed !== undefined
+            ? { legacyFallbackUsed: input.legacyFallbackUsed }
+            : {}),
         },
         turnId: input.turnId,
         createdAt: input.createdAt,
@@ -878,13 +916,21 @@ const make = Effect.gen(function* () {
     const ownerPayload = ownerProviderRequestPayload(event.payload);
     if (ownerPayload) {
       if (ownerPayload.providerRequestStatus === "blocked") {
+        const detail = ownerProviderRequestDiagnostic(ownerPayload);
         yield* appendProviderFailureActivity({
           threadId: event.payload.threadId,
           kind: "provider.turn.start.failed",
           summary: "Owner provider request blocked",
-          detail: ownerProviderRequestDiagnostic(ownerPayload),
+          detail,
           turnId: null,
           createdAt: event.payload.createdAt,
+          ownerRequestId: ownerProviderRequestId(ownerPayload),
+          transportStatus: "rejected",
+          providerThreadId: ownerProviderThreadId(ownerPayload, event.payload.threadId),
+          providerTurnId: asNonEmptyString(ownerPayload.providerTurnId),
+          error: detail,
+          ownerDiagnostics: ownerPayload.ownerDiagnostics,
+          legacyFallbackUsed: ownerPayload.legacyFallbackUsed,
         });
         return;
       }
@@ -893,14 +939,22 @@ const make = Effect.gen(function* () {
         ownerPayload.providerRequest,
       );
       if (!providerRequest) {
+        const detail =
+          "Owner providerRequestStatus was ready, but providerRequest.kind was not thread.turn.start or required fields were missing.";
         yield* appendProviderFailureActivity({
           threadId: event.payload.threadId,
           kind: "provider.turn.start.failed",
           summary: "Owner provider request failed closed",
-          detail:
-            "Owner providerRequestStatus was ready, but providerRequest.kind was not thread.turn.start or required fields were missing.",
+          detail,
           turnId: null,
           createdAt: event.payload.createdAt,
+          ownerRequestId: ownerProviderRequestId(ownerPayload),
+          transportStatus: "rejected",
+          providerThreadId: ownerProviderThreadId(ownerPayload, event.payload.threadId),
+          providerTurnId: asNonEmptyString(ownerPayload.providerTurnId),
+          error: detail,
+          ownerDiagnostics: ownerPayload.ownerDiagnostics,
+          legacyFallbackUsed: ownerPayload.legacyFallbackUsed,
         });
         return;
       }
@@ -925,6 +979,13 @@ const make = Effect.gen(function* () {
             turnId: null,
             createdAt: event.payload.createdAt,
             requestId: providerRequest.requestId,
+            ownerRequestId: providerRequest.requestId,
+            transportStatus: "failed",
+            providerThreadId: providerRequest.threadId,
+            providerTurnId: asNonEmptyString(ownerPayload.providerTurnId),
+            error: Cause.pretty(cause),
+            ownerDiagnostics: ownerPayload.ownerDiagnostics,
+            legacyFallbackUsed: ownerPayload.legacyFallbackUsed,
           }),
         ),
       );

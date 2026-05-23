@@ -424,6 +424,9 @@ describe("ProviderCommandReactor authority boundary", () => {
         threadId: asThreadId("thread-1"),
         messageId: "owner-message-not-used",
         providerRequestStatus: "ready",
+        ownerRequestId: "owner-request-malformed",
+        ownerDiagnostics: { reason: "missing_provider_request" },
+        legacyFallbackUsed: false,
         createdAt: "2026-05-16T00:00:08.000Z",
       },
       commandId: CommandId.makeUnsafe("cmd-owner-provider-malformed"),
@@ -439,6 +442,15 @@ describe("ProviderCommandReactor authority boundary", () => {
       expect.objectContaining({
         kind: "provider.turn.start.failed",
         summary: "Owner provider request failed closed",
+        payload: expect.objectContaining({
+          ownerRequestId: "owner-request-malformed",
+          transportStatus: "rejected",
+          providerThreadId: "thread-1",
+          providerTurnId: null,
+          error: expect.stringContaining("Owner providerRequestStatus was ready"),
+          ownerDiagnostics: { reason: "missing_provider_request" },
+          legacyFallbackUsed: false,
+        }),
       }),
     );
   });
@@ -457,8 +469,10 @@ describe("ProviderCommandReactor authority boundary", () => {
         threadId: asThreadId("thread-1"),
         messageId: "owner-message-not-used",
         providerRequestStatus: "blocked",
+        ownerRequestId: "owner-request-blocked",
         failureCode: "busy_thread",
         failureMessage: "Thread is busy.",
+        ownerDiagnostics: { queue: "busy" },
         legacyFallbackUsed: false,
         createdAt: "2026-05-16T00:00:09.000Z",
       },
@@ -475,6 +489,13 @@ describe("ProviderCommandReactor authority boundary", () => {
         summary: "Owner provider request blocked",
         payload: expect.objectContaining({
           detail: "busy_thread: Thread is busy.",
+          ownerRequestId: "owner-request-blocked",
+          transportStatus: "rejected",
+          providerThreadId: "thread-1",
+          providerTurnId: null,
+          error: "busy_thread: Thread is busy.",
+          ownerDiagnostics: { queue: "busy" },
+          legacyFallbackUsed: false,
         }),
       }),
     );

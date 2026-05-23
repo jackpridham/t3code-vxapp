@@ -247,6 +247,16 @@ function buildWatchSummaryExport(snapshot: JsonRecord): AgentsVxappWatchSummaryE
   const jasper = asRecord(selection?.jasper);
   return {
     ...OWNER_EXPORT_ENVELOPE,
+    ...(Object.hasOwn(snapshot, "providerRequestStatus")
+      ? { providerRequestStatus: snapshot.providerRequestStatus }
+      : {}),
+    ...(Object.hasOwn(snapshot, "providerRequest")
+      ? { providerRequest: snapshot.providerRequest }
+      : {}),
+    ...(Object.hasOwn(snapshot, "failureCode") ? { failureCode: snapshot.failureCode } : {}),
+    ...(Object.hasOwn(snapshot, "failureMessage")
+      ? { failureMessage: snapshot.failureMessage }
+      : {}),
     enabledPrograms: watches.flatMap((watch) => {
       const programId = asString(watch.programId);
       return watch.enabled === true && programId ? [programId] : [];
