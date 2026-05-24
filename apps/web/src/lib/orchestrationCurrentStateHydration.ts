@@ -10,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 
 const CURRENT_THREAD_HISTORY_PAGE_LIMIT = NonNegativeInt.makeUnsafe(1000);
+const CURRENT_THREAD_MESSAGE_HISTORY_PAGE_LIMIT = NonNegativeInt.makeUnsafe(500);
 const CURRENT_THREAD_INITIAL_HISTORY_LIMIT = NonNegativeInt.makeUnsafe(200);
 const CURRENT_THREAD_WAKE_LIMIT = NonNegativeInt.makeUnsafe(100);
 
@@ -56,14 +57,14 @@ async function listAllThreadMessages(
   for (;;) {
     const page = await api.orchestration.listThreadMessages({
       threadId,
-      limit: CURRENT_THREAD_HISTORY_PAGE_LIMIT,
+      limit: CURRENT_THREAD_MESSAGE_HISTORY_PAGE_LIMIT,
       ...(beforeCreatedAt !== undefined ? { beforeCreatedAt } : {}),
     });
     if (page.length === 0) {
       break;
     }
     pages.unshift(page);
-    if (page.length < CURRENT_THREAD_HISTORY_PAGE_LIMIT) {
+    if (page.length < CURRENT_THREAD_MESSAGE_HISTORY_PAGE_LIMIT) {
       break;
     }
     const oldestMessage = page[0];

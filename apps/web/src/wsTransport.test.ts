@@ -1,4 +1,4 @@
-import { WS_CHANNELS } from "@t3tools/contracts";
+import { ORCHESTRATION_WS_CHANNELS, WS_CHANNELS } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WsTransport } from "./wsTransport";
@@ -65,6 +65,41 @@ function getSocket(): MockWebSocket {
   return socket;
 }
 
+function assistantDomainPush(input: {
+  readonly sequence: number;
+  readonly text: string;
+  readonly streaming: boolean;
+}) {
+  const occurredAt = new Date(Date.UTC(2026, 4, 24, 1, 0, 0, input.sequence)).toISOString();
+  return {
+    type: "push",
+    sequence: input.sequence,
+    channel: ORCHESTRATION_WS_CHANNELS.domainEvent,
+    data: {
+      eventId: `event-${input.sequence}`,
+      sequence: input.sequence,
+      type: "thread.message-sent",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      commandId: `command-${input.sequence}`,
+      causationEventId: null,
+      correlationId: null,
+      occurredAt,
+      metadata: {},
+      payload: {
+        threadId: "thread-1",
+        messageId: "assistant:message-1",
+        role: "assistant",
+        text: input.text,
+        turnId: "turn-1",
+        streaming: input.streaming,
+        createdAt: occurredAt,
+        updatedAt: occurredAt,
+      },
+    },
+  } as const;
+}
+
 beforeEach(() => {
   sockets.length = 0;
 
@@ -109,6 +144,38 @@ describe("WsTransport", () => {
       channel: WS_CHANNELS.serverConfigUpdated,
       data: { issues: [] },
     });
+
+    transport.dispose();
+  });
+
+  it("keeps assistant streaming responsive through bursty deltas and a fresh final message", () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const socket = getSocket();
+    socket.open();
+
+    const listener = vi.fn();
+    transport.subscribe(ORCHESTRATION_WS_CHANNELS.domainEvent, listener);
+
+    for (let index = 1; index <= 100; index += 1) {
+      socket.serverMessage(
+        JSON.stringify(
+          assistantDomainPush({ sequence: index, text: `${index},`, streaming: true }),
+        ),
+      );
+    }
+    socket.serverMessage(
+      JSON.stringify(assistantDomainPush({ sequence: 101, text: "", streaming: false })),
+    );
+
+    expect(listener).toHaveBeenCalledTimes(101);
+    const latest = transport.getLatestPush(ORCHESTRATION_WS_CHANNELS.domainEvent);
+    expect(latest?.data.type).toBe("thread.message-sent");
+    if (latest?.data.type === "thread.message-sent") {
+      expect(latest.data.payload.streaming).toBe(false);
+      expect(latest.data.payload.updatedAt).toBe(
+        new Date(Date.UTC(2026, 4, 24, 1, 0, 0, 101)).toISOString(),
+      );
+    }
 
     transport.dispose();
   });

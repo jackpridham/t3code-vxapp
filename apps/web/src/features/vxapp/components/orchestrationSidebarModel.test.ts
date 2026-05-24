@@ -492,6 +492,105 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.executives[0]?.programs[0]?.currentLane?.workers).toEqual([]);
   });
 
+  it("does not mark stale sqlite fallback lineage active when owner authority is present", () => {
+    const program = makeProgram({
+      currentOrchestratorThreadId: ThreadId.makeUnsafe("orch-stale"),
+      id: ProgramId.makeUnsafe("program-1"),
+      title: "Owner Program",
+      status: "active",
+    });
+
+    const model = buildOrchestrationSidebarModel({
+      authoritySnapshot: makeAuthoritySnapshot({
+        programs: [
+          {
+            activeAllocations: [],
+            attentionItems: [],
+            currentTodo: null,
+            display: null,
+            executive: makeAuthorityRuntimeTarget({
+              agentKind: "executive",
+              kind: "executive",
+              threadId: ThreadId.makeUnsafe("exec-thread"),
+            }),
+            notifications: [],
+            openWakes: [],
+            orchestrator: makeAuthorityRuntimeTarget({
+              agentKind: "orchestrator",
+              kind: "orchestrator",
+              threadId: ThreadId.makeUnsafe("orch-stale"),
+            }),
+            ownerDiagnostics: [],
+            program,
+            watchProjection: null,
+            workers: [],
+          },
+        ],
+      }),
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [program],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("exec-project"),
+          name: "CTOv2",
+          cwd: "/exec",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: makeSqliteGraph({
+        threadLinks: [
+          {
+            archivedAt: null,
+            createdAt: "2026-05-10T00:00:00.000Z",
+            deletedAt: null,
+            executiveProjectId: ProjectId.makeUnsafe("exec-project"),
+            executiveThreadId: ThreadId.makeUnsafe("exec-thread"),
+            labels: [],
+            latestTurn: {
+              turnId: "turn-stale" as any,
+              state: "running",
+              requestedAt: "2026-05-10T00:00:00.000Z",
+              startedAt: "2026-05-10T00:00:01.000Z",
+              completedAt: null,
+              assistantMessageId: null,
+            },
+            metadata: null,
+            orchestratorThreadId: null,
+            parentThreadId: null,
+            programId: ProgramId.makeUnsafe("program-1"),
+            projectId: ProjectId.makeUnsafe("exec-project"),
+            session: {
+              threadId: ThreadId.makeUnsafe("orch-stale"),
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: "turn-stale" as any,
+              lastError: null,
+              updatedAt: "2026-05-10T00:00:02.000Z",
+            },
+            spawnRole: "orchestrator",
+            spawnedBy: "cto",
+            threadId: ThreadId.makeUnsafe("orch-stale"),
+            title: "Stale sqlite orchestrator",
+            updatedAt: "2026-05-10T00:00:02.000Z",
+            workflowId: null,
+            workspaceRoot: "/orch-stale",
+            worktreePath: "/orch-stale",
+          },
+        ],
+      }),
+      threads: [],
+      wakeItems: [],
+    });
+
+    const currentLane = model.executives[0]?.programs[0]?.currentLane;
+    expect(currentLane?.fallbackThreadLink?.threadId).toBe("orch-stale");
+    expect(currentLane?.isActiveNow).toBe(false);
+    expect(model.executives[0]?.programs[0]?.isActiveNow).toBe(false);
+    expect(model.executives[0]?.isActiveNow).toBe(false);
+  });
+
   it("uses owner executive identity for authority-backed cards instead of stale T3 project label", () => {
     const executiveProjectId = ProjectId.makeUnsafe("project-cto");
     const ownerExecutiveThreadId = ThreadId.makeUnsafe("thread-cto-current");

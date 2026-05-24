@@ -228,6 +228,22 @@ Provider output is fully normalized before the decider sees it. The engine and p
 - **Runtime mode**: `approval-required` | `full-access`
 - **Interaction mode**: `default` | `plan`
 
+Assistant streaming is bounded before it reaches browser clients. The server
+coalesces non-final assistant deltas by thread, message, and turn; final
+assistant completion, lifecycle events, wake receipts, owner diagnostics, and
+session state changes stay non-droppable. Slow clients are isolated with
+`bufferedAmount`: non-final deltas may be skipped for that client, while fresh
+final messages and owner lifecycle state still deliver.
+
+Transport health is measured with `pushQueueDepth`,
+`coalescedAssistantDeltaCount`, `droppedStreamingDeltaCount`,
+`slowClientCount`, `maxClientBufferedAmount`, and `domainEventPublishCount`.
+Message history reads are cursor-backed and bounded: default `100`, maximum
+`500`; larger requests fail schema validation instead of widening the SQL read.
+Checkpoint, diff, and tool-progress events are provisional. Only provider or
+owner-approved terminal lifecycle events close a turn, clear running state, or
+remove stop affordances.
+
 ---
 
 ## Model Selection & Balancing
@@ -687,7 +703,7 @@ This is the panel the orchestrator reads to decide the next dispatch — files c
 
 ## UI Surfaces
 
-- **Orchestration Sidebar** — Jasper session selector, worker counts scoped to the active orchestrator, cross-project worker visibility, wake summaries, two visibility modes (`selected-session` / `project-diagnostic`). VX sidebar/program rows should render owner-backed `agents-vxapp` truth for Program, TODO, notification, attention, wake, and runtime state.
+- **Orchestration Sidebar** — Jasper session selector, worker counts scoped to the active orchestrator, cross-project worker visibility, wake summaries, two visibility modes (`selected-session` / `project-diagnostic`). VX sidebar/program rows render owner-backed `agents-vxapp` truth for Program, TODO, notification, attention, wake, active executive, active worker, and runtime state. Retired SQLite projection lineage may appear as historical diagnostics only; it must not mark current executives or workers active when an owner snapshot is present.
 - **Executive/CTO grouping** — CTO executive projects and program-linked work sit above Jasper orchestrators, so founder-level decisions do not look like worker children.
 - **ChatView** — conversation rendering with activity cards, approvals, checkpoint markers, proposed-plan cards, wake notices.
 - **ChangesPanel** — the four tabs above.

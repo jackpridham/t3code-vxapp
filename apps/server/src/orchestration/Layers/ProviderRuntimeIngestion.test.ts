@@ -1033,6 +1033,72 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.activeTurnId).toBe("turn-burst-lifecycle");
   });
 
+  it("keeps checkpoint and tool progress events provisional during an active turn", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-provisional"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-provisional"),
+    });
+
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-provisional",
+    );
+
+    harness.emit({
+      type: "item.updated",
+      eventId: asEventId("evt-tool-progress-provisional"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-provisional"),
+      itemId: asItemId("item-tool-provisional"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Run tests",
+        detail: "passed",
+        data: {},
+      },
+    });
+    harness.emit({
+      type: "turn.diff.updated",
+      eventId: asEventId("evt-turn-diff-provisional"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-provisional"),
+      itemId: asItemId("item-assistant-provisional"),
+      payload: {
+        unifiedDiff: "diff --git a/file.txt b/file.txt\n+hello\n",
+      },
+    });
+
+    await harness.drain();
+    const readModel = await Effect.runPromise(harness.engine.getReadModel());
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
+
+    expect(thread?.session?.status).toBe("running");
+    expect(thread?.session?.activeTurnId).toBe("turn-provisional");
+    expect(thread?.latestTurn?.state).toBe("running");
+    expect(
+      thread?.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.kind === "tool.updated" &&
+          activity.payload !== null &&
+          typeof activity.payload === "object" &&
+          (activity.payload as { status?: unknown }).status === "completed",
+      ),
+    ).toBe(true);
+  });
+
   it("accepts claude turn lifecycle when seeded thread id is a synthetic placeholder", async () => {
     const harness = await createHarness();
     const seededAt = new Date().toISOString();

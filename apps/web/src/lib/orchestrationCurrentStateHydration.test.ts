@@ -134,7 +134,7 @@ describe("orchestration current-state hydration", () => {
     expect(api.orchestration.listSessionThreads).not.toHaveBeenCalled();
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 1000,
+      limit: 500,
     });
     expect(api.orchestration.listThreadActivities).toHaveBeenCalledWith({
       threadId: rootThreadId,
@@ -213,7 +213,7 @@ describe("orchestration current-state hydration", () => {
     });
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId: workerThreadId,
-      limit: 1000,
+      limit: 500,
     });
     expect(api.orchestration.listOrchestratorWakes).not.toHaveBeenCalled();
     expect(worker).toEqual(
@@ -280,7 +280,7 @@ describe("orchestration current-state hydration", () => {
   });
 
   it("paginates older messages and activities until history is exhausted", async () => {
-    const messagePage = Array.from({ length: 1000 }, (_, index) => ({
+    const messagePage = Array.from({ length: 500 }, (_, index) => ({
       id: MessageId.makeUnsafe(`message-${index + 2}`),
       role: "assistant" as const,
       text: `newer ${index}`,
@@ -335,7 +335,7 @@ describe("orchestration current-state hydration", () => {
 
     expect(api.orchestration.listThreadMessages).toHaveBeenNthCalledWith(2, {
       threadId: rootThreadId,
-      limit: 1000,
+      limit: 500,
       beforeCreatedAt: messagePage[0]?.createdAt,
     });
     expect(api.orchestration.listThreadActivities).toHaveBeenNthCalledWith(2, {
@@ -344,7 +344,7 @@ describe("orchestration current-state hydration", () => {
       beforeSequence: 2,
     });
     expect(thread?.messages[0]?.id).toBe("message-1");
-    expect(thread?.messages).toHaveLength(1001);
+    expect(thread?.messages).toHaveLength(501);
     expect(thread?.activities[0]?.id).toBe("activity-1");
     expect(thread?.activities).toHaveLength(1001);
     expect(thread?.snapshotCoverage?.messagesTruncated).toBe(false);

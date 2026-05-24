@@ -18,6 +18,7 @@ import {
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
   OrchestrationListProjectThreadsResult,
+  OrchestrationListThreadMessagesInput,
   OrchestrationCtoAttentionItem,
   OrchestrationReadModel,
   OrchestrationProgram,
@@ -65,6 +66,9 @@ const decodeOrchestrationGetProjectByWorkspaceResult = decodeEffect(
 );
 const decodeOrchestrationListProjectThreadsResult = decodeEffect(
   OrchestrationListProjectThreadsResult,
+);
+const decodeOrchestrationListThreadMessagesInput = decodeEffect(
+  OrchestrationListThreadMessagesInput,
 );
 const decodeOrchestrationLatestTurn = decodeEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = decodeEffect(OrchestrationProposedPlan);
@@ -206,6 +210,29 @@ it.effect("rejects thread turn diff when fromTurnCount > toTurnCount", () =>
       }),
     );
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("bounds thread message reads to a 100 default and 500 maximum", () =>
+  Effect.gen(function* () {
+    const defaulted = yield* decodeOrchestrationListThreadMessagesInput({
+      threadId: "thread-1",
+    });
+    assert.strictEqual(defaulted.limit, 100);
+
+    const acceptedMax = yield* decodeOrchestrationListThreadMessagesInput({
+      threadId: "thread-1",
+      limit: 500,
+    });
+    assert.strictEqual(acceptedMax.limit, 500);
+
+    const rejected = yield* Effect.exit(
+      decodeOrchestrationListThreadMessagesInput({
+        threadId: "thread-1",
+        limit: 501,
+      }),
+    );
+    assert.strictEqual(rejected._tag, "Failure");
   }),
 );
 

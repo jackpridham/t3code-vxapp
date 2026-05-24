@@ -1936,12 +1936,15 @@ export type OrchestrationListSessionThreadsResult =
 const OrchestrationPageLimit = NonNegativeInt.check(Schema.isLessThanOrEqualTo(1000)).pipe(
   Schema.withDecodingDefault(() => 250),
 );
+const OrchestrationMessagePageLimit = NonNegativeInt.check(Schema.isLessThanOrEqualTo(500)).pipe(
+  Schema.withDecodingDefault(() => 100),
+);
 export const OrchestrationActivityPayloadMode = Schema.Literals(["full", "compact"]);
 export type OrchestrationActivityPayloadMode = typeof OrchestrationActivityPayloadMode.Type;
 
 export const OrchestrationListThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
-  limit: OrchestrationPageLimit,
+  limit: OrchestrationMessagePageLimit,
   beforeCreatedAt: Schema.optional(IsoDateTime),
 });
 export type OrchestrationListThreadMessagesInput = typeof OrchestrationListThreadMessagesInput.Type;

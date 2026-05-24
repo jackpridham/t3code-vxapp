@@ -341,6 +341,17 @@ function isThreadLikeActive(
   } as Parameters<typeof isThreadRuntimeActive>[0]);
 }
 
+function isAuthoritativeCurrentThreadActive(input: {
+  authoritativeOwnerRequired: boolean;
+  fallbackThreadLink: Pick<SidebarThreadActivitySource, "latestTurn" | "session"> | null;
+  thread: Pick<SidebarThreadActivitySource, "latestTurn" | "session"> | null;
+}): boolean {
+  if (input.authoritativeOwnerRequired) {
+    return isThreadLikeActive(input.thread);
+  }
+  return isThreadLikeActive(input.thread ?? input.fallbackThreadLink);
+}
+
 function normalizeStoreNotification(
   notification: ProgramNotification,
 ): SidebarNotificationItem | null {
@@ -1442,7 +1453,11 @@ export function buildOrchestrationSidebarModel(input: {
         isActiveNow:
           !inputWorker.isHistorical &&
           inputWorker.archivedAt === null &&
-          isThreadLikeActive(authoritativeThread ?? inputWorker.fallbackThreadLink),
+          isAuthoritativeCurrentThreadActive({
+            authoritativeOwnerRequired: authoritySnapshot !== null,
+            fallbackThreadLink: inputWorker.fallbackThreadLink,
+            thread: authoritativeThread,
+          }),
         isHistorical: inputWorker.isHistorical,
         provenanceLabel: resolveProvenanceLabel({
           fallbackThreadLink: inputWorker.fallbackThreadLink,
@@ -1604,7 +1619,11 @@ export function buildOrchestrationSidebarModel(input: {
                 currentRootThread?.archivedAt ?? fallbackRootThreadLink?.archivedAt ?? null,
               fallbackThreadLink: fallbackRootThreadLink,
               id: currentRootThreadId,
-              isActiveNow: isThreadLikeActive(currentRootThread ?? fallbackRootThreadLink),
+              isActiveNow: isAuthoritativeCurrentThreadActive({
+                authoritativeOwnerRequired: authoritySnapshot !== null,
+                fallbackThreadLink: fallbackRootThreadLink,
+                thread: currentRootThread,
+              }),
               isHistorical: false,
               runtimeState: runtime.runtimeState,
               runtimeStateMessage: runtime.runtimeStateMessage,
@@ -1689,8 +1708,11 @@ export function buildOrchestrationSidebarModel(input: {
         fallbackThreadLink: executive.fallbackThreadLink,
         id: executive.id,
         isActiveNow:
-          isThreadLikeActive(executive.thread ?? executive.fallbackThreadLink) ||
-          executive.programs.some((program) => program.isActiveNow),
+          isAuthoritativeCurrentThreadActive({
+            authoritativeOwnerRequired: authoritySnapshot !== null,
+            fallbackThreadLink: executive.fallbackThreadLink,
+            thread: executive.thread,
+          }) || executive.programs.some((program) => program.isActiveNow),
         label: executive.label,
         notifications: sortNotifications(
           notifications.filter((item) => {
