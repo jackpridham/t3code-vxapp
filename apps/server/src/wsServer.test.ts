@@ -23,6 +23,7 @@ vi.mock("./extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
   fetchAgentsVxappAgentRuntimeSnapshot: vi.fn(),
   fetchAgentsVxappControlPlaneSnapshot: vi.fn(),
   fetchAgentsVxappExternalRoleAuthoritySnapshot: vi.fn(),
+  fetchAgentsVxappProgramsAuthoritySnapshot: vi.fn(),
   fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
   fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
   fetchAgentsVxappSidebarGraphSnapshot: vi.fn(),
@@ -101,6 +102,7 @@ import { ServerSettingsService } from "./serverSettings.ts";
 import {
   fetchAgentsVxappControlPlaneSnapshot,
   fetchAgentsVxappExternalRoleAuthoritySnapshot,
+  fetchAgentsVxappProgramsAuthoritySnapshot,
   fetchAgentsVxappProgramsTodosSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   fetchAgentsVxappWorkerRuntimeSnapshot,
@@ -120,6 +122,7 @@ const mockedExternalRoleAuthoritySnapshot = vi.mocked(
   fetchAgentsVxappExternalRoleAuthoritySnapshot,
 );
 const mockedProjectLifecycleMirror = vi.mocked(mirrorProjectLifecycleEvent);
+const mockedProgramsAuthoritySnapshot = vi.mocked(fetchAgentsVxappProgramsAuthoritySnapshot);
 const mockedProgramsTodosSnapshot = vi.mocked(fetchAgentsVxappProgramsTodosSnapshot);
 const mockedRuntimePaths = vi.mocked(fetchAgentsVxappRoleSessionRuntimePaths);
 const mockedWorkerRuntimeSnapshot = vi.mocked(fetchAgentsVxappWorkerRuntimeSnapshot);
@@ -142,6 +145,17 @@ const emptyOwnerProgramsTodosSnapshot = {
   hints: [],
   pagination: null,
 } as Awaited<ReturnType<typeof fetchAgentsVxappProgramsTodosSnapshot>>;
+
+const emptyOwnerProgramsAuthoritySnapshot = {
+  programs: [],
+  pagination: null,
+  authority: {
+    source: "vx_sqlite_program_authority",
+    legacyFallbackUsed: false,
+  },
+  hints: [],
+  legacyFallbackUsed: false,
+} as Awaited<ReturnType<typeof fetchAgentsVxappProgramsAuthoritySnapshot>>;
 
 const emptyOwnerExternalRoleAuthoritySnapshot = {
   projects: [],
@@ -627,6 +641,7 @@ describe("WebSocket Server", () => {
 
     mockedControlPlaneSnapshot.mockResolvedValue(emptyOwnerControlPlaneSnapshot);
     mockedExternalRoleAuthoritySnapshot.mockResolvedValue(emptyOwnerExternalRoleAuthoritySnapshot);
+    mockedProgramsAuthoritySnapshot.mockResolvedValue(emptyOwnerProgramsAuthoritySnapshot);
     mockedProgramsTodosSnapshot.mockResolvedValue(emptyOwnerProgramsTodosSnapshot);
     mockedProjectLifecycleMirror.mockReset();
     mockedProjectLifecycleMirror.mockResolvedValue(undefined);
@@ -840,6 +855,7 @@ describe("WebSocket Server", () => {
     }
     vi.restoreAllMocks();
     mockedControlPlaneSnapshot.mockReset();
+    mockedProgramsAuthoritySnapshot.mockReset();
     mockedProgramsTodosSnapshot.mockReset();
     mockedRuntimePaths.mockReset();
     mockedWorkerRuntimeSnapshot.mockReset();
