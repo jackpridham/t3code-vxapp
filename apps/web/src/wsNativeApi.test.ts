@@ -423,6 +423,23 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards owner-backed Programs/TODOs reads to the non-deprecated websocket method", async () => {
+    requestMock.mockResolvedValue(undefined);
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.server.getAgentsVxappProgramsTodosSnapshot({ page: 2, limit: 20 });
+
+    expect(requestMock).toHaveBeenCalledWith(
+      WS_METHODS.serverGetAgentsVxappProgramsTodosSnapshot,
+      {
+        page: 2,
+        limit: 20,
+      },
+      { timeoutMs: 180_000 },
+    );
+  });
+
   it("forwards workspace file writes to the websocket project method", async () => {
     requestMock.mockResolvedValue({ relativePath: "plan.md" });
     const { createWsNativeApi } = await import("./wsNativeApi");

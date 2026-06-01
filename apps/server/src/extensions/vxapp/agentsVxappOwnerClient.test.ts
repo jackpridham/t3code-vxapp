@@ -11,7 +11,6 @@ import {
   fetchAgentsVxappAgentRuntimeSnapshot,
   fetchAgentsVxappProgramsAuthoritySnapshot,
   fetchAgentsVxappSidebarAuthoritySnapshot,
-  fetchAgentsVxappSidebarGraphSnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   fetchAgentsVxappWorkerRuntimeSnapshot,
   requestAgentsVxappApprovalRequest,
@@ -784,36 +783,6 @@ describe("agentsVxappOwnerClient", () => {
         authoritySurface: "threads",
       });
     }
-  });
-
-  it("routes the sidebar graph helper through the dedicated startup-safe owner command", async () => {
-    mockedRunProcess
-      .mockResolvedValueOnce(
-        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
-      )
-      .mockResolvedValueOnce(
-        processResult(
-          envelope("t3code-sidebar-graph-snapshot", "sidebar_graph_snapshot", {
-            source: "sqlite",
-            dbPath: "/tmp/vx_agents.sqlite3",
-            fallbackReason: null,
-            threadLinks: [],
-            openWakes: [],
-            watchProjections: [],
-            notifications: [],
-            attentionItems: [],
-          }),
-        ),
-      );
-
-    await fetchAgentsVxappSidebarGraphSnapshot();
-
-    expect(mockedRunProcess).toHaveBeenNthCalledWith(
-      2,
-      expect.stringMatching(/t3-control-plane-owner$/),
-      ["t3code-sidebar-graph-snapshot", "--json"],
-      expect.objectContaining({}),
-    );
   });
 
   it("routes Program authority snapshots through the dedicated owner command", async () => {

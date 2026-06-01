@@ -1,128 +1,76 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProjectId, ThreadId } from "@t3tools/contracts";
-import { Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { ProgramId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agentsVxappOwnerClient.ts", () => ({
-  fetchAgentsVxappSidebarGraphSnapshot: vi.fn(),
+  fetchAgentsVxappSidebarAuthoritySnapshot: vi.fn(),
 }));
 
-import { fetchAgentsVxappSidebarGraphSnapshot } from "../agentsVxappOwnerClient.ts";
-import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
+import { fetchAgentsVxappSidebarAuthoritySnapshot } from "../agentsVxappOwnerClient.ts";
 import { AgentsVxappSidebar } from "../Services/AgentsVxappSidebar.ts";
-import { SqlitePersistenceMemory } from "../../../persistence/Layers/Sqlite.ts";
 import { AgentsVxappSidebarLive } from "./AgentsVxappSidebar.ts";
 
-const mockedSidebarGraphSnapshot = vi.mocked(fetchAgentsVxappSidebarGraphSnapshot);
+const mockedSidebarAuthoritySnapshot = vi.mocked(fetchAgentsVxappSidebarAuthoritySnapshot);
 
-const ownerGraph = {
-  source: "sqlite" as const,
-  dbPath: "owner-db",
-  fallbackReason: null,
-  threadLinks: [
+const ownerAuthoritySnapshot = {
+  programs: [
     {
-      threadId: ThreadId.makeUnsafe("thread-owner"),
-      projectId: ProjectId.makeUnsafe("project-owner"),
-      workspaceRoot: "/tmp/workspace",
-      worktreePath: "/tmp/worktree",
-      roleSession: null,
-      title: "Owner thread",
-      spawnRole: "invented-owner-role",
-      spawnedBy: null,
-      parentThreadId: null,
-      workflowId: null,
-      programId: null,
-      executiveProjectId: null,
-      executiveThreadId: null,
-      orchestratorThreadId: null,
-      labels: [],
-      session: null,
-      latestTurn: null,
-      metadata: null,
-      createdAt: "2026-05-16T00:00:00.000Z",
-      updatedAt: "2026-05-16T00:00:01.000Z",
-      archivedAt: null,
-      deletedAt: null,
+      program: {
+        id: ProgramId.makeUnsafe("program-owner"),
+        title: "Owner Program",
+        objective: null,
+        status: "active",
+        baseStatus: null,
+        currentStatus: null,
+        executiveProjectId: ProjectId.makeUnsafe("project-owner"),
+        executiveThreadId: ThreadId.makeUnsafe("thread-owner"),
+        currentOrchestratorThreadId: null,
+        metadata: null,
+        closeout: null,
+        createdAt: "2026-05-16T00:00:00.000Z",
+        updatedAt: "2026-05-16T00:00:01.000Z",
+        completedAt: null,
+        deletedAt: null,
+      },
+      display: {
+        label: "Owner display",
+        tone: "owner-invented-tone",
+      },
+      currentTodo: null,
+      executive: null,
+      orchestrator: null,
+      workers: [],
+      notifications: [],
+      attentionItems: [],
+      openWakes: [],
+      watchProjection: null,
+      activeAllocations: [],
+      ownerDiagnostics: [],
     },
   ],
-  openWakes: [
-    {
-      wakeId: "wake-owner",
-      orchestratorThreadId: ThreadId.makeUnsafe("thread-owner"),
-      programId: null,
-      state: "owner-invented-state",
-      reason: "owner reason",
-      payload: null,
-      createdAt: "2026-05-16T00:00:00.000Z",
-      updatedAt: "2026-05-16T00:00:01.000Z",
-      settledAt: null,
-    },
-  ],
-  watchProjections: [],
-  notifications: [
-    {
-      notificationId: "notification-owner",
-      programId: null,
-      executiveProjectId: null,
-      executiveThreadId: null,
-      orchestratorThreadId: null,
-      kind: "owner-new-kind",
-      severity: "critical" as const,
-      summary: "Owner notification",
-      evidence: null,
-      state: "owner-new-state",
-      queuedAt: "2026-05-16T00:00:00.000Z",
-      deliveredAt: null,
-      consumedAt: null,
-      droppedAt: null,
-      consumeReason: null,
-      dropReason: null,
-      createdAt: "2026-05-16T00:00:00.000Z",
-      updatedAt: "2026-05-16T00:00:01.000Z",
-    },
-  ],
-  attentionItems: [],
+  todos: [],
+  currentTodos: [],
+  ownerDiagnostics: [],
+  hints: [],
+  pagination: null,
 };
 
-const sidebarLayer = AgentsVxappSidebarLive.pipe(
-  Layer.provideMerge(SqlitePersistenceMemory),
-  Layer.provideMerge(NodeServices.layer),
-  Layer.provide(
-    Layer.succeed(AgentsVxappExternalRoleAuthority, {
-      getSnapshot: () => Effect.succeed({ projects: [], threadSummaries: [] }),
-      getRuntimePaths: () => Effect.die("unexpected getRuntimePaths"),
-    }),
-  ),
-);
-
 afterEach(() => {
-  mockedSidebarGraphSnapshot.mockReset();
+  mockedSidebarAuthoritySnapshot.mockReset();
 });
 
 describe("AgentsVxappSidebarLive", () => {
-  it("assembles the graph from owner-backed inputs without normalizing owner vocabularies", async () => {
-    mockedSidebarGraphSnapshot.mockResolvedValueOnce(ownerGraph);
+  it("returns the owner-backed sidebar authority snapshot without normalizing owner vocabularies", async () => {
+    mockedSidebarAuthoritySnapshot.mockResolvedValueOnce(ownerAuthoritySnapshot);
 
-    const graph = await Effect.runPromise(
+    const snapshot = await Effect.runPromise(
       Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`DELETE FROM projection_projects`;
-        yield* sql`DELETE FROM projection_threads`;
         const sidebar = yield* AgentsVxappSidebar;
-        return yield* sidebar.getGraph({});
-      }).pipe(Effect.provide(sidebarLayer)),
+        return yield* sidebar.getAuthoritySnapshot({ page: 2, limit: 20 });
+      }).pipe(Effect.provide(AgentsVxappSidebarLive)),
     );
 
-    expect(mockedSidebarGraphSnapshot).toHaveBeenCalledTimes(1);
-    expect(graph.threadLinks[0]?.spawnRole).toBe("invented-owner-role");
-    expect(graph.openWakes[0]?.state).toBe("owner-invented-state");
-    expect(graph.notifications[0]?.kind).toBe("owner-new-kind");
-    expect(graph.notifications[0]?.state).toBe("owner-new-state");
-    expect(graph.mirrorDiagnostics).toEqual({
-      missingProjectIds: ["project-owner"],
-      missingThreadIds: ["thread-owner"],
-      staleMirror: true,
-    });
+    expect(mockedSidebarAuthoritySnapshot).toHaveBeenCalledWith({ page: 2, limit: 20 });
+    expect(snapshot.programs[0]?.display?.tone).toBe("owner-invented-tone");
   });
 });

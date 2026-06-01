@@ -7,7 +7,6 @@ import {
   type ServerDeleteAgentsVxappTodoInput,
   type ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
   type ServerGetAgentsVxappControlPlaneSnapshotInput,
-  type ServerGetAgentsVxappSidebarGraphInput,
   type ServerListVortexAppArtifactsInput,
   type ServerSetAgentsVxappProgramLifecycleInput,
   type ServerUpdateAgentsVxappProgramInput,
@@ -97,20 +96,6 @@ export const makeVxappWsRouteHandlers: Effect.Effect<
       },
     ],
     [
-      WS_METHODS.serverGetAgentsVxappSidebarGraph,
-      {
-        handle: (request) =>
-          agentsVxappSidebar.getGraph(
-            stripRequestTag(
-              request.body as Extract<
-                WebSocketRequest["body"],
-                { _tag: typeof WS_METHODS.serverGetAgentsVxappSidebarGraph }
-              >,
-            ) as ServerGetAgentsVxappSidebarGraphInput,
-          ),
-      },
-    ],
-    [
       WS_METHODS.serverGetAgentsVxappSidebarAuthoritySnapshot,
       {
         handle: (request) =>
@@ -125,14 +110,14 @@ export const makeVxappWsRouteHandlers: Effect.Effect<
       },
     ],
     [
-      WS_METHODS.serverGetAgentsVxappControlPlaneSnapshot,
+      WS_METHODS.serverGetAgentsVxappProgramsTodosSnapshot,
       {
         handle: (request) =>
           agentsVxappControlPlane.getProgramsTodosSnapshot(
             stripRequestTag(
               request.body as Extract<
                 WebSocketRequest["body"],
-                { _tag: typeof WS_METHODS.serverGetAgentsVxappControlPlaneSnapshot }
+                { _tag: typeof WS_METHODS.serverGetAgentsVxappProgramsTodosSnapshot }
               >,
             ) as ServerGetAgentsVxappControlPlaneSnapshotInput,
           ),

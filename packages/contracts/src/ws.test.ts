@@ -107,6 +107,25 @@ it.effect("accepts bounded orchestration read requests", () =>
   }),
 );
 
+it.effect("accepts owner-backed Programs/TODOs websocket requests", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-programs-todos-1",
+      body: {
+        _tag: WS_METHODS.serverGetAgentsVxappProgramsTodosSnapshot,
+        page: 2,
+        limit: 20,
+      },
+    });
+
+    assert.strictEqual(parsed.body._tag, WS_METHODS.serverGetAgentsVxappProgramsTodosSnapshot);
+    if (parsed.body._tag === WS_METHODS.serverGetAgentsVxappProgramsTodosSnapshot) {
+      assert.strictEqual(parsed.body.page, 2);
+      assert.strictEqual(parsed.body.limit, 20);
+    }
+  }),
+);
+
 it.effect("rejects getTurnDiff requests when fromTurnCount > toTurnCount", () =>
   Effect.gen(function* () {
     const result = yield* Effect.exit(

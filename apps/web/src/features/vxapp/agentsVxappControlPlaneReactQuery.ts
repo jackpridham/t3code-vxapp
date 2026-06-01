@@ -35,7 +35,7 @@ export function agentsVxappControlPlaneSnapshotQueryOptions(
   return queryOptions({
     queryKey: agentsVxappControlPlaneQueryKeys.snapshot(input),
     staleTime: AGENTS_VXAPP_CONTROL_PLANE_STALE_TIME_MS,
-    queryFn: async () => ensureNativeApi().server.getAgentsVxappControlPlaneSnapshot(input),
+    queryFn: async () => ensureNativeApi().server.getAgentsVxappProgramsTodosSnapshot(input),
   });
 }
 

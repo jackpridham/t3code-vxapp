@@ -12,6 +12,6 @@ export function agentsVxappSidebarGraphQueryOptions() {
   return queryOptions({
     queryKey: agentsVxappSidebarQueryKeys.graph(),
     staleTime: AGENTS_VXAPP_SIDEBAR_STALE_TIME_MS,
-    queryFn: async () => ensureNativeApi().server.getAgentsVxappSidebarGraph({}),
+    queryFn: async () => ensureNativeApi().server.getAgentsVxappSidebarAuthoritySnapshot({}),
   });
 }

@@ -26,7 +26,6 @@ vi.mock("./extensions/vxapp/agentsVxappOwnerClient.ts", () => ({
   fetchAgentsVxappProgramsAuthoritySnapshot: vi.fn(),
   fetchAgentsVxappProgramsTodosSnapshot: vi.fn(),
   fetchAgentsVxappRoleSessionRuntimePaths: vi.fn(),
-  fetchAgentsVxappSidebarGraphSnapshot: vi.fn(),
   fetchAgentsVxappWorkerRuntimeSnapshot: vi.fn(),
   requestAgentsVxappApprovalRequest: vi.fn(),
   requestAgentsVxappApprovalResponse: vi.fn(),
@@ -1990,6 +1989,24 @@ describe("WebSocket Server", () => {
       settings: defaultServerSettings,
     });
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
+  });
+
+  it("responds to owner-backed Programs/TODOs websocket reads", async () => {
+    server = await createTestServer({ cwd: "/test/project" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.serverGetAgentsVxappProgramsTodosSnapshot, {
+      page: 2,
+      limit: 20,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual(emptyOwnerProgramsTodosSnapshot);
+    expect(mockedProgramsTodosSnapshot).toHaveBeenCalledWith({ page: 2, limit: 20 });
   });
 
   it("bootstraps default keybindings file when missing", async () => {

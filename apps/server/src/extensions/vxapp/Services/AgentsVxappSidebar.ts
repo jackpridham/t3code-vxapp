@@ -1,8 +1,6 @@
 import type {
   ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
   ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
-  ServerGetAgentsVxappSidebarGraphInput,
-  ServerGetAgentsVxappSidebarGraphResult,
 } from "@t3tools/contracts";
 import { Effect, Schema, ServiceMap } from "effect";
 
@@ -18,15 +16,7 @@ export class AgentsVxappSidebarError extends Schema.TaggedErrorClass<AgentsVxapp
   },
 ) {}
 
-export type AgentsVxappSidebarOwnerGraphSnapshot = Omit<
-  ServerGetAgentsVxappSidebarGraphResult,
-  "mirrorDiagnostics"
->;
-
 export interface AgentsVxappSidebarShape {
-  readonly getGraph: (
-    input: ServerGetAgentsVxappSidebarGraphInput,
-  ) => Effect.Effect<ServerGetAgentsVxappSidebarGraphResult, AgentsVxappSidebarError>;
   readonly getAuthoritySnapshot: (
     input: ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
   ) => Effect.Effect<ServerGetAgentsVxappSidebarAuthoritySnapshotResult, AgentsVxappSidebarError>;

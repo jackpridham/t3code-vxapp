@@ -41,8 +41,6 @@ import type {
   ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   ServerGetAgentsVxappControlPlaneSnapshotInput,
   ServerGetAgentsVxappControlPlaneSnapshotResult,
-  ServerGetAgentsVxappSidebarGraphInput,
-  ServerGetAgentsVxappSidebarGraphResult,
   ServerAgentsVxappOwnerMutationResult,
   ServerSetAgentsVxappProgramLifecycleInput,
   ServerUpdateAgentsVxappProgramInput,
@@ -236,13 +234,10 @@ export interface NativeApi {
     listVortexAppArtifacts: (
       input: ServerListVortexAppArtifactsInput,
     ) => Promise<ServerListVortexAppArtifactsResult>;
-    getAgentsVxappSidebarGraph: (
-      input: ServerGetAgentsVxappSidebarGraphInput,
-    ) => Promise<ServerGetAgentsVxappSidebarGraphResult>;
     getAgentsVxappSidebarAuthoritySnapshot: (
       input: ServerGetAgentsVxappSidebarAuthoritySnapshotInput,
     ) => Promise<ServerGetAgentsVxappSidebarAuthoritySnapshotResult>;
-    getAgentsVxappControlPlaneSnapshot: (
+    getAgentsVxappProgramsTodosSnapshot: (
       input: ServerGetAgentsVxappControlPlaneSnapshotInput,
     ) => Promise<ServerGetAgentsVxappControlPlaneSnapshotResult>;
     createAgentsVxappProgram: (

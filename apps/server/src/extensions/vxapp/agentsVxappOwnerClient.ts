@@ -19,7 +19,6 @@ import type {
 } from "@t3tools/contracts";
 
 import { runProcess, type ProcessRunResult } from "../../processRunner.ts";
-import type { AgentsVxappSidebarOwnerGraphSnapshot } from "./Services/AgentsVxappSidebar.ts";
 import { AGENTS_VXAPP_REPO_ROOT } from "./agentsVxappRepoRoot.ts";
 
 const BOOTSTRAP_MANIFEST_COMMAND = "t3code-contract-manifest";
@@ -935,11 +934,6 @@ async function callManifestCommandByWrapperKey<T>(input: {
     });
   }
   return authorityPayload as AgentsVxappOwnerAuthorityPayload<T>;
-}
-
-export async function fetchAgentsVxappSidebarGraphSnapshot() {
-  return (await callManifestCommand<AgentsVxappSidebarOwnerGraphSnapshot>("sidebar_graph_snapshot"))
-    .payload;
 }
 
 export async function fetchAgentsVxappSidebarAuthoritySnapshot(
