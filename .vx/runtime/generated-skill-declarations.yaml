@@ -1,0 +1,26 @@
+schemaVersion: 1.0.0
+generatedSkills:
+  - name: 100-t3code-repo-orientation
+    source: .vx/runtime/packs/100-t3code-repo-orientation/SKILL.md
+    destination: .agents/skills/100-t3code-repo-orientation/SKILL.md
+    owner: t3code-vxapp
+  - name: 110-t3code-plan-execution
+    source: .vx/runtime/packs/110-t3code-plan-execution/SKILL.md
+    destination: .agents/skills/110-t3code-plan-execution/SKILL.md
+    owner: t3code-vxapp
+  - name: 120-t3code-test-authoring
+    source: .vx/runtime/packs/120-t3code-test-authoring/SKILL.md
+    destination: .agents/skills/120-t3code-test-authoring/SKILL.md
+    owner: t3code-vxapp
+  - name: 130-t3code-review
+    source: .vx/runtime/packs/130-t3code-review/SKILL.md
+    destination: .agents/skills/130-t3code-review/SKILL.md
+    owner: t3code-vxapp
+  - name: 143-t3code-pr-closeout
+    source: .vx/runtime/packs/143-t3code-pr-closeout/SKILL.md
+    destination: .agents/skills/143-t3code-pr-closeout/SKILL.md
+    owner: t3code-vxapp
+  - name: 150-t3-domain-modeling
+    source: .vx/runtime/packs/150-t3-domain-modeling/SKILL.md
+    destination: .agents/skills/150-t3-domain-modeling/SKILL.md
+    owner: t3code-vxapp

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "id": "repo:t3code-vxapp:120-t3code-test-authoring",
+  "slug": "120-t3code-test-authoring",
+  "localNumber": 120,
+  "name": "T3Code Test Authoring",
+  "type": "test-authoring",
+  "repo": "t3code-vxapp",
+  "scope": "repo",
+  "version": "1.0.0",
+  "description": "Test authoring for t3code-vxapp: Vitest setup, `bun run test` conventions.",
+  "allowedTaskClasses": ["test-authoring", "specialist"],
+  "grants": ["read", "edit", "run-local-tests"],
+  "forbids": ["commit", "push", "stash", "deploy", "branch-delete"],
+  "requires": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "repo:t3code-vxapp:100-t3code-repo-orientation"
+  ],
+  "conflictsWith": [],
+  "mountMode": "skill",
+  "defaultContextModes": ["isolated", "repo-guided"]
+}

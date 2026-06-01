@@ -1,0 +1,282 @@
+schema_version: 2.0.0
+document_kind: vx_agent_pack_profile
+repo: t3code-vxapp
+base_packs:
+  - global:000-safety-kernel
+  - global:001-t3-worker-basics
+context_modes:
+  isolated:
+    - global:000-safety-kernel
+    - global:001-t3-worker-basics
+    - repo:t3code-vxapp:100-t3code-repo-orientation
+  pack-managed:
+    - global:000-safety-kernel
+    - global:001-t3-worker-basics
+    - repo:t3code-vxapp:100-t3code-repo-orientation
+  repo-guided:
+    - global:000-safety-kernel
+    - global:001-t3-worker-basics
+    - global:003-vx-artifacts
+    - repo:t3code-vxapp:100-t3code-repo-orientation
+    - repo:t3code-vxapp:150-t3-domain-modeling
+  review-only:
+    - global:000-safety-kernel
+    - global:001-t3-worker-basics
+    - global:006-worker-command-telemetry
+    - global:050-vx-git-read
+    - repo:t3code-vxapp:100-t3code-repo-orientation
+    - repo:t3code-vxapp:130-t3code-review
+    - global:052-vx-github-pr
+    - repo:t3code-vxapp:143-t3code-pr-closeout
+  closeout:
+    - global:000-safety-kernel
+    - global:001-t3-worker-basics
+    - global:006-worker-command-telemetry
+    - global:050-vx-git-read
+    - global:051-vx-git-closeout-authority
+    - repo:t3code-vxapp:100-t3code-repo-orientation
+task_classes:
+  plan-mutation:
+    default_context_mode: isolated
+    default_closeout_authority: plan_only
+    packs:
+      - global:006-worker-command-telemetry
+      - global:015-vx-apps-plan-state
+      - repo:t3code-vxapp:100-t3code-repo-orientation
+      - global:050-vx-git-read
+      - global:064-vx-quality-gate-awareness
+      - global:008-terse-worker-reporting
+    grants:
+      - read
+      - inspect
+      - plan-mutate
+    forbids:
+      - edit
+      - run-local-tests
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  planning:
+    default_context_mode: isolated
+    default_closeout_authority: plan_only
+    packs:
+      - global:006-worker-command-telemetry
+      - global:015-vx-apps-plan-state
+      - repo:t3code-vxapp:100-t3code-repo-orientation
+      - global:050-vx-git-read
+      - global:064-vx-quality-gate-awareness
+      - global:008-terse-worker-reporting
+      - global:082-vx-creative-ideation-writing
+    grants:
+      - read
+      - inspect
+      - plan-mutate
+    forbids:
+      - edit
+      - run-local-tests
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  source-editing-implementation:
+    default_context_mode: isolated
+    default_closeout_authority: code_tests
+    packs:
+      - global:024-vx-plan-implement
+      - repo:t3code-vxapp:100-t3code-repo-orientation
+      - repo:t3code-vxapp:110-t3code-plan-execution
+      - global:050-vx-git-read
+      - global:064-vx-quality-gate-awareness
+      - global:008-terse-worker-reporting
+    grants:
+      - read
+      - inspect
+      - edit
+      - run-local-tests
+    forbids:
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  test-authoring:
+    default_context_mode: isolated
+    default_closeout_authority: code_tests
+    packs:
+      - global:027-vx-plan-tests
+      - repo:t3code-vxapp:100-t3code-repo-orientation
+      - repo:t3code-vxapp:120-t3code-test-authoring
+      - global:050-vx-git-read
+      - global:064-vx-quality-gate-awareness
+      - global:008-terse-worker-reporting
+    grants:
+      - read
+      - inspect
+      - edit
+      - run-local-tests
+    forbids:
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  review-only:
+    default_context_mode: review-only
+    default_closeout_authority: code_only
+    packs:
+      - global:006-worker-command-telemetry
+      - repo:t3code-vxapp:100-t3code-repo-orientation
+      - repo:t3code-vxapp:130-t3code-review
+      - global:050-vx-git-read
+      - global:052-vx-github-pr
+      - repo:t3code-vxapp:143-t3code-pr-closeout
+      - global:064-vx-quality-gate-awareness
+    grants:
+      - read
+      - inspect
+      - pr-comment
+      - pr-review
+    forbids:
+      - edit
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  closeout:
+    default_context_mode: closeout
+    default_closeout_authority: code_tests_commit
+    packs:
+      - global:050-vx-git-read
+      - global:051-vx-git-closeout-authority
+      - global:006-worker-command-telemetry
+      - repo:t3code-vxapp:100-t3code-repo-orientation
+      - global:064-vx-quality-gate-awareness
+    grants:
+      - read
+      - inspect
+      - run-local-tests
+      - commit
+    forbids:
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  specialist:
+    default_context_mode: isolated
+    default_closeout_authority: code_tests
+    packs:
+      - repo:t3code-vxapp:100-t3code-repo-orientation
+      - repo:t3code-vxapp:150-t3-domain-modeling
+      - global:064-vx-quality-gate-awareness
+      - global:081-vx-visual-diagramming
+      - global:082-vx-creative-ideation-writing
+    grants:
+      - read
+      - inspect
+      - edit
+      - run-local-tests
+    forbids:
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+validation_profiles:
+  syntax:
+    - cmd: bun fmt
+      cwd: ${workspace}
+    - cmd: bun typecheck
+      cwd: ${workspace}
+  focused_tests:
+    - cmd: bun run test ${suite}
+      cwd: ${workspace}
+  static_analysis:
+    - cmd: bun lint
+      cwd: ${workspace}
+  closeout:
+    - profile: syntax
+    - profile: static_analysis
+    - cmd: git diff --check HEAD~1..HEAD
+      cwd: ${workspace}
+repo_claude:
+  minimal: summary_only
+  repo-guided: include
+  review-only: omit
+  closeout: omit
+  isolated: omit
+  pack-managed: omit
+legacy_global_skills:
+  enabled: false
+closeout_authority:
+  code_only:
+    grants:
+      - read
+      - inspect
+    forbids:
+      - edit
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  plan_only:
+    grants:
+      - read
+      - inspect
+      - plan-mutate
+    forbids:
+      - edit
+      - run-local-tests
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  code_tests:
+    grants:
+      - read
+      - inspect
+      - edit
+      - run-local-tests
+    forbids:
+      - commit
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  code_tests_commit:
+    grants:
+      - read
+      - inspect
+      - run-local-tests
+      - commit
+    forbids:
+      - push
+      - stash
+      - deploy
+      - branch-delete
+  code_tests_commit_push:
+    grants:
+      - read
+      - inspect
+      - run-local-tests
+      - commit
+      - push
+    forbids:
+      - stash
+      - deploy
+      - branch-delete
+orchestration_defaults:
+  branch_prefixes:
+    implementation: task
+    review: review
+    closeout: closeout
+  lane_name_template: "{run_id}-{repo_id}-phase{ordinal}-{task_class}"
+  artifact_namespace: "@Scratch/agents-vxapp"
+  default_task_class: source-editing-implementation
+  default_context_mode: isolated
+  default_closeout_authority: code_tests

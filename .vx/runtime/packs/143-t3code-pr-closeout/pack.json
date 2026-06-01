@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "id": "repo:t3code-vxapp:143-t3code-pr-closeout",
+  "slug": "143-t3code-pr-closeout",
+  "localNumber": 143,
+  "name": "t3code-vxapp PR Closeout",
+  "type": "closeout",
+  "repo": "t3code-vxapp",
+  "scope": "repo",
+  "version": "1.0.0",
+  "description": "Review-surface PR guidance for t3code-vxapp.",
+  "allowedTaskClasses": ["review-only"],
+  "grants": ["read", "inspect", "pr-comment", "pr-review"],
+  "forbids": ["edit", "commit", "push", "stash", "deploy", "branch-delete"],
+  "requires": [
+    "global:000-safety-kernel",
+    "global:001-t3-worker-basics",
+    "global:052-vx-github-pr"
+  ],
+  "conflictsWith": [],
+  "mountMode": "skill",
+  "defaultContextModes": ["review-only"]
+}

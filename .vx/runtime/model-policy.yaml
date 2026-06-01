@@ -1,0 +1,44 @@
+schemaVersion: 1.0.0
+taskClasses:
+  closeout:
+    provider: openai
+    model: gpt-5.4
+    reasoningEffort: medium
+    allowedOverrides: []
+    fallbackPolicy: operator_selected
+  plan-mutation:
+    provider: openai
+    model: gpt-5.4
+    reasoningEffort: medium
+    allowedOverrides: []
+    fallbackPolicy: operator_selected
+  planning:
+    provider: openai
+    model: gpt-5.4
+    reasoningEffort: medium
+    allowedOverrides: []
+    fallbackPolicy: operator_selected
+  review-only:
+    provider: openai
+    model: gpt-5.4
+    reasoningEffort: medium
+    allowedOverrides: []
+    fallbackPolicy: operator_selected
+  source-editing-implementation:
+    provider: openai
+    model: gpt-5.4
+    reasoningEffort: medium
+    allowedOverrides: []
+    fallbackPolicy: operator_selected
+  specialist:
+    provider: openai
+    model: gpt-5.4
+    reasoningEffort: medium
+    allowedOverrides: []
+    fallbackPolicy: operator_selected
+  test-authoring:
+    provider: openai
+    model: gpt-5.4
+    reasoningEffort: medium
+    allowedOverrides: []
+    fallbackPolicy: operator_selected
