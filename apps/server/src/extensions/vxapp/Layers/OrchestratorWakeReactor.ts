@@ -762,11 +762,17 @@ const make = Effect.gen(function* () {
           yield* evaluateDrainForOrchestrator(event.payload.threadId);
           return;
         case "thread.turn-start-requested":
-          yield* consumeActiveWakeItemsForWorker({
-            workerThreadId: event.payload.threadId,
-            consumedAt: event.payload.createdAt,
-            consumeReason: "worker_superseded_by_new_turn",
-          });
+          {
+            const readModel = yield* orchestrationEngine.getReadModel();
+            const thread = readModel.threads.find((entry) => entry.id === event.payload.threadId);
+            if (thread?.spawnRole === "worker") {
+              yield* consumeActiveWakeItemsForWorker({
+                workerThreadId: event.payload.threadId,
+                consumedAt: event.payload.createdAt,
+                consumeReason: "worker_superseded_by_new_turn",
+              });
+            }
+          }
           return;
         case "thread.turn-interrupt-requested":
           if (event.payload.turnId !== undefined) {

@@ -59,6 +59,10 @@ function proofMetadata(realProvider) {
   return { proof_kind: proofKind, real_provider: realProvider };
 }
 
+function proofKindMetadata() {
+  return { proof_kind: proofKind };
+}
+
 async function writeJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -448,8 +452,11 @@ async function stopProcess(server) {
 }
 
 async function writeServerLogs(server) {
-  await writeFile(resolve(outDir, "server.stdout"), Buffer.concat(server.stdout).toString("utf8"));
-  await writeFile(resolve(outDir, "server.stderr"), Buffer.concat(server.stderr).toString("utf8"));
+  const stdout = Buffer.concat(server.stdout).toString("utf8");
+  const stderr = Buffer.concat(server.stderr).toString("utf8");
+  await writeFile(resolve(outDir, "server.stdout"), stdout);
+  await writeFile(resolve(outDir, "server.stderr"), stderr);
+  return { stdout, stderr };
 }
 
 function providerRuntimeError(event) {
@@ -463,6 +470,62 @@ function providerRuntimeError(event) {
   return null;
 }
 
+function eventCommandText(event) {
+  return `${event?.data?.commandId ?? ""} ${event?.data?.correlationId ?? ""}`;
+}
+
+function isAssistantStreamingEvent(push, threadId) {
+  const payload = push.data?.payload;
+  const commandText = eventCommandText(push);
+  return (
+    push.data?.type === "thread.message-sent" &&
+    payload?.threadId === threadId &&
+    payload?.role === "assistant" &&
+    payload?.streaming === true &&
+    typeof payload?.turnId === "string" &&
+    String(payload?.text ?? "").trim().length > 0 &&
+    (commandText.includes("assistant-delta") || commandText.includes("assistant-delta-finalize"))
+  );
+}
+
+function isAssistantFinalEvent(push, threadId, messageId) {
+  const payload = push.data?.payload;
+  const commandText = eventCommandText(push);
+  return (
+    push.data?.type === "thread.message-sent" &&
+    payload?.threadId === threadId &&
+    payload?.messageId === messageId &&
+    payload?.role === "assistant" &&
+    payload?.streaming === false &&
+    commandText.includes("assistant-complete")
+  );
+}
+
+function serverLogViolation(stdout, stderr) {
+  const lines = `${stdout}\n${stderr}`.split(/\r?\n/);
+  const forbidden = [
+    "OwnerCommandFailure",
+    "failed to process input",
+    "Traceback",
+    "auth failure",
+    "authentication failed",
+    "provider failure",
+    "runtime failure",
+  ];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const lower = line.toLowerCase();
+    const marker = forbidden.find((entry) => lower.includes(entry.toLowerCase()));
+    if (marker) {
+      return `server log contains '${marker}': ${line}`;
+    }
+    if (/\bWARN\b/.test(line) || /\bERROR\b/.test(line)) {
+      return `server log contains unclassified warning/error: ${line}`;
+    }
+  }
+  return null;
+}
+
 async function main() {
   await mkdir(outDir, { recursive: true });
   await Promise.all([
@@ -473,6 +536,8 @@ async function main() {
     rm(resolve(outDir, "cleanup.json"), { force: true }),
     rm(resolve(outDir, "server.stdout"), { force: true }),
     rm(resolve(outDir, "server.stderr"), { force: true }),
+    rm(resolve(outDir, "observed-pushes.json"), { force: true }),
+    rm(resolve(outDir, "server-config.json"), { force: true }),
   ]);
   await rm(t3Home, { recursive: true, force: true });
   await mkdir(t3UserData, { recursive: true });
@@ -481,14 +546,16 @@ async function main() {
   const preflightResult = await preflight();
   await writeJson(resolve(outDir, "preflight.json"), {
     ok: preflightResult.ok,
-    ...proofMetadata(false),
+    ...proofKindMetadata(),
+    acceptedRealProviderCandidate: preflightResult.ok,
     checkedAt: nowIso(),
     ...preflightResult.result,
     ...(preflightResult.blocker ? { blocker: preflightResult.blocker } : {}),
   });
   if (!preflightResult.ok) {
     await writeJson(resolve(outDir, "run-metadata.json"), {
-      ...proofMetadata(false),
+      ...proofKindMetadata(),
+      acceptedRealProviderCandidate: false,
       startedAt: nowIso(),
       outDir,
       t3Home,
@@ -507,6 +574,7 @@ async function main() {
   const acceptedBinary = preflightResult.result.realpath;
   const codexHome = preflightResult.result.codexHome;
   await writeJson(resolve(t3UserData, "settings.json"), {
+    enableAssistantStreaming: true,
     providers: {
       codex: {
         binaryPath: acceptedBinary,
@@ -530,7 +598,8 @@ async function main() {
     VX_AGENTS_REPO_ROOT: agentsRoot,
   };
   const metadata = {
-    ...proofMetadata(false),
+    ...proofKindMetadata(),
+    acceptedRealProviderCandidate: true,
     startedAt: nowIso(),
     port,
     outDir,
@@ -576,6 +645,7 @@ async function main() {
     await writeJson(resolve(outDir, "lifecycle.json"), lifecycle);
     cleanup = await stopProcess(server);
     await writeJson(resolve(outDir, "cleanup.json"), cleanup);
+    await writeJson(resolve(outDir, "observed-pushes.json"), observedPushes);
     await writeServerLogs(server);
     await writeSummary(status, block, {
       preflight: preflightResult.result,
@@ -707,14 +777,10 @@ async function main() {
         push.data?.payload?.session?.status === "running",
       lifecycleTimeoutMs,
     );
-    const assistantPromise = waitForPush(
+    const assistantStreamPromise = waitForPush(
       ws,
       "orchestration.domainEvent",
-      (push) =>
-        push.data?.type === "thread.message-sent" &&
-        push.data?.payload?.threadId === threadId &&
-        push.data?.payload?.role === "assistant" &&
-        String(push.data?.payload?.text ?? "").trim().length > 0,
+      (push) => isAssistantStreamingEvent(push, threadId),
       lifecycleTimeoutMs,
     );
 
@@ -749,13 +815,27 @@ async function main() {
       receivedAt: nowIso(),
       event: running.data,
     });
-    const assistant = await assistantPromise.catch((error) =>
+    const assistantStream = await assistantStreamPromise.catch((error) =>
       Promise.reject(Object.assign(error, { proofCode: "assistant_stream_timeout" })),
     );
     lifecycle.events.push({
-      assertion: "assistant-message",
+      assertion: "assistant-streaming-message",
       receivedAt: nowIso(),
-      event: assistant.data,
+      event: assistantStream.data,
+    });
+    const assistantMessageId = assistantStream.data?.payload?.messageId ?? null;
+    const assistantFinal = await waitForPush(
+      ws,
+      "orchestration.domainEvent",
+      (push) => isAssistantFinalEvent(push, threadId, assistantMessageId),
+      lifecycleTimeoutMs,
+    ).catch((error) =>
+      Promise.reject(Object.assign(error, { proofCode: "assistant_finalize_timeout" })),
+    );
+    lifecycle.events.push({
+      assertion: "assistant-finalized",
+      receivedAt: nowIso(),
+      event: assistantFinal.data,
     });
     const ready = await waitForPush(
       ws,
@@ -764,7 +844,8 @@ async function main() {
         push.data?.type === "thread.session-set" &&
         push.data?.payload?.threadId === threadId &&
         push.data?.payload?.session?.status === "ready" &&
-        push.data?.payload?.session?.activeTurnId === null,
+        push.data?.payload?.session?.activeTurnId === null &&
+        Number(push.data?.sequence ?? 0) > Number(assistantFinal.data?.sequence ?? 0),
       lifecycleTimeoutMs,
     ).catch((error) =>
       Promise.reject(Object.assign(error, { proofCode: "lifecycle_ready_timeout" })),
@@ -789,7 +870,8 @@ async function main() {
     lifecycle.assertions = [
       "server/provider ready",
       "request accepted/running",
-      "assistant message streamed",
+      "assistant streaming event observed",
+      "assistant finalization event observed",
       "session returned ready",
       "no provider/auth/runtime error",
     ];
@@ -799,7 +881,7 @@ async function main() {
     cleanup = await stopProcess(server);
     await writeJson(resolve(outDir, "cleanup.json"), cleanup);
     await writeJson(resolve(outDir, "observed-pushes.json"), observedPushes);
-    await writeServerLogs(server);
+    const serverLogs = await writeServerLogs(server);
     if (cleanup.errors.length > 0) {
       await writeSummary(
         "failed",
@@ -809,6 +891,23 @@ async function main() {
           cleanup.errors.join("; "),
           "Inspect cleanup.json and stop remaining T3Code server processes for this port.",
           "cleanup",
+          true,
+        ),
+        { preflight: preflightResult.result, cleanup, lifecycle },
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const logViolation = serverLogViolation(serverLogs.stdout, serverLogs.stderr);
+    if (logViolation) {
+      await writeSummary(
+        "failed",
+        blocker(
+          "server_log_violation",
+          "Probe server logs contain an unclassified warning or runtime failure.",
+          logViolation,
+          "Inspect server.stdout and server.stderr, fix or classify the log line, then rerun.",
+          "server_logs",
           true,
         ),
         { preflight: preflightResult.result, cleanup, lifecycle },
@@ -828,8 +927,10 @@ async function main() {
       boundedTurn: {
         prompt: promptText,
         turnsStarted,
-        assistantMessageId: assistant.data?.payload?.messageId ?? null,
-        assistantTextLength: String(assistant.data?.payload?.text ?? "").length,
+        assistantMessageId,
+        assistantTextLength: String(assistantStream.data?.payload?.text ?? "").length,
+        streamingEventSequence: assistantStream.data?.sequence ?? null,
+        finalEventSequence: assistantFinal.data?.sequence ?? null,
       },
       lifecycle,
       cleanup,
@@ -843,6 +944,7 @@ async function main() {
       websocket_ready_timeout: "server_readiness",
       dispatch_failed: "dispatch",
       assistant_stream_timeout: "stream",
+      assistant_finalize_timeout: "stream",
       lifecycle_ready_timeout: "lifecycle",
     };
     await failWith(

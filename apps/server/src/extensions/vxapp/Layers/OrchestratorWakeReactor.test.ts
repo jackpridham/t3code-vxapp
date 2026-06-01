@@ -86,6 +86,13 @@ describe("OrchestratorWakeReactor authority boundary", () => {
     expect(source).not.toContain("program-link-sync");
   });
 
+  it("does not reconcile wake consumption for ordinary local turns", () => {
+    const source = readSource();
+
+    expect(source).toContain('thread?.spawnRole === "worker"');
+    expect(source).toContain('consumeReason: "worker_superseded_by_new_turn"');
+  });
+
   it("does not synthesize stale review wake identifiers owned by agents-vxapp", () => {
     const source = readSource();
 
