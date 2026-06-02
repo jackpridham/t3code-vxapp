@@ -675,6 +675,83 @@ describe("buildOrchestrationSidebarModel", () => {
     expect(model.executives[0]?.threadId).not.toBe(staleProjectRootThreadId);
   });
 
+  it("does not reconstruct a CTO thread from stale project or program lineage when owner authority is present", () => {
+    const executiveProjectId = ProjectId.makeUnsafe("project-cto");
+    const staleProjectRootThreadId = ThreadId.makeUnsafe("a084b92c-e863-4373-a728-b86c51305163");
+    const staleProgramThreadId = ThreadId.makeUnsafe("thread-cto-program-stale");
+
+    const model = buildOrchestrationSidebarModel({
+      authoritySnapshot: makeAuthoritySnapshot({
+        programs: [
+          {
+            activeAllocations: [],
+            attentionItems: [],
+            currentTodo: null,
+            display: null,
+            executive: makeAuthorityRuntimeTarget({
+              agentKind: "executive",
+              kind: "executive",
+              threadId: null,
+              workspace: "/runtime/role-sessions/cto/current/workspace",
+            }),
+            notifications: [],
+            openWakes: [],
+            orchestrator: null,
+            ownerDiagnostics: [],
+            program: makeProgram({
+              executiveProjectId,
+              executiveThreadId: staleProgramThreadId,
+              id: ProgramId.makeUnsafe("program-current"),
+              status: "active",
+              title: "Current Program",
+            }),
+            watchProjection: null,
+            workers: [],
+          },
+        ],
+      }),
+      ctoAttentionItems: [],
+      programNotifications: [],
+      programs: [
+        makeProgram({
+          executiveProjectId,
+          executiveThreadId: staleProgramThreadId,
+          id: ProgramId.makeUnsafe("program-current"),
+          status: "active",
+          title: "Current Program",
+        }),
+      ],
+      projects: [
+        makeProject({
+          currentSessionRootThreadId: staleProjectRootThreadId,
+          cwd: "/executive",
+          id: executiveProjectId,
+          name: "CTOv2",
+        }),
+      ],
+      sessionWorkerThreadsByRootId: new Map(),
+      sqliteGraph: null,
+      threads: [
+        makeThread({
+          id: staleProjectRootThreadId,
+          projectId: executiveProjectId,
+          title: "Archived CTO",
+          archivedAt: "2026-05-10T00:00:00.000Z",
+        }),
+        makeThread({
+          id: staleProgramThreadId,
+          projectId: executiveProjectId,
+          title: "Program stale CTO",
+        }),
+      ],
+      wakeItems: [],
+    });
+
+    expect(model.executives[0]?.threadId).toBeNull();
+    expect(model.executives[0]?.threadId).not.toBe(staleProjectRootThreadId);
+    expect(model.executives[0]?.threadId).not.toBe(staleProgramThreadId);
+  });
+
   it("does not collapse authority-backed executives that share a project but disagree on thread", () => {
     const executiveProjectId = ProjectId.makeUnsafe("project-cto");
     const firstExecutiveThreadId = ThreadId.makeUnsafe("thread-cto-a");

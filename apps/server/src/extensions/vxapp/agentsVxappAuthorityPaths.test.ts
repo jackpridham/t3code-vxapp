@@ -55,16 +55,15 @@ describe("agentsVxappAuthorityPaths", () => {
     ).toBe(true);
   });
 
-  it("classifies owner-authoritative vxapp worktrees outside the role-session root", () => {
+  it("does not classify owner thread worktree paths outside the role-session root", () => {
     const runtimePaths = makeRuntimePaths();
     const ownerWorktreePath = "/tmp/custom-vxapp/thread-7/worktree";
 
     expect(
       isAgentsVxappWorktreePath(ownerWorktreePath, {
         runtimePaths,
-        authoritativeWorktreePaths: [ownerWorktreePath],
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("does not classify unrelated repo-root paths as vxapp-backed", () => {
@@ -76,7 +75,6 @@ describe("agentsVxappAuthorityPaths", () => {
     expect(
       isAgentsVxappWorktreePath("/home/gizmo/agents-vxapp/worktrees/thread-1", {
         runtimePaths,
-        authoritativeWorktreePaths: ["/tmp/custom-vxapp/thread-7/worktree"],
       }),
     ).toBe(false);
   });
@@ -97,7 +95,6 @@ describe("agentsVxappAuthorityPaths", () => {
     expect(
       isAgentsVxappWorktreePath("/tmp/custom-vxapp/thread-7/worktree", {
         runtimePaths: null,
-        authoritativeWorktreePaths: null,
       }),
     ).toBe(false);
   });

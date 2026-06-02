@@ -115,6 +115,33 @@ describe("workerRuntime fixtures", () => {
   });
 
   it("accepts owner-defined runtime status and kind strings as transport data", async () => {
+    const contextPlan = await Effect.runPromise(
+      decodeContextPlan({
+        schema_version: "1.0.0",
+        repo: "owner-repo",
+        taskClass: "source-editing-implementation",
+        contextMode: "repo-guided",
+        closeoutAuthority: "code_tests",
+        worktreePath: "/repo",
+        selectedPacks: ["repo:owner:pack"],
+        runtimeProfilePath: "/repo/.vx/runtime/pack-profile.yaml",
+        repoPackRoot: "/repo/.vx/runtime/packs",
+        generatedSkillsPath: "/repo/.vx/runtime/generated-skill-declarations.yaml",
+        modelPolicyPath: "/repo/.vx/runtime/model-policy.yaml",
+        localVx: {
+          contractPath: "/repo/.vx/vx-config.yaml",
+          runtimeProfilePath: "/repo/.vx/runtime/pack-profile.yaml",
+          generatedSkillsPath: "/repo/.vx/runtime/generated-skill-declarations.yaml",
+          modelPolicyPath: "/repo/.vx/runtime/model-policy.yaml",
+        },
+        modelPolicy: {
+          provider: "codex",
+          model: "gpt-5.4",
+          effort: "medium",
+          selectionReason: "local_model_policy",
+        },
+      }),
+    );
     const sourceFile = await Effect.runPromise(
       decodeWorkerRuntimeSourceFile({
         status: "runtime-source/custom",
@@ -175,6 +202,18 @@ describe("workerRuntime fixtures", () => {
       }),
     );
 
+    assert.ok(contextPlan.localVx);
+    assert.ok(contextPlan.modelPolicy);
+    assert.equal(contextPlan.worktreePath, "/repo");
+    assert.equal(contextPlan.runtimeProfilePath, "/repo/.vx/runtime/pack-profile.yaml");
+    assert.equal(contextPlan.repoPackRoot, "/repo/.vx/runtime/packs");
+    assert.equal(
+      contextPlan.generatedSkillsPath,
+      "/repo/.vx/runtime/generated-skill-declarations.yaml",
+    );
+    assert.equal(contextPlan.modelPolicyPath, "/repo/.vx/runtime/model-policy.yaml");
+    assert.equal(contextPlan.localVx.contractPath, "/repo/.vx/vx-config.yaml");
+    assert.equal(contextPlan.modelPolicy.selectionReason, "local_model_policy");
     assert.strictEqual(sourceFile.status, "runtime-source/custom");
     assert.strictEqual(snapshot.agentKind, "worker");
     assert.strictEqual(snapshot.runtimeKind, "snapshot-kind/custom");

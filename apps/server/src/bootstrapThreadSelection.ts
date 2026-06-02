@@ -123,15 +123,8 @@ function resolveProjectThreadId(input: {
     if (currentSessionThread) {
       return currentSessionThread.id;
     }
-
-    const archivedCurrentSessionThread = projectThreads.find(
-      (thread) => thread.id === input.project.currentSessionRootThreadId,
-    );
-    if (archivedCurrentSessionThread) {
-      return archivedCurrentSessionThread.id;
-    }
   }
 
   const activeThread = projectThreads.find((thread) => thread.archivedAt === null);
-  return activeThread?.id ?? projectThreads[0]?.id ?? null;
+  return activeThread?.id ?? null;
 }

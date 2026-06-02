@@ -1,5 +1,6 @@
 import type {
   OrchestrationProject,
+  OrchestrationProjectKind,
   OrchestrationThreadSummary,
   ProjectId,
   ThreadId,
@@ -8,6 +9,15 @@ import { Effect, Schema, ServiceMap } from "effect";
 
 export interface AgentsVxappExternalRoleAuthoritySnapshot {
   readonly projects: readonly OrchestrationProject[];
+  readonly threadSummaries: readonly OrchestrationThreadSummary[];
+}
+
+type AgentsVxappExternalRoleAuthorityProjectInput = Omit<OrchestrationProject, "kind"> & {
+  readonly kind?: OrchestrationProjectKind | "workspace" | undefined;
+};
+
+interface AgentsVxappExternalRoleAuthoritySnapshotInput {
+  readonly projects: readonly AgentsVxappExternalRoleAuthorityProjectInput[];
   readonly threadSummaries: readonly OrchestrationThreadSummary[];
 }
 
@@ -53,6 +63,45 @@ export function buildExternalRoleAuthorityIndex(
         thread.worktreePath && thread.worktreePath.length > 0 ? [thread.worktreePath] : [],
       ),
     ),
+  };
+}
+
+function normalizeExternalRoleAuthorityProject(
+  project: AgentsVxappExternalRoleAuthorityProjectInput,
+): OrchestrationProject {
+  const { kind, ...projectWithoutKind } = project;
+  if (kind === "workspace") {
+    return { ...projectWithoutKind, kind: "project" };
+  }
+  if (kind === undefined) {
+    return projectWithoutKind;
+  }
+  return { ...projectWithoutKind, kind };
+}
+
+export function validateExternalRoleAuthoritySnapshot(
+  snapshot: AgentsVxappExternalRoleAuthoritySnapshotInput,
+): AgentsVxappExternalRoleAuthoritySnapshot {
+  const projects = snapshot.projects.map(normalizeExternalRoleAuthorityProject);
+  const activeThreadIds = new Set(
+    snapshot.threadSummaries
+      .filter((thread) => thread.archivedAt === null && thread.deletedAt === null)
+      .map((thread) => thread.id),
+  );
+  const staleProject = projects.find(
+    (project) =>
+      project.currentSessionRootThreadId !== undefined &&
+      project.currentSessionRootThreadId !== null &&
+      !activeThreadIds.has(project.currentSessionRootThreadId),
+  );
+  if (staleProject) {
+    throw new Error(
+      `agents-vxapp external role authority project ${staleProject.id} points at a stale currentSessionRootThreadId.`,
+    );
+  }
+  return {
+    projects,
+    threadSummaries: snapshot.threadSummaries,
   };
 }
 

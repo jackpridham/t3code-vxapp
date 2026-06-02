@@ -42,6 +42,11 @@ describe("ProjectionOperationalQuery authority boundary", () => {
     expect(source).not.toContain("projection_cto_attention");
   });
 
+  it("validates external-role authority before merging operational projects and threads", () => {
+    expect(source).toContain("validateExternalRoleAuthoritySnapshot(snapshot)");
+    expect(source).toContain("ProjectionOperationalQuery.externalRoleAuthority:validate");
+  });
+
   it("does not synthesize vxapp-backed current-state projects from local projection rows", async () => {
     const sqliteBackedLayer = Layer.mergeAll(
       ProjectionProjectRepositoryLive,

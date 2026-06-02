@@ -6,6 +6,7 @@ import {
   type AgentsVxappExternalRoleAuthorityShape,
   type AgentsVxappExternalRoleAuthoritySnapshot,
   type AgentsVxappRoleSessionRuntimePaths,
+  validateExternalRoleAuthoritySnapshot,
 } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import {
   fetchAgentsVxappExternalRoleAuthoritySnapshot,
@@ -75,11 +76,11 @@ function buildSnapshot(payload: unknown): AgentsVxappExternalRoleAuthoritySnapsh
   if (!Array.isArray(authority.threadSummaries)) {
     throw new Error("agents-vxapp external role authority snapshot is missing threadSummaries.");
   }
-  return {
+  return validateExternalRoleAuthoritySnapshot({
     projects: authority.projects as AgentsVxappExternalRoleAuthoritySnapshot["projects"],
     threadSummaries:
       authority.threadSummaries as AgentsVxappExternalRoleAuthoritySnapshot["threadSummaries"],
-  };
+  });
 }
 
 const makeAgentsVxappExternalRoleAuthority = Effect.succeed({

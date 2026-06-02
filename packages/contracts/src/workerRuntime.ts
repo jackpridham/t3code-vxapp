@@ -25,6 +25,10 @@ const WorkerRuntimeLooseString = Schema.NullOr(Schema.String).pipe(
   Schema.withDecodingDefault(() => null),
 );
 
+const WorkerRuntimeLooseRecord = Schema.Record(Schema.String, Schema.Unknown).pipe(
+  Schema.withDecodingDefault(() => ({})),
+);
+
 export const WorkerRuntimeContextPlan = Schema.Struct({
   schema_version: Schema.String,
   repo: Schema.String,
@@ -46,6 +50,9 @@ export const WorkerRuntimeContextPlan = Schema.Struct({
   conflicts: Schema.optional(WorkerRuntimeStringList).pipe(Schema.withDecodingDefault(() => [])),
   warnings: Schema.optional(WorkerRuntimeStringList).pipe(Schema.withDecodingDefault(() => [])),
   workspace: Schema.optional(WorkerRuntimeLooseString).pipe(Schema.withDecodingDefault(() => null)),
+  worktreePath: Schema.optional(WorkerRuntimeLooseString).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   runtimeDir: Schema.optional(WorkerRuntimeLooseString).pipe(
     Schema.withDecodingDefault(() => null),
   ),
@@ -56,7 +63,23 @@ export const WorkerRuntimeContextPlan = Schema.Struct({
   repoClaude: Schema.optional(WorkerRuntimeLooseString).pipe(
     Schema.withDecodingDefault(() => null),
   ),
+  runtimeProfilePath: Schema.optional(WorkerRuntimeLooseString).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  repoPackRoot: Schema.optional(WorkerRuntimeLooseString).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  generatedSkillsPath: Schema.optional(WorkerRuntimeLooseString).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  modelPolicyPath: Schema.optional(WorkerRuntimeLooseString).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   legacyGlobalSkills: Schema.optional(Schema.Boolean).pipe(Schema.withDecodingDefault(() => false)),
+  localVx: Schema.optional(WorkerRuntimeLooseRecord).pipe(Schema.withDecodingDefault(() => ({}))),
+  modelPolicy: Schema.optional(WorkerRuntimeLooseRecord).pipe(
+    Schema.withDecodingDefault(() => ({})),
+  ),
 });
 export type WorkerRuntimeContextPlan = typeof WorkerRuntimeContextPlan.Type;
 

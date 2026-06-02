@@ -200,4 +200,92 @@ describe("resolveStartupBootstrapSelection", () => {
       threadId: newerThread,
     });
   });
+
+  it("does not select an archived current session root", () => {
+    const projectApp = ProjectId.makeUnsafe("project-app");
+    const projectCto = ProjectId.makeUnsafe("project-cto");
+    const staleThread = ThreadId.makeUnsafe("a084b92c-e863-4373-a728-b86c51305163");
+    const freshThread = ThreadId.makeUnsafe("thread-cto-fresh");
+
+    expect(
+      resolveStartupBootstrapSelection({
+        bootstrapProjectId: projectApp,
+        startupThreadTarget: "executive",
+        projects: [
+          {
+            id: projectApp,
+            kind: "project",
+            sidebarParentProjectId: undefined,
+            currentSessionRootThreadId: undefined,
+            deletedAt: null,
+            updatedAt: "2026-04-24T00:00:00.000Z",
+          },
+          {
+            id: projectCto,
+            kind: "executive",
+            sidebarParentProjectId: projectApp,
+            currentSessionRootThreadId: staleThread,
+            deletedAt: null,
+            updatedAt: "2026-04-24T00:01:00.000Z",
+          },
+        ],
+        threads: [
+          {
+            id: staleThread,
+            projectId: projectCto,
+            archivedAt: "2026-04-24T00:02:00.000Z",
+            deletedAt: null,
+          },
+          {
+            id: freshThread,
+            projectId: projectCto,
+            archivedAt: null,
+            deletedAt: null,
+          },
+        ],
+      }),
+    ).toEqual({
+      projectId: projectCto,
+      threadId: freshThread,
+    });
+  });
+
+  it("returns no selection when the only project thread is archived", () => {
+    const projectApp = ProjectId.makeUnsafe("project-app");
+    const projectCto = ProjectId.makeUnsafe("project-cto");
+    const staleThread = ThreadId.makeUnsafe("a084b92c-e863-4373-a728-b86c51305163");
+
+    expect(
+      resolveStartupBootstrapSelection({
+        bootstrapProjectId: projectApp,
+        startupThreadTarget: "executive",
+        projects: [
+          {
+            id: projectApp,
+            kind: "project",
+            sidebarParentProjectId: undefined,
+            currentSessionRootThreadId: undefined,
+            deletedAt: null,
+            updatedAt: "2026-04-24T00:00:00.000Z",
+          },
+          {
+            id: projectCto,
+            kind: "executive",
+            sidebarParentProjectId: projectApp,
+            currentSessionRootThreadId: staleThread,
+            deletedAt: null,
+            updatedAt: "2026-04-24T00:01:00.000Z",
+          },
+        ],
+        threads: [
+          {
+            id: staleThread,
+            projectId: projectCto,
+            archivedAt: "2026-04-24T00:02:00.000Z",
+            deletedAt: null,
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
 });

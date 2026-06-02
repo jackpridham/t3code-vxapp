@@ -41,6 +41,7 @@ import {
   buildExternalRoleAuthorityIndex,
   type AgentsVxappRoleSessionRuntimePaths,
   type AgentsVxappExternalRoleAuthoritySnapshot,
+  validateExternalRoleAuthoritySnapshot,
 } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappControlPlane } from "../Services/AgentsVxappControlPlane.ts";
 import { isAgentsVxappWorkspaceRoot } from "../agentsVxappAuthorityPaths.ts";
@@ -552,16 +553,26 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
               threadSummaries: [],
             } satisfies AgentsVxappExternalRoleAuthoritySnapshot),
           onSome: (externalRoleAuthority) =>
-            externalRoleAuthority
-              .getSnapshot()
-              .pipe(
-                Effect.mapError((error) =>
-                  toProjectionSqlError(
-                    "ProjectionBootstrapSummaryQuery.externalRoleAuthority:query",
-                    error,
-                  ),
-                ),
+            externalRoleAuthority.getSnapshot().pipe(
+              Effect.flatMap((snapshot) =>
+                Effect.try({
+                  try: () => validateExternalRoleAuthoritySnapshot(snapshot),
+                  catch: (error) =>
+                    toProjectionSqlError(
+                      "ProjectionBootstrapSummaryQuery.externalRoleAuthority:validate",
+                      error,
+                    ),
+                }),
               ),
+              Effect.mapError((error) =>
+                isPersistenceError(error)
+                  ? error
+                  : toProjectionSqlError(
+                      "ProjectionBootstrapSummaryQuery.externalRoleAuthority:query",
+                      error,
+                    ),
+              ),
+            ),
         }),
       ),
     );

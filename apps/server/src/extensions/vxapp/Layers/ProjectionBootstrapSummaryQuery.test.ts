@@ -13,7 +13,10 @@ import {
   AgentsVxappControlPlane,
   AgentsVxappControlPlaneError,
 } from "../Services/AgentsVxappControlPlane.ts";
-import { AgentsVxappExternalRoleAuthority } from "../Services/AgentsVxappExternalRoleAuthority.ts";
+import {
+  AgentsVxappExternalRoleAuthority,
+  type AgentsVxappExternalRoleAuthoritySnapshot,
+} from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { ProjectionBootstrapSummaryQuery } from "../Services/ProjectionBootstrapSummaryQuery.ts";
 import { OrchestrationProjectionBootstrapSummaryQueryLive } from "./ProjectionBootstrapSummaryQuery.ts";
 
@@ -37,6 +40,11 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
     );
   });
 
+  it("validates external-role authority before merging startup projects and threads", () => {
+    expect(source).toContain("validateExternalRoleAuthoritySnapshot(snapshot)");
+    expect(source).toContain("ProjectionBootstrapSummaryQuery.externalRoleAuthority:validate");
+  });
+
   it("returns startup-safe external projects even when local projection project rows are empty", async () => {
     const projectId = ProjectId.makeUnsafe("project-external");
     const threadId = ThreadId.makeUnsafe("thread-external");
@@ -52,7 +60,7 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
                 id: projectId,
                 title: "External Project",
                 workspaceRoot: "/runtime/role-sessions/jasper/workspace/project-external",
-                kind: "project",
+                kind: "workspace",
                 currentSessionRootThreadId: threadId,
                 defaultModelSelection: null,
                 scripts: [],
@@ -85,7 +93,7 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
                 errorPresentationSource: "none",
               },
             ],
-          }),
+          } as unknown as AgentsVxappExternalRoleAuthoritySnapshot),
         getRuntimePaths: () =>
           Effect.succeed({
             runtimeRoot: "/runtime",
@@ -162,6 +170,7 @@ describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
         id: projectId,
         title: "External Project",
         workspaceRoot: "/runtime/role-sessions/jasper/workspace/project-external",
+        kind: "project",
         currentSessionRootThreadId: threadId,
       }),
     ]);

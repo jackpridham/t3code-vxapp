@@ -87,6 +87,62 @@ describe("AgentsVxappExternalRoleAuthorityLive", () => {
     expect(mockedExternalRoleAuthoritySnapshot).toHaveBeenCalledTimes(1);
   });
 
+  it("normalizes owner workspace project kind before exposing the public read model", async () => {
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValueOnce({
+      externalRoleAuthority: {
+        projects: [
+          {
+            id: "project-owner",
+            title: "Owner Workspace",
+            workspaceRoot: "/tmp/owner",
+            kind: "workspace",
+            currentSessionRootThreadId: "thread-owner",
+            defaultModelSelection: null,
+            scripts: [],
+            hooks: [],
+            createdAt: "2026-05-18T04:00:00.000Z",
+            updatedAt: "2026-05-18T04:02:00.000Z",
+            deletedAt: null,
+          },
+        ],
+        threadSummaries: [
+          {
+            id: "thread-owner",
+            projectId: "project-owner",
+            title: "Owner Thread",
+            labels: [],
+            modelSelection: { provider: "codex", model: "gpt-5.4" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: "/tmp/owner",
+            latestTurn: null,
+            createdAt: "2026-05-18T04:00:00.000Z",
+            updatedAt: "2026-05-18T04:03:00.000Z",
+            archivedAt: null,
+            deletedAt: null,
+            session: null,
+            hasActiveError: false,
+            activeError: null,
+            historicalError: null,
+            errorPresentationSource: "none",
+          },
+        ],
+      },
+    });
+
+    const snapshot = await Effect.runPromise(
+      Effect.gen(function* () {
+        const authority = yield* AgentsVxappExternalRoleAuthority;
+        return yield* authority.getSnapshot();
+      }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive)),
+    );
+
+    expect(snapshot.projects[0]?.kind).toBe("project");
+    expect(snapshot.projects[0]?.workspaceRoot).toBe("/tmp/owner");
+    expect(snapshot.projects[0]?.currentSessionRootThreadId).toBe("thread-owner");
+  });
+
   it("fails closed when the owner snapshot payload is malformed", async () => {
     mockedExternalRoleAuthoritySnapshot.mockResolvedValueOnce({
       externalRoleAuthority: {
@@ -102,6 +158,39 @@ describe("AgentsVxappExternalRoleAuthorityLive", () => {
       }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive), Effect.runPromise),
     ).rejects.toMatchObject({
       detail: "agents-vxapp external role authority snapshot is missing projects.",
+      operation: "AgentsVxappExternalRoleAuthority.getSnapshot",
+    });
+  });
+
+  it("fails closed when a project current root points at an archived owner thread", async () => {
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValueOnce({
+      externalRoleAuthority: {
+        projects: [
+          {
+            id: "project-owner",
+            workspaceRoot: "/tmp/owner",
+            currentSessionRootThreadId: "a084b92c-e863-4373-a728-b86c51305163",
+          },
+        ],
+        threadSummaries: [
+          {
+            id: "a084b92c-e863-4373-a728-b86c51305163",
+            projectId: "project-owner",
+            archivedAt: "2026-05-18T04:00:00.000Z",
+            deletedAt: null,
+          },
+        ],
+      },
+    });
+
+    await expect(
+      Effect.gen(function* () {
+        const authority = yield* AgentsVxappExternalRoleAuthority;
+        return yield* authority.getSnapshot();
+      }).pipe(Effect.provide(AgentsVxappExternalRoleAuthorityLive), Effect.runPromise),
+    ).rejects.toMatchObject({
+      detail:
+        "agents-vxapp external role authority project project-owner points at a stale currentSessionRootThreadId.",
       operation: "AgentsVxappExternalRoleAuthority.getSnapshot",
     });
   });

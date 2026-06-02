@@ -4,11 +4,6 @@ import type { AgentsVxappRoleSessionRuntimePaths } from "./Services/AgentsVxappE
 
 export interface AgentsVxappWorktreeAuthority {
   readonly runtimePaths: AgentsVxappRoleSessionRuntimePaths | null | undefined;
-  readonly authoritativeWorktreePaths?:
-    | ReadonlySet<string>
-    | ReadonlyArray<string>
-    | null
-    | undefined;
 }
 
 function normalizeComparablePath(value: string | null | undefined): string | null {
@@ -27,26 +22,6 @@ function isPathWithinRoot(
   }
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-function isAuthoritativeWorktreePath(
-  candidatePath: string | null | undefined,
-  authoritativeWorktreePaths: ReadonlySet<string> | ReadonlyArray<string> | null | undefined,
-): boolean {
-  const candidate = normalizeComparablePath(candidatePath);
-  if (!candidate || !authoritativeWorktreePaths) {
-    return false;
-  }
-  const comparablePaths =
-    authoritativeWorktreePaths instanceof Set
-      ? authoritativeWorktreePaths
-      : new Set(authoritativeWorktreePaths);
-  for (const authoritativePath of comparablePaths) {
-    if (normalizeComparablePath(authoritativePath) === candidate) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export function isAgentsVxappWorkspaceRoot(
@@ -69,8 +44,5 @@ export function isAgentsVxappWorktreePath(
   if (!worktreePath || !authority) {
     return false;
   }
-  return (
-    isPathWithinRoot(worktreePath, authority.runtimePaths?.roleSessionsRoot) ||
-    isAuthoritativeWorktreePath(worktreePath, authority.authoritativeWorktreePaths)
-  );
+  return isPathWithinRoot(worktreePath, authority.runtimePaths?.roleSessionsRoot);
 }

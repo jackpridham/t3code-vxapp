@@ -698,6 +698,7 @@ function buildExecutiveAuthorityByProjectId(input: {
 
 function resolveExecutiveAuthority(input: {
   authorityExecutiveThreadId: string | null;
+  ownerAuthorityPresent: boolean;
   executiveAuthority: {
     fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
     threadId: string;
@@ -719,6 +720,12 @@ function resolveExecutiveAuthority(input: {
     return {
       fallbackThreadLink,
       threadId: input.authorityExecutiveThreadId,
+    };
+  }
+  if (input.ownerAuthorityPresent) {
+    return {
+      fallbackThreadLink: null,
+      threadId: null,
     };
   }
   const projectRootThreadId =
@@ -1306,6 +1313,7 @@ export function buildOrchestrationSidebarModel(input: {
         : null;
     const resolvedExecutiveAuthority = resolveExecutiveAuthority({
       authorityExecutiveThreadId: authorityExecutiveTarget?.threadId ?? null,
+      ownerAuthorityPresent: authoritySnapshot !== null,
       executiveAuthority,
       executiveProjectId,
       executiveThreadId,
@@ -1314,7 +1322,9 @@ export function buildOrchestrationSidebarModel(input: {
     });
     const resolvedExecutiveThreadId = resolvedExecutiveAuthority.threadId;
     const effectiveExecutiveThreadId =
-      authorityExecutiveTarget?.threadId ?? resolvedExecutiveThreadId ?? executiveThreadId;
+      authoritySnapshot !== null
+        ? (authorityExecutiveTarget?.threadId ?? resolvedExecutiveThreadId)
+        : (resolvedExecutiveThreadId ?? executiveThreadId);
     const executiveKey =
       executiveProjectId !== null && effectiveExecutiveThreadId !== null
         ? makeExecutiveKey(executiveProjectId, effectiveExecutiveThreadId)

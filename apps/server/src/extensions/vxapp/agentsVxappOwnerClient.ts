@@ -384,7 +384,13 @@ function requiredThreadLifecycleProviderFields(
 ): readonly string[] {
   switch (kind) {
     case "thread_create":
-      return ["projectId", "title"];
+      return [
+        "projectId",
+        "title",
+        "providerBindingRequired",
+        "providerProjectId",
+        "providerReady",
+      ];
     case "thread_turn_start":
       return ["threadId", "message"];
     case "thread_revert":
@@ -408,6 +414,9 @@ function validateLifecycleProviderRequestField(input: {
   const value = input.providerRequest[input.field];
   if (input.field === "archiveCurrent") {
     return typeof value === "boolean" ? null : input.field;
+  }
+  if (input.field === "providerBindingRequired" || input.field === "providerReady") {
+    return value === true ? null : input.field;
   }
   if (input.field === "lineage") {
     const lineage = asRecord(value);

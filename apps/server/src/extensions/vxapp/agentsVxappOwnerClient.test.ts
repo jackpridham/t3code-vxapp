@@ -605,6 +605,9 @@ describe("agentsVxappOwnerClient", () => {
           kind: "thread_create",
           requestId: "req-create",
           projectId: "project-1",
+          providerBindingRequired: true,
+          providerProjectId: "provider-project-1",
+          providerReady: true,
           title: "Worker",
         },
       },
@@ -725,6 +728,21 @@ describe("agentsVxappOwnerClient", () => {
           legacyFallbackUsed: false,
         },
         "missing providerRequest",
+        "t3code-threads-start",
+      ],
+      [
+        "thread create missing provider binding",
+        {
+          legacyFallbackUsed: false,
+          providerRequest: {
+            kind: "thread_create",
+            requestId: "req-create",
+            projectId: "project-1",
+            title: "Worker",
+          },
+        },
+        "missing providerBindingRequired, providerProjectId, providerReady",
+        "t3code-threads-create",
       ],
       [
         "malformed providerRequest",
@@ -733,6 +751,7 @@ describe("agentsVxappOwnerClient", () => {
           providerRequest: { kind: "thread_turn_start", requestId: "req-start", threadId: "t1" },
         },
         "missing message",
+        "t3code-threads-start",
       ],
       [
         "legacy lifecycle payload",
@@ -746,6 +765,7 @@ describe("agentsVxappOwnerClient", () => {
           },
         },
         "legacy fallback",
+        "t3code-threads-start",
       ],
       [
         "mismatched providerRequest kind",
@@ -758,10 +778,11 @@ describe("agentsVxappOwnerClient", () => {
           },
         },
         "did not match",
+        "t3code-threads-start",
       ],
     ] as const;
 
-    for (const [, payload, message] of invalidPayloads) {
+    for (const [, payload, message, command] of invalidPayloads) {
       resetAgentsVxappOwnerManifestForTests();
       mockedRunProcess.mockReset();
       mockedRunProcess
@@ -770,16 +791,16 @@ describe("agentsVxappOwnerClient", () => {
             envelope("t3code-contract-manifest", "contract_manifest", manifestPayload()),
           ),
         )
-        .mockResolvedValueOnce(processResult(envelope("t3code-threads-start", "threads", payload)));
+        .mockResolvedValueOnce(processResult(envelope(command, "threads", payload)));
 
       await expect(
         requestAgentsVxappThreadLifecycleProviderRequest({
-          command: "t3code-threads-start",
+          command,
           payloadJson: { threadId: "t1" },
         }),
       ).rejects.toMatchObject({
         message: expect.stringContaining(message),
-        ownerCommand: "t3code-threads-start",
+        ownerCommand: command,
         authoritySurface: "threads",
       });
     }

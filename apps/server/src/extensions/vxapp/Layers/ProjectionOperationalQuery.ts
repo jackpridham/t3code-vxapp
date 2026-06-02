@@ -60,6 +60,7 @@ import {
   buildExternalRoleAuthorityIndex,
   type AgentsVxappRoleSessionRuntimePaths,
   type AgentsVxappExternalRoleAuthoritySnapshot,
+  validateExternalRoleAuthoritySnapshot,
 } from "../Services/AgentsVxappExternalRoleAuthority.ts";
 import { AgentsVxappControlPlane } from "../Services/AgentsVxappControlPlane.ts";
 import {
@@ -2085,16 +2086,26 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
               threadSummaries: [],
             } satisfies AgentsVxappExternalRoleAuthoritySnapshot),
           onSome: (externalRoleAuthority) =>
-            externalRoleAuthority
-              .getSnapshot()
-              .pipe(
-                Effect.mapError((error) =>
-                  toProjectionSqlError(
-                    "ProjectionOperationalQuery.externalRoleAuthority:query",
-                    error,
-                  ),
-                ),
+            externalRoleAuthority.getSnapshot().pipe(
+              Effect.flatMap((snapshot) =>
+                Effect.try({
+                  try: () => validateExternalRoleAuthoritySnapshot(snapshot),
+                  catch: (error) =>
+                    toProjectionSqlError(
+                      "ProjectionOperationalQuery.externalRoleAuthority:validate",
+                      error,
+                    ),
+                }),
               ),
+              Effect.mapError((error) =>
+                isPersistenceError(error)
+                  ? error
+                  : toProjectionSqlError(
+                      "ProjectionOperationalQuery.externalRoleAuthority:query",
+                      error,
+                    ),
+              ),
+            ),
         }),
       ),
     );
