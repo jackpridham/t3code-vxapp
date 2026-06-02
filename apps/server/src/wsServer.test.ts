@@ -60,6 +60,8 @@ import {
   EventId,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
+  ProgramId,
+  ProjectId,
   ProviderItemId,
   type ServerSettings,
   ThreadId,
@@ -160,6 +162,84 @@ const emptyOwnerExternalRoleAuthoritySnapshot = {
   projects: [],
   threadSummaries: [],
 } as Awaited<ReturnType<typeof fetchAgentsVxappExternalRoleAuthoritySnapshot>>;
+
+function ownerExternalRoleAuthoritySnapshotForCwd(cwd: string) {
+  const projectName = path.basename(cwd) || "project";
+  const projectId = ProjectId.makeUnsafe(`project-owner-${projectName}`);
+  const threadId = ThreadId.makeUnsafe(`thread-owner-${projectName}`);
+  const timestamp = "2026-05-18T04:00:00.000Z";
+  return {
+    projects: [
+      {
+        id: projectId,
+        title: projectName,
+        workspaceRoot: cwd,
+        kind: "workspace",
+        currentSessionRootThreadId: threadId,
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        scripts: [],
+        hooks: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        deletedAt: null,
+      },
+    ],
+    threadSummaries: [
+      {
+        id: threadId,
+        projectId,
+        title: "New thread",
+        labels: [],
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        latestTurn: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        archivedAt: null,
+        deletedAt: null,
+        session: null,
+        hasActiveError: false,
+        activeError: null,
+        historicalError: null,
+        errorPresentationSource: "none",
+      },
+    ],
+  } as Awaited<ReturnType<typeof fetchAgentsVxappExternalRoleAuthoritySnapshot>>;
+}
+
+function ownerProgramsAuthoritySnapshotForCwd(cwd: string) {
+  const projectName = path.basename(cwd) || "project";
+  const projectId = ProjectId.makeUnsafe(`project-owner-${projectName}`);
+  const threadId = ThreadId.makeUnsafe(`thread-owner-${projectName}`);
+  const timestamp = "2026-05-18T04:00:00.000Z";
+  return {
+    ...emptyOwnerProgramsAuthoritySnapshot,
+    programs: [
+      {
+        id: ProgramId.makeUnsafe(`program-owner-${projectName}`),
+        title: `${projectName} owner program`,
+        objective: null,
+        status: "active",
+        executiveProjectId: projectId,
+        executiveThreadId: threadId,
+        currentOrchestratorThreadId: threadId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        completedAt: null,
+        deletedAt: null,
+      },
+    ],
+  } as Awaited<ReturnType<typeof fetchAgentsVxappProgramsAuthoritySnapshot>>;
+}
 
 const defaultOwnerRuntimePaths = {
   runtimeRoot: "/runtime",
@@ -639,8 +719,16 @@ describe("WebSocket Server", () => {
     }
 
     mockedControlPlaneSnapshot.mockResolvedValue(emptyOwnerControlPlaneSnapshot);
-    mockedExternalRoleAuthoritySnapshot.mockResolvedValue(emptyOwnerExternalRoleAuthoritySnapshot);
-    mockedProgramsAuthoritySnapshot.mockResolvedValue(emptyOwnerProgramsAuthoritySnapshot);
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValue(
+      options.autoBootstrapProjectFromCwd
+        ? ownerExternalRoleAuthoritySnapshotForCwd(options.cwd ?? "/test/project")
+        : emptyOwnerExternalRoleAuthoritySnapshot,
+    );
+    mockedProgramsAuthoritySnapshot.mockResolvedValue(
+      options.autoBootstrapProjectFromCwd
+        ? ownerProgramsAuthoritySnapshotForCwd(options.cwd ?? "/test/project")
+        : emptyOwnerProgramsAuthoritySnapshot,
+    );
     mockedProgramsTodosSnapshot.mockResolvedValue(emptyOwnerProgramsTodosSnapshot);
     mockedProjectLifecycleMirror.mockReset();
     mockedProjectLifecycleMirror.mockResolvedValue(undefined);
@@ -840,6 +928,27 @@ describe("WebSocket Server", () => {
       },
     );
     expect(updateProjectResponse.error).toBeUndefined();
+  }
+
+  async function createLocalProject(input: {
+    ws: WebSocket;
+    projectId: string;
+    title: string;
+    workspaceRoot: string;
+  }) {
+    const response = await sendRequest(input.ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: `cmd-${input.projectId}-create`,
+      projectId: input.projectId,
+      title: input.title,
+      workspaceRoot: input.workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt: new Date().toISOString(),
+    });
+    expect(response.error).toBeUndefined();
   }
 
   afterEach(async () => {
@@ -1228,7 +1337,8 @@ describe("WebSocket Server", () => {
   });
 
   it("returns startup-safe external projects on the real bootstrap-summary websocket route", async () => {
-    mockedExternalRoleAuthoritySnapshot.mockResolvedValueOnce({
+    server = await createTestServer({ cwd: "/test/project" });
+    mockedExternalRoleAuthoritySnapshot.mockResolvedValue({
       projects: [
         {
           id: "project-external",
@@ -1246,7 +1356,6 @@ describe("WebSocket Server", () => {
       ],
       threadSummaries: [],
     });
-    server = await createTestServer({ cwd: "/test/project" });
     const addr = server.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;
 
@@ -1857,8 +1966,15 @@ describe("WebSocket Server", () => {
     expect(secondWelcome.data).toEqual(
       expect.objectContaining({
         cwd,
-        bootstrapProjectId: "project-cto",
-        bootstrapThreadId: "thread-cto-active",
+        bootstrapProjectId,
+        bootstrapThreadId: (firstWelcome.data as { bootstrapThreadId?: string }).bootstrapThreadId,
+        startupAuthority: expect.objectContaining({
+          activeOwnerThreadId: (firstWelcome.data as { bootstrapThreadId?: string })
+            .bootstrapThreadId,
+          localBootstrapThreadId: "thread-cto-active",
+          authoritySource: "agents-vxapp-owner",
+          startupContract: "external-role-authority-snapshot",
+        }),
       }),
     );
   });
@@ -1930,8 +2046,15 @@ describe("WebSocket Server", () => {
     expect(secondWelcome.data).toEqual(
       expect.objectContaining({
         cwd,
-        bootstrapProjectId: "project-orchestrator-toggle",
-        bootstrapThreadId: "thread-orchestrator-toggle-active",
+        bootstrapProjectId,
+        bootstrapThreadId: (firstWelcome.data as { bootstrapThreadId?: string }).bootstrapThreadId,
+        startupAuthority: expect.objectContaining({
+          activeOwnerThreadId: (firstWelcome.data as { bootstrapThreadId?: string })
+            .bootstrapThreadId,
+          localBootstrapThreadId: "thread-orchestrator-toggle-active",
+          authoritySource: "agents-vxapp-owner",
+          startupContract: "external-role-authority-snapshot",
+        }),
       }),
     );
   });
@@ -2297,14 +2420,20 @@ describe("WebSocket Server", () => {
     const [ws, welcome] = await connectAndAwaitWelcome(port);
     connections.push(ws);
 
-    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
-    expect(bootstrapProjectId).toBeDefined();
+    expect((welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId).toBeDefined();
+    const localProjectId = "project-worker-runtime";
+    await createLocalProject({
+      ws,
+      projectId: localProjectId,
+      title: "Worker Runtime Project",
+      workspaceRoot: worktreePath,
+    });
 
     const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
       type: "thread.create",
       commandId: "cmd-worker-runtime-thread-create",
       threadId: "thread-worker-runtime",
-      projectId: bootstrapProjectId,
+      projectId: localProjectId,
       title: "Worker Runtime Thread",
       modelSelection: {
         provider: "codex",
@@ -2473,14 +2602,20 @@ describe("WebSocket Server", () => {
     const [ws, welcome] = await connectAndAwaitWelcome(port);
     connections.push(ws);
 
-    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
-    expect(bootstrapProjectId).toBeDefined();
+    expect((welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId).toBeDefined();
+    const localProjectId = "project-worker-runtime-partial";
+    await createLocalProject({
+      ws,
+      projectId: localProjectId,
+      title: "Worker Runtime Partial Project",
+      workspaceRoot: worktreePath,
+    });
 
     const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
       type: "thread.create",
       commandId: "cmd-worker-runtime-partial-thread-create",
       threadId: "thread-worker-runtime-partial",
-      projectId: bootstrapProjectId,
+      projectId: localProjectId,
       title: "Worker Runtime Partial Thread",
       modelSelection: {
         provider: "codex",
@@ -2608,14 +2743,20 @@ describe("WebSocket Server", () => {
     const [ws, welcome] = await connectAndAwaitWelcome(port);
     connections.push(ws);
 
-    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
-    expect(bootstrapProjectId).toBeDefined();
+    expect((welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId).toBeDefined();
+    const localProjectId = "project-orchestrator-runtime";
+    await createLocalProject({
+      ws,
+      projectId: localProjectId,
+      title: "Orchestrator Runtime Project",
+      workspaceRoot: worktreePath,
+    });
 
     const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
       type: "thread.create",
       commandId: "cmd-orchestrator-runtime-thread-create",
       threadId: "thread-orchestrator-runtime",
-      projectId: bootstrapProjectId,
+      projectId: localProjectId,
       title: "Orchestrator Runtime Thread",
       modelSelection: {
         provider: "codex",
@@ -2724,14 +2865,20 @@ describe("WebSocket Server", () => {
     const [ws, welcome] = await connectAndAwaitWelcome(port);
     connections.push(ws);
 
-    const bootstrapProjectId = (welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId;
-    expect(bootstrapProjectId).toBeDefined();
+    expect((welcome.data as { bootstrapProjectId?: string }).bootstrapProjectId).toBeDefined();
+    const localProjectId = "project-worker-runtime-no-worktree";
+    await createLocalProject({
+      ws,
+      projectId: localProjectId,
+      title: "Worker Runtime No Worktree Project",
+      workspaceRoot: projectRoot,
+    });
 
     const createThreadResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
       type: "thread.create",
       commandId: "cmd-worker-runtime-no-worktree-thread-create",
       threadId: "thread-worker-runtime-no-worktree",
-      projectId: bootstrapProjectId,
+      projectId: localProjectId,
       title: "Worker Runtime No Worktree Thread",
       modelSelection: {
         provider: "codex",

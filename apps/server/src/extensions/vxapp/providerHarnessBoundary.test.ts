@@ -28,13 +28,18 @@ function readSource(relativePath: string): string {
 }
 
 describe("provider harness boundary", () => {
-  it("keeps the owner process path isolated to agentsVxappOwnerClient.ts", () => {
+  it("does not hardcode the owner process path in provider harness source", () => {
     const matches = listSourceFiles(serverSrcRoot).filter(
       (filePath) =>
         filePath !== repoRootPath && readFileSync(filePath, "utf8").includes(ownerProcessPath),
     );
 
-    expect(matches).toEqual([ownerClientPath]);
+    expect(matches).toEqual([]);
+
+    const ownerClientSource = readFileSync(ownerClientPath, "utf8");
+    expect(ownerClientSource).toContain("manifestCommand");
+    expect(ownerClientSource).toContain("commandsByWrapperKey");
+    expect(ownerClientSource).toContain("wrapperKey");
   });
 
   it("routes provider-harness owner interactions through the vxapp bridge helpers", () => {

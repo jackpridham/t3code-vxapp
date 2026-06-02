@@ -1332,6 +1332,9 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                 <SidebarMenuItem key={executive.id} className="rounded-md">
                   <SidebarMenuButton
                     size="sm"
+                    data-testid={
+                      executive.threadId ? `thread-row-${executive.threadId}` : undefined
+                    }
                     className={cn(
                       "relative isolate h-auto min-h-7 gap-2 px-2 py-1.5 pr-16",
                       executive.threadId ? "cursor-pointer" : "",

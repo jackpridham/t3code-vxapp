@@ -218,11 +218,11 @@ describe("route thread history hydration", () => {
     expect(api.orchestration.getProjectFullById).toHaveBeenCalledWith({ projectId });
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId,
-      limit: 200,
+      limit: 100,
     });
     expect(api.orchestration.listThreadActivities).toHaveBeenCalledWith({
       threadId,
-      limit: 200,
+      limit: 100,
       payloadMode: "compact",
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(
@@ -233,7 +233,7 @@ describe("route thread history hydration", () => {
             messages: [expect.objectContaining({ text: "loaded after navigation" })],
             snapshotCoverage: expect.objectContaining({
               messageCount: 1,
-              messageLimit: 200,
+              messageLimit: 100,
             }),
           }),
         ],
@@ -427,7 +427,7 @@ describe("route thread history hydration", () => {
     });
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId,
-      limit: 200,
+      limit: 100,
     });
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledTimes(1);
     expect(api.orchestration.listThreadCheckpoints).toHaveBeenCalledWith({
@@ -436,7 +436,7 @@ describe("route thread history hydration", () => {
     });
     expect(api.orchestration.listThreadActivities).toHaveBeenCalledWith({
       threadId,
-      limit: 200,
+      limit: 100,
       payloadMode: "compact",
     });
     expect(api.orchestration.listThreadActivities).toHaveBeenCalledTimes(1);

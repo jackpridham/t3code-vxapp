@@ -1,0 +1,17 @@
+schemaVersion: 1.0.0
+documentKind: vx_owner_client_config
+manifest:
+  command: t3code-contract-manifest
+commands:
+  controlPlane:
+    wrapperKey: t3_control_plane_owner
+  roleSession:
+    wrapperKey: role_session_owner
+timeoutMs: 30000
+maxBufferBytes: 16777216
+readCacheTtlMs: 60000
+stdout: json_envelope
+stderr: diagnostics_only
+missingConfig:
+  code: owner_client_config_missing
+fallbackPolicy: fail_closed

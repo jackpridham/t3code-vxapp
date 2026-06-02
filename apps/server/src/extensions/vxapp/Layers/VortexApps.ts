@@ -9,18 +9,87 @@ import {
 import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ServerConfig } from "../../../config";
 import { runProcess } from "../../../processRunner";
 import { VortexApps, VortexAppsError, type VortexAppsShape } from "../Services/VortexApps";
 
 const VORTEX_APPS_CACHE_KEY = "vortex.apps.list";
-const VORTEX_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
-const VORTEX_APPS_COMMAND_TIMEOUT_MS = 10_000;
-const VORTEX_APPS_COMMAND_MAX_BUFFER_BYTES = 2 * 1024 * 1024;
-const VORTEX_ARTIFACTS_PAGE_LIMIT = 100;
-const VORTEX_ARTIFACTS_COMMAND_TIMEOUT_MS = 20_000;
-const VORTEX_ARTIFACTS_COMMAND_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+const T3CODE_REPO_ROOT_SENTINELS = ["bun.lock", "apps/server/package.json"] as const;
+
+export interface VortexAppsOperationsConfig {
+  readonly commandTimeoutMs: number;
+  readonly maxBufferBytes: number;
+  readonly cacheTtlMs: number;
+  readonly defaultPageLimit: number;
+}
+
+function isT3CodeRepoRoot(candidate: string): boolean {
+  return T3CODE_REPO_ROOT_SENTINELS.every((relativePath) =>
+    fs.existsSync(path.join(candidate, relativePath)),
+  );
+}
+
+function resolveT3CodeRepoRoot(fromDir: string): string {
+  let candidate = path.resolve(fromDir);
+  while (true) {
+    if (isT3CodeRepoRoot(candidate)) {
+      return candidate;
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      throw new Error(`Unable to resolve t3code-vxapp repo root from ${fromDir}.`);
+    }
+    candidate = parent;
+  }
+}
+
+function readYamlNumber(raw: string, section: string, key: string): number {
+  const lines = raw.split(/\r?\n/);
+  let inSection = false;
+  for (const line of lines) {
+    if (line.trim() === `${section}:`) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && line.length > 0 && !line.startsWith(" ")) {
+      break;
+    }
+    const match = inSection ? line.match(new RegExp(`^\\s{2}${key}:\\s*(\\d+)\\s*$`)) : null;
+    const value = Number(match?.[1]);
+    if (Number.isSafeInteger(value) && value > 0) {
+      return value;
+    }
+  }
+  const value = Number.NaN;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(
+      `Invalid .vx/runtime/operations.yaml ${section}.${key}; expected positive integer.`,
+    );
+  }
+  return value;
+}
+
+export function loadVortexAppsOperationsConfigForTests(
+  repoRoot = resolveT3CodeRepoRoot(path.dirname(fileURLToPath(import.meta.url))),
+): VortexAppsOperationsConfig {
+  const configPath = path.join(repoRoot, ".vx/runtime/operations.yaml");
+  const raw = fs.readFileSync(configPath, "utf8");
+  if (!/^documentKind:\s+vx_runtime_operations\s*$/m.test(raw)) {
+    throw new Error(`Invalid runtime operations config documentKind at ${configPath}.`);
+  }
+  return {
+    commandTimeoutMs: readYamlNumber(raw, "vortexApps", "commandTimeoutMs"),
+    maxBufferBytes: readYamlNumber(raw, "vortexApps", "maxBufferBytes"),
+    cacheTtlMs: readYamlNumber(raw, "vortexApps", "cacheTtlMs"),
+    defaultPageLimit: readYamlNumber(raw, "web", "defaultPageLimit"),
+  };
+}
+
+const VORTEX_APPS_OPERATIONS = loadVortexAppsOperationsConfigForTests();
 
 const RuntimeTtlCacheKeySchema = Schema.Struct({
   key: Schema.String,
@@ -65,7 +134,7 @@ function nowIso(): string {
 }
 
 function expiresAtFromNow(): string {
-  return new Date(Date.now() + VORTEX_APPS_CACHE_TTL_MS).toISOString();
+  return new Date(Date.now() + VORTEX_APPS_OPERATIONS.cacheTtlMs).toISOString();
 }
 
 function isFresh(expiresAt: string): boolean {
@@ -134,8 +203,8 @@ const makeVortexApps = Effect.gen(function* () {
       try: () =>
         runProcess("vx", ["apps", "--list", "--json"], {
           cwd: serverConfig.cwd,
-          timeoutMs: VORTEX_APPS_COMMAND_TIMEOUT_MS,
-          maxBufferBytes: VORTEX_APPS_COMMAND_MAX_BUFFER_BYTES,
+          timeoutMs: VORTEX_APPS_OPERATIONS.commandTimeoutMs,
+          maxBufferBytes: VORTEX_APPS_OPERATIONS.maxBufferBytes,
         }),
       catch: toVortexAppsError("listApps.runCommand", "Failed to run vx apps --list --json."),
     });
@@ -181,7 +250,7 @@ const makeVortexApps = Effect.gen(function* () {
         "list",
         "--json",
         "--limit",
-        String(VORTEX_ARTIFACTS_PAGE_LIMIT),
+        String(VORTEX_APPS_OPERATIONS.defaultPageLimit),
         "--page",
         String(input.page),
       ];
@@ -193,8 +262,8 @@ const makeVortexApps = Effect.gen(function* () {
         try: () =>
           runProcess("vx", args, {
             cwd: serverConfig.cwd,
-            timeoutMs: VORTEX_ARTIFACTS_COMMAND_TIMEOUT_MS,
-            maxBufferBytes: VORTEX_ARTIFACTS_COMMAND_MAX_BUFFER_BYTES,
+            timeoutMs: VORTEX_APPS_OPERATIONS.commandTimeoutMs,
+            maxBufferBytes: VORTEX_APPS_OPERATIONS.maxBufferBytes,
           }),
         catch: toVortexAppsError(
           "listAppArtifacts.runCommand",

@@ -1,0 +1,102 @@
+schemaVersion: 1.0.0
+documentKind: vx_performance_budgets
+repo: t3
+budgets:
+  t3.direct_thread_hard_refresh:
+    probe: t3.direct_thread_hard_refresh
+    requiredArgs:
+      - budget
+      - base-url
+      - thread-id
+      - json
+    hard_forbidden_frames:
+      - orchestration.getCurrentState
+    max_bootstrap_payload_bytes: 262144
+    max_targeted_hydration_payload_bytes: 524288
+    row_caps:
+      orchestration.listSessionThreads.result: 20
+      orchestration.listThreadMessages.result: 100
+      orchestration.listThreadActivities.result: 100
+      orchestration.listThreadCheckpoints.result: 100
+      orchestration.listThreadSessions.result: 20
+      orchestration.listOrchestratorWakes.result: 20
+    query_bounds:
+      orchestration.listThreadMessages.limit: 100
+      orchestration.listThreadActivities.limit: 100
+      orchestration.listThreadCheckpoints.limit: 100
+    max_subprocess_count: 0
+    warmups: 1
+    samples: 1
+    warm_p95_ms: 2500
+    hard_ms: 5000
+
+  agents.sidebar_authority_snapshot:
+    probe: agents.sidebar_authority_snapshot
+    requiredArgs:
+      - budget
+      - base-url
+      - json
+    request:
+      method: server.getAgentsVxappSidebarAuthoritySnapshot
+      input:
+        limit: 20
+    max_payload_bytes: 524288
+    row_caps:
+      server.getAgentsVxappSidebarAuthoritySnapshot.result.programs: 20
+      server.getAgentsVxappSidebarAuthoritySnapshot.result.todos: 200
+      server.getAgentsVxappSidebarAuthoritySnapshot.result.currentTodos: 100
+    query_bounds:
+      server.getAgentsVxappSidebarAuthoritySnapshot.limit: 20
+    max_subprocess_count: 1
+    warmups: 1
+    samples: 1
+    warm_p95_ms: 1500
+    hard_ms: 3000
+
+  agents.control_plane_snapshot:
+    probe: agents.control_plane_snapshot
+    requiredArgs:
+      - budget
+      - base-url
+      - json
+    request:
+      method: server.getAgentsVxappProgramsTodosSnapshot
+      input:
+        limit: 20
+    max_payload_bytes: 524288
+    row_caps:
+      server.getAgentsVxappProgramsTodosSnapshot.result.programs: 20
+      server.getAgentsVxappProgramsTodosSnapshot.result.todos: 200
+      server.getAgentsVxappProgramsTodosSnapshot.result.currentTodos: 100
+    query_bounds:
+      server.getAgentsVxappProgramsTodosSnapshot.limit: 20
+    max_subprocess_count: 1
+    warmups: 1
+    samples: 1
+    warm_p95_ms: 1500
+    hard_ms: 3000
+
+  t3.live_turn_pipeline:
+    probe: t3.live_turn_pipeline
+    requiredArgs:
+      - budget
+      - base-url
+      - thread-id
+      - message
+      - json
+    hard_forbidden_frames:
+      - orchestration.getCurrentState
+    max_payload_bytes: 1048576
+    row_caps:
+      orchestration.dispatchCommand.result: 1
+    query_bounds: {}
+    max_subprocess_count: 0
+    warmups: 0
+    samples: 1
+    hard_ms: 120000
+    pipeline_milestone_caps_ms:
+      submit_to_ack: 3000
+      turn_start_requested_to_running: 10000
+      running_to_first_thinking: 30000
+      final_to_settled: 15000
+      total_turn_duration: 120000

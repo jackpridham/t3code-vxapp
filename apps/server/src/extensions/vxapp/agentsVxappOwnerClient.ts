@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   GetAgentRuntimeSnapshotInput,
   GetAgentRuntimeSnapshotResult,
@@ -21,17 +23,28 @@ import type {
 import { runProcess, type ProcessRunResult } from "../../processRunner.ts";
 import { AGENTS_VXAPP_REPO_ROOT } from "./agentsVxappRepoRoot.ts";
 
-const BOOTSTRAP_MANIFEST_COMMAND = "t3code-contract-manifest";
 const ROLE_SESSION_RUNTIME_PATHS_COMMAND = "runtime-paths";
-const CONTROL_PLANE_OWNER_RELATIVE_PATH = "scripts/tools/t3-control-plane-owner";
-const ROLE_SESSION_OWNER_RELATIVE_PATH = "scripts/tools/role-session-owner";
-const OWNER_COMMAND_TIMEOUT_MS = 30_000;
-const OWNER_COMMAND_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const CONTRACT_FAMILY = "agents-vxapp-t3code-authority";
 const CONTRACT_VERSION = "v1";
+const OWNER_CLIENT_CONFIG_RELATIVE_PATH = ".vx/runtime/owner-client.yaml";
+const OWNER_CLIENT_CONFIG_MISSING_CODE = "owner_client_config_missing";
+const OWNER_CLIENT_CONFIG_HINT =
+  "Repair .vx/runtime/owner-client.yaml or .vx-config.yaml runtime.ownerClient before calling agents-vxapp owner commands.";
+const T3CODE_REPO_ROOT_SENTINELS = ["bun.lock", "apps/server/package.json"] as const;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 type JsonRecord = Record<string, unknown>;
 type OwnerSurface = string;
 type OwnerTool = "control-plane" | "role-session";
+interface AgentsVxappOwnerClientConfig {
+  readonly manifestCommand: string;
+  readonly commands: Readonly<Record<OwnerTool, { readonly wrapperKey: string }>>;
+  readonly timeoutMs: number;
+  readonly maxBufferBytes: number;
+  readonly readCacheTtlMs: number;
+  readonly stdout: "json_envelope";
+  readonly stderr: "diagnostics_only";
+  readonly configPath: string;
+}
 
 export class AgentsVxappOwnerClientError extends Error {
   readonly ownerCommand: string;
@@ -111,11 +124,19 @@ export interface AgentsVxappOwnerManifest {
 }
 
 let cachedManifest: AgentsVxappOwnerManifest | null = null;
+let cachedOwnerClientConfig: AgentsVxappOwnerClientConfig | null = null;
 type OwnerCommandResult = {
   readonly envelope: JsonRecord;
   readonly result: ProcessRunResult;
 };
 const inFlightOwnerReadCommands = new Map<string, Promise<OwnerCommandResult>>();
+const cachedOwnerReadCommands = new Map<
+  string,
+  {
+    readonly expiresAtMs: number;
+    readonly result: OwnerCommandResult;
+  }
+>();
 const TODO_MUTATE_WRAPPER_KEY = "todo_mutate";
 const TODO_MUTATE_ACTIONS = [
   "create",
@@ -189,6 +210,7 @@ function ownerReadCoalescingKey(input: {
 
 export function clearAgentsVxappOwnerReadCoalescing(): void {
   inFlightOwnerReadCommands.clear();
+  cachedOwnerReadCommands.clear();
 }
 
 const THREAD_LIFECYCLE_OWNER_COMMAND_KINDS = {
@@ -248,11 +270,151 @@ function asRecordArray(value: unknown): JsonRecord[] {
     : [];
 }
 
-function ownerPath(tool: OwnerTool): string {
-  return path.join(
-    AGENTS_VXAPP_REPO_ROOT,
-    tool === "role-session" ? ROLE_SESSION_OWNER_RELATIVE_PATH : CONTROL_PLANE_OWNER_RELATIVE_PATH,
+function isT3CodeRepoRoot(candidate: string): boolean {
+  return T3CODE_REPO_ROOT_SENTINELS.every((relativePath) =>
+    fs.existsSync(path.join(candidate, relativePath)),
   );
+}
+
+function resolveT3CodeRepoRoot(fromDir = MODULE_DIR): string {
+  let candidate = path.resolve(fromDir);
+  while (true) {
+    if (isT3CodeRepoRoot(candidate)) {
+      return candidate;
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      throw new Error(`Unable to resolve t3code-vxapp repo root from ${fromDir}.`);
+    }
+    candidate = parent;
+  }
+}
+
+function ownerClientConfigPath(): string {
+  const repoRoot = resolveT3CodeRepoRoot();
+  const rootContract = path.join(repoRoot, ".vx-config.yaml");
+  const rootContractText = fs.existsSync(rootContract) ? fs.readFileSync(rootContract, "utf8") : "";
+  if (!/^\s{2}ownerClient:\s+\.vx\/runtime\/owner-client\.yaml\s*$/m.test(rootContractText)) {
+    throwOwnerClientConfigMissing(rootContract);
+  }
+  return path.join(repoRoot, OWNER_CLIENT_CONFIG_RELATIVE_PATH);
+}
+
+function throwOwnerClientConfigMissing(configPath: string): never {
+  throw new AgentsVxappOwnerClientError({
+    authoritySurface: "owner_client_config",
+    details: { configPath },
+    hints: [{ hint: OWNER_CLIENT_CONFIG_HINT }],
+    message: OWNER_CLIENT_CONFIG_HINT,
+    ownerCommand: "owner-client-config",
+    ownerErrorCode: OWNER_CLIENT_CONFIG_MISSING_CODE,
+  });
+}
+
+function scalarValue(text: string, key: string): string | null {
+  const match = new RegExp(`^${key}:\\s*(\\S.*?)\\s*$`, "m").exec(text);
+  return match?.[1] ?? null;
+}
+
+function nestedScalarValue(text: string, section: string, key: string): string | null {
+  const match = new RegExp(
+    `^${section}:\\s*\\n(?:\\s{2,}.*\\n)*?\\s{2}${key}:\\s*(\\S.*?)\\s*$`,
+    "m",
+  ).exec(text);
+  return match?.[1] ?? null;
+}
+
+function wrapperKeyValue(text: string, section: "controlPlane" | "roleSession"): string | null {
+  const match = new RegExp(`^\\s{2}${section}:\\s*\\n\\s{4}wrapperKey:\\s*(\\S.*?)\\s*$`, "m").exec(
+    text,
+  );
+  return match?.[1] ?? null;
+}
+
+function requiredInteger(text: string, key: string, configPath: string): number {
+  const rawValue = scalarValue(text, key);
+  const value = rawValue ? Number.parseInt(rawValue, 10) : Number.NaN;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new AgentsVxappOwnerClientError({
+      authoritySurface: "owner_client_config",
+      details: { configPath, key },
+      message: `Owner-client config field '${key}' must be a non-negative integer.`,
+      ownerCommand: "owner-client-config",
+      ownerErrorCode: "owner_client_config_invalid",
+    });
+  }
+  return value;
+}
+
+function ownerPathFromWrapperKey(wrapperKey: string): string {
+  return path.join(AGENTS_VXAPP_REPO_ROOT, "scripts", "tools", wrapperKey.replaceAll("_", "-"));
+}
+
+function parseOwnerClientConfig(text: string, configPath: string): AgentsVxappOwnerClientConfig {
+  const manifestCommand = nestedScalarValue(text, "manifest", "command");
+  const controlPlaneWrapperKey = wrapperKeyValue(text, "controlPlane");
+  const roleSessionWrapperKey = wrapperKeyValue(text, "roleSession");
+  if (!manifestCommand || !controlPlaneWrapperKey || !roleSessionWrapperKey) {
+    throw new AgentsVxappOwnerClientError({
+      authoritySurface: "owner_client_config",
+      details: { configPath },
+      message: "Owner-client config is missing manifest.command or command wrapper keys.",
+      ownerCommand: "owner-client-config",
+      ownerErrorCode: "owner_client_config_invalid",
+    });
+  }
+  if (
+    scalarValue(text, "stdout") !== "json_envelope" ||
+    scalarValue(text, "stderr") !== "diagnostics_only" ||
+    scalarValue(text, "fallbackPolicy") !== "fail_closed"
+  ) {
+    throw new AgentsVxappOwnerClientError({
+      authoritySurface: "owner_client_config",
+      details: { configPath },
+      message:
+        "Owner-client config must use json_envelope stdout, diagnostics_only stderr, and fail_closed fallback.",
+      ownerCommand: "owner-client-config",
+      ownerErrorCode: "owner_client_config_invalid",
+    });
+  }
+  return {
+    commands: {
+      "control-plane": { wrapperKey: controlPlaneWrapperKey },
+      "role-session": { wrapperKey: roleSessionWrapperKey },
+    },
+    configPath,
+    manifestCommand,
+    maxBufferBytes: requiredInteger(text, "maxBufferBytes", configPath),
+    readCacheTtlMs: requiredInteger(text, "readCacheTtlMs", configPath),
+    stderr: "diagnostics_only",
+    stdout: "json_envelope",
+    timeoutMs: requiredInteger(text, "timeoutMs", configPath),
+  };
+}
+
+function loadOwnerClientConfig(): AgentsVxappOwnerClientConfig {
+  if (cachedOwnerClientConfig) {
+    return cachedOwnerClientConfig;
+  }
+  const configPath = ownerClientConfigPath();
+  if (!fs.existsSync(configPath)) {
+    throwOwnerClientConfigMissing(configPath);
+  }
+  cachedOwnerClientConfig = parseOwnerClientConfig(fs.readFileSync(configPath, "utf8"), configPath);
+  return cachedOwnerClientConfig;
+}
+
+export function loadAgentsVxappOwnerClientConfigForTests(
+  configPath: string,
+): AgentsVxappOwnerClientConfig {
+  if (!fs.existsSync(configPath)) {
+    throwOwnerClientConfigMissing(configPath);
+  }
+  return parseOwnerClientConfig(fs.readFileSync(configPath, "utf8"), configPath);
+}
+
+function ownerPath(tool: OwnerTool, config: AgentsVxappOwnerClientConfig): string {
+  return ownerPathFromWrapperKey(config.commands[tool].wrapperKey);
 }
 
 function extractOwnerDiagnostics(input: {
@@ -608,6 +770,7 @@ async function executeOwnerCommand(input: {
   readonly surface: string;
   readonly tool: OwnerTool;
 }): Promise<OwnerCommandResult> {
+  const config = loadOwnerClientConfig();
   const args =
     input.tool === "control-plane"
       ? [input.command, "--json", ...(input.args ?? [])]
@@ -623,6 +786,10 @@ async function executeOwnerCommand(input: {
       surface: input.surface,
       tool: input.tool,
     });
+    const cached = cachedOwnerReadCommands.get(key);
+    if (cached && cached.expiresAtMs > Date.now()) {
+      return cached.result;
+    }
     const existing = inFlightOwnerReadCommands.get(key);
     if (existing) {
       return existing;
@@ -640,7 +807,12 @@ async function executeOwnerCommand(input: {
       }
     });
     inFlightOwnerReadCommands.set(key, promise);
-    return promise;
+    const result = await promise;
+    cachedOwnerReadCommands.set(key, {
+      expiresAtMs: Date.now() + config.readCacheTtlMs,
+      result,
+    });
+    return result;
   }
   if (args.includes("--compatibility-mode")) {
     fail({
@@ -649,12 +821,12 @@ async function executeOwnerCommand(input: {
       ownerCommand: input.command,
     });
   }
-  const result = await runProcess(ownerPath(input.tool), args, {
+  const result = await runProcess(ownerPath(input.tool, config), args, {
     allowNonZeroExit: true,
     cwd: AGENTS_VXAPP_REPO_ROOT,
-    maxBufferBytes: OWNER_COMMAND_MAX_BUFFER_BYTES,
+    maxBufferBytes: config.maxBufferBytes,
     outputMode: "truncate",
-    timeoutMs: OWNER_COMMAND_TIMEOUT_MS,
+    timeoutMs: config.timeoutMs,
   }).catch((error: unknown) =>
     fail({
       authoritySurface: input.surface,
@@ -817,20 +989,23 @@ function parseManifest(payload: unknown): AgentsVxappOwnerManifest {
 
 export function resetAgentsVxappOwnerManifestForTests(): void {
   cachedManifest = null;
+  cachedOwnerClientConfig = null;
+  clearAgentsVxappOwnerReadCoalescing();
 }
 
 export async function bootstrapAgentsVxappOwnerManifest(): Promise<AgentsVxappOwnerManifest> {
   if (cachedManifest) {
     return cachedManifest;
   }
+  const config = loadOwnerClientConfig();
   const { envelope, result } = await executeOwnerCommand({
-    command: BOOTSTRAP_MANIFEST_COMMAND,
+    command: config.manifestCommand,
     coalesceRead: true,
     surface: "contract_manifest",
     tool: "control-plane",
   });
   const authority = validateAuthorityPayload(
-    BOOTSTRAP_MANIFEST_COMMAND,
+    config.manifestCommand,
     "contract_manifest",
     envelope.result,
     result,
@@ -844,7 +1019,7 @@ export async function bootstrapAgentsVxappOwnerManifest(): Promise<AgentsVxappOw
       authoritySurface: "contract_manifest",
       authorityPayload: asRecord(authority),
       message: "Owner manifest authority contract mismatch.",
-      ownerCommand: BOOTSTRAP_MANIFEST_COMMAND,
+      ownerCommand: config.manifestCommand,
       result,
     });
   }
@@ -857,7 +1032,7 @@ export async function bootstrapAgentsVxappOwnerManifest(): Promise<AgentsVxappOw
       authoritySurface: "contract_manifest",
       cause: error,
       message: error instanceof Error ? error.message : "Owner manifest is invalid.",
-      ownerCommand: BOOTSTRAP_MANIFEST_COMMAND,
+      ownerCommand: config.manifestCommand,
       result,
     });
   }

@@ -250,6 +250,62 @@ it.effect("accepts typed websocket push envelopes with sequence", () =>
   }),
 );
 
+it.effect("accepts startup authority diagnostics on welcome pushes", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWsResponse({
+      type: "push",
+      sequence: 2,
+      channel: WS_CHANNELS.serverWelcome,
+      data: {
+        cwd: "/tmp/workspace",
+        projectName: "workspace",
+        bootstrapProjectId: "project-cto",
+        bootstrapThreadId: "thread-owner",
+        startupAuthority: {
+          authoritySource: "agents-vxapp-owner",
+          startupContract: "external-role-authority-snapshot",
+          activeOwnerThreadId: "thread-owner",
+          localBootstrapThreadId: "thread-local",
+          hint: "Refresh agents-vxapp owner authority and rerun T3Code startup; do not use local bootstrap root as active CTO authority.",
+        },
+      },
+    });
+
+    if (!("type" in parsed) || parsed.type !== "push") {
+      assert.fail("expected websocket response to decode as a push envelope");
+    }
+
+    assert.strictEqual(parsed.channel, WS_CHANNELS.serverWelcome);
+  }),
+);
+
+it.effect("rejects startup fallback authority on welcome pushes", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeWsResponse({
+        type: "push",
+        sequence: 2,
+        channel: WS_CHANNELS.serverWelcome,
+        data: {
+          cwd: "/tmp/workspace",
+          projectName: "workspace",
+          bootstrapProjectId: "project-cto",
+          bootstrapThreadId: "thread-owner",
+          startupAuthority: {
+            authoritySource: "startup-safe-fallback",
+            startupContract: "startup-safe-fallback",
+            activeOwnerThreadId: "thread-owner",
+            localBootstrapThreadId: "thread-local",
+            hint: "Refresh agents-vxapp owner authority and rerun T3Code startup; do not use local bootstrap root as active CTO authority.",
+          },
+        },
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
 it.effect("accepts git.actionProgress push envelopes", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWsResponse({

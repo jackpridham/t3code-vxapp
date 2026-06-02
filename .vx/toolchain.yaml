@@ -1,0 +1,15 @@
+schemaVersion: 1.0.0
+documentKind: vx_toolchain_config
+tools:
+  bun:
+    env: BUN_BIN
+    default: bun
+  node:
+    env: NODE_BIN
+    default: node
+  vx:
+    env: VX_BIN
+    default: vx
+path:
+  prependFromTools: []
+missingToolPolicy: fail_closed

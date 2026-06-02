@@ -24,20 +24,22 @@ const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(resolve(here, "ProjectionBootstrapSummaryQuery.ts"), "utf8");
 
 describe("ProjectionBootstrapSummaryQuery authority boundary", () => {
-  it("uses owner-backed Program and notification truth for vxapp bootstrap rows", () => {
+  it("uses owner-backed Program truth while keeping residual notifications out of bootstrap rows", () => {
     expect(source).toContain("controlPlane.getProgramsAuthoritySnapshot()");
-    expect(source).toContain("controlPlane.getNotificationSummaryExport()");
+    expect(source).not.toContain("controlPlane.getNotificationSummaryExport()");
     expect(source).toContain("getRuntimePaths()");
     expect(source).toMatch(/const programs: ReadonlyArray<OrchestrationProgram> =\s*ownerPrograms/);
+    expect(source).toContain("programNotifications: []");
+    expect(source).toContain("ctoAttentionItems: []");
     expect(source).toContain(
       "vxapp projection boundary requires external role authority runtime paths.",
     );
   });
 
   it("does not expose local wake rows as vxapp-backed bootstrap truth", () => {
-    expect(source).toMatch(
-      /const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> =[\s\S]*vxappBacked[\s\S]*\?\s*\[\]/,
-    );
+    expect(source).not.toContain("ProjectionOrchestratorWake");
+    expect(source).toContain("orchestratorWakeItems: []");
+    expect(source).toContain("wakeItemsTruncated: true");
   });
 
   it("validates external-role authority before merging startup projects and threads", () => {

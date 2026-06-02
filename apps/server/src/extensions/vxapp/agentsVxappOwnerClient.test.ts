@@ -1,9 +1,15 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../processRunner.ts", () => ({
   runProcess: vi.fn(),
 }));
+vi.hoisted(() => {
+  process.env.T3_AGENTS_VXAPP_REPO_ROOT ??= "/home/gizmo/agents-vxapp";
+});
 
 import { runProcess } from "../../processRunner.ts";
 import {
@@ -13,6 +19,7 @@ import {
   fetchAgentsVxappSidebarAuthoritySnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
   fetchAgentsVxappWorkerRuntimeSnapshot,
+  loadAgentsVxappOwnerClientConfigForTests,
   requestAgentsVxappApprovalRequest,
   requestAgentsVxappApprovalResponse,
   requestAgentsVxappProjectEventIngest,
@@ -28,6 +35,25 @@ import {
 } from "./agentsVxappOwnerClient.ts";
 
 const mockedRunProcess = vi.mocked(runProcess);
+const OWNER_CLIENT_CONFIG_TEXT = `
+schemaVersion: 1.0.0
+documentKind: vx_owner_client_config
+manifest:
+  command: t3code-contract-manifest
+commands:
+  controlPlane:
+    wrapperKey: t3_control_plane_owner
+  roleSession:
+    wrapperKey: role_session_owner
+timeoutMs: 30000
+maxBufferBytes: 16777216
+readCacheTtlMs: 60000
+stdout: json_envelope
+stderr: diagnostics_only
+missingConfig:
+  code: owner_client_config_missing
+fallbackPolicy: fail_closed
+`;
 
 const FULL_MANIFEST_ROWS = `
 t3code-contract-manifest	contract_manifest
@@ -190,6 +216,35 @@ afterEach(() => {
 });
 
 describe("agentsVxappOwnerClient", () => {
+  it("loads owner-client command policy from config and reports missing config", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "owner-client-config-"));
+    const configPath = path.join(tmpRoot, "owner-client.yaml");
+    fs.writeFileSync(configPath, OWNER_CLIENT_CONFIG_TEXT, "utf8");
+
+    const config = loadAgentsVxappOwnerClientConfigForTests(configPath);
+
+    expect(config).toMatchObject({
+      manifestCommand: "t3code-contract-manifest",
+      maxBufferBytes: 16777216,
+      readCacheTtlMs: 60000,
+      stderr: "diagnostics_only",
+      stdout: "json_envelope",
+      timeoutMs: 30000,
+    });
+    expect(config.commands["control-plane"].wrapperKey).toBe("t3_control_plane_owner");
+    expect(config.commands["role-session"].wrapperKey).toBe("role_session_owner");
+
+    try {
+      loadAgentsVxappOwnerClientConfigForTests(path.join(tmpRoot, "missing.yaml"));
+      throw new Error("expected missing owner-client config to fail");
+    } catch (error) {
+      expect(error).toMatchObject({
+        ownerErrorCode: "owner_client_config_missing",
+        message: expect.stringContaining("runtime.ownerClient"),
+      });
+    }
+  });
+
   it("parses owner and caller contract manifest arrays and keeps commands addressable by name", async () => {
     mockedRunProcess.mockResolvedValueOnce(
       processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
@@ -309,8 +364,13 @@ describe("agentsVxappOwnerClient", () => {
       1,
       expect.stringMatching(/t3-control-plane-owner$/),
       ["t3code-contract-manifest", "--json"],
-      expect.objectContaining({ allowNonZeroExit: true }),
+      expect.objectContaining({
+        allowNonZeroExit: true,
+        maxBufferBytes: 16777216,
+        timeoutMs: 30000,
+      }),
     );
+    expect(mockedRunProcess.mock.calls[0]?.[0]).not.toContain("t3code-vxapp/../agents-vxapp");
     expect(mockedRunProcess).toHaveBeenNthCalledWith(
       2,
       expect.stringMatching(/t3-control-plane-owner$/),
@@ -894,6 +954,30 @@ describe("agentsVxappOwnerClient", () => {
       ["t3code-sidebar-authority-snapshot", "--json", "--page", "3", "--limit", "20"],
       expect.objectContaining({}),
     );
+  });
+
+  it("serves repeated coalesced owner reads from a short TTL cache", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-sidebar-authority-snapshot", "sidebar_authority_snapshot", {
+            programs: [],
+            todos: [],
+            currentTodos: [],
+            ownerDiagnostics: [],
+            pagination: { page: 1, limit: 20, total: 0, hasMore: false },
+            hints: [],
+          }),
+        ),
+      );
+
+    await fetchAgentsVxappSidebarAuthoritySnapshot({ page: 1, limit: 20 });
+    await fetchAgentsVxappSidebarAuthoritySnapshot({ page: 1, limit: 20 });
+
+    expect(mockedRunProcess).toHaveBeenCalledTimes(2);
   });
 
   it("keeps role-session runtime paths on the separate role-session owner surface", async () => {

@@ -10,6 +10,7 @@ import {
   buildProgramTodoGroups,
   chooseCreateProgramScopeTemplate,
   readProgramScope,
+  resolveProgramLanePolicy,
   resolveProgramLifecycleOptions,
   resolveOrchestratorOptions,
   resolveProgramOrchestratorLabel,
@@ -194,6 +195,42 @@ describe("programsTodosModel", () => {
         requiredExternalE2ESuites: [],
       }),
     ).toEqual([]);
+  });
+
+  it("keeps local placeholder Program scope non-submittable", () => {
+    const template = chooseCreateProgramScopeTemplate([]);
+
+    expect(template.usedFallback).toBe(true);
+    expect(template.scope).toMatchObject({
+      authoritySource: "local_placeholder",
+      ownerPayloadRequired: true,
+      placeholders: { submittable: false },
+    });
+    expect(validateProgramScope(template.scope)).toContain(
+      "Local placeholder Program scope cannot be submitted.",
+    );
+  });
+
+  it("resolves owner-provided Program lane policy", () => {
+    const snapshot = {
+      programLanePolicy: {
+        allowedBranchPatterns: ["task/*", "program/*"],
+        defaultBaseBranch: "main",
+        defaultEnvironment: "development",
+        ownerPayloadRequired: true,
+        placeholders: { submittable: false },
+        worktreePattern: "task/{programId}-{laneId}",
+      },
+    } as unknown as ServerGetAgentsVxappControlPlaneSnapshotResult;
+
+    expect(resolveProgramLanePolicy(snapshot)).toEqual({
+      allowedBranchPatterns: ["task/*", "program/*"],
+      defaultBaseBranch: "main",
+      defaultEnvironment: "development",
+      ownerPayloadRequired: true,
+      placeholders: { submittable: false },
+      worktreePattern: "task/{programId}-{laneId}",
+    });
   });
 
   it("prefers role-session labels for orchestrator options", () => {

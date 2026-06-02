@@ -1,8 +1,30 @@
 import type {
+  OrchestrationProgram,
   OrchestrationProject,
   OrchestrationThread,
   StartupThreadTarget,
 } from "@t3tools/contracts";
+
+export const STARTUP_AUTHORITY_DISAGREEMENT_HINT =
+  "Refresh agents-vxapp owner authority and rerun T3Code startup; do not use local bootstrap root as active CTO authority.";
+
+const ACTIVE_PROGRAM_STATUSES = new Set(["active", "in_progress", "running", "open"]);
+
+export interface StartupAuthorityDiagnostic {
+  readonly activeOwnerThreadId: OrchestrationThread["id"];
+  readonly localBootstrapThreadId: OrchestrationThread["id"] | null;
+  readonly authoritySource: "agents-vxapp-owner";
+  readonly startupContract: "external-role-authority-snapshot";
+  readonly hint: typeof STARTUP_AUTHORITY_DISAGREEMENT_HINT;
+}
+
+export interface StartupBootstrapSelection {
+  readonly projectId: BootstrapProjectSummary["id"];
+  readonly threadId: BootstrapThreadSummary["id"];
+  readonly authoritySource: "agents-vxapp-owner";
+  readonly startupContract: "external-role-authority-snapshot";
+  readonly diagnostic?: StartupAuthorityDiagnostic;
+}
 
 type BootstrapProjectSummary = Pick<
   OrchestrationProject,
@@ -19,6 +41,16 @@ type BootstrapThreadSummary = Pick<
   "archivedAt" | "deletedAt" | "id" | "projectId"
 >;
 
+type BootstrapProgramSummary = Pick<
+  OrchestrationProgram,
+  | "completedAt"
+  | "currentOrchestratorThreadId"
+  | "deletedAt"
+  | "executiveThreadId"
+  | "status"
+  | "updatedAt"
+>;
+
 export function resolveStartupBootstrapSelection(input: {
   bootstrapProjectId: BootstrapProjectSummary["id"];
   projects: readonly BootstrapProjectSummary[];
@@ -28,34 +60,102 @@ export function resolveStartupBootstrapSelection(input: {
   projectId: BootstrapProjectSummary["id"];
   threadId: BootstrapThreadSummary["id"];
 } | null {
+  const result = resolveStartupBootstrapSelectionDetail(input)?.selection ?? null;
+  return result ? { projectId: result.projectId, threadId: result.threadId } : null;
+}
+
+export function resolveStartupBootstrapSelectionDetail(input: {
+  bootstrapProjectId: BootstrapProjectSummary["id"];
+  programs?: readonly BootstrapProgramSummary[] | undefined;
+  projects: readonly BootstrapProjectSummary[];
+  threads: readonly BootstrapThreadSummary[];
+  startupThreadTarget: StartupThreadTarget;
+}): {
+  readonly selection: StartupBootstrapSelection;
+} | null {
   const activeProjects = input.projects.filter((project) => project.deletedAt === null);
   const bootstrapProject =
     activeProjects.find((project) => project.id === input.bootstrapProjectId) ?? null;
-  if (!bootstrapProject) {
-    return null;
-  }
-
-  const targetProject = resolveTargetProject({
-    bootstrapProject,
-    projects: activeProjects,
+  const targetProject = bootstrapProject
+    ? resolveTargetProject({
+        bootstrapProject,
+        projects: activeProjects,
+        startupThreadTarget: input.startupThreadTarget,
+      })
+    : null;
+  const localBootstrapThreadId = targetProject
+    ? resolveProjectThreadId({
+        project: targetProject,
+        threads: input.threads,
+      })
+    : null;
+  const ownerThreadId = resolveOwnerThreadId({
+    programs: input.programs ?? [],
     startupThreadTarget: input.startupThreadTarget,
   });
-  if (!targetProject) {
+  if (ownerThreadId) {
+    const ownerThread = input.threads.find(
+      (thread) =>
+        thread.id === ownerThreadId && thread.archivedAt === null && thread.deletedAt === null,
+    );
+    if (ownerThread) {
+      const diagnostic =
+        localBootstrapThreadId && localBootstrapThreadId !== ownerThread.id
+          ? makeOwnerDisagreementDiagnostic({
+              activeOwnerThreadId: ownerThread.id,
+              localBootstrapThreadId,
+              startupContract: "external-role-authority-snapshot",
+            })
+          : undefined;
+      return {
+        selection: {
+          projectId: ownerThread.projectId,
+          threadId: ownerThread.id,
+          authoritySource: "agents-vxapp-owner",
+          startupContract: "external-role-authority-snapshot",
+          ...(diagnostic ? { diagnostic } : {}),
+        },
+      };
+    }
     return null;
   }
 
-  const threadId = resolveProjectThreadId({
-    project: targetProject,
-    threads: input.threads,
-  });
-  if (!threadId) {
-    return null;
-  }
+  return null;
+}
 
+function makeOwnerDisagreementDiagnostic(input: {
+  activeOwnerThreadId: OrchestrationThread["id"];
+  localBootstrapThreadId: OrchestrationThread["id"] | null;
+  startupContract: StartupAuthorityDiagnostic["startupContract"];
+}): StartupAuthorityDiagnostic {
   return {
-    projectId: targetProject.id,
-    threadId,
+    activeOwnerThreadId: input.activeOwnerThreadId,
+    localBootstrapThreadId: input.localBootstrapThreadId,
+    authoritySource: "agents-vxapp-owner",
+    startupContract: input.startupContract,
+    hint: STARTUP_AUTHORITY_DISAGREEMENT_HINT,
   };
+}
+
+function resolveOwnerThreadId(input: {
+  programs: readonly BootstrapProgramSummary[];
+  startupThreadTarget: StartupThreadTarget;
+}): OrchestrationThread["id"] | null {
+  const candidates = input.programs
+    .filter((program) => program.deletedAt === null && program.completedAt === null)
+    .filter((program) => ACTIVE_PROGRAM_STATUSES.has(String(program.status).toLowerCase()))
+    .map((program) => {
+      const threadId =
+        input.startupThreadTarget === "orchestrator"
+          ? program.currentOrchestratorThreadId
+          : program.executiveThreadId;
+      return { threadId, updatedAt: program.updatedAt };
+    })
+    .filter((candidate): candidate is { threadId: OrchestrationThread["id"]; updatedAt: string } =>
+      Boolean(candidate.threadId),
+    )
+    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return candidates[0]?.threadId ?? null;
 }
 
 function resolveTargetProject(input: {

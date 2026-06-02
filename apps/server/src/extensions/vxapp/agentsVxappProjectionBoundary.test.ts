@@ -42,13 +42,19 @@ describe("agents-vxapp projection authority boundary", () => {
     expect(snapshotQuerySource).toContain("AgentsVxappControlPlane");
     expect(snapshotQuerySource).toContain("snapshot.programs.map(mapOwnerProgram)");
 
-    for (const relativePath of [
-      "src/extensions/vxapp/Layers/ProjectionOperationalQuery.ts",
-      "src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts",
-    ]) {
-      const source = read(relativePath);
+    const operationalSource = read("src/extensions/vxapp/Layers/ProjectionOperationalQuery.ts");
+    expect(operationalSource).toContain("controlPlane.getProgramsAuthoritySnapshot()");
+    expect(operationalSource).toContain("getNotificationSummaryExport()");
+    expect(operationalSource).toContain("getRuntimePaths()");
+    expect(operationalSource).toContain("AgentsVxappControlPlane");
+    expect(operationalSource).toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
+    expect(operationalSource).toContain(
+      "vxapp projection boundary requires external role authority runtime paths.",
+    );
+
+    const bootstrapSource = read("src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts");
+    for (const source of [bootstrapSource]) {
       expect(source).toContain("controlPlane.getProgramsAuthoritySnapshot()");
-      expect(source).toContain("getNotificationSummaryExport()");
       expect(source).toContain("getRuntimePaths()");
       expect(source).toContain("AgentsVxappControlPlane");
       expect(source).toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
@@ -56,15 +62,18 @@ describe("agents-vxapp projection authority boundary", () => {
         "vxapp projection boundary requires external role authority runtime paths.",
       );
     }
+    expect(bootstrapSource).not.toContain("getNotificationSummaryExport()");
+    expect(bootstrapSource).toContain("programNotifications: []");
+    expect(bootstrapSource).toContain("ctoAttentionItems: []");
   });
 
   it("does not expose local wake rows as vxapp-backed current truth", () => {
     expect(read("src/orchestration/Layers/ProjectionSnapshotQuery.ts")).toMatch(
       /vxappBackedProjectRows\.length > 0\s*\?\s*\[\]\s*:\s*orchestratorWakeRows/,
     );
-    expect(read("src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts")).toMatch(
-      /const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> =[\s\S]*vxappBacked[\s\S]*\?\s*\[\]/,
-    );
+    const bootstrapSource = read("src/extensions/vxapp/Layers/ProjectionBootstrapSummaryQuery.ts");
+    expect(bootstrapSource).toContain("orchestratorWakeItems: []");
+    expect(bootstrapSource).not.toContain("ProjectionOrchestratorWake");
   });
 
   it("keeps CTO provider request and wake authority outside projection synthesis", () => {

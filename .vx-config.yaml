@@ -28,7 +28,11 @@ runtime:
   repoPackRoot: .vx/runtime/packs
   generatedSkills: .vx/runtime/generated-skill-declarations.yaml
   modelPolicy: .vx/runtime/model-policy.yaml
+  operations: .vx/runtime/operations.yaml
   globalPackSource: agent-runtime/packs
+  ownerClient: .vx/runtime/owner-client.yaml
+repoLinks:
+  config: .vx/repo-links.yaml
 devServer:
   adapter: scripts/dev-runner.ts
   runner: node
@@ -37,30 +41,38 @@ devServer:
   deployedPort:
     env: T3CODE_PORT
     default: 7421
+  host:
+    default: 127.0.0.1
 deploy:
   adapter: deploy.sh
   webAdapter: deploy-web.sh
   runner: bash
+  config: .vx/deploy.yaml
+  toolchain: .vx/toolchain.yaml
   environments:
     - production
   dryRun: true
   confirmationRequired: true
+devState:
+  config: .vx/dev-state.yaml
 tests:
   validationProfiles:
     - id: health-live
-      url: http://127.0.0.1:7421/health/live
+      healthcheckRef: live
       timeout: 30
       expectedExitCodes:
         - 0
       jsonMode: true
 healthchecks:
-  - id: live
+  live:
     path: /health/live
-    url: http://127.0.0.1:7421/health/live
+    endpoint:
+      deriveFrom: devServer.deployedPort
     timeout: 30
-  - id: ready
+  ready:
     path: /health/ready
-    url: http://127.0.0.1:7421/health/ready
+    endpoint:
+      deriveFrom: devServer.deployedPort
     timeout: 30
 compatibility:
   phase: new-install

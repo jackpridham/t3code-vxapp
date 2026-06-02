@@ -4,6 +4,7 @@ import type { AgentsVxappRoleSessionRuntimePaths } from "./Services/AgentsVxappE
 
 export interface AgentsVxappWorktreeAuthority {
   readonly runtimePaths: AgentsVxappRoleSessionRuntimePaths | null | undefined;
+  readonly authoritativeWorktreePaths?: ReadonlySet<string>;
 }
 
 function normalizeComparablePath(value: string | null | undefined): string | null {
@@ -44,5 +45,11 @@ export function isAgentsVxappWorktreePath(
   if (!worktreePath || !authority) {
     return false;
   }
-  return isPathWithinRoot(worktreePath, authority.runtimePaths?.roleSessionsRoot);
+  const normalizedWorktreePath = normalizeComparablePath(worktreePath);
+  return (
+    (normalizedWorktreePath !== null &&
+      (authority.authoritativeWorktreePaths?.has(worktreePath) ||
+        authority.authoritativeWorktreePaths?.has(normalizedWorktreePath))) ||
+    isPathWithinRoot(worktreePath, authority.runtimePaths?.roleSessionsRoot)
+  );
 }

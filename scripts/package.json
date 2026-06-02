@@ -6,6 +6,8 @@
     "prepare": "effect-language-service patch",
     "claude-fast-mode-probe": "bun run claude-fast-mode-probe.ts",
     "claude-haiku-thinking-probe": "bun run claude-haiku-thinking-probe.ts",
+    "perf:validate": "bun run perf/validate.ts",
+    "perf:watch-turn": "bun run perf/watch-turn.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

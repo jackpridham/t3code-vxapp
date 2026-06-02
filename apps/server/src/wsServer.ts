@@ -12,7 +12,6 @@ import type { Duplex } from "node:stream";
 import Mime from "@effect/platform-node/Mime";
 import {
   CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -95,7 +94,7 @@ import {
   isThreadLifecycleEvent,
   mirrorThreadLifecycleEvent,
 } from "./extensions/vxapp/threadEventMirror.ts";
-import { resolveStartupBootstrapSelection } from "./bootstrapThreadSelection";
+import { resolveStartupBootstrapSelectionDetail } from "./bootstrapThreadSelection";
 import { AgentRuntime } from "./extensions/vxapp/Services/AgentRuntime.ts";
 import { WorkerRuntime } from "./extensions/vxapp/Services/WorkerRuntime.ts";
 
@@ -834,6 +833,15 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   let welcomeBootstrapProjectId: ProjectId | undefined;
   let welcomeBootstrapThreadId: ThreadId | undefined;
+  let welcomeStartupAuthority:
+    | {
+        authoritySource: "agents-vxapp-owner";
+        startupContract: "external-role-authority-snapshot";
+        activeOwnerThreadId: ThreadId;
+        localBootstrapThreadId: ThreadId | null;
+        hint: string;
+      }
+    | undefined;
 
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
@@ -843,13 +851,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         (project) => project.workspaceRoot === cwd && project.deletedAt === null,
       );
       let bootstrapProjectId: ProjectId;
-      let bootstrapProjectDefaultModelSelection;
 
       if (!existingProject) {
         const createdAt = new Date().toISOString();
         bootstrapProjectId = ProjectId.makeUnsafe(crypto.randomUUID());
         const bootstrapProjectTitle = path.basename(cwd) || "project";
-        bootstrapProjectDefaultModelSelection = {
+        const bootstrapProjectDefaultModelSelection = {
           provider: "codex" as const,
           model: "gpt-5-codex",
         };
@@ -864,51 +871,21 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         });
       } else {
         bootstrapProjectId = existingProject.id;
-        bootstrapProjectDefaultModelSelection = existingProject.defaultModelSelection ?? {
-          provider: "codex" as const,
-          model: "gpt-5-codex",
-        };
       }
 
-      const preferredStartupSelection = resolveStartupBootstrapSelection({
+      const preferredStartupSelection = resolveStartupBootstrapSelectionDetail({
         bootstrapProjectId,
+        programs: bootstrapSummary.programs,
         projects: bootstrapSummary.projects,
         threads: bootstrapSummary.threads,
         startupThreadTarget: serverSettings.startupThreadTarget,
       });
       if (preferredStartupSelection) {
-        welcomeBootstrapProjectId = preferredStartupSelection.projectId;
-        welcomeBootstrapThreadId = preferredStartupSelection.threadId;
-        return;
-      }
-
-      const existingThread = bootstrapSummary.threads.find(
-        (thread) =>
-          thread.projectId === bootstrapProjectId &&
-          thread.deletedAt === null &&
-          thread.archivedAt === null,
-      );
-      if (!existingThread) {
-        const createdAt = new Date().toISOString();
-        const threadId = ThreadId.makeUnsafe(crypto.randomUUID());
-        yield* orchestrationEngine.dispatch({
-          type: "thread.create",
-          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-          threadId,
-          projectId: bootstrapProjectId,
-          title: "New thread",
-          modelSelection: bootstrapProjectDefaultModelSelection,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        });
-        welcomeBootstrapProjectId = bootstrapProjectId;
-        welcomeBootstrapThreadId = threadId;
-      } else {
-        welcomeBootstrapProjectId = bootstrapProjectId;
-        welcomeBootstrapThreadId = existingThread.id;
+        welcomeBootstrapProjectId = preferredStartupSelection.selection.projectId;
+        welcomeBootstrapThreadId = preferredStartupSelection.selection.threadId;
+        if (preferredStartupSelection.selection.diagnostic) {
+          welcomeStartupAuthority = preferredStartupSelection.selection.diagnostic;
+        }
       }
     }).pipe(
       Effect.mapError(
@@ -1335,6 +1312,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       projectName,
       ...(welcomeBootstrapProjectId ? { bootstrapProjectId: welcomeBootstrapProjectId } : {}),
       ...(welcomeBootstrapThreadId ? { bootstrapThreadId: welcomeBootstrapThreadId } : {}),
+      ...(welcomeStartupAuthority ? { startupAuthority: welcomeStartupAuthority } : {}),
     };
     // Send welcome before adding to broadcast set so publishAll calls
     // cannot reach this client before the welcome arrives.

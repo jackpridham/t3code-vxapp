@@ -29,10 +29,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-DEFAULT_SOURCE_DB = Path.home() / ".t3" / "userdata" / "state.sqlite"
-DEFAULT_DEST_DB = Path.home() / ".t3" / "dev" / "state.sqlite"
-DEFAULT_AGENTS_DB = Path.home() / "agents-vxapp" / ".agents" / "state" / "vx_agents.sqlite3"
 DEFAULT_THREADS_PER_PROJECT = 5
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEV_STATE_CONFIG_PATH = REPO_ROOT / ".vx" / "dev-state.yaml"
+REPO_LINKS_CONFIG_PATH = REPO_ROOT / ".vx" / "repo-links.yaml"
 SQLITE_SIDE_CARS = ("-wal", "-shm")
 
 
@@ -47,6 +47,97 @@ class SeedConfig:
     json_output: bool
     include_program_ids: tuple[str, ...]
     include_thread_ids: tuple[str, ...]
+    seed_authority: str
+
+
+@dataclass(frozen=True)
+class DevStateConfig:
+    source_db: Path
+    dest_db: Path
+    agents_db: Path
+    threads_per_project: int
+    seed_authority: str
+
+
+def _read_simple_yaml_scalar(text: str, key_path: Sequence[str]) -> str | None:
+    lines = text.splitlines()
+    indent = 0
+    start = 0
+    for depth, key in enumerate(key_path):
+        prefix = " " * indent
+        found = False
+        for index in range(start, len(lines)):
+            line = lines[index]
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            current_indent = len(line) - len(line.lstrip(" "))
+            if depth > 0 and current_indent < indent:
+                break
+            stripped = line.strip()
+            marker = f"{key}:"
+            if current_indent == indent and stripped.startswith(marker):
+                value = stripped[len(marker) :].strip()
+                if depth == len(key_path) - 1:
+                    return value or None
+                indent = current_indent + 2
+                start = index + 1
+                found = True
+                break
+            if depth == 0 and not line.startswith(prefix):
+                continue
+        if not found and depth != len(key_path) - 1:
+            return None
+    return None
+
+
+def _expand_config_path(value: str) -> Path:
+    return Path(value).expanduser()
+
+
+def _resolve_agents_repo_from_links() -> Path:
+    if not REPO_LINKS_CONFIG_PATH.exists():
+        raise FileNotFoundError(f"missing repo-link config: {REPO_LINKS_CONFIG_PATH}")
+    aliases: list[str] = []
+    for line in REPO_LINKS_CONFIG_PATH.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- ") and stripped[2:].strip().isupper():
+            aliases.append(stripped[2:].strip())
+    configured = [(alias, os.environ[alias]) for alias in aliases if os.environ.get(alias)]
+    if not configured:
+        raise ValueError(
+            "agents-vxapp repo root is not configured; set one of "
+            + ", ".join(aliases)
+            + " from .vx/repo-links.yaml"
+        )
+    roots = {str(Path(value).expanduser().resolve()) for _, value in configured}
+    if len(roots) != 1:
+        details = ", ".join(f"{alias}={value}" for alias, value in configured)
+        raise ValueError(f"agents-vxapp repo-root env aliases disagree: {details}")
+    return Path(next(iter(roots)))
+
+
+def load_dev_state_config() -> DevStateConfig:
+    if not DEV_STATE_CONFIG_PATH.exists():
+        raise FileNotFoundError(f"missing dev-state config: {DEV_STATE_CONFIG_PATH}")
+    raw = DEV_STATE_CONFIG_PATH.read_text(encoding="utf-8")
+    authority = _read_simple_yaml_scalar(raw, ("seedDb", "authority"))
+    if authority != "dev_only":
+        raise ValueError("dev-state seedDb.authority must be dev_only")
+    t3_home_env = _read_simple_yaml_scalar(raw, ("t3Home", "env")) or "T3CODE_HOME"
+    t3_home_default = _read_simple_yaml_scalar(raw, ("t3Home", "default")) or "~/.t3"
+    t3_home = _expand_config_path(os.environ.get(t3_home_env, t3_home_default))
+    retention = _read_simple_yaml_scalar(raw, ("retention", "default"))
+    threads_per_project = int(retention or DEFAULT_THREADS_PER_PROJECT)
+    if threads_per_project <= 0:
+        raise ValueError("dev-state retention.default must be greater than zero")
+    agents_repo = _resolve_agents_repo_from_links()
+    return DevStateConfig(
+        source_db=(t3_home / "userdata" / "state.sqlite").resolve(),
+        dest_db=(t3_home / "dev" / "state.sqlite").resolve(),
+        agents_db=(agents_repo / ".agents" / "state" / "vx_agents.sqlite3").resolve(),
+        threads_per_project=threads_per_project,
+        seed_authority=authority,
+    )
 
 
 @dataclass(frozen=True)
@@ -83,32 +174,33 @@ class RetentionSummary:
 
 
 def parse_args(argv: Sequence[str]) -> SeedConfig:
+    dev_state = load_dev_state_config()
     parser = argparse.ArgumentParser(
         description="Copy a bounded slice of the live T3 prod DB into the dev DB.",
     )
     parser.add_argument(
         "--source-db",
         type=Path,
-        default=DEFAULT_SOURCE_DB,
-        help=f"Source T3 SQLite database path (default: {DEFAULT_SOURCE_DB})",
+        default=dev_state.source_db,
+        help=f"Source T3 SQLite database path (default: {dev_state.source_db})",
     )
     parser.add_argument(
         "--dest-db",
         type=Path,
-        default=DEFAULT_DEST_DB,
-        help=f"Destination dev SQLite database path (default: {DEFAULT_DEST_DB})",
+        default=dev_state.dest_db,
+        help=f"Destination dev SQLite database path (default: {dev_state.dest_db})",
     )
     parser.add_argument(
         "--agents-db",
         type=Path,
-        default=DEFAULT_AGENTS_DB,
-        help=f"agents-vxapp control-plane SQLite path (default: {DEFAULT_AGENTS_DB})",
+        default=dev_state.agents_db,
+        help=f"agents-vxapp control-plane SQLite path (default: {dev_state.agents_db})",
     )
     parser.add_argument(
         "--threads-per-project",
         type=int,
-        default=DEFAULT_THREADS_PER_PROJECT,
-        help=f"Recent threads to retain per project (default: {DEFAULT_THREADS_PER_PROJECT})",
+        default=dev_state.threads_per_project,
+        help=f"Recent threads to retain per project (default: {dev_state.threads_per_project})",
     )
     parser.add_argument(
         "--include-program",
@@ -159,6 +251,7 @@ def parse_args(argv: Sequence[str]) -> SeedConfig:
         include_thread_ids=tuple(
             value.strip() for value in args.include_thread_ids if value and value.strip()
         ),
+        seed_authority=dev_state.seed_authority,
     )
 
 

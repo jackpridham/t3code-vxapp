@@ -1,5 +1,10 @@
 import { Effect, Layer, Schema } from "effect";
-import { ProgramId, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  ProgramId,
+  ProjectId,
+  ThreadId,
+  type ServerGetAgentsVxappControlPlaneSnapshotResult,
+} from "@t3tools/contracts";
 
 import {
   AgentsVxappControlPlane,
@@ -46,6 +51,23 @@ function asRecordArray(value: unknown): ReadonlyArray<JsonRecord> {
     const record = asRecord(item);
     return record ? [record] : [];
   });
+}
+
+function sanitizeProgramsTodosSnapshot(
+  snapshot: ServerGetAgentsVxappControlPlaneSnapshotResult,
+): ServerGetAgentsVxappControlPlaneSnapshotResult {
+  return {
+    fetchedAt: snapshot.fetchedAt,
+    dbPath: snapshot.dbPath,
+    todoRootPath: snapshot.todoRootPath,
+    agents: snapshot.agents,
+    programs: snapshot.programs,
+    todos: snapshot.todos,
+    currentTodos: snapshot.currentTodos,
+    ...(snapshot.error !== undefined ? { error: snapshot.error } : {}),
+    hints: snapshot.hints ?? [],
+    pagination: snapshot.pagination ?? null,
+  };
 }
 
 function hasOwnerString(record: JsonRecord, ...fields: ReadonlyArray<string>): boolean {
@@ -364,7 +386,7 @@ const makeAgentsVxappControlPlane = Effect.succeed({
     ),
   getProgramsTodosSnapshot: (input) =>
     ownerPromise("ownerControlPlane.programsTodos.getProgramsTodosSnapshot", () =>
-      fetchAgentsVxappProgramsTodosSnapshot(input),
+      fetchAgentsVxappProgramsTodosSnapshot(input).then(sanitizeProgramsTodosSnapshot),
     ),
   createProgram: (input) =>
     ownerPromise("ownerControlPlane.program.create", () =>

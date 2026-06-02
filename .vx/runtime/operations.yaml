@@ -1,0 +1,12 @@
+schemaVersion: 1.0.0
+documentKind: vx_runtime_operations
+web:
+  agentStoreStaleTimeMs: 10000
+  defaultPageLimit: 20
+vortexApps:
+  commandTimeoutMs: 30000
+  maxBufferBytes: 16777216
+  cacheTtlMs: 60000
+wake:
+  suppressionMarker: /tmp/t3code-vxapp-no-wake
+fallbackPolicy: fail_closed

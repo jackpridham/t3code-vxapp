@@ -2155,12 +2155,18 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
           ),
         ),
       ),
+      externalSnapshot: getExternalSnapshot(),
     }).pipe(
       Effect.map(
-        ({ stateRows, projectCountRow, threadCountRow }): OrchestrationGetReadinessResult => ({
+        ({
+          stateRows,
+          projectCountRow,
+          threadCountRow,
+          externalSnapshot,
+        }): OrchestrationGetReadinessResult => ({
           snapshotSequence: computeSnapshotSequence(stateRows),
-          projectCount: projectCountRow.count,
-          threadCount: threadCountRow.count,
+          projectCount: projectCountRow.count + externalSnapshot.projects.length,
+          threadCount: threadCountRow.count + externalSnapshot.threadSummaries.length,
         }),
       ),
     );
@@ -2685,20 +2691,31 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
   const listSessionThreads: ProjectionOperationalQueryShape["listSessionThreads"] = (input) => {
     const includeArchived = input.includeArchived ?? true;
     const includeDeleted = input.includeDeleted ?? false;
-    return listSessionThreadRows({
-      rootThreadId: input.rootThreadId,
-      includeArchived,
-      includeDeleted,
-    }).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "ProjectionOperationalQuery.listSessionThreads:threads:query",
-          "ProjectionOperationalQuery.listSessionThreads:threads:decodeRows",
+    return Effect.all({
+      threads: listSessionThreadRows({
+        rootThreadId: input.rootThreadId,
+        includeArchived,
+        includeDeleted,
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionOperationalQuery.listSessionThreads:threads:query",
+            "ProjectionOperationalQuery.listSessionThreads:threads:decodeRows",
+          ),
         ),
       ),
-      Effect.flatMap((threads) => {
+      externalSnapshot: getExternalSnapshot(),
+    }).pipe(
+      Effect.flatMap(({ threads, externalSnapshot }) => {
         if (threads.length === 0) {
-          return Effect.succeed([] satisfies OrchestrationListSessionThreadsResult);
+          const externalRootThread =
+            externalSnapshot.threadSummaries.find((thread) => thread.id === input.rootThreadId) ??
+            null;
+          return Effect.succeed(
+            externalRootThread
+              ? [externalRootThread]
+              : ([] satisfies OrchestrationListSessionThreadsResult),
+          );
         }
 
         const threadIds = new Set(threads.map((thread) => thread.threadId));

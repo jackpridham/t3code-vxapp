@@ -32,6 +32,15 @@ export type OwnerDisplayOption = {
   value: string;
 };
 
+export type ProgramLanePolicy = {
+  allowedBranchPatterns: readonly string[];
+  defaultBaseBranch: string;
+  defaultEnvironment: string;
+  ownerPayloadRequired: boolean;
+  placeholders: { submittable: false };
+  worktreePattern: string;
+};
+
 export type ProgramTodoGroup =
   | {
       currentTodoId: string | null;
@@ -106,15 +115,20 @@ function isObjectArray(value: unknown): JsonRecord[] {
 function baseProgramScopeTemplate(): JsonRecord {
   return {
     appTargets: [],
+    authoritySource: "local_placeholder",
     declaredRepos: ["repo-name"],
+    ownerPayloadRequired: true,
+    placeholders: {
+      submittable: false,
+    },
     repoLaneContracts: [
       {
-        allowedHeadBranchPatterns: ["task/program-*"],
-        allowedWorktreePatterns: ["/home/gizmo/worktrees/*"],
-        baseBranch: "development",
+        allowedHeadBranchPatterns: [],
+        allowedWorktreePatterns: [],
+        baseBranch: "",
         repo: "repo-name",
         requireManagedWorktree: true,
-        worktreeMode: "write",
+        worktreeMode: "",
       },
     ],
     requireCleanPostFlight: false,
@@ -163,6 +177,33 @@ function toOwnerDisplayOption(value: unknown): OwnerDisplayOption | null {
     sortKey: asString(display?.sortKey) ?? asString(record?.sortKey),
     tone: asString(display?.tone) ?? asString(record?.tone),
     value: resolvedValue,
+  };
+}
+
+function readProgramLanePolicyValue(value: unknown): ProgramLanePolicy | null {
+  const record = asObject(value);
+  const placeholders = asObject(record?.placeholders);
+  const allowedBranchPatterns = asStringList(record?.allowedBranchPatterns);
+  const defaultBaseBranch = asString(record?.defaultBaseBranch);
+  const defaultEnvironment = asString(record?.defaultEnvironment);
+  const worktreePattern = asString(record?.worktreePattern);
+  if (
+    !defaultBaseBranch ||
+    !defaultEnvironment ||
+    !worktreePattern ||
+    allowedBranchPatterns.length === 0 ||
+    placeholders?.submittable !== false ||
+    record?.ownerPayloadRequired !== true
+  ) {
+    return null;
+  }
+  return {
+    allowedBranchPatterns,
+    defaultBaseBranch,
+    defaultEnvironment,
+    ownerPayloadRequired: true,
+    placeholders: { submittable: false },
+    worktreePattern,
   };
 }
 
@@ -370,6 +411,12 @@ export function validateProgramScope(scope: JsonRecord): string[] {
   });
 
   const errors: string[] = [];
+  if (
+    asObject(scope.placeholders)?.submittable === false ||
+    scope.authoritySource === "local_placeholder"
+  ) {
+    errors.push("Local placeholder Program scope cannot be submitted.");
+  }
   if (declaredRepos.length === 0) {
     errors.push("At least one declared repo is required.");
   }
@@ -392,6 +439,15 @@ export function validateProgramScope(scope: JsonRecord): string[] {
     errors.push("Scope suite bindings are invalid.");
   }
   return errors;
+}
+
+export function resolveProgramLanePolicy(
+  snapshot: ServerGetAgentsVxappControlPlaneSnapshotResult | null | undefined,
+): ProgramLanePolicy | null {
+  const source = asObject(snapshot);
+  return readProgramLanePolicyValue(
+    source?.programLanePolicy ?? asObject(source?.options)?.programLanePolicy,
+  );
 }
 
 export function chooseCreateProgramScopeTemplate(

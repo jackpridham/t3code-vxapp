@@ -270,7 +270,7 @@ describe("reactivateOrchestrationSession", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(targetedHydrationApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: targetRoot.id,
-      limit: 200,
+      limit: 100,
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -365,7 +365,7 @@ describe("createNewOrchestrationSession", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(targetedHydrationApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: newThreadId,
-      limit: 200,
+      limit: 100,
     });
     expect(syncServerReadModel).toHaveBeenCalledWith(
       expect.objectContaining({

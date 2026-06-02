@@ -9,7 +9,10 @@
     "T3CODE_PORT",
     "T3CODE_NO_BROWSER",
     "T3CODE_HOME",
-    "T3CODE_AUTH_TOKEN"
+    "T3CODE_AUTH_TOKEN",
+    "T3_AGENTS_VXAPP_REPO_ROOT",
+    "AGENTS_VXAPP_REPO_ROOT",
+    "VX_AGENTS_REPO_ROOT"
   ],
   "tasks": {
     "build": {

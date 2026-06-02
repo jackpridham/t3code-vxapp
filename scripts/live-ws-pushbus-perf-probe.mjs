@@ -16,8 +16,7 @@ const webRequire = createRequire(new URL("../apps/web/package.json", import.meta
 const { WebSocketServer } = serverRequire("ws");
 const { chromium } = webRequire("playwright");
 const outDir = resolve(
-  process.env.T3CODE_LIVE_WS_PROBE_OUT_DIR ??
-    "/home/gizmo/agents-vxapp/plans/evidence/orchestration-platform-migration/t3code-live-ws",
+  process.env.T3CODE_LIVE_WS_PROBE_OUT_DIR ?? resolve(repoRoot, ".vx/live-probes/t3code-live-ws"),
 );
 
 const html = String.raw`<!doctype html>

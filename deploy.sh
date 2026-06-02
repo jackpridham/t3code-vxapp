@@ -5,21 +5,81 @@ set -euo pipefail
 IFS=$'\n\t'
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUN_BIN="${BUN_BIN:-/home/gizmo/.bun/bin/bun}"
-NODE_BIN="${NODE_BIN:-/usr/bin/node}"
-VX_BIN="${VX_BIN:-/home/gizmo/vortex-scripts/bin/vx}"
-SERVICE_NAME="${SERVICE_NAME:-t3code}"
-HOST="${T3CODE_HOST:-0.0.0.0}"
-PORT="${T3CODE_PORT:-7421}"
-NO_BROWSER_FLAG="--no-browser"
-LOG_FILE="${DEPLOY_LOG_FILE:-/tmp/t3code-vxapp-deploy.log}"
-PID_FILE="${DEPLOY_PID_FILE:-/tmp/t3code-vxapp-deploy.pid}"
-READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-120}"
-WS_READY_TIMEOUT_SECONDS="${WS_READY_TIMEOUT_SECONDS:-60}"
-NO_WAKE_MARKER="${T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER:-/tmp/t3code-vxapp-no-wake}"
-NO_WAKE=0
+DEPLOY_CONFIG="${DEPLOY_CONFIG:-$REPO_ROOT/.vx/deploy.yaml}"
+TOOLCHAIN_CONFIG="${TOOLCHAIN_CONFIG:-$REPO_ROOT/.vx/toolchain.yaml}"
 
-export PATH="$(dirname "$BUN_BIN"):$PATH"
+yaml_top_value() {
+    local file="$1"
+    local key="$2"
+    awk -v key="$key" '
+        $0 ~ "^[[:space:]]*" key ":[[:space:]]*" {
+            sub("^[[:space:]]*" key ":[[:space:]]*", "")
+            print
+            exit
+        }
+    ' "$file"
+}
+
+yaml_nested_value() {
+    local file="$1"
+    local section="$2"
+    local key="$3"
+    awk -v section="$section" -v key="$key" '
+        $0 ~ "^" section ":[[:space:]]*$" { in_section=1; next }
+        in_section && /^[^[:space:]]/ { exit }
+        in_section && $0 ~ "^[[:space:]]{2}" key ":[[:space:]]*" {
+            sub("^[[:space:]]{2}" key ":[[:space:]]*", "")
+            print
+            exit
+        }
+    ' "$file"
+}
+
+yaml_tool_value() {
+    local file="$1"
+    local tool="$2"
+    local key="$3"
+    awk -v tool="$tool" -v key="$key" '
+        /^tools:[[:space:]]*$/ { in_tools=1; next }
+        in_tools && /^[^[:space:]]/ { exit }
+        in_tools && $0 ~ "^[[:space:]]{2}" tool ":[[:space:]]*$" { in_tool=1; next }
+        in_tool && $0 ~ "^[[:space:]]{2}[[:alnum:]_-]+:[[:space:]]*$" { exit }
+        in_tool && $0 ~ "^[[:space:]]{4}" key ":[[:space:]]*" {
+            sub("^[[:space:]]{4}" key ":[[:space:]]*", "")
+            print
+            exit
+        }
+    ' "$file"
+}
+
+require_config() {
+    local file="$1"
+    if [[ ! -r "$file" ]]; then
+        printf 'Missing required config: %s\n' "$file" >&2
+        exit 1
+    fi
+}
+
+require_config "$DEPLOY_CONFIG"
+require_config "$TOOLCHAIN_CONFIG"
+
+BUN_BIN="${BUN_BIN:-$(yaml_tool_value "$TOOLCHAIN_CONFIG" bun default)}"
+NODE_BIN="${NODE_BIN:-$(yaml_tool_value "$TOOLCHAIN_CONFIG" node default)}"
+VX_BIN="${VX_BIN:-$(yaml_tool_value "$TOOLCHAIN_CONFIG" vx default)}"
+SERVICE_NAME="${SERVICE_NAME:-$(yaml_top_value "$DEPLOY_CONFIG" serviceName)}"
+HOST_ENV_KEY="$(yaml_nested_value "$DEPLOY_CONFIG" host env)"
+HOST_DEFAULT="$(yaml_nested_value "$DEPLOY_CONFIG" host default)"
+PORT_ENV_KEY="$(yaml_nested_value "$DEPLOY_CONFIG" port env)"
+PORT_DEFAULT="$(yaml_nested_value "$DEPLOY_CONFIG" port default)"
+HOST="${!HOST_ENV_KEY:-$HOST_DEFAULT}"
+PORT="${!PORT_ENV_KEY:-$PORT_DEFAULT}"
+NO_BROWSER_FLAG="--no-browser"
+LOG_FILE="${DEPLOY_LOG_FILE:-$(yaml_top_value "$DEPLOY_CONFIG" logFile)}"
+PID_FILE="${DEPLOY_PID_FILE:-$(yaml_top_value "$DEPLOY_CONFIG" pidFile)}"
+READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-$(yaml_top_value "$DEPLOY_CONFIG" readyTimeoutSeconds)}"
+WS_READY_TIMEOUT_SECONDS="${WS_READY_TIMEOUT_SECONDS:-$(yaml_top_value "$DEPLOY_CONFIG" wsReadyTimeoutSeconds)}"
+NO_WAKE_MARKER="${T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER:-$(yaml_top_value "$DEPLOY_CONFIG" noWakeMarker)}"
+NO_WAKE=0
 
 usage() {
     cat <<'EOF'
@@ -234,11 +294,10 @@ start_direct_process() {
     prepare_startup_wake_suppression
 
     mkdir -p /tmp
-    pkill -f "/home/gizmo/t3code-vxapp/apps/server/dist/index.mjs --host ${HOST} --port ${PORT} --no-browser" >/dev/null 2>&1 || true
+    pkill -f "$REPO_ROOT/apps/server/dist/index.mjs --host ${HOST} --port ${PORT} --no-browser" >/dev/null 2>&1 || true
     rm -f "$PID_FILE"
 
     nohup env \
-        PATH="/home/gizmo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
         NODE_ENV=production \
         T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE="$NO_WAKE" \
         T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER="$NO_WAKE_MARKER" \

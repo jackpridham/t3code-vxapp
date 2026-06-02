@@ -4,12 +4,18 @@ import { describe, expect, it } from "vitest";
 
 const vxappServerRoot = path.resolve(import.meta.dirname, "../../..");
 const ownerClientPath = path.resolve(import.meta.dirname, "agentsVxappOwnerClient.ts");
+const ownerClientConfigPath = path.resolve(
+  import.meta.dirname,
+  "../../../../..",
+  ".vx/runtime/owner-client.yaml",
+);
 const controlPlaneLayerPath = path.resolve(
   import.meta.dirname,
   "Layers/AgentsVxappControlPlane.ts",
 );
 const repoRootPath = path.resolve(import.meta.dirname, "agentsVxappRepoRoot.ts");
 const ownerClientSource = fs.readFileSync(ownerClientPath, "utf8");
+const ownerClientConfigSource = fs.readFileSync(ownerClientConfigPath, "utf8");
 const controlPlaneLayerSource = fs.readFileSync(controlPlaneLayerPath, "utf8");
 
 function listTsFiles(dir: string): string[] {
@@ -42,11 +48,8 @@ describe("agents-vxapp owner authority boundary", () => {
   });
 
   it("keeps owner command literals and the bootstrap manifest route centralized in the owner client", () => {
-    const ownerCommandLiterals =
-      ownerClientSource.match(/["']t3code-[a-z0-9-]+["']/g)?.map((value) => value.slice(1, -1)) ??
-      [];
-
-    expect(ownerCommandLiterals).toEqual(expect.arrayContaining(["t3code-contract-manifest"]));
+    expect(ownerClientConfigSource).toContain("command: t3code-contract-manifest");
+    expect(ownerClientSource).toContain("config.manifestCommand");
     expect(ownerClientSource).toContain("t3code-thread-status");
     expect(ownerClientSource).toContain("t3code-thread-event-ingest");
     expect(ownerClientSource).toContain("t3code-projects-event-ingest");

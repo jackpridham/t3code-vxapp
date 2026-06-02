@@ -188,20 +188,20 @@ task_classes:
 validation_profiles:
   syntax:
     - cmd: bun fmt
-      cwd: ${workspace}
+      cwd: "${workspace}"
     - cmd: bun typecheck
-      cwd: ${workspace}
+      cwd: "${workspace}"
   focused_tests:
-    - cmd: bun run test ${suite}
-      cwd: ${workspace}
+    - cmd: "bun run test ${suite}"
+      cwd: "${workspace}"
   static_analysis:
     - cmd: bun lint
-      cwd: ${workspace}
+      cwd: "${workspace}"
   closeout:
     - profile: syntax
     - profile: static_analysis
     - cmd: git diff --check HEAD~1..HEAD
-      cwd: ${workspace}
+      cwd: "${workspace}"
 repo_claude:
   minimal: summary_only
   repo-guided: include

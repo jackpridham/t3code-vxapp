@@ -5,7 +5,6 @@ import {
   OrchestrationProjectKind,
   OrchestrationReadModel,
   ProgramId,
-  ProgramNotificationId,
   ProjectId,
   ProjectHooks,
   ProjectScript,
@@ -15,10 +14,8 @@ import {
   type OrchestrationLatestTurn,
   type OrchestrationProject,
   type OrchestrationProgram,
-  type OrchestrationProgramNotification,
   type OrchestrationSession,
   type OrchestrationThread,
-  type OrchestratorWakeItem,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -30,7 +27,6 @@ import {
   toPersistenceDecodeError,
   type ProjectionRepositoryError,
 } from "../../../persistence/Errors.ts";
-import { ProjectionOrchestratorWake } from "../../../persistence/Services/ProjectionOrchestratorWakes.ts";
 import { ProjectionProject } from "../../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionState } from "../../../persistence/Services/ProjectionState.ts";
 import { resolveLocalThreadErrorPresentation } from "../../../orchestration/localThreadErrorPresentation.ts";
@@ -72,8 +68,6 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
 );
 
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
-const ProjectionOrchestratorWakeDbRowSchema = ProjectionOrchestratorWake;
-
 const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
@@ -268,70 +262,6 @@ function mergeThreadsWithExternal(input: {
   );
 }
 
-function requireOwnerString(value: unknown, field: string): string {
-  const normalized = typeof value === "string" && value.trim().length > 0 ? value : null;
-  if (!normalized) {
-    throw new Error(`vxapp owner export is missing ${field}.`);
-  }
-  return normalized;
-}
-
-function requireOwnerObject(value: unknown, field: string): Record<string, unknown> {
-  const normalized =
-    value !== null && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  if (!normalized) {
-    throw new Error(`vxapp owner export is missing ${field}.`);
-  }
-  return normalized;
-}
-
-function mapOwnerProgramNotification(
-  row: Record<string, unknown>,
-): OrchestrationProgramNotification {
-  const notificationId = requireOwnerString(row.notificationId ?? row.id, "notificationId");
-  const programId = requireOwnerString(row.programId, "programId");
-  const executiveProjectId = requireOwnerString(
-    row.executiveProjectId ?? row.projectId,
-    "executiveProjectId",
-  );
-  const executiveThreadId = requireOwnerString(
-    row.executiveThreadId ?? row.threadId,
-    "executiveThreadId",
-  );
-  const orchestratorThreadId =
-    typeof (row.orchestratorThreadId ?? row.threadId) === "string"
-      ? ((row.orchestratorThreadId ?? row.threadId) as ThreadId)
-      : null;
-  return {
-    notificationId: ProgramNotificationId.makeUnsafe(notificationId),
-    programId: ProgramId.makeUnsafe(programId),
-    executiveProjectId: ProjectId.makeUnsafe(executiveProjectId),
-    executiveThreadId: ThreadId.makeUnsafe(executiveThreadId),
-    orchestratorThreadId,
-    kind: requireOwnerString(
-      row.kind ?? row.notificationKind,
-      "kind",
-    ) as OrchestrationProgramNotification["kind"],
-    severity: requireOwnerString(
-      row.severity,
-      "severity",
-    ) as OrchestrationProgramNotification["severity"],
-    summary: requireOwnerString(row.summary, "summary"),
-    evidence: requireOwnerObject(row.evidence ?? row.source ?? {}, "evidence"),
-    state: requireOwnerString(row.state, "state") as OrchestrationProgramNotification["state"],
-    queuedAt: requireOwnerString(row.queuedAt ?? row.createdAt ?? row.updatedAt, "queuedAt"),
-    deliveredAt: typeof row.deliveredAt === "string" ? row.deliveredAt : null,
-    consumedAt: typeof row.consumedAt === "string" ? row.consumedAt : null,
-    droppedAt: typeof row.droppedAt === "string" ? row.droppedAt : null,
-    consumeReason: typeof row.consumeReason === "string" ? row.consumeReason : undefined,
-    dropReason: typeof row.dropReason === "string" ? row.dropReason : undefined,
-    createdAt: requireOwnerString(row.createdAt ?? row.queuedAt ?? row.updatedAt, "createdAt"),
-    updatedAt: requireOwnerString(row.updatedAt ?? row.createdAt ?? row.queuedAt, "updatedAt"),
-  };
-}
-
 function mapOwnerProgram(program: {
   readonly id: ProgramId;
   readonly title: string;
@@ -503,33 +433,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
       `,
   });
 
-  const listOrchestratorWakeRows = SqlSchema.findAll({
-    Request: Schema.Void,
-    Result: ProjectionOrchestratorWakeDbRowSchema,
-    execute: () =>
-      sql`
-        SELECT
-          wake_id AS "wakeId",
-          orchestrator_thread_id AS "orchestratorThreadId",
-          orchestrator_project_id AS "orchestratorProjectId",
-          worker_thread_id AS "workerThreadId",
-          worker_project_id AS "workerProjectId",
-          worker_turn_id AS "workerTurnId",
-          workflow_id AS "workflowId",
-          worker_title_snapshot AS "workerTitleSnapshot",
-          outcome,
-          summary,
-          queued_at AS "queuedAt",
-          state,
-          delivery_message_id AS "deliveryMessageId",
-          delivered_at AS "deliveredAt",
-          consumed_at AS "consumedAt",
-          consume_reason AS "consumeReason"
-        FROM projection_orchestrator_wakes
-        ORDER BY queued_at ASC, wake_id ASC
-      `,
-  });
-
   const listProjectionStateRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionStateDbRowSchema,
@@ -615,7 +518,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             threadRows,
             sessionRows,
             latestTurnRows,
-            wakeRows,
             stateRows,
             externalSnapshot,
             runtimePaths,
@@ -641,14 +543,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
                 toPersistenceSqlOrDecodeError(
                   "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:query",
                   "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listLatestTurns:decodeRows",
-                ),
-              ),
-            ),
-            listOrchestratorWakeRows(undefined).pipe(
-              Effect.mapError(
-                toPersistenceSqlOrDecodeError(
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:query",
-                  "ProjectionBootstrapSummaryQuery.getBootstrapSummary:listOrchestratorWakes:decodeRows",
                 ),
               ),
             ),
@@ -691,12 +585,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
               }),
             ),
           );
-          const [notificationSummaryExport, ownerSnapshot] = yield* Effect.all([
-            controlPlane.getNotificationSummaryExport(),
-            controlPlane.getProgramsAuthoritySnapshot(),
-          ]);
-          const programNotificationRows: ReadonlyArray<OrchestrationProgramNotification> =
-            notificationSummaryExport.notifications.map(mapOwnerProgramNotification);
+          const ownerSnapshot = yield* controlPlane.getProgramsAuthoritySnapshot();
           const ownerPrograms: ReadonlyArray<OrchestrationProgram> =
             ownerSnapshot.programs.map(mapOwnerProgram);
           if (vxappBacked) {
@@ -759,9 +648,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           for (const row of ownerPrograms) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
-          for (const row of programNotificationRows) {
-            updatedAt = maxIso(updatedAt, row.updatedAt);
-          }
           for (const row of threadRows) {
             updatedAt = maxIso(updatedAt, row.updatedAt);
           }
@@ -799,8 +685,6 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           );
 
           const programs: ReadonlyArray<OrchestrationProgram> = ownerPrograms;
-
-          const programNotifications = programNotificationRows;
 
           const vxappBackedProjectIds = new Set(
             projectRows
@@ -873,41 +757,24 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
             externalSnapshot,
           });
 
-          const orchestratorWakeItems: ReadonlyArray<OrchestratorWakeItem> = vxappBacked
-            ? []
-            : wakeRows.map((row) =>
-                Object.assign(
-                  {
-                    wakeId: row.wakeId,
-                    orchestratorThreadId: row.orchestratorThreadId,
-                    orchestratorProjectId: row.orchestratorProjectId,
-                    workerThreadId: row.workerThreadId,
-                    workerProjectId: row.workerProjectId,
-                    workerTurnId: row.workerTurnId,
-                    workerTitleSnapshot: row.workerTitleSnapshot,
-                    outcome: row.outcome,
-                    summary: row.summary,
-                    queuedAt: row.queuedAt,
-                    state: row.state,
-                    deliveredAt: row.deliveredAt,
-                    consumedAt: row.consumedAt,
-                  },
-                  row.workflowId !== null ? { workflowId: row.workflowId } : undefined,
-                  row.deliveryMessageId !== null
-                    ? { deliveryMessageId: row.deliveryMessageId }
-                    : undefined,
-                  row.consumeReason !== null ? { consumeReason: row.consumeReason } : undefined,
-                ),
-              );
-
           return yield* decodeReadModel({
             snapshotSequence: computeSnapshotSequence(stateRows),
             snapshotProfile: "bootstrap-summary",
+            snapshotCoverage: {
+              includeArchivedThreads: false,
+              wakeItemCount: 0,
+              wakeItemLimit: 0,
+              wakeItemsTruncated: true,
+              warnings: [
+                "bootstrap-summary omits owner-backed residual notifications and historical wake rows; use targeted owner/sidebar and thread hydration surfaces for detail.",
+              ],
+            },
             projects,
             programs,
-            programNotifications,
+            programNotifications: [],
+            ctoAttentionItems: [],
             threads,
-            orchestratorWakeItems,
+            orchestratorWakeItems: [],
             updatedAt:
               [
                 updatedAt,

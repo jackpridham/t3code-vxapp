@@ -1,0 +1,12 @@
+schemaVersion: 1.0.0
+documentKind: vx_dev_state_config
+t3Home:
+  env: T3CODE_HOME
+  default: ~/.t3
+agentsRepo:
+  selector: agents
+retention:
+  default: 5
+seedDb:
+  enabled: true
+  authority: dev_only

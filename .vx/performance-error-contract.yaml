@@ -1,0 +1,72 @@
+schemaVersion: 1.0.0
+documentKind: vx_performance_error_contract
+contractVersion: 1.0.0
+exitCodes:
+  pass: 0
+  contract: 2
+  gate_failure: 3
+errors:
+  PERF_BUDGET_CONFIG_MISSING:
+    message: Performance budget config is missing.
+    severity: error
+    exitCode: 2
+  PERF_BUDGET_UNKNOWN:
+    message: Requested performance budget is not published.
+    severity: error
+    exitCode: 2
+  PERF_BUDGET_REQUIRED_FIELD_MISSING:
+    message: Performance budget is missing a required field.
+    severity: error
+    exitCode: 2
+  PERF_PROBE_REQUIRED_ARG_MISSING:
+    message: Performance probe is missing a required CLI argument.
+    severity: error
+    exitCode: 2
+  PERF_PROBE_UNSUPPORTED:
+    message: Performance probe is unsupported by this repository.
+    severity: error
+    exitCode: 2
+  PERF_PROBE_TARGET_UNAVAILABLE:
+    message: Performance probe target is unavailable.
+    severity: error
+    exitCode: 2
+  PERF_TRACE_REQUIRED_UNAVAILABLE:
+    message: Required performance trace is unavailable.
+    severity: error
+    exitCode: 2
+  PERF_WATCHER_CORRELATION_LOST:
+    message: Live turn watcher could not correlate command, message, or turn identity.
+    severity: error
+    exitCode: 2
+  PERF_WATCHER_MILESTONE_MISSING:
+    message: Live turn watcher did not observe a required milestone.
+    severity: error
+    exitCode: 2
+  PERF_GATE_FORBIDDEN_RPC:
+    message: Forbidden outbound RPC frame was observed.
+    severity: error
+    exitCode: 3
+  PERF_GATE_PAYLOAD_BYTES:
+    message: Payload byte budget was exceeded.
+    severity: error
+    exitCode: 3
+  PERF_GATE_ROW_CAP:
+    message: Row count budget was exceeded.
+    severity: error
+    exitCode: 3
+  PERF_GATE_QUERY_BOUND:
+    message: Query bound budget was exceeded.
+    severity: error
+    exitCode: 3
+  PERF_GATE_SUBPROCESS_COUNT:
+    message: Subprocess count budget was exceeded.
+    severity: error
+    exitCode: 3
+  PERF_GATE_WALL_CLOCK:
+    message: Wall-clock budget was exceeded.
+    severity: error
+    exitCode: 3
+  PERF_GATE_PIPELINE_MILESTONE:
+    message: Live turn pipeline milestone budget was exceeded.
+    severity: error
+    exitCode: 3

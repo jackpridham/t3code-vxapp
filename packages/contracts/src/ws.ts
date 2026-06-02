@@ -279,6 +279,15 @@ export const WsWelcomePayload = Schema.Struct({
   projectName: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
   bootstrapThreadId: Schema.optional(ThreadId),
+  startupAuthority: Schema.optional(
+    Schema.Struct({
+      authoritySource: Schema.Literal("agents-vxapp-owner"),
+      startupContract: Schema.Literal("external-role-authority-snapshot"),
+      activeOwnerThreadId: ThreadId,
+      localBootstrapThreadId: Schema.NullOr(ThreadId),
+      hint: TrimmedNonEmptyString,
+    }),
+  ),
 });
 export type WsWelcomePayload = typeof WsWelcomePayload.Type;
 

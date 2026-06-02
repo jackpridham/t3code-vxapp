@@ -1372,34 +1372,37 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           const vxappBackedProjectRows = projectRows.filter((row) =>
             isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths),
           );
-          const externalSnapshot =
-            vxappBackedProjectRows.length > 0
-              ? yield* Effect.serviceOption(AgentsVxappExternalRoleAuthority).pipe(
-                  Effect.flatMap((externalRoleAuthorityOption) =>
-                    Option.match(externalRoleAuthorityOption, {
-                      onNone: () =>
-                        Effect.fail(
-                          new Error(
-                            "vxapp-backed snapshot requires external role authority snapshot.",
-                          ),
+          const externalSnapshot = yield* Effect.serviceOption(
+            AgentsVxappExternalRoleAuthority,
+          ).pipe(
+            Effect.flatMap((externalRoleAuthorityOption) =>
+              Option.match(externalRoleAuthorityOption, {
+                onNone: () =>
+                  vxappBackedProjectRows.length > 0
+                    ? Effect.fail(
+                        new Error(
+                          "vxapp-backed snapshot requires external role authority snapshot.",
                         ),
-                      onSome: (externalRoleAuthority) =>
-                        externalRoleAuthority
-                          .getSnapshot()
-                          .pipe(
-                            Effect.mapError((error) =>
-                              toPersistenceSqlError(
-                                "ProjectionSnapshotQuery.externalRoleAuthority:query",
-                              )(error),
-                            ),
-                          ),
-                    }),
-                  ),
-                )
-              : {
-                  projects: [],
-                  threadSummaries: [],
-                };
+                      )
+                    : Effect.succeed({
+                        projects: [],
+                        threadSummaries: [],
+                      }),
+                onSome: (externalRoleAuthority) =>
+                  externalRoleAuthority
+                    .getSnapshot()
+                    .pipe(
+                      Effect.mapError((error) =>
+                        toPersistenceSqlError(
+                          "ProjectionSnapshotQuery.externalRoleAuthority:query",
+                        )(error),
+                      ),
+                    ),
+              }),
+            ),
+          );
+          const hasExternalAuthority =
+            externalSnapshot.projects.length > 0 || externalSnapshot.threadSummaries.length > 0;
           const bindingAuthority = yield* getBindingAuthorityForVxappProjects(
             vxappBackedProjectRows,
             runtimePaths,
@@ -1668,10 +1671,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   : undefined,
               ),
             );
-          const projects =
-            vxappBackedProjectRows.length > 0
-              ? mergeProjectsWithExternal(localProjects, externalSnapshot)
-              : localProjects;
+          const projects = hasExternalAuthority
+            ? mergeProjectsWithExternal(localProjects, externalSnapshot)
+            : localProjects;
           const boundProjects = applyBindingCurrentThreadToProjects(projects, bindingAuthority);
 
           const programs: ReadonlyArray<OrchestrationProgram> = ownerPrograms;
@@ -1701,17 +1703,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
           const vxappBackedProjectIds = new Set(vxappBackedProjectRows.map((row) => row.projectId));
           const externalIndex = buildExternalRoleAuthorityIndex(externalSnapshot);
-          const localCurrentAuthorityThreadRows =
-            vxappBackedProjectRows.length > 0
-              ? scopedThreadRows.filter(
-                  (row) =>
-                    !vxappBackedProjectIds.has(row.projectId) &&
-                    !externalIndex.threadIds.has(row.threadId) &&
-                    !(
-                      row.worktreePath !== null && externalIndex.worktreePaths.has(row.worktreePath)
-                    ),
-                )
-              : scopedThreadRows;
+          const localCurrentAuthorityThreadRows = hasExternalAuthority
+            ? scopedThreadRows.filter(
+                (row) =>
+                  !vxappBackedProjectIds.has(row.projectId) &&
+                  !externalIndex.threadIds.has(row.threadId) &&
+                  !(row.worktreePath !== null && externalIndex.worktreePaths.has(row.worktreePath)),
+              )
+            : scopedThreadRows;
 
           const localThreads: ReadonlyArray<OrchestrationThread> =
             localCurrentAuthorityThreadRows.map((row) => {
@@ -1817,10 +1816,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   : undefined,
               ) satisfies OrchestrationThread;
             });
-          const threads =
-            vxappBackedProjectRows.length > 0
-              ? mergeThreadsWithExternal({ localThreads, externalSnapshot })
-              : localThreads;
+          const threads = hasExternalAuthority
+            ? mergeThreadsWithExternal({ localThreads, externalSnapshot })
+            : localThreads;
 
           const snapshot = {
             snapshotSequence: computeSnapshotSequence(stateRows),

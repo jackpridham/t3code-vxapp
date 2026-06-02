@@ -1,0 +1,16 @@
+schemaVersion: 1.0.0
+documentKind: vx_deploy_config
+serviceName: t3code
+host:
+  env: T3CODE_HOST
+  default: 0.0.0.0
+port:
+  env: T3CODE_PORT
+  default: 7421
+logFile: /tmp/t3code-vxapp-deploy.log
+pidFile: /tmp/t3code-vxapp-deploy.pid
+readyTimeoutSeconds: 120
+wsReadyTimeoutSeconds: 60
+noWakeMarker: /tmp/t3code-vxapp-no-wake
+fallbackDirectNode:
+  allowedWhenSystemdUnavailable: true

@@ -1,36 +1,42 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import http from "node:http";
-import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const agentsRoot = process.env.AGENTS_VXAPP_REPO_ROOT ?? "/home/gizmo/agents-vxapp";
-const ownerEvidenceRoot = resolve(
-  agentsRoot,
-  "plans/evidence/orchestration-platform-migration/live-orchestration",
-);
-const ownerStateRoot = resolve(ownerEvidenceRoot, "isolated-state/owner-app");
-const ownerDbPath = resolve(ownerStateRoot, "state/vx_agents.sqlite3");
-const generatedRoleEvidenceRoot = resolve(
-  agentsRoot,
-  "plans/evidence/orchestration-platform-migration/generated-role-session-live",
-);
-const generatedRoleSourceWorkRoot = "/tmp/agents-vxapp-generated-role-session-live";
-const generatedRoleSourceRuntimeRoot = resolve(
-  generatedRoleSourceWorkRoot,
-  ".agents-vxapp-runtime",
-);
+
+async function resolveAgentsRootFromRepoLinks() {
+  const repoLinksRaw = await readFile(resolve(repoRoot, ".vx/repo-links.yaml"), "utf8");
+  const aliases = [...repoLinksRaw.matchAll(/^\s{6}-\s+([A-Z0-9_]+)\s*$/gm)].map(
+    (match) => match[1],
+  );
+  const configured = aliases
+    .map((alias) => ({ alias, root: process.env[alias]?.trim() }))
+    .filter((entry) => entry.root);
+  if (configured.length === 0) {
+    throw new Error(
+      `agents-vxapp repo root is not configured. Set one of ${aliases.join(", ")} from .vx/repo-links.yaml.`,
+    );
+  }
+  const roots = new Set(configured.map((entry) => resolve(entry.root)));
+  if (roots.size !== 1) {
+    throw new Error(
+      `agents-vxapp repo-root env aliases disagree: ${configured
+        .map((entry) => `${entry.alias}=${entry.root}`)
+        .join(", ")}`,
+    );
+  }
+  return [...roots][0];
+}
+
+const agentsRoot = await resolveAgentsRootFromRepoLinks();
 const outDir = resolve(
   process.env.T3CODE_APP_SERVER_PROBE_OUT_DIR ??
-    resolve(agentsRoot, "plans/evidence/orchestration-platform-migration/t3code-app-server-live"),
+    resolve(repoRoot, ".vx/live-probes/t3code-app-server-live"),
 );
-const generatedRoleRuntimeRoot =
-  process.env.T3CODE_APP_SERVER_ROLE_RUNTIME_ROOT ??
-  "/tmp/t3code-app-server-live-generated-role-runtime";
-const generatedRoleStateRoot = resolve(generatedRoleRuntimeRoot, "role-state");
 const serverRequire = createRequire(new URL("../apps/server/package.json", import.meta.url));
 const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
 const { WebSocket } = serverRequire("ws");
@@ -51,6 +57,45 @@ function proofMetadata() {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function servedAssetNames(indexHtml) {
+  return [...indexHtml.matchAll(/(?:src|href)="([^"]*assets\/[^"]+)"/g)]
+    .map((match) => match[1])
+    .filter(Boolean)
+    .toSorted();
+}
+
+function activeOwnerThreadFromSidebarAuthority(sidebarAuthority, ownerAuthority) {
+  const activeProgramCard =
+    sidebarAuthority.programs.find(
+      (row) =>
+        row.program?.id === ownerAuthority.activeProgramId ||
+        row.executive?.threadId === ownerAuthority.ctoThreadId ||
+        (row.executive?.threadId && row.program?.status !== "completed"),
+    ) ??
+    sidebarAuthority.programs.find((row) => row.executive?.threadId) ??
+    null;
+  return {
+    programCard: activeProgramCard,
+    threadId: activeProgramCard?.executive?.threadId ?? null,
+  };
+}
+
+function activeOwnerThreadFromBootstrapSummary(bootstrapSummary, ownerAuthority) {
+  const activeProgram =
+    bootstrapSummary.programs?.find(
+      (program) =>
+        program.id === ownerAuthority.activeProgramId ||
+        program.executiveThreadId === ownerAuthority.ctoThreadId ||
+        (program.executiveThreadId && program.status !== "completed"),
+    ) ??
+    bootstrapSummary.programs?.find((program) => program.executiveThreadId) ??
+    null;
+  return {
+    program: activeProgram,
+    threadId: activeProgram?.executiveThreadId ?? null,
+  };
 }
 
 function wait(ms) {
@@ -226,127 +271,6 @@ process.stdin.on("data", (chunk) => {
   return fakeCodexPath;
 }
 
-function sqlQuote(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
-async function loadGeneratedRoleSessions() {
-  const summary = JSON.parse(
-    await readFile(resolve(generatedRoleEvidenceRoot, "summary.json"), "utf8"),
-  );
-  const sessions = {};
-  for (const entry of summary.materialized ?? []) {
-    if (entry.role === "cto") {
-      sessions.cto = {
-        role: "cto",
-        threadId: "thread-generated-cto-live",
-        agentKind: "executive",
-        sessionId: entry.session_id,
-        workspace: mapGeneratedWorkspaceToActiveRuntime(entry.workspace),
-      };
-    }
-    if (entry.role === "jasper") {
-      sessions.jasper = {
-        role: "jasper",
-        threadId: "thread-generated-jasper-live",
-        agentKind: "orchestrator",
-        sessionId: entry.session_id,
-        workspace: mapGeneratedWorkspaceToActiveRuntime(entry.workspace),
-      };
-    }
-  }
-  if (!sessions.cto || !sessions.jasper) {
-    throw new Error(
-      "generated role-session evidence is missing CTO or Jasper materialized workspace",
-    );
-  }
-  return sessions;
-}
-
-function mapGeneratedWorkspaceToActiveRuntime(workspace) {
-  const raw = String(workspace);
-  if (!raw.startsWith(generatedRoleSourceRuntimeRoot)) {
-    throw new Error(`generated workspace is outside source runtime root: ${raw}`);
-  }
-  return `${generatedRoleRuntimeRoot}${raw.slice(generatedRoleSourceRuntimeRoot.length)}`;
-}
-
-async function prepareGeneratedRoleRuntime(sessions) {
-  await rm(generatedRoleRuntimeRoot, { recursive: true, force: true });
-  await mkdir(generatedRoleRuntimeRoot, { recursive: true });
-  await cp(
-    resolve(generatedRoleSourceRuntimeRoot, "role-sessions"),
-    resolve(generatedRoleRuntimeRoot, "role-sessions"),
-    {
-      recursive: true,
-    },
-  );
-  await cp(resolve(generatedRoleSourceRuntimeRoot, "role-state"), generatedRoleStateRoot, {
-    recursive: true,
-  });
-  for (const session of [sessions.cto, sessions.jasper]) {
-    const sessionRecordPath = resolve(
-      generatedRoleStateRoot,
-      session.role,
-      "sessions",
-      `${session.sessionId}.json`,
-    );
-    const record = JSON.parse(await readFile(sessionRecordPath, "utf8"));
-    record.workspace_path = session.workspace;
-    await writeFile(sessionRecordPath, `${JSON.stringify(record, null, 2)}\n`);
-  }
-}
-
-function seedGeneratedRoleBinding(session) {
-  const now = nowIso();
-  const metadata = JSON.stringify({
-    source: "t3code-app-server-live-role-runtime-proof",
-    role: session.role,
-  });
-  const sql = `
-INSERT OR REPLACE INTO agents_session_bindings (
-  binding_key,
-  workspace_root,
-  repo_name,
-  current_session_id,
-  current_thread_id,
-  status,
-  metadata_json,
-  created_at,
-  updated_at
-) VALUES (
-  ${sqlQuote(`live-generated-${session.role}`)},
-  ${sqlQuote(session.workspace)},
-  ${sqlQuote("agents-vxapp")},
-  ${sqlQuote(session.sessionId)},
-  ${sqlQuote(session.threadId)},
-  ${sqlQuote("active")},
-  ${sqlQuote(metadata)},
-  ${sqlQuote(now)},
-  ${sqlQuote(now)}
-);
-`;
-  const result = spawnSync("sqlite3", [ownerDbPath, sql], { encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(
-      `failed to seed generated ${session.role} role-session binding: ${result.stderr || result.stdout}`,
-    );
-  }
-}
-
-function clearGeneratedRoleBindings() {
-  const sql = `
-DELETE FROM agents_session_bindings
-WHERE binding_key IN (${sqlQuote("live-generated-cto")}, ${sqlQuote("live-generated-jasper")});
-`;
-  const result = spawnSync("sqlite3", [ownerDbPath, sql], { encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(
-      `failed to clear generated role-session bindings: ${result.stderr || result.stdout}`,
-    );
-  }
-}
-
 function wsRequest(ws, method, body = {}, timeoutMs = 45_000) {
   const id = `probe-${method}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const payload = JSON.stringify({ id, body: { _tag: method, ...body } });
@@ -417,8 +341,8 @@ async function connectWs(port) {
     ws.once("open", resolveOpen);
     ws.once("error", rejectOpen);
   });
-  await waitForPush(ws, "server.welcome", () => true, 10_000);
-  return ws;
+  const welcome = await waitForPush(ws, "server.welcome", () => true, 10_000);
+  return { ws, welcome };
 }
 
 function collectPushes(ws, sink) {
@@ -444,6 +368,99 @@ function spawnProcess(command, args, options) {
   child.stdout?.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
   child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
   return { child, stdout, stderr };
+}
+
+function runCommandCapture(command, args, options = {}) {
+  const startedAt = nowIso();
+  const started = Date.now();
+  return new Promise((resolveRun) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd ?? repoRoot,
+      env: options.env ?? process.env,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout = [];
+    const stderr = [];
+    child.stdout?.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
+    child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
+    child.on("error", (error) => {
+      resolveRun({
+        command,
+        args,
+        exitCode: null,
+        signal: null,
+        error: error.message,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        startedAt,
+        finishedAt: nowIso(),
+        durationMs: Date.now() - started,
+      });
+    });
+    child.on("exit", (exitCode, signal) => {
+      resolveRun({
+        command,
+        args,
+        exitCode,
+        signal,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        startedAt,
+        finishedAt: nowIso(),
+        durationMs: Date.now() - started,
+      });
+    });
+  });
+}
+
+async function loadOwnerAuthorityStatus() {
+  const vxPath = resolve(agentsRoot, "scripts/tools/vx");
+  const result = await runCommandCapture(vxPath, ["t3", "cto", "status", "--json"], {
+    cwd: agentsRoot,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `failed to load active CTO status from ${vxPath}: ${result.stderr || result.stdout}`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`failed to parse active CTO status JSON: ${error.message}`, { cause: error });
+  }
+  const payload = parsed?.result?.payload;
+  const activeProgram = payload?.activeProgram ?? null;
+  const cto = payload?.cto ?? null;
+  const jasper = payload?.jasper ?? null;
+  const activeProgramId = activeProgram?.id ?? activeProgram?.programId ?? null;
+  const ctoThreadId =
+    cto?.currentThreadId ?? cto?.currentThread?.id ?? activeProgram?.executiveThreadId ?? null;
+  const jasperThreadId =
+    jasper?.currentThreadId ??
+    jasper?.currentThread?.id ??
+    activeProgram?.currentOrchestratorThreadId ??
+    null;
+  if (!activeProgramId || !ctoThreadId || !jasperThreadId) {
+    throw new Error(
+      "active CTO status is missing active Program, CTO thread, or Jasper thread authority",
+    );
+  }
+  return {
+    raw: parsed,
+    activeProgram,
+    activeProgramId,
+    activeProgramTitle: activeProgram?.title ?? null,
+    ctoThreadId,
+    ctoWorkspaceRoot: cto?.workspaceRoot ?? cto?.currentThread?.workspaceRoot ?? null,
+    jasperThreadId,
+    jasperWorkspaceRoot: jasper?.workspaceRoot ?? jasper?.currentThread?.workspaceRoot ?? null,
+    legacyFallbackUsed:
+      payload?.legacyFallbackUsed === true ||
+      cto?.legacyFallbackUsed === true ||
+      jasper?.legacyFallbackUsed === true,
+  };
 }
 
 async function stopProcess(child) {
@@ -478,13 +495,10 @@ async function main() {
   await mkdir(t3UserData, { recursive: true });
   await mkdir(binDir, { recursive: true });
   const fakeCodexPath = await writeFakeCodex(binDir);
-  const generatedRoleSessions = await loadGeneratedRoleSessions();
-  clearGeneratedRoleBindings();
-  await rm(generatedRoleRuntimeRoot, { recursive: true, force: true });
-  await mkdir(generatedRoleRuntimeRoot, { recursive: true });
+  const ownerAuthority = await loadOwnerAuthorityStatus();
   await writeFile(
-    resolve(outDir, "generated-role-session-bindings.json"),
-    `${JSON.stringify(generatedRoleSessions, null, 2)}\n`,
+    resolve(outDir, "owner-cto-status.json"),
+    `${JSON.stringify(ownerAuthority.raw, null, 2)}\n`,
   );
   await writeFile(
     resolve(t3UserData, "settings.json"),
@@ -494,19 +508,15 @@ async function main() {
   const env = {
     ...process.env,
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
+    T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "true",
     T3CODE_HOME: t3Home,
     T3CODE_HOST: "127.0.0.1",
     T3CODE_LOG_WS_EVENTS: "1",
     T3CODE_NO_BROWSER: "1",
     T3CODE_PORT: String(port),
-    T3_STATE_DB: ownerDbPath,
-    VX_AGENTS_APP_ROOT: ownerStateRoot,
     VX_AGENTS_OWNER_REVISION: "t3code-app-server-live-proof",
     VX_AGENTS_REPO_ROOT: agentsRoot,
     VX_AGENTS_ROLE_SESSION_REPO_ROOT: agentsRoot,
-    VX_AGENTS_ROLE_SESSION_RUNTIME_ROOT: generatedRoleRuntimeRoot,
-    VX_AGENTS_ROLE_SESSION_STATE_ROOT: generatedRoleStateRoot,
   };
 
   const server = spawnProcess(
@@ -539,7 +549,9 @@ async function main() {
         port,
         fakeCodexPath,
         t3Home,
-        ownerDbPath,
+        activeProgramId: ownerAuthority.activeProgramId,
+        ctoThreadId: ownerAuthority.ctoThreadId,
+        jasperThreadId: ownerAuthority.jasperThreadId,
         startedAt: nowIso(),
       },
       null,
@@ -559,39 +571,71 @@ async function main() {
       "T3 server ready health",
       60_000,
     );
+    const servedIndexHtml = await fetch(`http://127.0.0.1:${port}/`).then((response) =>
+      response.text(),
+    );
+    const servedAssets = servedAssetNames(servedIndexHtml);
 
-    ws = await connectWs(port);
+    const connection = await connectWs(port);
+    ws = connection.ws;
+    const serverWelcome = connection.welcome;
     stopCollectingPushes = collectPushes(ws, observedPushes);
     const config = await wsRequest(ws, "server.getConfig");
+    const bootstrapSummary = await wsRequest(ws, "orchestration.getBootstrapSummary");
     const sidebarAuthority = await wsRequest(ws, "server.getAgentsVxappSidebarAuthoritySnapshot", {
       page: 1,
       limit: 20,
     });
-    const sidebarGraph = await wsRequest(ws, "server.getAgentsVxappSidebarGraph", {});
-    const controlPlane = await wsRequest(ws, "server.getAgentsVxappControlPlaneSnapshot", {
-      page: 1,
-      limit: 20,
+    const sidebarOwner = activeOwnerThreadFromSidebarAuthority(sidebarAuthority, ownerAuthority);
+    const bootstrapOwner = activeOwnerThreadFromBootstrapSummary(bootstrapSummary, ownerAuthority);
+    const ownerProgramCard = sidebarOwner.programCard;
+    const ownerProgram = bootstrapOwner.program;
+    const activeOwnerThreadId =
+      ownerAuthority.ctoThreadId ??
+      sidebarOwner.threadId ??
+      bootstrapOwner.threadId ??
+      serverWelcome.data?.bootstrapThreadId ??
+      null;
+    const agentRuntime = activeOwnerThreadId
+      ? await wsRequest(ws, "server.getAgentRuntimeSnapshot", {
+          agentKind: "executive",
+          threadId: activeOwnerThreadId,
+        })
+      : null;
+    const jasperRuntime = await wsRequest(ws, "server.getAgentRuntimeSnapshot", {
+      agentKind: "orchestrator",
+      threadId: ownerAuthority.jasperThreadId,
     });
-    const agentRuntime = await wsRequest(ws, "server.getAgentRuntimeSnapshot", {
-      agentKind: "executive",
-      threadId: "thread-cto-live",
-    });
+    const firstWorkerTarget =
+      sidebarAuthority.programs
+        .flatMap((row) => row.workers ?? [])
+        .find((worker) => worker?.threadId && worker?.workspace) ?? null;
+    const workerRuntime = firstWorkerTarget
+      ? await wsRequest(ws, "server.getWorkerRuntimeSnapshot", {
+          threadId: firstWorkerTarget.threadId,
+          workspace: firstWorkerTarget.workspace,
+        })
+      : null;
     await writeFile(resolve(outDir, "server-config.json"), `${JSON.stringify(config, null, 2)}\n`);
+    await writeFile(
+      resolve(outDir, "bootstrap-summary.json"),
+      `${JSON.stringify(bootstrapSummary, null, 2)}\n`,
+    );
     await writeFile(
       resolve(outDir, "sidebar-authority.json"),
       `${JSON.stringify(sidebarAuthority, null, 2)}\n`,
     );
     await writeFile(
-      resolve(outDir, "sidebar-graph.json"),
-      `${JSON.stringify(sidebarGraph, null, 2)}\n`,
-    );
-    await writeFile(
-      resolve(outDir, "control-plane.json"),
-      `${JSON.stringify(controlPlane, null, 2)}\n`,
-    );
-    await writeFile(
       resolve(outDir, "agent-runtime.json"),
       `${JSON.stringify(agentRuntime, null, 2)}\n`,
+    );
+    await writeFile(
+      resolve(outDir, "jasper-agent-runtime.json"),
+      `${JSON.stringify(jasperRuntime, null, 2)}\n`,
+    );
+    await writeFile(
+      resolve(outDir, "worker-runtime.json"),
+      `${JSON.stringify(workerRuntime, null, 2)}\n`,
     );
     const createdAt = nowIso();
     const projectId = "project-provider-live-probe";
@@ -672,6 +716,10 @@ async function main() {
       "provider turn ready session after running turn",
     );
     const currentStateBeforeGenerated = await wsRequest(ws, "orchestration.getCurrentState");
+    await writeFile(
+      resolve(outDir, "current-state.json"),
+      `${JSON.stringify(currentStateBeforeGenerated, null, 2)}\n`,
+    );
 
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -690,134 +738,118 @@ async function main() {
         }
       });
     });
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "domcontentloaded" });
+    if (activeOwnerThreadId) {
+      await page
+        .waitForURL(new RegExp(`/${activeOwnerThreadId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), {
+          timeout: 45_000,
+        })
+        .catch(() => undefined);
+    }
+    const browserStartupUrl = page.url();
     await page.goto(`http://127.0.0.1:${port}/sidebar`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="vx-orchestration-sidebar"]', { timeout: 45_000 });
-    await page.waitForFunction(
-      () => document.body.textContent?.includes("Live Orchestration Proof"),
-      undefined,
-      { timeout: 45_000 },
-    );
+    const activeOwnerProgramTitle = ownerProgramCard?.program?.title ?? ownerProgram?.title ?? null;
+    if (activeOwnerThreadId) {
+      await page
+        .waitForFunction(
+          ([threadId, title]) =>
+            document.body.textContent?.includes(threadId) ||
+            (title ? document.body.textContent?.includes(title) : false) ||
+            document.querySelector(`[data-testid="thread-row-${threadId}"]`) !== null,
+          [activeOwnerThreadId, activeOwnerProgramTitle],
+          { timeout: 45_000 },
+        )
+        .catch(() => undefined);
+    }
     const screenshotPath = resolve(outDir, "t3code-app-server-sidebar.png");
     const tracePath = resolve(outDir, "t3code-app-server-sidebar-trace.zip");
     await page.screenshot({ path: screenshotPath, fullPage: true });
     await context.tracing.stop({ path: tracePath });
 
     const bodyText = await page.locator("body").innerText();
-    await prepareGeneratedRoleRuntime(generatedRoleSessions);
-    seedGeneratedRoleBinding(generatedRoleSessions.cto);
-    seedGeneratedRoleBinding(generatedRoleSessions.jasper);
-    const generatedCtoRuntime = await wsRequest(ws, "server.getAgentRuntimeSnapshot", {
-      agentKind: generatedRoleSessions.cto.agentKind,
-      threadId: generatedRoleSessions.cto.threadId,
-    });
-    const generatedJasperRuntime = await wsRequest(ws, "server.getAgentRuntimeSnapshot", {
-      agentKind: generatedRoleSessions.jasper.agentKind,
-      threadId: generatedRoleSessions.jasper.threadId,
-    });
-    await writeFile(
-      resolve(outDir, "generated-cto-agent-runtime.json"),
-      `${JSON.stringify(generatedCtoRuntime, null, 2)}\n`,
-    );
-    await writeFile(
-      resolve(outDir, "generated-jasper-agent-runtime.json"),
-      `${JSON.stringify(generatedJasperRuntime, null, 2)}\n`,
-    );
-    await wsRequest(ws, "orchestration.dispatchCommand", {
-      command: {
-        type: "project.create",
-        commandId: "cmd-live-generated-cto-project",
-        projectId: "project-generated-cto-runtime",
-        title: "Generated CTO Runtime",
-        workspaceRoot: generatedCtoRuntime.workspaceRoot,
-        defaultModelSelection: { provider: "codex", model: "gpt-5-codex" },
-        createdAt: nowIso(),
-      },
-    });
-    await wsRequest(ws, "orchestration.dispatchCommand", {
-      command: {
-        type: "thread.create",
-        commandId: "cmd-live-generated-cto-thread",
-        threadId: generatedRoleSessions.cto.threadId,
-        projectId: "project-generated-cto-runtime",
-        title: "Generated CTO runtime thread",
-        modelSelection: { provider: "codex", model: "gpt-5-codex" },
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: generatedCtoRuntime.workspaceRoot,
-        createdAt: nowIso(),
-      },
-    });
-    await wsRequest(ws, "orchestration.dispatchCommand", {
-      command: {
-        type: "project.create",
-        commandId: "cmd-live-generated-jasper-project",
-        projectId: "project-generated-jasper-runtime",
-        title: "Generated Jasper Runtime",
-        workspaceRoot: generatedJasperRuntime.workspaceRoot,
-        defaultModelSelection: { provider: "codex", model: "gpt-5-codex" },
-        createdAt: nowIso(),
-      },
-    });
-    await wsRequest(ws, "orchestration.dispatchCommand", {
-      command: {
-        type: "thread.create",
-        commandId: "cmd-live-generated-jasper-thread",
-        threadId: generatedRoleSessions.jasper.threadId,
-        projectId: "project-generated-jasper-runtime",
-        title: "Generated Jasper runtime thread",
-        modelSelection: { provider: "codex", model: "gpt-5-codex" },
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: generatedJasperRuntime.workspaceRoot,
-        createdAt: nowIso(),
-      },
-    });
-    const generatedCtoThreadPush = await waitForObservedPush(
-      observedPushes,
-      (push) =>
-        push.channel === "orchestration.domainEvent" &&
-        push.data?.type === "thread.created" &&
-        push.data?.payload?.threadId === generatedRoleSessions.cto.threadId,
-      "generated CTO thread.created event",
-    );
-    const generatedJasperThreadPush = await waitForObservedPush(
-      observedPushes,
-      (push) =>
-        push.channel === "orchestration.domainEvent" &&
-        push.data?.type === "thread.created" &&
-        push.data?.payload?.threadId === generatedRoleSessions.jasper.threadId,
-      "generated Jasper thread.created event",
-    );
+    const sidebarCtoRowSelector = activeOwnerThreadId
+      ? `[data-testid="thread-row-${activeOwnerThreadId}"]`
+      : null;
+    let sidebarCtoRowFound = false;
+    let sidebarClickUrl = page.url();
+    if (sidebarCtoRowSelector) {
+      const sidebarCtoRow = page.locator(sidebarCtoRowSelector).first();
+      sidebarCtoRowFound = (await sidebarCtoRow.count()) > 0;
+      if (sidebarCtoRowFound) {
+        await sidebarCtoRow.click();
+        await page.waitForURL(
+          new RegExp(`/${activeOwnerThreadId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+          {
+            timeout: 45_000,
+          },
+        );
+        sidebarClickUrl = page.url();
+      }
+    }
+    const serverWelcomeBootstrapThreadId = serverWelcome.data?.bootstrapThreadId ?? null;
+    const currentStateThreadId =
+      currentStateBeforeGenerated.projects?.find(
+        (project) => project.currentSessionRootThreadId === activeOwnerThreadId,
+      )?.currentSessionRootThreadId ?? null;
+    const sidebarThreadId = ownerProgramCard?.executive?.threadId ?? null;
+    const sidebarJasperThreadId = ownerProgramCard?.orchestrator?.threadId ?? null;
+    const startupSidebarCurrentStateParity =
+      activeOwnerThreadId !== null &&
+      serverWelcomeBootstrapThreadId === activeOwnerThreadId &&
+      currentStateThreadId === activeOwnerThreadId &&
+      sidebarThreadId === activeOwnerThreadId;
+    const activeAuthorityParity =
+      ownerProgram?.id === ownerAuthority.activeProgramId &&
+      ownerProgram?.executiveThreadId === ownerAuthority.ctoThreadId &&
+      ownerProgram?.currentOrchestratorThreadId === ownerAuthority.jasperThreadId &&
+      sidebarJasperThreadId === ownerAuthority.jasperThreadId;
+    const browserStartupRouteMatchesOwner =
+      activeOwnerThreadId !== null && browserStartupUrl.endsWith(`/${activeOwnerThreadId}`);
+    const sidebarClickRouteMatchesOwner =
+      activeOwnerThreadId !== null && sidebarClickUrl.endsWith(`/${activeOwnerThreadId}`);
+    const activeRuntimeOk =
+      agentRuntime?.threadId === ownerAuthority.ctoThreadId &&
+      agentRuntime?.agentKind === "executive" &&
+      agentRuntime?.workspaceRoot === ownerAuthority.ctoWorkspaceRoot &&
+      jasperRuntime?.threadId === ownerAuthority.jasperThreadId &&
+      jasperRuntime?.agentKind === "orchestrator" &&
+      jasperRuntime?.workspaceRoot === ownerAuthority.jasperWorkspaceRoot;
     const summary = {
       ok:
-        sidebarAuthority.programs.some((row) => row.program?.id === "program-live") &&
-        sidebarGraph.threadLinks.some((row) => row.threadId === "thread-cto-live") &&
-        controlPlane.programs.some((row) => row.id === "program-live") &&
-        agentRuntime.threadId === "thread-cto-live" &&
-        agentRuntime.agentKind === "executive" &&
-        generatedCtoRuntime.threadId === generatedRoleSessions.cto.threadId &&
-        generatedCtoRuntime.availability === "inspectable" &&
-        generatedCtoRuntime.workspaceRoot === generatedRoleSessions.cto.workspace &&
-        generatedCtoRuntime.summary?.role === "cto" &&
-        generatedJasperRuntime.threadId === generatedRoleSessions.jasper.threadId &&
-        generatedJasperRuntime.availability === "inspectable" &&
-        generatedJasperRuntime.workspaceRoot === generatedRoleSessions.jasper.workspace &&
-        generatedJasperRuntime.summary?.role === "jasper" &&
-        generatedCtoThreadPush.data?.payload?.worktreePath ===
-          generatedRoleSessions.cto.workspace &&
-        generatedJasperThreadPush.data?.payload?.worktreePath ===
-          generatedRoleSessions.jasper.workspace &&
+        !ownerAuthority.legacyFallbackUsed &&
+        activeAuthorityParity &&
+        activeRuntimeOk &&
+        startupSidebarCurrentStateParity &&
+        browserStartupRouteMatchesOwner &&
+        sidebarClickRouteMatchesOwner &&
+        servedAssets.length > 0 &&
+        bootstrapSummary.threads.some((row) => row.id === activeOwnerThreadId) &&
+        sidebarAuthority.programs.some((row) => row.executive?.threadId === activeOwnerThreadId) &&
+        bootstrapSummary.programs?.some((row) => row.executiveThreadId === activeOwnerThreadId) &&
+        agentRuntime?.threadId === activeOwnerThreadId &&
+        agentRuntime?.agentKind === "executive" &&
         sessionPush.data?.type === "thread.session-set" &&
         assistantPush.data?.type === "thread.message-sent" &&
         completedPush.data?.type === "thread.session-set" &&
         completedPush.data?.payload?.session?.status === "ready" &&
-        bodyText.includes("Live Orchestration Proof"),
+        (sidebarCtoRowFound ||
+          (activeOwnerThreadId !== null && bodyText.includes(activeOwnerThreadId))),
       ...proofMetadata(),
       baseUrl: `http://127.0.0.1:${port}`,
       fakeCodexPath,
-      ownerDbPath,
+      servedAssets,
+      directWebSocket: {
+        bootstrapThreadPresent: bootstrapSummary.threads.some(
+          (row) => row.id === activeOwnerThreadId,
+        ),
+        bootstrapProjectCount: Array.isArray(bootstrapSummary.projects)
+          ? bootstrapSummary.projects.length
+          : null,
+        bootstrapThreadCount: Array.isArray(bootstrapSummary.threads)
+          ? bootstrapSummary.threads.length
+          : null,
+      },
       provider: {
         sessionEvent: sessionPush.data,
         assistantEvent: assistantPush.data,
@@ -835,39 +867,63 @@ async function main() {
         todoCount: sidebarAuthority.todos.length,
         currentTodoCount: sidebarAuthority.currentTodos.length,
         ownerDiagnosticsCount: sidebarAuthority.ownerDiagnostics.length,
+        activeProgramId: ownerProgramCard?.program?.id ?? null,
       },
-      sidebarGraph: {
-        threadLinkCount: sidebarGraph.threadLinks.length,
-        staleMirror: sidebarGraph.mirrorDiagnostics?.staleMirror ?? null,
+      ownerStatusAuthority: {
+        activeProgramId: ownerAuthority.activeProgramId,
+        activeProgramTitle: ownerAuthority.activeProgramTitle,
+        ctoThreadId: ownerAuthority.ctoThreadId,
+        ctoWorkspaceRoot: ownerAuthority.ctoWorkspaceRoot,
+        jasperThreadId: ownerAuthority.jasperThreadId,
+        jasperWorkspaceRoot: ownerAuthority.jasperWorkspaceRoot,
+        legacyFallbackUsed: ownerAuthority.legacyFallbackUsed,
+        activeAuthorityParity,
+        activeRuntimeOk,
+      },
+      startupAuthority: {
+        activeOwnerThreadId,
+        serverWelcomeBootstrapThreadId,
+        currentStateThreadId,
+        sidebarThreadId,
+        sidebarJasperThreadId,
+        authoritySource:
+          serverWelcome.data?.startupAuthority?.authoritySource ?? "agents-vxapp-owner",
+        startupContract:
+          serverWelcome.data?.startupAuthority?.startupContract ??
+          "external-role-authority-snapshot",
+        diagnostic: serverWelcome.data?.startupAuthority ?? null,
+        ok: startupSidebarCurrentStateParity,
+      },
+      ownerProgramAuthority: {
+        activeProgramId: ownerProgram?.id ?? null,
+        executiveThreadId: ownerProgram?.executiveThreadId ?? null,
+        currentOrchestratorThreadId: ownerProgram?.currentOrchestratorThreadId ?? null,
       },
       agentRuntime: {
-        availability: agentRuntime.availability,
-        reasonCode: agentRuntime.reasonCode,
-        runtimeKind: agentRuntime.runtimeKind,
-        workspaceRoot: agentRuntime.workspaceRoot,
-        packCount: agentRuntime.summary?.packCount ?? null,
-        skillCount: agentRuntime.summary?.skillCount ?? null,
+        availability: agentRuntime?.availability ?? null,
+        reasonCode: agentRuntime?.reasonCode ?? null,
+        runtimeKind: agentRuntime?.runtimeKind ?? null,
+        workspaceRoot: agentRuntime?.workspaceRoot ?? null,
+        packCount: agentRuntime?.summary?.packCount ?? null,
+        skillCount: agentRuntime?.summary?.skillCount ?? null,
       },
-      generatedRoleRuntime: {
-        cto: {
-          threadId: generatedCtoRuntime.threadId,
-          availability: generatedCtoRuntime.availability,
-          workspaceRoot: generatedCtoRuntime.workspaceRoot,
-          workspaceResolution: generatedCtoRuntime.workspaceResolution,
-          role: generatedCtoRuntime.summary?.role ?? null,
-          profile: generatedCtoRuntime.summary?.profile ?? null,
-          skillCount: generatedCtoRuntime.summary?.skillCount ?? null,
-        },
-        jasper: {
-          threadId: generatedJasperRuntime.threadId,
-          availability: generatedJasperRuntime.availability,
-          workspaceRoot: generatedJasperRuntime.workspaceRoot,
-          workspaceResolution: generatedJasperRuntime.workspaceResolution,
-          role: generatedJasperRuntime.summary?.role ?? null,
-          profile: generatedJasperRuntime.summary?.profile ?? null,
-          skillCount: generatedJasperRuntime.summary?.skillCount ?? null,
-        },
+      jasperRuntime: {
+        availability: jasperRuntime?.availability ?? null,
+        reasonCode: jasperRuntime?.reasonCode ?? null,
+        runtimeKind: jasperRuntime?.runtimeKind ?? null,
+        workspaceRoot: jasperRuntime?.workspaceRoot ?? null,
+        packCount: jasperRuntime?.summary?.packCount ?? null,
+        skillCount: jasperRuntime?.summary?.skillCount ?? null,
       },
+      workerRuntime:
+        workerRuntime === null
+          ? null
+          : {
+              threadId: workerRuntime.threadId,
+              workspace: workerRuntime.workspace,
+              availability: workerRuntime.availability,
+              reasonCode: workerRuntime.reasonCode,
+            },
       currentState: {
         projectCount: Array.isArray(currentStateBeforeGenerated.projects)
           ? currentStateBeforeGenerated.projects.length
@@ -875,21 +931,17 @@ async function main() {
         threadCount: Array.isArray(currentStateBeforeGenerated.threads)
           ? currentStateBeforeGenerated.threads.length
           : null,
-        generatedThreadWorktreePaths: [
-          {
-            id: generatedRoleSessions.cto.threadId,
-            worktreePath: generatedCtoThreadPush.data?.payload?.worktreePath ?? null,
-          },
-          {
-            id: generatedRoleSessions.jasper.threadId,
-            worktreePath: generatedJasperThreadPush.data?.payload?.worktreePath ?? null,
-          },
-        ],
       },
       browser: {
-        sidebarRendered: bodyText.includes("Live Orchestration Proof"),
+        sidebarRendered:
+          sidebarCtoRowFound ||
+          (activeOwnerThreadId !== null && bodyText.includes(activeOwnerThreadId)),
         containsAttention: bodyText.includes("attention"),
         frameSampleCount: browserWsFrames.length,
+        startupUrl: browserStartupUrl,
+        sidebarClickUrl,
+        startupRouteMatchesOwner: browserStartupRouteMatchesOwner,
+        sidebarClickRouteMatchesOwner,
       },
       artifacts: { screenshotPath, tracePath },
     };

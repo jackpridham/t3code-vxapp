@@ -76,7 +76,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     ).toEqual({
       allowActiveThreadsInFold: true,
       chatViewInputWhenScrolling: "hide",
-      changesDrawerVisibility: "always_show",
+      changesDrawerVisibility: "always_hide",
       changesPanelFilesChangedViewType: "list",
       changesPanelWindowNavigationMode: "static",
       confirmThreadArchive: true,

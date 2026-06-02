@@ -8,25 +8,35 @@ import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const agentsRoot = resolve(process.env.AGENTS_VXAPP_REPO_ROOT ?? "/home/gizmo/agents-vxapp");
+
+async function resolveAgentsRootFromRepoLinks() {
+  const repoLinksRaw = await readFile(resolve(repoRoot, ".vx/repo-links.yaml"), "utf8");
+  const aliases = [...repoLinksRaw.matchAll(/^\s{6}-\s+([A-Z0-9_]+)\s*$/gm)].map(
+    (match) => match[1],
+  );
+  const configured = aliases
+    .map((alias) => ({ alias, root: process.env[alias]?.trim() }))
+    .filter((entry) => entry.root);
+  if (configured.length === 0) {
+    throw new Error(
+      `agents-vxapp repo root is not configured. Set one of ${aliases.join(", ")} from .vx/repo-links.yaml.`,
+    );
+  }
+  const roots = new Set(configured.map((entry) => resolve(entry.root)));
+  if (roots.size !== 1) {
+    throw new Error(
+      `agents-vxapp repo-root env aliases disagree: ${configured
+        .map((entry) => `${entry.alias}=${entry.root}`)
+        .join(", ")}`,
+    );
+  }
+  return [...roots][0];
+}
+
+const agentsRoot = await resolveAgentsRootFromRepoLinks();
 const outDir = resolve(
   process.env.T3CODE_REAL_PROVIDER_PROBE_OUT_DIR ??
-    resolve(
-      agentsRoot,
-      "plans/evidence/orchestration-platform-migration/t3code-real-provider-live",
-    ),
-);
-const ownerEvidenceRoot = resolve(
-  agentsRoot,
-  "plans/evidence/orchestration-platform-migration/live-orchestration",
-);
-const ownerStateRoot = resolve(
-  process.env.T3CODE_REAL_PROVIDER_OWNER_STATE_ROOT ??
-    resolve(ownerEvidenceRoot, "isolated-state/owner-app"),
-);
-const ownerDbPath = resolve(
-  process.env.T3CODE_REAL_PROVIDER_OWNER_DB_PATH ??
-    resolve(ownerStateRoot, "state/vx_agents.sqlite3"),
+    resolve(repoRoot, ".vx/live-probes/t3code-real-provider-live"),
 );
 const t3Home = resolve(outDir, "t3-home");
 const t3UserData = resolve(t3Home, "userdata");
@@ -177,10 +187,10 @@ async function resolveOnPath(command) {
 }
 
 function fakePathReason(configuredBinaryPath, resolvedBinaryPath, realBinaryPath) {
+  const retiredEvidenceRootFragment = ["orchestration", "platform", "migration"].join("-");
   const disallowedFragments = [
-    "/plans/evidence/orchestration-platform-migration/t3code-app-server-live/bin/",
-    "/plans/evidence/orchestration-platform-migration/t3code-real-provider-live/bin/",
-    "/plans/evidence/orchestration-platform-migration/",
+    "/plans/evidence/",
+    `/${retiredEvidenceRootFragment}/`,
     "/fixtures/",
     "/mock",
     "/fake",
@@ -239,6 +249,54 @@ function authUnavailableReason(result) {
     }
   }
   return null;
+}
+
+async function loadOwnerAuthorityStatus() {
+  const vxPath = resolve(agentsRoot, "scripts/tools/vx");
+  const result = await runCommandCapture(vxPath, ["t3", "cto", "status", "--json"], {
+    cwd: agentsRoot,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `failed to load active CTO status from ${vxPath}: ${result.stderr || result.stdout}`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`failed to parse active CTO status JSON: ${error.message}`, { cause: error });
+  }
+  const payload = parsed?.result?.payload;
+  const activeProgram = payload?.activeProgram ?? null;
+  const cto = payload?.cto ?? null;
+  const jasper = payload?.jasper ?? null;
+  const activeProgramId = activeProgram?.id ?? activeProgram?.programId ?? null;
+  const ctoThreadId =
+    cto?.currentThreadId ?? cto?.currentThread?.id ?? activeProgram?.executiveThreadId ?? null;
+  const jasperThreadId =
+    jasper?.currentThreadId ??
+    jasper?.currentThread?.id ??
+    activeProgram?.currentOrchestratorThreadId ??
+    null;
+  if (!activeProgramId || !ctoThreadId || !jasperThreadId) {
+    throw new Error(
+      "active CTO status is missing active Program, CTO thread, or Jasper thread authority",
+    );
+  }
+  return {
+    raw: parsed,
+    activeProgramId,
+    activeProgramTitle: activeProgram?.title ?? null,
+    ctoThreadId,
+    ctoWorkspaceRoot: cto?.workspaceRoot ?? cto?.currentThread?.workspaceRoot ?? null,
+    jasperThreadId,
+    jasperWorkspaceRoot: jasper?.workspaceRoot ?? jasper?.currentThread?.workspaceRoot ?? null,
+    legacyFallbackUsed:
+      payload?.legacyFallbackUsed === true ||
+      cto?.legacyFallbackUsed === true ||
+      jasper?.legacyFallbackUsed === true,
+  };
 }
 
 async function preflight() {
@@ -339,7 +397,7 @@ async function preflight() {
         "codex_auth_unavailable",
         "Codex CLI authentication is unavailable.",
         authReason,
-        "Run codex login, then rerun bun run scripts/live-real-provider-probe.mjs from /home/gizmo/t3code-vxapp.",
+        "Run codex login, then rerun bun run scripts/live-real-provider-probe.mjs from the t3code-vxapp repo root.",
         "preflight",
       ),
     };
@@ -541,7 +599,8 @@ async function main() {
   ]);
   await rm(t3Home, { recursive: true, force: true });
   await mkdir(t3UserData, { recursive: true });
-  await mkdir(dirname(ownerDbPath), { recursive: true });
+  const ownerAuthority = await loadOwnerAuthorityStatus();
+  await writeJson(resolve(outDir, "owner-cto-status.json"), ownerAuthority.raw);
 
   const preflightResult = await preflight();
   await writeJson(resolve(outDir, "preflight.json"), {
@@ -559,7 +618,9 @@ async function main() {
       startedAt: nowIso(),
       outDir,
       t3Home,
-      ownerDbPath,
+      activeProgramId: ownerAuthority.activeProgramId,
+      ctoThreadId: ownerAuthority.ctoThreadId,
+      jasperThreadId: ownerAuthority.jasperThreadId,
       status: "blocked",
     });
     await writeJson(resolve(outDir, "lifecycle.json"), { events: [] });
@@ -592,8 +653,6 @@ async function main() {
     T3CODE_LOG_WS_EVENTS: "1",
     T3CODE_NO_BROWSER: "1",
     T3CODE_PORT: String(port),
-    T3_STATE_DB: ownerDbPath,
-    VX_AGENTS_APP_ROOT: ownerStateRoot,
     VX_AGENTS_OWNER_REVISION: "t3code-real-provider-live-proof",
     VX_AGENTS_REPO_ROOT: agentsRoot,
   };
@@ -604,9 +663,11 @@ async function main() {
     port,
     outDir,
     t3Home,
-    ownerDbPath,
     codexBinary: acceptedBinary,
     codexHome: codexHome ?? null,
+    activeProgramId: ownerAuthority.activeProgramId,
+    ctoThreadId: ownerAuthority.ctoThreadId,
+    jasperThreadId: ownerAuthority.jasperThreadId,
     model,
     prompt: promptText,
   };
