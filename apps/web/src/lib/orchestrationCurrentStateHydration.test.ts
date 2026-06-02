@@ -14,6 +14,7 @@ import {
   addOrchestratorSessionWorkerDetailsToReadModel,
   addOrchestratorSessionWorkerChangesToReadModel,
   addThreadDetailToReadModel,
+  loadTargetedThreadDetailReadModel,
 } from "./orchestrationCurrentStateHydration";
 
 const projectId = ProjectId.makeUnsafe("project-1");
@@ -92,6 +93,14 @@ function makeReadModel(
 function makeApi(overrides: Partial<NativeApi["orchestration"]> = {}) {
   return {
     orchestration: {
+      getCurrentState: vi.fn(),
+      getReadiness: vi.fn().mockResolvedValue({
+        snapshotSequence: 12,
+        projectCount: 1,
+        threadCount: 2,
+      }),
+      getProjectFullById: vi.fn().mockResolvedValue(makeReadModel([]).projects[0]),
+      getThreadById: vi.fn().mockResolvedValue(null),
       listSessionThreads: vi.fn().mockResolvedValue([]),
       listThreadMessages: vi.fn().mockResolvedValue([
         {
@@ -277,6 +286,114 @@ describe("orchestration current-state hydration", () => {
         activityLimit: 0,
       }),
     );
+  });
+
+  it("loads targeted thread detail without calling broad current state", async () => {
+    const summary = makeThreadSummary(rootThreadId);
+    const api = makeApi({
+      listSessionThreads: vi.fn().mockResolvedValue([summary]),
+    });
+    const base = makeReadModel([makeThread(rootThreadId)]);
+
+    const next = await loadTargetedThreadDetailReadModel({
+      api,
+      threadId: rootThreadId,
+      baseReadModel: base,
+    });
+
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
+    expect(api.orchestration.getReadiness).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.getProjectFullById).toHaveBeenCalledWith({ projectId });
+    expect(next).toEqual(
+      expect.objectContaining({
+        snapshotSequence: 12,
+        snapshotProfile: "active-thread",
+        projects: [expect.objectContaining({ id: projectId, scripts: [], hooks: [] })],
+        threads: [
+          expect.objectContaining({
+            id: rootThreadId,
+            messages: [expect.objectContaining({ text: "loaded history" })],
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("dedupes only thread-detail fragments and merges them with each caller base", async () => {
+    const summary = makeThreadSummary(rootThreadId);
+    const extraProjectId = ProjectId.makeUnsafe("project-extra");
+    const baseA = makeReadModel([makeThread(rootThreadId)]);
+    const baseB: OrchestrationReadModel = {
+      ...makeReadModel([makeThread(rootThreadId)]),
+      projects: [
+        ...makeReadModel([]).projects,
+        {
+          id: extraProjectId,
+          title: "Extra Project",
+          workspaceRoot: "/extra",
+          kind: "project",
+          defaultModelSelection: null,
+          scripts: [],
+          hooks: [],
+          createdAt: "2026-04-14T00:00:00.000Z",
+          updatedAt: "2026-04-14T00:00:00.000Z",
+          deletedAt: null,
+        },
+      ],
+    };
+    const api = makeApi({
+      listSessionThreads: vi.fn().mockResolvedValue([summary]),
+    });
+
+    const [resultA, resultB] = await Promise.all([
+      loadTargetedThreadDetailReadModel({
+        api,
+        threadId: rootThreadId,
+        baseReadModel: baseA,
+      }),
+      loadTargetedThreadDetailReadModel({
+        api,
+        threadId: rootThreadId,
+        baseReadModel: baseB,
+      }),
+    ]);
+
+    expect(api.orchestration.listThreadMessages).toHaveBeenCalledTimes(1);
+    expect(resultA.projects.some((project) => project.id === extraProjectId)).toBe(false);
+    expect(resultB.projects.some((project) => project.id === extraProjectId)).toBe(true);
+  });
+
+  it("does not add a targeted thread when its full project cannot be resolved", async () => {
+    const api = makeApi({
+      getProjectFullById: vi.fn().mockResolvedValue(null),
+      listSessionThreads: vi.fn().mockResolvedValue([makeThreadSummary(rootThreadId)]),
+    });
+
+    const next = await loadTargetedThreadDetailReadModel({
+      api,
+      threadId: rootThreadId,
+      baseReadModel: null,
+    });
+
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
+    expect(next.threads.some((thread) => thread.id === rootThreadId)).toBe(false);
+    expect(next.projects).toEqual([]);
+  });
+
+  it("uses a current timestamp, not the epoch, for empty targeted partials", async () => {
+    const api = makeApi({
+      getThreadById: vi.fn().mockResolvedValue(null),
+      listSessionThreads: vi.fn().mockResolvedValue([]),
+    });
+
+    const next = await loadTargetedThreadDetailReadModel({
+      api,
+      threadId: rootThreadId,
+      baseReadModel: null,
+    });
+
+    expect(next.updatedAt).not.toBe("1970-01-01T00:00:00.000Z");
+    expect(Date.parse(next.updatedAt)).toBeGreaterThan(Date.parse("2026-01-01T00:00:00.000Z"));
   });
 
   it("paginates older messages and activities until history is exhausted", async () => {

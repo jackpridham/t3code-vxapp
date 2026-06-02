@@ -31,6 +31,7 @@ type AgentsVxappStoreState = {
   error: AgentsVxappOwnerBoundaryError | null;
   fetchedAt: number | null;
   inFlightRefresh: Promise<void> | null;
+  authorityGeneration: number;
   notifications: readonly ServerAgentsVxappSidebarProgramNotification[];
   openWakes: readonly ServerAgentsVxappSidebarWake[];
   openWakeSummaryByThreadId: ReadonlyMap<string, SidebarWakeSummary>;
@@ -113,6 +114,7 @@ export const useAgentsVxappStore = create<AgentsVxappStoreState>((set, get) => (
   error: null,
   fetchedAt: null,
   inFlightRefresh: null,
+  authorityGeneration: 0,
   attentionItems: [],
   notifications: [],
   openWakes: [],
@@ -141,19 +143,23 @@ export const useAgentsVxappStore = create<AgentsVxappStoreState>((set, get) => (
       todosByProgramId: normalized.todosByProgramId,
     }),
   invalidate: () =>
-    set({
+    set((state) => ({
       fetchedAt: null,
-    }),
+      inFlightRefresh: null,
+      authorityGeneration: state.authorityGeneration + 1,
+    })),
   refreshSidebarAuthority: async (input) => {
     const existing = get();
     if (!input?.force && hasFreshSnapshot(existing)) {
       return;
     }
-    if (existing.inFlightRefresh) {
+    if (!input?.force && existing.inFlightRefresh) {
       await existing.inFlightRefresh;
       return;
     }
-    const refreshPromise = (async () => {
+    const generation = existing.authorityGeneration;
+    let refreshPromise!: Promise<void>;
+    refreshPromise = (async () => {
       set((state) => ({
         status: state.snapshot === null ? "loading" : state.status,
         error: null,
@@ -163,8 +169,22 @@ export const useAgentsVxappStore = create<AgentsVxappStoreState>((set, get) => (
           limit: input?.limit ?? AGENTS_VXAPP_PROGRAM_PAGE_LIMIT,
           page: input?.page ?? 1,
         });
-        get().setNormalizedSnapshot(normalizeAgentsVxappSidebarAuthoritySnapshot(snapshot));
+        const normalized = normalizeAgentsVxappSidebarAuthoritySnapshot(snapshot);
+        const current = get();
+        if (
+          current.authorityGeneration === generation &&
+          current.inFlightRefresh === refreshPromise
+        ) {
+          current.setNormalizedSnapshot(normalized);
+        }
       } catch (error) {
+        const current = get();
+        if (
+          current.authorityGeneration !== generation ||
+          current.inFlightRefresh !== refreshPromise
+        ) {
+          return;
+        }
         const boundaryError: AgentsVxappOwnerBoundaryError =
           error && typeof error === "object" && "kind" in error && "message" in error
             ? (error as AgentsVxappOwnerBoundaryError)

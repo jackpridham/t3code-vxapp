@@ -45,6 +45,7 @@ function makeProjectionOperationalQuery(
     getCurrentState: unused,
     listProjects: unused,
     getProjectById: unused,
+    getProjectFullById: unused,
     getProjectByWorkspace: unused,
     getThreadById: unused,
     listProjectThreads: unused,

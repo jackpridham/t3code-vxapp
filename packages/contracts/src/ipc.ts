@@ -70,6 +70,8 @@ import type {
   OrchestrationGetSnapshotInput,
   OrchestrationGetProjectByIdInput,
   OrchestrationGetProjectByIdResult,
+  OrchestrationGetProjectFullByIdInput,
+  OrchestrationGetProjectFullByIdResult,
   OrchestrationGetProjectByWorkspaceInput,
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetFileDiffInput,
@@ -277,6 +279,9 @@ export interface NativeApi {
     getProjectById: (
       input: OrchestrationGetProjectByIdInput,
     ) => Promise<OrchestrationGetProjectByIdResult>;
+    getProjectFullById: (
+      input: OrchestrationGetProjectFullByIdInput,
+    ) => Promise<OrchestrationGetProjectFullByIdResult>;
     getProjectByWorkspace: (
       input: OrchestrationGetProjectByWorkspaceInput,
     ) => Promise<OrchestrationGetProjectByWorkspaceResult>;

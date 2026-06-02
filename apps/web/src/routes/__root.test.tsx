@@ -188,6 +188,17 @@ function makeReadModel(
 
 function makeThreadDetailApi(overrides: Partial<NativeApi["orchestration"]> = {}) {
   return {
+    getReadiness: vi.fn().mockResolvedValue({
+      snapshotSequence: 6,
+      projectCount: 1,
+      threadCount: 1,
+    }),
+    getProjectFullById: vi
+      .fn()
+      .mockResolvedValue(makeReadModel(6, ThreadId.makeUnsafe("thread-root")).projects[0]),
+    getThreadById: vi
+      .fn()
+      .mockResolvedValue(makeReadModel(6, ThreadId.makeUnsafe("thread-root")).threads[0]),
     listThreadMessages: vi.fn().mockResolvedValue([
       {
         id: MessageId.makeUnsafe("message-thread-detail"),
@@ -242,7 +253,7 @@ describe("bootstrapOrchestrationState", () => {
     });
 
     expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
-    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).not.toHaveBeenCalled();
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
@@ -357,7 +368,7 @@ describe("bootstrapOrchestrationState", () => {
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
-      limit: 1000,
+      limit: 500,
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(1, currentState);
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
@@ -409,7 +420,7 @@ describe("bootstrapOrchestrationState", () => {
     });
 
     expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
-    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).not.toHaveBeenCalled();
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: ThreadId.makeUnsafe("thread-root"),
@@ -456,7 +467,7 @@ describe("bootstrapOrchestrationState", () => {
       getCurrentThreadId: () => routeThreadId,
     });
 
-    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).not.toHaveBeenCalled();
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listSessionThreads).toHaveBeenCalledWith({
       rootThreadId: routeThreadId,

@@ -360,6 +360,9 @@ describe("wsNativeApi", () => {
     await api.orchestration.getProjectById({
       projectId: ProjectId.makeUnsafe("project-1"),
     });
+    await api.orchestration.getProjectFullById({
+      projectId: ProjectId.makeUnsafe("project-1"),
+    });
     await api.orchestration.getProjectByWorkspace({
       workspaceRoot: "/tmp/project",
     });
@@ -387,18 +390,21 @@ describe("wsNativeApi", () => {
     expect(requestMock).toHaveBeenNthCalledWith(5, ORCHESTRATION_WS_METHODS.getProjectById, {
       projectId: "project-1",
     });
-    expect(requestMock).toHaveBeenNthCalledWith(6, ORCHESTRATION_WS_METHODS.getProjectByWorkspace, {
+    expect(requestMock).toHaveBeenNthCalledWith(6, ORCHESTRATION_WS_METHODS.getProjectFullById, {
+      projectId: "project-1",
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(7, ORCHESTRATION_WS_METHODS.getProjectByWorkspace, {
       workspaceRoot: "/tmp/project",
     });
-    expect(requestMock).toHaveBeenNthCalledWith(7, ORCHESTRATION_WS_METHODS.listProjectThreads, {
+    expect(requestMock).toHaveBeenNthCalledWith(8, ORCHESTRATION_WS_METHODS.listProjectThreads, {
       projectId: "project-1",
       includeArchived: false,
       includeDeleted: false,
     });
-    expect(requestMock).toHaveBeenNthCalledWith(8, ORCHESTRATION_WS_METHODS.getThreadById, {
+    expect(requestMock).toHaveBeenNthCalledWith(9, ORCHESTRATION_WS_METHODS.getThreadById, {
       threadId: "thread-1",
     });
-    expect(requestMock).toHaveBeenNthCalledWith(9, ORCHESTRATION_WS_METHODS.listSessionThreads, {
+    expect(requestMock).toHaveBeenNthCalledWith(10, ORCHESTRATION_WS_METHODS.listSessionThreads, {
       rootThreadId: "thread-1",
       includeArchived: true,
       includeDeleted: false,

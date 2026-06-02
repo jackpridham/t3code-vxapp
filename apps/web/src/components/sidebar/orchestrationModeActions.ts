@@ -14,7 +14,8 @@ import {
   orchestrationProjectThreadsQueryOptions,
   orchestrationSessionThreadsQueryOptions,
 } from "../../lib/orchestrationReactQuery";
-import { loadCurrentStateWithThreadDetail } from "../../lib/orchestrationCurrentStateHydration";
+import { loadTargetedThreadDetailReadModel } from "../../lib/orchestrationCurrentStateHydration";
+import { buildOrchestrationReadModelFromStoreState, useStore } from "../../store";
 import { newCommandId, newThreadId } from "../../lib/utils";
 
 export interface SessionReactivationPlan {
@@ -320,7 +321,11 @@ export async function reactivateOrchestrationSession(input: {
     ),
   );
 
-  const readModel = await loadCurrentStateWithThreadDetail(input.api, plan.rootThreadIdToHydrate);
+  const readModel = await loadTargetedThreadDetailReadModel({
+    api: input.api,
+    threadId: plan.rootThreadIdToHydrate,
+    baseReadModel: buildOrchestrationReadModelFromStoreState(useStore.getState()),
+  });
   input.syncServerReadModel(readModel);
 
   await input.queryClient.fetchQuery(
@@ -412,7 +417,11 @@ export async function createNewOrchestrationSession(input: {
     ),
   );
 
-  const readModel = await loadCurrentStateWithThreadDetail(input.api, newRootThreadId);
+  const readModel = await loadTargetedThreadDetailReadModel({
+    api: input.api,
+    threadId: newRootThreadId,
+    baseReadModel: buildOrchestrationReadModelFromStoreState(useStore.getState()),
+  });
   input.syncServerReadModel(readModel);
 
   await input.queryClient.fetchQuery(

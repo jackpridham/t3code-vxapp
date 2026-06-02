@@ -40,6 +40,47 @@ function makeSummary(
   };
 }
 
+function makeFullProject(projectId: ProjectId) {
+  return {
+    id: projectId,
+    title: "Project",
+    workspaceRoot: "/workspace",
+    kind: "project" as const,
+    currentSessionRootThreadId: null,
+    defaultModelSelection: null,
+    scripts: [],
+    hooks: [],
+    createdAt: "2026-04-10T00:00:00.000Z",
+    updatedAt: "2026-04-10T00:00:00.000Z",
+    deletedAt: null,
+  };
+}
+
+function makeTargetedHydrationApi(projectId: ProjectId) {
+  return {
+    getReadiness: vi.fn().mockResolvedValue({
+      snapshotSequence: 2,
+      projectCount: 1,
+      threadCount: 1,
+    }),
+    getProjectFullById: vi.fn().mockResolvedValue(makeFullProject(projectId)),
+    getThreadById: vi.fn(({ threadId }: { threadId: ThreadId }) =>
+      Promise.resolve(
+        makeSummary({
+          id: threadId,
+          projectId,
+          spawnRole: "orchestrator",
+        }),
+      ),
+    ),
+    listThreadMessages: vi.fn().mockResolvedValue([]),
+    listThreadActivities: vi.fn().mockResolvedValue([]),
+    listThreadSessions: vi.fn().mockResolvedValue([]),
+    listSessionThreads: vi.fn().mockResolvedValue([]),
+    listOrchestratorWakes: vi.fn().mockResolvedValue([]),
+  };
+}
+
 describe("buildSessionReactivationPlan", () => {
   it("does not archive or unarchive when selecting the already active root", () => {
     const rootId = ThreadId.makeUnsafe("root-1");
@@ -179,21 +220,11 @@ describe("reactivateOrchestrationSession", () => {
         updatedAt: "2026-04-10T00:00:00.000Z",
       },
     });
-    const snapshot = {
-      snapshotSequence: 1,
-      projects: [],
-      threads: [],
-      orchestratorWakeItems: [],
-      updatedAt: "2026-04-10T00:00:00.000Z",
-    };
     const dispatchCommand = vi.fn().mockResolvedValue({ sequence: 1 });
-    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getCurrentState = vi.fn();
     const getSnapshot = vi.fn();
-    const listThreadMessages = vi.fn().mockResolvedValue([]);
-    const listThreadActivities = vi.fn().mockResolvedValue([]);
-    const listThreadSessions = vi.fn().mockResolvedValue([]);
-    const listSessionThreads = vi.fn().mockResolvedValue([]);
-    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
+    const targetedHydrationApi = makeTargetedHydrationApi(projectId);
+    targetedHydrationApi.listSessionThreads.mockResolvedValue([targetRoot]);
     const confirm = vi.fn().mockResolvedValue(true);
     const queryClient = new QueryClient();
     const invalidateQueries = vi
@@ -213,11 +244,7 @@ describe("reactivateOrchestrationSession", () => {
           dispatchCommand,
           getCurrentState,
           getSnapshot,
-          listThreadMessages,
-          listThreadActivities,
-          listThreadSessions,
-          listSessionThreads,
-          listOrchestratorWakes,
+          ...targetedHydrationApi,
         },
       } as never,
       queryClient,
@@ -239,13 +266,18 @@ describe("reactivateOrchestrationSession", () => {
       "thread.unarchive",
       "project.meta.update",
     ]);
-    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).not.toHaveBeenCalled();
     expect(getSnapshot).not.toHaveBeenCalled();
-    expect(listThreadMessages).toHaveBeenCalledWith({
+    expect(targetedHydrationApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: targetRoot.id,
-      limit: 1000,
+      limit: 200,
     });
-    expect(syncServerReadModel).toHaveBeenCalledWith(snapshot);
+    expect(syncServerReadModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotProfile: "active-thread",
+        threads: expect.arrayContaining([expect.objectContaining({ id: targetRoot.id })]),
+      }),
+    );
     expect(invalidateQueries).toHaveBeenCalled();
     expect(fetchQuery).toHaveBeenCalled();
     expect(navigateToThread).toHaveBeenCalledWith(targetRoot.id);
@@ -274,21 +306,10 @@ describe("createNewOrchestrationSession", () => {
         updatedAt: "2026-04-10T00:00:00.000Z",
       },
     });
-    const snapshot = {
-      snapshotSequence: 1,
-      projects: [],
-      threads: [],
-      orchestratorWakeItems: [],
-      updatedAt: "2026-04-10T00:00:00.000Z",
-    };
     const dispatchCommand = vi.fn().mockResolvedValue({ sequence: 1 });
-    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getCurrentState = vi.fn();
     const getSnapshot = vi.fn();
-    const listThreadMessages = vi.fn().mockResolvedValue([]);
-    const listThreadActivities = vi.fn().mockResolvedValue([]);
-    const listThreadSessions = vi.fn().mockResolvedValue([]);
-    const listSessionThreads = vi.fn().mockResolvedValue([]);
-    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
+    const targetedHydrationApi = makeTargetedHydrationApi(projectId);
     const confirm = vi.fn().mockResolvedValue(true);
     const queryClient = new QueryClient();
     const invalidateQueries = vi
@@ -309,11 +330,7 @@ describe("createNewOrchestrationSession", () => {
           dispatchCommand,
           getCurrentState,
           getSnapshot,
-          listThreadMessages,
-          listThreadActivities,
-          listThreadSessions,
-          listSessionThreads,
-          listOrchestratorWakes,
+          ...targetedHydrationApi,
         },
       } as never,
       queryClient,
@@ -344,13 +361,18 @@ describe("createNewOrchestrationSession", () => {
       projectId,
       currentSessionRootThreadId: newThreadId,
     });
-    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).not.toHaveBeenCalled();
     expect(getSnapshot).not.toHaveBeenCalled();
-    expect(listThreadMessages).toHaveBeenCalledWith({
+    expect(targetedHydrationApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: newThreadId,
-      limit: 1000,
+      limit: 200,
     });
-    expect(syncServerReadModel).toHaveBeenCalledWith(snapshot);
+    expect(syncServerReadModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotProfile: "active-thread",
+        threads: expect.arrayContaining([expect.objectContaining({ id: newThreadId })]),
+      }),
+    );
     expect(invalidateQueries).toHaveBeenCalled();
     expect(fetchQuery).toHaveBeenCalledTimes(3);
     expect(navigateToThread).toHaveBeenCalledWith(newThreadId);
@@ -371,21 +393,10 @@ describe("createNewOrchestrationSession", () => {
       archivedAt: "2026-04-10T00:09:00.000Z",
       updatedAt: "2026-04-10T00:09:00.000Z",
     });
-    const snapshot = {
-      snapshotSequence: 1,
-      projects: [],
-      threads: [],
-      orchestratorWakeItems: [],
-      updatedAt: "2026-04-10T00:00:00.000Z",
-    };
     const dispatchCommand = vi.fn().mockResolvedValue({ sequence: 1 });
-    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getCurrentState = vi.fn();
     const getSnapshot = vi.fn();
-    const listThreadMessages = vi.fn().mockResolvedValue([]);
-    const listThreadActivities = vi.fn().mockResolvedValue([]);
-    const listThreadSessions = vi.fn().mockResolvedValue([]);
-    const listSessionThreads = vi.fn().mockResolvedValue([]);
-    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
+    const targetedHydrationApi = makeTargetedHydrationApi(projectId);
     const confirm = vi.fn().mockResolvedValue(true);
     const queryClient = new QueryClient();
     vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
@@ -404,11 +415,7 @@ describe("createNewOrchestrationSession", () => {
           dispatchCommand,
           getCurrentState,
           getSnapshot,
-          listThreadMessages,
-          listThreadActivities,
-          listThreadSessions,
-          listSessionThreads,
-          listOrchestratorWakes,
+          ...targetedHydrationApi,
         },
       } as never,
       queryClient,
@@ -430,6 +437,7 @@ describe("createNewOrchestrationSession", () => {
       type: "thread.archive",
       threadId: activeRoot.id,
     });
+    expect(getCurrentState).not.toHaveBeenCalled();
   });
 
   it("skips archived session members and tolerates concurrent already-archived responses", async () => {
@@ -445,13 +453,6 @@ describe("createNewOrchestrationSession", () => {
       parentThreadId: activeRoot.id,
       archivedAt: "2026-04-10T00:05:00.000Z",
     });
-    const snapshot = {
-      snapshotSequence: 1,
-      projects: [],
-      threads: [],
-      orchestratorWakeItems: [],
-      updatedAt: "2026-04-10T00:00:00.000Z",
-    };
     const dispatchCommand = vi.fn((command) => {
       if (command.type === "thread.archive") {
         return Promise.reject(
@@ -462,13 +463,9 @@ describe("createNewOrchestrationSession", () => {
       }
       return Promise.resolve({ sequence: 1 });
     });
-    const getCurrentState = vi.fn().mockResolvedValue(snapshot);
+    const getCurrentState = vi.fn();
     const getSnapshot = vi.fn();
-    const listThreadMessages = vi.fn().mockResolvedValue([]);
-    const listThreadActivities = vi.fn().mockResolvedValue([]);
-    const listThreadSessions = vi.fn().mockResolvedValue([]);
-    const listSessionThreads = vi.fn().mockResolvedValue([]);
-    const listOrchestratorWakes = vi.fn().mockResolvedValue([]);
+    const targetedHydrationApi = makeTargetedHydrationApi(projectId);
     const confirm = vi.fn().mockResolvedValue(true);
     const queryClient = new QueryClient();
     vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
@@ -486,11 +483,7 @@ describe("createNewOrchestrationSession", () => {
           dispatchCommand,
           getCurrentState,
           getSnapshot,
-          listThreadMessages,
-          listThreadActivities,
-          listThreadSessions,
-          listSessionThreads,
-          listOrchestratorWakes,
+          ...targetedHydrationApi,
         },
       } as never,
       queryClient,
@@ -506,5 +499,6 @@ describe("createNewOrchestrationSession", () => {
       "thread.create",
       "project.meta.update",
     ]);
+    expect(getCurrentState).not.toHaveBeenCalled();
   });
 });

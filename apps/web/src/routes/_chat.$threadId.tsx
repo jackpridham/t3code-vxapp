@@ -39,7 +39,7 @@ import {
   threadNeedsRouteHistoryHydration,
 } from "../lib/routeThreadHistoryHydration";
 import { readNativeApi } from "../nativeApi";
-import { useStore } from "../store";
+import { buildOrchestrationReadModelFromStoreState, useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
 import {
@@ -253,6 +253,7 @@ function ChatThreadRouteView() {
     void hydrateMissingRouteThread({
       api,
       threadId,
+      baseReadModel: buildOrchestrationReadModelFromStoreState(useStore.getState()),
       syncServerReadModel: (readModel) => {
         if (!cancelled) {
           useStore.getState().syncServerReadModel(readModel);
@@ -293,6 +294,7 @@ function ChatThreadRouteView() {
       api,
       threadId,
       thread: routeThread,
+      baseReadModel: buildOrchestrationReadModelFromStoreState(useStore.getState()),
       syncServerReadModel: (readModel) => {
         if (!cancelled) {
           useStore.getState().syncServerReadModel(readModel);

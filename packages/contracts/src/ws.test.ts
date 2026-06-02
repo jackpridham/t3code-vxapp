@@ -104,6 +104,18 @@ it.effect("accepts bounded orchestration read requests", () =>
     if (parsed.body._tag === ORCHESTRATION_WS_METHODS.getProjectByWorkspace) {
       assert.strictEqual(parsed.body.workspaceRoot, "/tmp/workspace");
     }
+
+    const projectFull = yield* decodeWebSocketRequest({
+      id: "req-project-full-1",
+      body: {
+        _tag: ORCHESTRATION_WS_METHODS.getProjectFullById,
+        projectId: "project-1",
+      },
+    });
+    assert.strictEqual(projectFull.body._tag, ORCHESTRATION_WS_METHODS.getProjectFullById);
+    if (projectFull.body._tag === ORCHESTRATION_WS_METHODS.getProjectFullById) {
+      assert.strictEqual(projectFull.body.projectId, "project-1");
+    }
   }),
 );
 

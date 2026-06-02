@@ -2444,6 +2444,50 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
       ),
     );
 
+  const getProjectFullById: ProjectionOperationalQueryShape["getProjectFullById"] = (input) =>
+    Effect.all({
+      projectRow: getProjectByIdRow({ projectId: input.projectId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionOperationalQuery.getProjectFullById:query",
+            "ProjectionOperationalQuery.getProjectFullById:decodeRow",
+          ),
+        ),
+      ),
+      externalSnapshot: getExternalSnapshot(),
+      runtimePaths: getRuntimePaths(),
+    }).pipe(
+      Effect.flatMap(({ projectRow, externalSnapshot, runtimePaths }) =>
+        getBindingAuthorityForVxappProjectRows(
+          Option.match(projectRow, {
+            onNone: () => [],
+            onSome: (row) => [row],
+          }),
+          runtimePaths,
+        ).pipe(
+          Effect.map((bindingAuthority) => {
+            const externalProject =
+              externalSnapshot.projects.find((project) => project.id === input.projectId) ?? null;
+            if (externalProject) {
+              return (
+                applyBindingCurrentThreadToProjects([externalProject], bindingAuthority)[0] ?? null
+              );
+            }
+            return Option.match(projectRow, {
+              onNone: (): null => null,
+              onSome: (row) =>
+                isAgentsVxappWorkspaceRoot(row.workspaceRoot, runtimePaths)
+                  ? null
+                  : (applyBindingCurrentThreadToProjects(
+                      [mapProjectRowToReadModelProject(row)],
+                      bindingAuthority,
+                    )[0] ?? null),
+            });
+          }),
+        ),
+      ),
+    );
+
   const getProjectByWorkspace: ProjectionOperationalQueryShape["getProjectByWorkspace"] = (input) =>
     Effect.all({
       projectRow: getProjectByWorkspaceRow({
@@ -2897,6 +2941,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
     getCurrentState,
     listProjects,
     getProjectById,
+    getProjectFullById,
     getProjectByWorkspace,
     listProjectThreads,
     getThreadById,

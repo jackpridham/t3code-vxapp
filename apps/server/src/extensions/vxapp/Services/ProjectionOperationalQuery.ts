@@ -3,6 +3,8 @@ import type {
   OrchestrationGetCurrentStateResult,
   OrchestrationGetProjectByIdInput,
   OrchestrationGetProjectByIdResult,
+  OrchestrationGetProjectFullByIdInput,
+  OrchestrationGetProjectFullByIdResult,
   OrchestrationGetProjectByWorkspaceInput,
   OrchestrationGetProjectByWorkspaceResult,
   OrchestrationGetReadinessResult,
@@ -53,6 +55,9 @@ export interface ProjectionOperationalQueryShape {
   readonly getProjectById: (
     input: OrchestrationGetProjectByIdInput,
   ) => Effect.Effect<OrchestrationGetProjectByIdResult, ProjectionRepositoryError>;
+  readonly getProjectFullById: (
+    input: OrchestrationGetProjectFullByIdInput,
+  ) => Effect.Effect<OrchestrationGetProjectFullByIdResult, ProjectionRepositoryError>;
   readonly getProjectByWorkspace: (
     input: OrchestrationGetProjectByWorkspaceInput,
   ) => Effect.Effect<OrchestrationGetProjectByWorkspaceResult, ProjectionRepositoryError>;

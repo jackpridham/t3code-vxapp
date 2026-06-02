@@ -145,6 +145,13 @@ function makeApi(): NativeApi {
   return {
     orchestration: {
       getCurrentState: vi.fn().mockResolvedValue(makeReadModel()),
+      getReadiness: vi.fn().mockResolvedValue({
+        snapshotSequence: 11,
+        projectCount: 1,
+        threadCount: 1,
+      }),
+      getProjectFullById: vi.fn().mockResolvedValue(makeReadModel().projects[0]),
+      getThreadById: vi.fn().mockResolvedValue(makeReadModel().threads[0]),
       listSessionThreads: vi.fn().mockResolvedValue([]),
       listThreadMessages: vi.fn().mockResolvedValue([
         {
@@ -201,11 +208,14 @@ describe("route thread history hydration", () => {
         api,
         threadId,
         thread: makeStartedSummaryThread(),
+        baseReadModel: makeReadModel(),
         syncServerReadModel,
       }),
     ).resolves.toBe(true);
 
-    expect(api.orchestration.getCurrentState).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
+    expect(api.orchestration.getReadiness).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.getProjectFullById).toHaveBeenCalledWith({ projectId });
     expect(api.orchestration.listThreadMessages).toHaveBeenCalledWith({
       threadId,
       limit: 200,
@@ -248,11 +258,12 @@ describe("route thread history hydration", () => {
       hydrateMissingRouteThread({
         api,
         threadId: missingThreadId,
+        baseReadModel: makeReadModel(),
         syncServerReadModel,
       }),
     ).resolves.toBe(true);
 
-    expect(api.orchestration.getCurrentState).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
     expect(api.orchestration.listSessionThreads).toHaveBeenCalledWith({
       rootThreadId: missingThreadId,
       includeArchived: true,
@@ -269,17 +280,77 @@ describe("route thread history hydration", () => {
     const api = makeApi();
     const missingThreadId = ThreadId.makeUnsafe("thread-missing");
     vi.mocked(api.orchestration.listSessionThreads).mockResolvedValue([]);
+    vi.mocked(api.orchestration.getThreadById).mockResolvedValue(null);
     const syncServerReadModel = vi.fn();
 
     await expect(
       hydrateMissingRouteThread({
         api,
         threadId: missingThreadId,
+        baseReadModel: makeReadModel(),
         syncServerReadModel,
       }),
     ).resolves.toBe(false);
 
-    expect(api.orchestration.getCurrentState).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
+    expect(syncServerReadModel).not.toHaveBeenCalled();
+  });
+
+  it("hydrates direct archived route threads through targeted lookup", async () => {
+    const api = makeApi();
+    const archivedThreadId = ThreadId.makeUnsafe("thread-archived");
+    vi.mocked(api.orchestration.listSessionThreads).mockResolvedValue([]);
+    vi.mocked(api.orchestration.getThreadById).mockResolvedValue({
+      ...(makeReadModel().threads[0] as OrchestrationThreadSummary),
+      id: archivedThreadId,
+      title: "Archived thread",
+      archivedAt: "2026-04-15T00:00:00.000Z",
+    });
+    const syncServerReadModel = vi.fn();
+
+    await expect(
+      hydrateMissingRouteThread({
+        api,
+        threadId: archivedThreadId,
+        baseReadModel: makeReadModel(),
+        syncServerReadModel,
+      }),
+    ).resolves.toBe(true);
+
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
+    expect(syncServerReadModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threads: expect.arrayContaining([
+          expect.objectContaining({
+            id: archivedThreadId,
+            archivedAt: "2026-04-15T00:00:00.000Z",
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("does not sync deleted direct route threads", async () => {
+    const api = makeApi();
+    const deletedThreadId = ThreadId.makeUnsafe("thread-deleted");
+    vi.mocked(api.orchestration.listSessionThreads).mockResolvedValue([]);
+    vi.mocked(api.orchestration.getThreadById).mockResolvedValue({
+      ...(makeReadModel().threads[0] as OrchestrationThreadSummary),
+      id: deletedThreadId,
+      deletedAt: "2026-04-15T00:00:00.000Z",
+    });
+    const syncServerReadModel = vi.fn();
+
+    await expect(
+      hydrateMissingRouteThread({
+        api,
+        threadId: deletedThreadId,
+        baseReadModel: makeReadModel(),
+        syncServerReadModel,
+      }),
+    ).resolves.toBe(false);
+
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
     expect(syncServerReadModel).not.toHaveBeenCalled();
   });
 
@@ -344,6 +415,7 @@ describe("route thread history hydration", () => {
           latestTurn: makeStartedSummaryThread().latestTurn,
           spawnRole: "orchestrator",
         }),
+        baseReadModel: makeReadModel(),
         syncServerReadModel,
       }),
     ).resolves.toBe(true);
@@ -402,6 +474,7 @@ describe("route thread history hydration", () => {
             },
           ],
         }),
+        baseReadModel: makeReadModel(),
         syncServerReadModel,
       }),
     ).resolves.toBe(false);

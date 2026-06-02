@@ -23,11 +23,11 @@ import {
 import { readNativeApi } from "../../nativeApi";
 import { newCommandId, newProjectId } from "../../lib/utils";
 import { toastManager } from "../ui/toast";
-import { useStore } from "../../store";
+import { buildOrchestrationReadModelFromStoreState, useStore } from "../../store";
 import type { DraftThreadEnvMode } from "../../composerDraftStore";
 import type { Project, Thread } from "../../types";
 import { createNewOrchestrationSession } from "./orchestrationModeActions";
-import { loadCurrentStateWithThreadDetail } from "../../lib/orchestrationCurrentStateHydration";
+import { loadTargetedThreadDetailReadModel } from "../../lib/orchestrationCurrentStateHydration";
 
 type ProjectDraftThread = {
   threadId: ThreadId;
@@ -261,7 +261,11 @@ export function useSidebarProjectController<TThread extends ThreadLike>(
             .getState()
             .threads.some((thread) => thread.id === latestServerThread.id);
           if (!alreadyHydrated) {
-            const readModel = await loadCurrentStateWithThreadDetail(api, latestServerThread.id);
+            const readModel = await loadTargetedThreadDetailReadModel({
+              api,
+              threadId: latestServerThread.id,
+              baseReadModel: buildOrchestrationReadModelFromStoreState(useStore.getState()),
+            });
             useStore.getState().syncServerReadModel(readModel);
           }
           await input.navigateToSelectedThread(latestServerThread.id);

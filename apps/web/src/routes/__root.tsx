@@ -30,7 +30,7 @@ import {
   clearPromotedDraftThreads,
   useComposerDraftStore,
 } from "../composerDraftStore";
-import { useStore } from "../store";
+import { buildOrchestrationReadModelFromStoreState, useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
@@ -56,9 +56,8 @@ import {
 } from "../lib/orchestrationReactQuery";
 import { buildAppDocumentTitle } from "../lib/documentTitle";
 import {
-  addThreadDetailToReadModel,
-  loadCurrentStateWithOrchestratorSessionDetail,
-  loadCurrentStateWithThreadDetail,
+  loadTargetedOrchestratorSessionDetailReadModel,
+  loadTargetedThreadDetailReadModel,
 } from "../lib/orchestrationCurrentStateHydration";
 import { resolveThreadSessionRootId } from "../lib/orchestrationMode";
 import type { Project, Thread } from "../types";
@@ -407,8 +406,16 @@ export async function bootstrapOrchestrationState({
       const activeThread = summaryApplied.threads.find((thread) => thread.id === activeThreadId);
       await runSnapshotRecovery(() =>
         activeThread?.spawnRole === "orchestrator"
-          ? loadCurrentStateWithOrchestratorSessionDetail(api, activeThreadId)
-          : loadCurrentStateWithThreadDetail(api, activeThreadId),
+          ? loadTargetedOrchestratorSessionDetailReadModel({
+              api,
+              threadId: activeThreadId,
+              baseReadModel: summaryApplied,
+            })
+          : loadTargetedThreadDetailReadModel({
+              api,
+              threadId: activeThreadId,
+              baseReadModel: summaryApplied,
+            }),
       );
     }
     return;
@@ -422,8 +429,18 @@ export async function bootstrapOrchestrationState({
     const activeThread = currentState.threads.find((thread) => thread.id === activeThreadId);
     await runSnapshotRecovery(() =>
       activeThread?.spawnRole === "orchestrator"
-        ? loadCurrentStateWithOrchestratorSessionDetail(api, activeThreadId)
-        : addThreadDetailToReadModel(api, currentState, activeThreadId),
+        ? loadTargetedOrchestratorSessionDetailReadModel({
+            api,
+            threadId: activeThreadId,
+            baseReadModel: currentState,
+            historyMode: "full",
+          })
+        : loadTargetedThreadDetailReadModel({
+            api,
+            threadId: activeThreadId,
+            baseReadModel: currentState,
+            historyMode: "full",
+          }),
     );
   }
 }
@@ -606,10 +623,21 @@ function EventRouter() {
         const currentThread = currentThreadId
           ? useStore.getState().threads.find((thread) => thread.id === currentThreadId)
           : undefined;
+        const baseReadModel = currentThreadId
+          ? buildOrchestrationReadModelFromStoreState(useStore.getState())
+          : null;
         const readModel = currentThreadId
           ? currentThread?.spawnRole === "orchestrator"
-            ? await loadCurrentStateWithOrchestratorSessionDetail(api, currentThreadId)
-            : await loadCurrentStateWithThreadDetail(api, currentThreadId)
+            ? await loadTargetedOrchestratorSessionDetailReadModel({
+                api,
+                threadId: currentThreadId,
+                baseReadModel,
+              })
+            : await loadTargetedThreadDetailReadModel({
+                api,
+                threadId: currentThreadId,
+                baseReadModel,
+              })
           : await api.orchestration.getCurrentState();
         if (!disposed) {
           syncServerReadModel(readModel);

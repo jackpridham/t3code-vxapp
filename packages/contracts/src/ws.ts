@@ -8,6 +8,7 @@ import {
   OrchestrationGetCurrentStateInput,
   OrchestrationGetFileDiffInput,
   OrchestrationGetProjectByIdInput,
+  OrchestrationGetProjectFullByIdInput,
   OrchestrationGetProjectByWorkspaceInput,
   ORCHESTRATION_WS_CHANNELS,
   OrchestrationGetReadinessInput,
@@ -161,6 +162,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(ORCHESTRATION_WS_METHODS.getCurrentState, OrchestrationGetCurrentStateInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.listProjects, OrchestrationListProjectsInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getProjectById, OrchestrationGetProjectByIdInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getProjectFullById, OrchestrationGetProjectFullByIdInput),
   tagRequestBody(
     ORCHESTRATION_WS_METHODS.getProjectByWorkspace,
     OrchestrationGetProjectByWorkspaceInput,

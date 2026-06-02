@@ -1,8 +1,8 @@
 import { type NativeApi, type OrchestrationReadModel, type ThreadId } from "@t3tools/contracts";
 
 import {
-  loadCurrentStateWithOrchestratorSessionDetail,
-  loadCurrentStateWithThreadDetail,
+  loadTargetedOrchestratorSessionDetailReadModel,
+  loadTargetedThreadDetailReadModel,
 } from "./orchestrationCurrentStateHydration";
 import type { Thread } from "../types";
 
@@ -43,6 +43,7 @@ export async function hydrateRouteThreadHistory(input: {
   api: NativeApi;
   threadId: ThreadId;
   thread: Thread | null | undefined;
+  baseReadModel: OrchestrationReadModel | null;
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
 }): Promise<boolean> {
   if (!threadNeedsRouteHistoryHydration(input.thread)) {
@@ -51,8 +52,16 @@ export async function hydrateRouteThreadHistory(input: {
 
   const readModel =
     input.thread?.spawnRole === "orchestrator"
-      ? await loadCurrentStateWithOrchestratorSessionDetail(input.api, input.threadId)
-      : await loadCurrentStateWithThreadDetail(input.api, input.threadId);
+      ? await loadTargetedOrchestratorSessionDetailReadModel({
+          api: input.api,
+          threadId: input.threadId,
+          baseReadModel: input.baseReadModel,
+        })
+      : await loadTargetedThreadDetailReadModel({
+          api: input.api,
+          threadId: input.threadId,
+          baseReadModel: input.baseReadModel,
+        });
   input.syncServerReadModel(readModel);
   return true;
 }
@@ -60,9 +69,14 @@ export async function hydrateRouteThreadHistory(input: {
 export async function hydrateMissingRouteThread(input: {
   api: NativeApi;
   threadId: ThreadId;
+  baseReadModel: OrchestrationReadModel | null;
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
 }): Promise<boolean> {
-  const readModel = await loadCurrentStateWithThreadDetail(input.api, input.threadId);
+  const readModel = await loadTargetedThreadDetailReadModel({
+    api: input.api,
+    threadId: input.threadId,
+    baseReadModel: input.baseReadModel,
+  });
   const hydrated = readModel.threads.some((thread) => thread.id === input.threadId);
   if (hydrated) {
     input.syncServerReadModel(readModel);

@@ -956,6 +956,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return yield* projectionOperationalQuery.getProjectById(body);
       }
 
+      case ORCHESTRATION_WS_METHODS.getProjectFullById: {
+        const body = stripRequestTag(request.body);
+        return yield* projectionOperationalQuery.getProjectFullById(body);
+      }
+
       case ORCHESTRATION_WS_METHODS.getProjectByWorkspace: {
         const body = stripRequestTag(request.body);
         return yield* projectionOperationalQuery.getProjectByWorkspace(body);

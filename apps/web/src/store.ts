@@ -10,6 +10,10 @@ import {
   type OrchestrationCheckpointSummary,
   type OrchestrationThread,
   type OrchestrationSessionStatus,
+  type OrchestrationThreadActivity,
+  CheckpointRef,
+  ProgramId,
+  ProjectId,
 } from "@t3tools/contracts";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
 import { create } from "zustand";
@@ -24,6 +28,7 @@ import {
   type PersistedFileChange,
   type Program,
   type ProgramNotification,
+  type ProposedPlan,
   type Project,
   type Thread,
   type TurnDiffSummary,
@@ -392,6 +397,167 @@ export function accumulateFileChanges(
 
 function mapOrchestratorWakeItem(wakeItem: OrchestratorWakeItem): OrchestratorWakeItem {
   return { ...wakeItem };
+}
+
+function mapProjectToReadModelProject(
+  project: Project,
+): OrchestrationReadModel["projects"][number] {
+  return {
+    id: project.id,
+    title: project.name,
+    workspaceRoot: project.cwd,
+    kind: project.kind,
+    sidebarParentProjectId: project.sidebarParentProjectId,
+    currentSessionRootThreadId: project.currentSessionRootThreadId,
+    defaultModelSelection: project.defaultModelSelection,
+    scripts: mapProjectScripts(project.scripts),
+    hooks: mapProjectHooks(project.hooks),
+    createdAt: project.createdAt ?? new Date().toISOString(),
+    updatedAt: project.updatedAt ?? project.createdAt ?? new Date().toISOString(),
+    deletedAt: null,
+  };
+}
+
+function mapSessionToReadModelSession(thread: Thread): OrchestrationSession | null {
+  const session = thread.session;
+  if (!session) {
+    return null;
+  }
+  return {
+    threadId: thread.id,
+    status: session.orchestrationStatus,
+    providerName: session.provider,
+    runtimeMode: thread.runtimeMode,
+    activeTurnId: session.activeTurnId ?? null,
+    lastError: session.lastError ?? null,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function mapMessageToReadModelMessage(message: ChatMessage): OrchestrationMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    ...(message.attachments
+      ? {
+          attachments: message.attachments.map((attachment) => ({
+            type: attachment.type,
+            id: attachment.id,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+          })),
+        }
+      : {}),
+    turnId: message.turnId ?? null,
+    streaming: message.streaming,
+    createdAt: message.createdAt,
+    updatedAt: message.completedAt ?? message.createdAt,
+  };
+}
+
+function mapProposedPlanToReadModelProposedPlan(
+  proposedPlan: ProposedPlan,
+): OrchestrationProposedPlan {
+  return { ...proposedPlan };
+}
+
+function mapTurnDiffSummaryToReadModelCheckpoint(
+  summary: TurnDiffSummary,
+): OrchestrationCheckpointSummary {
+  return {
+    turnId: summary.turnId,
+    checkpointTurnCount: summary.checkpointTurnCount ?? 0,
+    checkpointRef:
+      summary.checkpointRef ?? CheckpointRef.makeUnsafe(`checkpoint-${summary.turnId}`),
+    status: summary.status ?? "ready",
+    files: summary.files.map((file) => ({
+      path: file.path,
+      kind: file.kind ?? "modified",
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+    })),
+    assistantMessageId: summary.assistantMessageId ?? null,
+    completedAt: summary.completedAt,
+  };
+}
+
+function mapThreadToReadModelThread(thread: Thread): OrchestrationReadModel["threads"][number] {
+  return {
+    id: thread.id,
+    projectId: thread.projectId,
+    title: thread.title,
+    labels: mapThreadLabels(thread.labels),
+    modelSelection: thread.modelSelection,
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestTurn: thread.latestTurn,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt ?? thread.createdAt,
+    archivedAt: thread.archivedAt,
+    deletedAt: null,
+    messages: thread.messages.map(mapMessageToReadModelMessage),
+    proposedPlans: thread.proposedPlans.map(mapProposedPlanToReadModelProposedPlan),
+    activities: thread.activities.map((activity): OrchestrationThreadActivity => ({ ...activity })),
+    checkpoints: thread.turnDiffSummaries.map(mapTurnDiffSummaryToReadModelCheckpoint),
+    snapshotCoverage: thread.snapshotCoverage,
+    session: mapSessionToReadModelSession(thread),
+    orchestratorProjectId: thread.orchestratorProjectId
+      ? ProjectId.makeUnsafe(thread.orchestratorProjectId)
+      : undefined,
+    orchestratorThreadId: thread.orchestratorThreadId
+      ? ThreadId.makeUnsafe(thread.orchestratorThreadId)
+      : undefined,
+    parentThreadId: thread.parentThreadId ? ThreadId.makeUnsafe(thread.parentThreadId) : undefined,
+    spawnRole: thread.spawnRole,
+    spawnedBy: thread.spawnedBy,
+    workflowId: thread.workflowId,
+    programId: thread.programId ? ProgramId.makeUnsafe(thread.programId) : undefined,
+    executiveProjectId: thread.executiveProjectId
+      ? ProjectId.makeUnsafe(thread.executiveProjectId)
+      : undefined,
+    executiveThreadId: thread.executiveThreadId
+      ? ThreadId.makeUnsafe(thread.executiveThreadId)
+      : undefined,
+    sessionWorkerThreadCount: thread.sessionWorkerThreadCount,
+    hasActiveError: thread.hasActiveError,
+    activeError: thread.activeError,
+    historicalError: thread.historicalError,
+    errorPresentationSource: thread.errorPresentationSource,
+  };
+}
+
+export function buildOrchestrationReadModelFromStoreState(state: AppState): OrchestrationReadModel {
+  const now = new Date().toISOString();
+  const updatedAt =
+    [
+      ...state.projects.flatMap((project) => [project.updatedAt, project.createdAt]),
+      ...state.threads.flatMap((thread) => [thread.updatedAt, thread.createdAt]),
+      ...state.orchestratorWakeItems.map((wake) => wake.queuedAt),
+    ]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .toSorted()
+      .at(-1) ?? now;
+  return {
+    snapshotSequence: 0,
+    snapshotProfile: "active-thread",
+    snapshotCoverage: {
+      includeArchivedThreads: true,
+      wakeItemCount: state.orchestratorWakeItems.length,
+      wakeItemLimit: null,
+      wakeItemsTruncated: false,
+    },
+    projects: state.projects.map(mapProjectToReadModelProject),
+    programs: state.programs ?? [],
+    programNotifications: state.programNotifications ?? [],
+    ctoAttentionItems: state.ctoAttentionItems ?? [],
+    threads: state.threads.map(mapThreadToReadModelThread),
+    orchestratorWakeItems: state.orchestratorWakeItems.map(mapOrchestratorWakeItem),
+    updatedAt,
+  };
 }
 
 function mapThread(thread: OrchestrationThreadWithLabels): Thread {

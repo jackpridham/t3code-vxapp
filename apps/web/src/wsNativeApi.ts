@@ -251,6 +251,8 @@ export function createWsNativeApi(): NativeApi {
       getCurrentState: () => transport.request(ORCHESTRATION_WS_METHODS.getCurrentState),
       listProjects: () => transport.request(ORCHESTRATION_WS_METHODS.listProjects),
       getProjectById: (input) => transport.request(ORCHESTRATION_WS_METHODS.getProjectById, input),
+      getProjectFullById: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.getProjectFullById, input),
       getProjectByWorkspace: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getProjectByWorkspace, input),
       listProjectThreads: (input) =>

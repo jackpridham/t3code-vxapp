@@ -27,6 +27,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getCurrentState: "orchestration.getCurrentState",
   listProjects: "orchestration.listProjects",
   getProjectById: "orchestration.getProjectById",
+  getProjectFullById: "orchestration.getProjectFullById",
   getProjectByWorkspace: "orchestration.getProjectByWorkspace",
   listProjectThreads: "orchestration.listProjectThreads",
   getThreadById: "orchestration.getThreadById",
@@ -1906,6 +1907,14 @@ export type OrchestrationGetProjectByIdInput = typeof OrchestrationGetProjectByI
 export const OrchestrationGetProjectByIdResult = Schema.NullOr(OrchestrationProjectSummary);
 export type OrchestrationGetProjectByIdResult = typeof OrchestrationGetProjectByIdResult.Type;
 
+export const OrchestrationGetProjectFullByIdInput = Schema.Struct({
+  projectId: ProjectId,
+});
+export type OrchestrationGetProjectFullByIdInput = typeof OrchestrationGetProjectFullByIdInput.Type;
+export const OrchestrationGetProjectFullByIdResult = Schema.NullOr(OrchestrationProject);
+export type OrchestrationGetProjectFullByIdResult =
+  typeof OrchestrationGetProjectFullByIdResult.Type;
+
 export const OrchestrationListProjectThreadsInput = Schema.Struct({
   projectId: ProjectId,
   includeArchived: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
@@ -2081,6 +2090,10 @@ export const OrchestrationRpcSchemas = {
   getProjectById: {
     input: OrchestrationGetProjectByIdInput,
     output: OrchestrationGetProjectByIdResult,
+  },
+  getProjectFullById: {
+    input: OrchestrationGetProjectFullByIdInput,
+    output: OrchestrationGetProjectFullByIdResult,
   },
   getProjectByWorkspace: {
     input: OrchestrationGetProjectByWorkspaceInput,

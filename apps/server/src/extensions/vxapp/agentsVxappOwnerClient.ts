@@ -111,6 +111,11 @@ export interface AgentsVxappOwnerManifest {
 }
 
 let cachedManifest: AgentsVxappOwnerManifest | null = null;
+type OwnerCommandResult = {
+  readonly envelope: JsonRecord;
+  readonly result: ProcessRunResult;
+};
+const inFlightOwnerReadCommands = new Map<string, Promise<OwnerCommandResult>>();
 const TODO_MUTATE_WRAPPER_KEY = "todo_mutate";
 const TODO_MUTATE_ACTIONS = [
   "create",
@@ -152,6 +157,39 @@ export type AgentsVxappWakeOwnerCommand =
   | "t3code-wake-drain-ready"
   | "t3code-wake-reconcile-startup"
   | "t3code-wake-provider-request";
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function ownerReadCoalescingKey(input: {
+  readonly args: readonly string[];
+  readonly command: string;
+  readonly payloadJson?: unknown;
+  readonly surface: string;
+  readonly tool: OwnerTool;
+}): string {
+  return stableStringify({
+    args: input.args,
+    command: input.command,
+    payloadJson: input.payloadJson,
+    surface: input.surface,
+    tool: input.tool,
+  });
+}
+
+export function clearAgentsVxappOwnerReadCoalescing(): void {
+  inFlightOwnerReadCommands.clear();
+}
 
 const THREAD_LIFECYCLE_OWNER_COMMAND_KINDS = {
   "t3code-threads-create": "thread_create",
@@ -564,17 +602,45 @@ function validateWakeProviderRequestPayload(input: {
 
 async function executeOwnerCommand(input: {
   readonly args?: readonly string[];
+  readonly coalesceRead?: boolean;
   readonly command: string;
   readonly payloadJson?: unknown;
   readonly surface: string;
   readonly tool: OwnerTool;
-}) {
+}): Promise<OwnerCommandResult> {
   const args =
     input.tool === "control-plane"
       ? [input.command, "--json", ...(input.args ?? [])]
       : [input.command, ...(input.args ?? [])];
   if (input.payloadJson !== undefined) {
     args.push("--payload-json", JSON.stringify(input.payloadJson));
+  }
+  if (input.coalesceRead === true) {
+    const key = ownerReadCoalescingKey({
+      args,
+      command: input.command,
+      payloadJson: input.payloadJson,
+      surface: input.surface,
+      tool: input.tool,
+    });
+    const existing = inFlightOwnerReadCommands.get(key);
+    if (existing) {
+      return existing;
+    }
+    const promise = executeOwnerCommand({
+      coalesceRead: false,
+      command: input.command,
+      ...(input.args !== undefined ? { args: input.args } : {}),
+      ...(input.payloadJson !== undefined ? { payloadJson: input.payloadJson } : {}),
+      surface: input.surface,
+      tool: input.tool,
+    }).finally(() => {
+      if (inFlightOwnerReadCommands.get(key) === promise) {
+        inFlightOwnerReadCommands.delete(key);
+      }
+    });
+    inFlightOwnerReadCommands.set(key, promise);
+    return promise;
   }
   if (args.includes("--compatibility-mode")) {
     fail({
@@ -759,6 +825,7 @@ export async function bootstrapAgentsVxappOwnerManifest(): Promise<AgentsVxappOw
   }
   const { envelope, result } = await executeOwnerCommand({
     command: BOOTSTRAP_MANIFEST_COMMAND,
+    coalesceRead: true,
     surface: "contract_manifest",
     tool: "control-plane",
   });
@@ -800,6 +867,7 @@ async function callManifestCommand<T>(
   surface: Exclude<OwnerSurface, "contract_manifest">,
   input?: unknown,
   args?: readonly string[],
+  options: { readonly coalesceRead?: boolean } = {},
 ): Promise<AgentsVxappOwnerAuthorityPayload<T>> {
   const manifest = await bootstrapAgentsVxappOwnerManifest();
   const matchingEntries = [...manifest.commandsByName.values()].filter(
@@ -824,6 +892,7 @@ async function callManifestCommand<T>(
     command: entry.command,
     ...(args ? { args } : {}),
     ...(input !== undefined ? { payloadJson: input } : {}),
+    ...(options.coalesceRead === true ? { coalesceRead: true } : {}),
     surface: entry.surface,
     tool: entry.tool,
   });
@@ -847,6 +916,7 @@ async function callManifestCommand<T>(
 async function callRoleSessionCommand<T>(command: string): Promise<T> {
   const { envelope } = await executeOwnerCommand({
     command,
+    coalesceRead: true,
     surface: "role_session_runtime_paths",
     tool: "role-session",
   });
@@ -857,6 +927,7 @@ async function callManifestCommandByName<T>(input: {
   readonly command: string;
   readonly surface: Exclude<OwnerSurface, "contract_manifest">;
   readonly args?: readonly string[];
+  readonly coalesceRead?: boolean;
   readonly payloadJson?: unknown;
 }): Promise<AgentsVxappOwnerAuthorityPayload<T>> {
   const manifest = await bootstrapAgentsVxappOwnerManifest();
@@ -879,6 +950,7 @@ async function callManifestCommandByName<T>(input: {
     command: entry.command,
     ...(input.args ? { args: input.args } : {}),
     ...(input.payloadJson !== undefined ? { payloadJson: input.payloadJson } : {}),
+    ...(input.coalesceRead === true ? { coalesceRead: true } : {}),
     surface: entry.surface,
     tool: entry.tool,
   });
@@ -903,6 +975,7 @@ async function callManifestCommandByWrapperKey<T>(input: {
   readonly wrapperKey: string;
   readonly surface: Exclude<OwnerSurface, "contract_manifest">;
   readonly args?: readonly string[];
+  readonly coalesceRead?: boolean;
   readonly payloadJson?: unknown;
 }): Promise<AgentsVxappOwnerAuthorityPayload<T>> {
   const manifest = await bootstrapAgentsVxappOwnerManifest();
@@ -925,6 +998,7 @@ async function callManifestCommandByWrapperKey<T>(input: {
     command: entry.command,
     ...(input.args ? { args: input.args } : {}),
     ...(input.payloadJson !== undefined ? { payloadJson: input.payloadJson } : {}),
+    ...(input.coalesceRead === true ? { coalesceRead: true } : {}),
     surface: entry.surface,
     tool: entry.tool,
   });
@@ -953,16 +1027,30 @@ export async function fetchAgentsVxappSidebarAuthoritySnapshot(
       "sidebar_authority_snapshot",
       undefined,
       paginationArgs(input),
+      { coalesceRead: true },
     )
   ).payload;
 }
 
 export async function fetchAgentsVxappControlPlaneSnapshot() {
-  return (await callManifestCommand<JsonRecord>("control_plane_snapshot")).payload;
+  return (
+    await callManifestCommand<JsonRecord>("control_plane_snapshot", undefined, undefined, {
+      coalesceRead: true,
+    })
+  ).payload;
 }
 
 export async function fetchAgentsVxappExternalRoleAuthoritySnapshot() {
-  return (await callManifestCommand<JsonRecord>("external_role_authority_snapshot")).payload;
+  return (
+    await callManifestCommand<JsonRecord>(
+      "external_role_authority_snapshot",
+      undefined,
+      undefined,
+      {
+        coalesceRead: true,
+      },
+    )
+  ).payload;
 }
 
 export async function fetchAgentsVxappProgramsTodosSnapshot(
@@ -973,6 +1061,7 @@ export async function fetchAgentsVxappProgramsTodosSnapshot(
       "programs_todos_snapshot",
       undefined,
       paginationArgs(input),
+      { coalesceRead: true },
     )
   ).payload;
 }
@@ -983,6 +1072,7 @@ export async function fetchAgentsVxappProgramsAuthoritySnapshot(
   return (
     await callManifestCommandByWrapperKey<JsonRecord>({
       args: paginationArgs(input),
+      coalesceRead: true,
       wrapperKey: "programs_authority_snapshot",
       surface: "programs_authority_snapshot",
     })
@@ -1008,8 +1098,12 @@ export async function requestAgentsVxappProgramMutation(
         readonly input: ServerSetAgentsVxappProgramLifecycleInput;
       },
 ) {
-  return (await callManifestCommand<ServerAgentsVxappOwnerMutationResult>("programs", input))
-    .payload;
+  try {
+    return (await callManifestCommand<ServerAgentsVxappOwnerMutationResult>("programs", input))
+      .payload;
+  } finally {
+    clearAgentsVxappOwnerReadCoalescing();
+  }
 }
 
 export async function requestAgentsVxappTodoMutation(
@@ -1038,13 +1132,17 @@ export async function requestAgentsVxappTodoMutation(
       ownerCommand: TODO_MUTATE_WRAPPER_KEY,
     });
   }
-  return (
-    await callManifestCommandByWrapperKey<ServerAgentsVxappOwnerMutationResult>({
-      wrapperKey: TODO_MUTATE_WRAPPER_KEY,
-      surface: "todos",
-      payloadJson: input,
-    })
-  ).payload;
+  try {
+    return (
+      await callManifestCommandByWrapperKey<ServerAgentsVxappOwnerMutationResult>({
+        wrapperKey: TODO_MUTATE_WRAPPER_KEY,
+        surface: "todos",
+        payloadJson: input,
+      })
+    ).payload;
+  } finally {
+    clearAgentsVxappOwnerReadCoalescing();
+  }
 }
 
 export async function fetchAgentsVxappRoleSessionRuntimePaths<T>() {
@@ -1052,12 +1150,19 @@ export async function fetchAgentsVxappRoleSessionRuntimePaths<T>() {
 }
 
 export async function fetchAgentsVxappWorkerRuntimeSnapshot(input: GetWorkerRuntimeSnapshotInput) {
-  return (await callManifestCommand<GetWorkerRuntimeSnapshotResult>("worker_runtime", input))
-    .payload;
+  return (
+    await callManifestCommand<GetWorkerRuntimeSnapshotResult>("worker_runtime", input, undefined, {
+      coalesceRead: true,
+    })
+  ).payload;
 }
 
 export async function fetchAgentsVxappAgentRuntimeSnapshot(input: GetAgentRuntimeSnapshotInput) {
-  return (await callManifestCommand<GetAgentRuntimeSnapshotResult>("agent_runtime", input)).payload;
+  return (
+    await callManifestCommand<GetAgentRuntimeSnapshotResult>("agent_runtime", input, undefined, {
+      coalesceRead: true,
+    })
+  ).payload;
 }
 
 export async function requestAgentsVxappThreadStatus(input: { readonly threadId: string }) {
@@ -1066,6 +1171,7 @@ export async function requestAgentsVxappThreadStatus(input: { readonly threadId:
       command: "t3code-thread-status",
       surface: "threads",
       args: ["--thread", input.threadId],
+      coalesceRead: true,
     })
   ).payload;
 }
