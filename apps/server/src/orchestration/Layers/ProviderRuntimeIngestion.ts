@@ -1949,7 +1949,7 @@ const make = Effect.fn("make")(function* () {
         return worker.enqueue({ source: "domain", event });
       }),
     );
-    yield* reconcilePersistedSessionsOnStart;
+    yield* Effect.forkScoped(reconcilePersistedSessionsOnStart);
   });
 
   return {

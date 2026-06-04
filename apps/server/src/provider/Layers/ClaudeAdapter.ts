@@ -2503,9 +2503,18 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
+      const threadId = input.threadId;
+      const existingContext = sessions.get(threadId);
+      if (existingContext && !existingContext.stopped) {
+        // A same-thread "restart" must fully retire the prior runtime first so
+        // Claude child processes and event fibers cannot outlive the replaced session.
+        yield* stopSessionInternal(existingContext, {
+          emitExitEvent: true,
+        });
+      }
+
       const startedAt = yield* nowIso;
       const resumeState = readClaudeResumeState(input.resumeCursor);
-      const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
       const newSessionId =
         existingResumeSessionId === undefined ? yield* Random.nextUUIDv4 : undefined;

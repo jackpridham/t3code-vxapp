@@ -4,6 +4,7 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type ProviderSessionRuntimeStatus,
   type OrchestrationThread,
   ProviderKind,
   type OrchestrationSession,
@@ -15,6 +16,9 @@ import {
   type RuntimeMode as RuntimeModeType,
   type TurnId,
 } from "@t3tools/contracts";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { threadHasLiveActiveTurn } from "@t3tools/orchestration-core/command-invariants";
 import { Cache, Cause, Data, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -204,7 +208,7 @@ function toNonEmptyProviderInput(value: string | undefined): string | undefined 
 
 function mapProviderSessionStatusToOrchestrationStatus(
   status: "connecting" | "ready" | "running" | "error" | "closed",
-): OrchestrationSession["status"] {
+): ProviderSessionRuntimeStatus {
   switch (status) {
     case "connecting":
       return "starting";
@@ -257,6 +261,42 @@ const DEFAULT_RUNTIME_MODE: RuntimeModeType = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 const DEFAULT_THREAD_TITLE = "New thread";
+const INSTRUCTION_SURFACE_FILENAMES = ["AGENTS.md", "CLAUDE.md"] as const;
+const INSTRUCTION_FINGERPRINT_KEY = "instructionFingerprint";
+
+function runtimePayloadInstructionFingerprint(value: unknown): string | null {
+  const record = asRecord(value);
+  return asNonEmptyString(record?.[INSTRUCTION_FINGERPRINT_KEY]);
+}
+
+function computeEffectiveInstructionFingerprint(cwd: string | undefined): string | null {
+  const normalizedCwd = toNonEmptyProviderInput(cwd);
+  if (!normalizedCwd) {
+    return null;
+  }
+  const hash = createHash("sha256");
+  const seen = new Set<string>();
+  let currentDir = path.resolve(normalizedCwd);
+  while (!seen.has(currentDir)) {
+    seen.add(currentDir);
+    for (const filename of INSTRUCTION_SURFACE_FILENAMES) {
+      const filePath = path.join(currentDir, filename);
+      if (!fs.existsSync(filePath)) {
+        continue;
+      }
+      hash.update(filePath);
+      hash.update("\u0000");
+      hash.update(fs.readFileSync(filePath));
+      hash.update("\u0000");
+    }
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      break;
+    }
+    currentDir = parentDir;
+  }
+  return hash.digest("hex");
+}
 
 function ensureThreadHasNoLiveActiveTurn(
   thread: {
@@ -595,24 +635,56 @@ const make = Effect.gen(function* () {
       thread,
       projects: readModel.projects,
     });
+    const desiredInstructionFingerprint = computeEffectiveInstructionFingerprint(effectiveCwd);
 
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
         .listSessions()
         .pipe(Effect.map((sessions) => sessions.find((session) => session.threadId === threadId)));
 
+    const persistInstructionFingerprint = (
+      session: ProviderSession,
+      instructionFingerprint: string | null,
+    ) =>
+      providerSessionDirectory.upsert({
+        threadId,
+        provider: session.provider,
+        runtimeMode: session.runtimeMode,
+        status: mapProviderSessionStatusToOrchestrationStatus(session.status),
+        ...(session.resumeCursor !== undefined ? { resumeCursor: session.resumeCursor } : {}),
+        runtimePayload: {
+          [INSTRUCTION_FINGERPRINT_KEY]: instructionFingerprint,
+        },
+      });
+
+    const clearPersistedResumeCursor = (provider: ProviderKind) =>
+      providerSessionDirectory.upsert({
+        threadId,
+        provider,
+        resumeCursor: null,
+      });
+
     const startProviderSession = (input?: {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderKind;
+      readonly clearPersistedResumeCursor?: boolean;
     }) =>
-      providerService.startSession(threadId, {
-        threadId,
-        projectId: thread.projectId,
-        ...(preferredProvider ? { provider: preferredProvider } : {}),
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-        modelSelection: desiredModelSelection,
-        ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
-        runtimeMode: desiredRuntimeMode,
+      Effect.gen(function* () {
+        const providerForSession = input?.provider ?? preferredProvider;
+        if (input?.clearPersistedResumeCursor && providerForSession !== undefined) {
+          yield* clearPersistedResumeCursor(providerForSession);
+        }
+        const session = yield* providerService.startSession(threadId, {
+          threadId,
+          projectId: thread.projectId,
+          ...(providerForSession ? { provider: providerForSession } : {}),
+          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+          modelSelection: desiredModelSelection,
+          ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+          runtimeMode: desiredRuntimeMode,
+        });
+        yield* persistInstructionFingerprint(session, desiredInstructionFingerprint);
+        return session;
       });
 
     const bindSessionToThread = (session: ProviderSession) =>
@@ -644,6 +716,14 @@ const make = Effect.gen(function* () {
 
     const existingSessionThreadId =
       thread.session && thread.session.status !== "stopped" ? thread.id : null;
+    const persistedBinding = Option.getOrUndefined(
+      yield* providerSessionDirectory.getBinding(threadId),
+    );
+    const persistedInstructionFingerprint = runtimePayloadInstructionFingerprint(
+      persistedBinding?.runtimePayload,
+    );
+    const instructionFingerprintChanged =
+      persistedInstructionFingerprint !== desiredInstructionFingerprint;
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const providerChanged =
@@ -664,19 +744,21 @@ const make = Effect.gen(function* () {
         currentProvider === "claudeAgent" &&
         requestedModelSelection !== undefined &&
         !Equal.equals(previousModelSelection, requestedModelSelection);
+      const shouldRestartForInstructionChange = instructionFingerprintChanged;
 
       if (
         !runtimeModeChanged &&
         !cwdChanged &&
         !providerChanged &&
         !shouldRestartForModelChange &&
-        !shouldRestartForModelSelectionChange
+        !shouldRestartForModelSelectionChange &&
+        !shouldRestartForInstructionChange
       ) {
         return existingSessionThreadId;
       }
 
       const resumeCursor =
-        providerChanged || shouldRestartForModelChange
+        providerChanged || shouldRestartForModelChange || shouldRestartForInstructionChange
           ? undefined
           : (activeSession?.resumeCursor ?? undefined);
       yield* Effect.logInfo("provider command reactor restarting provider session", {
@@ -694,11 +776,15 @@ const make = Effect.gen(function* () {
         modelChanged,
         shouldRestartForModelChange,
         shouldRestartForModelSelectionChange,
+        persistedInstructionFingerprint,
+        desiredInstructionFingerprint,
+        shouldRestartForInstructionChange,
         hasResumeCursor: resumeCursor !== undefined,
       });
-      const restartedSession = yield* startProviderSession(
-        resumeCursor !== undefined ? { resumeCursor } : undefined,
-      );
+      const restartedSession = yield* startProviderSession({
+        ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+        clearPersistedResumeCursor: shouldRestartForInstructionChange,
+      });
       yield* Effect.logInfo("provider command reactor restarted provider session", {
         threadId,
         previousSessionId: existingSessionThreadId,
@@ -711,7 +797,9 @@ const make = Effect.gen(function* () {
       return restartedSession.threadId;
     }
 
-    const startedSession = yield* startProviderSession(undefined);
+    const startedSession = yield* startProviderSession({
+      clearPersistedResumeCursor: instructionFingerprintChanged,
+    });
     yield* bindSessionToThread(startedSession);
     return startedSession.threadId;
   });

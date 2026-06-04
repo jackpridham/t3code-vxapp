@@ -73,11 +73,9 @@ describe("provider harness boundary", () => {
     expect(reactorSource).not.toContain("threadStatusByThreadId");
   });
 
-  it("keeps CTO provider request transport owner-backed and fail-closed", () => {
-    const ownerClientSource = readSource("extensions/vxapp/agentsVxappOwnerClient.ts");
+  it("keeps provider request transport owner-backed and fail-closed", () => {
     const reactorSource = readSource("orchestration/Layers/ProviderCommandReactor.ts");
 
-    expect(ownerClientSource).toContain("requestAgentsVxappCtoProviderRequest");
     expect(reactorSource).toContain('record.kind !== "thread.turn.start"');
     expect(reactorSource).toContain("Owner provider request failed closed");
     expect(reactorSource).not.toContain("vx t3 cto operate --once --json");

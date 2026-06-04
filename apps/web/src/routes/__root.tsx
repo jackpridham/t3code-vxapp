@@ -325,13 +325,13 @@ export function resolvePreferredCurrentThreadId(input: {
   if (routeThreadId) {
     return routeThreadId;
   }
-  if (input.bootstrapThreadId) {
-    return input.bootstrapThreadId;
-  }
   for (const project of input.projects) {
     if (project.currentSessionRootThreadId) {
       return project.currentSessionRootThreadId;
     }
+  }
+  if (input.bootstrapThreadId) {
+    return input.bootstrapThreadId;
   }
   return null;
 }
@@ -369,10 +369,25 @@ export async function bootstrapOrchestrationState({
   isDisposed,
   getCurrentThreadId,
 }: BootstrapRecoveryDeps): Promise<void> {
-  const applyReadModel = async (
-    loadReadModel: () => Promise<OrchestrationReadModel>,
-  ): Promise<OrchestrationReadModel | null> => {
-    const readModel = await loadReadModel();
+  const loadPreferredThreadDetailReadModel = (
+    threadId: ThreadId,
+    baseReadModel: OrchestrationReadModel | null,
+  ): Promise<OrchestrationReadModel> => {
+    const thread = baseReadModel?.threads.find((candidate) => candidate.id === threadId);
+    return thread?.spawnRole === "orchestrator"
+      ? loadTargetedOrchestratorSessionDetailReadModel({
+          api,
+          threadId,
+          baseReadModel,
+        })
+      : loadTargetedThreadDetailReadModel({
+          api,
+          threadId,
+          baseReadModel,
+        });
+  };
+
+  const applyReadModel = (readModel: OrchestrationReadModel): OrchestrationReadModel | null => {
     if (isDisposed()) {
       return null;
     }
@@ -384,6 +399,13 @@ export async function bootstrapOrchestrationState({
     return readModel;
   };
 
+  const runAndApplyReadModel = async (
+    loadReadModel: () => Promise<OrchestrationReadModel>,
+  ): Promise<OrchestrationReadModel | null> => {
+    const readModel = await loadReadModel();
+    return applyReadModel(readModel);
+  };
+
   const runSnapshotRecovery = async (
     loadReadModel: () => Promise<OrchestrationReadModel>,
   ): Promise<OrchestrationReadModel | null> => {
@@ -392,55 +414,45 @@ export async function bootstrapOrchestrationState({
     }
 
     try {
-      return await applyReadModel(loadReadModel);
+      return await runAndApplyReadModel(loadReadModel);
     } catch {
       recovery.failSnapshotRecovery();
       return null;
     }
   };
 
-  const summaryApplied = await runSnapshotRecovery(() => api.orchestration.getBootstrapSummary());
-  if (summaryApplied) {
-    const activeThreadId = getCurrentThreadId?.() ?? findCurrentSessionRootThreadId(summaryApplied);
-    if (activeThreadId) {
-      const activeThread = summaryApplied.threads.find((thread) => thread.id === activeThreadId);
-      await runSnapshotRecovery(() =>
-        activeThread?.spawnRole === "orchestrator"
-          ? loadTargetedOrchestratorSessionDetailReadModel({
-              api,
-              threadId: activeThreadId,
-              baseReadModel: summaryApplied,
-            })
-          : loadTargetedThreadDetailReadModel({
-              api,
-              threadId: activeThreadId,
-              baseReadModel: summaryApplied,
-            }),
-      );
+  const routeThreadId = getCurrentThreadId?.() ?? null;
+  if (routeThreadId) {
+    const routePrimedState = await runSnapshotRecovery(() =>
+      loadPreferredThreadDetailReadModel(routeThreadId, null),
+    );
+    if (routePrimedState && !isDisposed()) {
+      try {
+        const summary = await api.orchestration.getBootstrapSummary();
+        const merged = await loadPreferredThreadDetailReadModel(routeThreadId, summary);
+        applyReadModel(merged);
+      } catch {
+        // Keep the targeted route snapshot if summary enrichment fails.
+      }
+      return;
     }
-    return;
   }
 
-  const currentState = await runSnapshotRecovery(() => api.orchestration.getCurrentState());
-  const activeThreadId = currentState
-    ? (getCurrentThreadId?.() ?? findCurrentSessionRootThreadId(currentState))
+  const summaryApplied = await runSnapshotRecovery(() => api.orchestration.getBootstrapSummary());
+  const preferredThreadId =
+    routeThreadId ?? (summaryApplied ? findCurrentSessionRootThreadId(summaryApplied) : null);
+  const bootstrapState =
+    summaryApplied ??
+    (preferredThreadId
+      ? await runSnapshotRecovery(() => loadPreferredThreadDetailReadModel(preferredThreadId, null))
+      : await runSnapshotRecovery(() => api.orchestration.getCurrentState()));
+
+  const activeThreadId = bootstrapState
+    ? (preferredThreadId ?? findCurrentSessionRootThreadId(bootstrapState))
     : null;
-  if (currentState && activeThreadId) {
-    const activeThread = currentState.threads.find((thread) => thread.id === activeThreadId);
+  if (summaryApplied && activeThreadId) {
     await runSnapshotRecovery(() =>
-      activeThread?.spawnRole === "orchestrator"
-        ? loadTargetedOrchestratorSessionDetailReadModel({
-            api,
-            threadId: activeThreadId,
-            baseReadModel: currentState,
-            historyMode: "full",
-          })
-        : loadTargetedThreadDetailReadModel({
-            api,
-            threadId: activeThreadId,
-            baseReadModel: currentState,
-            historyMode: "full",
-          }),
+      loadPreferredThreadDetailReadModel(activeThreadId, bootstrapState),
     );
   }
 }
@@ -700,23 +712,37 @@ function EventRouter() {
         // Only real-time domain events from here forward will trigger toasts.
         notificationsReady = true;
 
-        if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
+        const preferredBootstrapThreadId =
+          resolveCurrentThreadId() ?? payload.bootstrapThreadId ?? null;
+        const preferredBootstrapProjectId =
+          (preferredBootstrapThreadId
+            ? useStore.getState().threads.find((thread) => thread.id === preferredBootstrapThreadId)
+                ?.projectId
+            : null) ??
+          payload.bootstrapProjectId ??
+          null;
+
+        if (!preferredBootstrapProjectId) {
           return;
         }
-        setProjectExpanded(payload.bootstrapProjectId, true);
+        setProjectExpanded(preferredBootstrapProjectId, true);
+
+        if (!preferredBootstrapThreadId) {
+          return;
+        }
 
         if (pathnameRef.current !== "/") {
           return;
         }
-        if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+        if (handledBootstrapThreadIdRef.current === preferredBootstrapThreadId) {
           return;
         }
         await navigate({
           to: "/$threadId",
-          params: { threadId: payload.bootstrapThreadId },
+          params: { threadId: preferredBootstrapThreadId },
           replace: true,
         });
-        handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+        handledBootstrapThreadIdRef.current = preferredBootstrapThreadId;
       })().catch(() => undefined);
     });
     // onServerConfigUpdated replays the latest cached value synchronously

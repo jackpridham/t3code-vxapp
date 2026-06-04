@@ -226,9 +226,8 @@ describe("bootstrapOrchestrationState", () => {
 
     const rootThreadId = ThreadId.makeUnsafe("thread-root");
     const bootstrapSummary = makeReadModel(4, rootThreadId);
-    const currentState = makeReadModel(6, rootThreadId);
     const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
-    const getCurrentState = vi.fn().mockResolvedValue(currentState);
+    const getCurrentState = vi.fn();
     const getSnapshot = vi.fn();
     const threadDetailApi = makeThreadDetailApi();
     const api = {
@@ -366,34 +365,17 @@ describe("bootstrapOrchestrationState", () => {
     expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
     expect(getCurrentState).toHaveBeenCalledTimes(1);
     expect(getSnapshot).not.toHaveBeenCalled();
-    expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
-      threadId: rootThreadId,
-      limit: 500,
-    });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(1, currentState);
-    expect(syncServerReadModel).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        snapshotSequence: 9,
-        threads: [
-          expect.objectContaining({
-            id: rootThreadId,
-            messages: [expect.objectContaining({ text: "detail" })],
-          }),
-        ],
-      }),
-    );
-    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(2);
+    expect(syncServerReadModel).toHaveBeenCalledTimes(1);
+    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the summary state when bounded thread detail refresh fails", async () => {
+  it("keeps the converged current state when targeted detail refresh fails", async () => {
     const recovery = createOrchestrationRecoveryCoordinator();
 
     const bootstrapSummary = makeReadModel(4, ThreadId.makeUnsafe("thread-root"));
     const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
-    const getCurrentState = vi
-      .fn()
-      .mockResolvedValue(makeReadModel(5, ThreadId.makeUnsafe("thread-root")));
+    const getCurrentState = vi.fn();
     const getSnapshot = vi.fn();
     const threadDetailApi = makeThreadDetailApi({
       listThreadMessages: vi.fn().mockRejectedValue(new Error("detail unavailable")),
@@ -437,10 +419,9 @@ describe("bootstrapOrchestrationState", () => {
     const rootThreadId = ThreadId.makeUnsafe("thread-root");
     const routeThreadId = ThreadId.makeUnsafe("thread-route-worker");
     const bootstrapSummary = makeReadModel(4, rootThreadId);
-    const currentState = makeReadModel(6, rootThreadId);
     const routedThread = makeReadModel(6, routeThreadId).threads[0];
     const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
-    const getCurrentState = vi.fn().mockResolvedValue(currentState);
+    const getCurrentState = vi.fn();
     const getSnapshot = vi.fn();
     const threadDetailApi = makeThreadDetailApi({
       listSessionThreads: vi.fn().mockResolvedValue([routedThread]),
@@ -529,12 +510,22 @@ describe("resolvePreferredCurrentThreadId", () => {
     ).toBe(ThreadId.makeUnsafe("thread-route"));
   });
 
-  it("prefers the authoritative bootstrap thread over the first project root", () => {
+  it("prefers the current project session root over the bootstrap thread on root routes", () => {
     expect(
       resolvePreferredCurrentThreadId({
         pathname: "/",
         bootstrapThreadId: ThreadId.makeUnsafe("thread-bootstrap"),
         projects: [{ currentSessionRootThreadId: ThreadId.makeUnsafe("thread-project") }],
+      }),
+    ).toBe(ThreadId.makeUnsafe("thread-project"));
+  });
+
+  it("falls back to the bootstrap thread when no routed or project-root thread exists", () => {
+    expect(
+      resolvePreferredCurrentThreadId({
+        pathname: "/",
+        bootstrapThreadId: ThreadId.makeUnsafe("thread-bootstrap"),
+        projects: [{ currentSessionRootThreadId: null }],
       }),
     ).toBe(ThreadId.makeUnsafe("thread-bootstrap"));
   });

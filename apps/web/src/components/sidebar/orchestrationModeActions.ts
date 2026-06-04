@@ -14,6 +14,7 @@ import {
   orchestrationProjectThreadsQueryOptions,
   orchestrationSessionThreadsQueryOptions,
 } from "../../lib/orchestrationReactQuery";
+import { invalidateAgentsVxappControlPlaneQueries } from "../../features/vxapp/agentsVxappControlPlaneReactQuery";
 import { loadTargetedThreadDetailReadModel } from "../../lib/orchestrationCurrentStateHydration";
 import { buildOrchestrationReadModelFromStoreState, useStore } from "../../store";
 import { newCommandId, newThreadId } from "../../lib/utils";
@@ -320,6 +321,7 @@ export async function reactivateOrchestrationSession(input: {
       ),
     ),
   );
+  await invalidateAgentsVxappControlPlaneQueries(input.queryClient);
 
   const readModel = await loadTargetedThreadDetailReadModel({
     api: input.api,
@@ -416,6 +418,7 @@ export async function createNewOrchestrationSession(input: {
       ),
     ),
   );
+  await invalidateAgentsVxappControlPlaneQueries(input.queryClient);
 
   const readModel = await loadTargetedThreadDetailReadModel({
     api: input.api,

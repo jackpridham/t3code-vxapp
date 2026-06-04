@@ -68,6 +68,33 @@ describe("OrchestratorWakeReactor authority boundary", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("does not block startup on best-effort wake reconciliation", async () => {
+    const blockingEngine: OrchestrationEngineShape = {
+      ...engine,
+      getReadModel: () => Effect.never,
+    };
+
+    const blockingLayer = OrchestratorWakeReactorLive.pipe(
+      Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(Layer.succeed(OrchestrationEngineService, blockingEngine)),
+      Layer.provideMerge(Layer.succeed(ProviderService, provider)),
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    await expect(
+      Promise.race([
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const reactor = yield* OrchestratorWakeReactor;
+            yield* Effect.scoped(reactor.start());
+          }).pipe(Effect.provide(blockingLayer)),
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("startup blocked")), 200)),
+      ]),
+    ).resolves.toBeUndefined();
+  });
+
   it("preserves worker wake transport while avoiding local CTO escalation synthesis", () => {
     const source = readSource();
 

@@ -163,8 +163,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionDuration={null}
         nowIso="2026-03-17T19:12:30.000Z"
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
@@ -206,8 +204,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionDuration={null}
         nowIso="2026-03-17T19:12:30.000Z"
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
@@ -249,8 +245,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionDuration={null}
         nowIso="2026-03-17T19:12:30.000Z"
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
@@ -297,8 +291,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionDuration={null}
         nowIso="2026-03-17T19:12:30.000Z"
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}
@@ -309,10 +301,58 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Thinking");
-    expect(markup).toContain("2 thoughts");
     expect(markup).toContain("The ingestion path is rebinding message ids.");
     expect(markup).not.toContain("Inspect the provider event ordering.");
+    expect(markup).not.toContain("Thinking");
+    expect(markup).not.toContain("2 thoughts");
+  });
+
+  it("expands active-turn thinking bubbles by default so live thought history is visible", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isHydratingHistory={false}
+        isWorking={false}
+        activeTurnInProgress
+        activeTurnStartedAt="2026-03-17T19:12:27.000Z"
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "thinking:turn-1",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "thinking:turn-1",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Thinking",
+              detail: "The ingestion path is rebinding message ids.",
+              thoughts: [
+                "Inspect the provider event ordering.",
+                "The ingestion path is rebinding message ids.",
+              ],
+              tone: "thinking",
+              presentation: "thinking-bubble",
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionDuration={null}
+        nowIso="2026-03-17T19:12:30.000Z"
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Inspect the provider event ordering.");
+    expect(markup).toContain("The ingestion path is rebinding message ids.");
+    expect(markup).toContain("Hide");
+    expect(markup).not.toContain("Thinking");
   });
 
   it("renders a loading message while thread history is hydrating", async () => {
@@ -329,8 +369,6 @@ describe("MessagesTimeline", () => {
         completionDividerBeforeEntryId={null}
         completionDuration={null}
         nowIso="2026-03-17T19:12:30.000Z"
-        expandedWorkGroups={{}}
-        onToggleWorkGroup={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
         isRevertingCheckpoint={false}

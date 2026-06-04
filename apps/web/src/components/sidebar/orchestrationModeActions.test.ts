@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProjectId, ThreadId, type OrchestrationThreadSummary } from "@t3tools/contracts";
 import { QueryClient } from "@tanstack/react-query";
+import { invalidateAgentsVxappControlPlaneQueries } from "../../features/vxapp/agentsVxappControlPlaneReactQuery";
 import {
   buildSessionReactivationPlan,
   createNewOrchestrationSession,
   reactivateOrchestrationSession,
 } from "./orchestrationModeActions";
+
+vi.mock("../../features/vxapp/agentsVxappControlPlaneReactQuery", () => ({
+  invalidateAgentsVxappControlPlaneQueries: vi.fn().mockResolvedValue(undefined),
+}));
 
 function makeSummary(
   overrides: Partial<OrchestrationThreadSummary> &
@@ -194,6 +199,7 @@ describe("buildSessionReactivationPlan", () => {
 
 describe("reactivateOrchestrationSession", () => {
   it("hydrates and navigates after archive and unarchive sequencing", async () => {
+    vi.mocked(invalidateAgentsVxappControlPlaneQueries).mockClear();
     const projectId = ProjectId.makeUnsafe("project-1");
     const activeRoot = makeSummary({
       id: ThreadId.makeUnsafe("root-active"),
@@ -278,6 +284,8 @@ describe("reactivateOrchestrationSession", () => {
         threads: expect.arrayContaining([expect.objectContaining({ id: targetRoot.id })]),
       }),
     );
+    expect(invalidateAgentsVxappControlPlaneQueries).toHaveBeenCalledTimes(1);
+    expect(invalidateAgentsVxappControlPlaneQueries).toHaveBeenCalledWith(queryClient);
     expect(invalidateQueries).toHaveBeenCalled();
     expect(fetchQuery).toHaveBeenCalled();
     expect(navigateToThread).toHaveBeenCalledWith(targetRoot.id);
@@ -286,6 +294,7 @@ describe("reactivateOrchestrationSession", () => {
 
 describe("createNewOrchestrationSession", () => {
   it("archives the active session family and creates a fresh orchestrator root", async () => {
+    vi.mocked(invalidateAgentsVxappControlPlaneQueries).mockClear();
     const projectId = ProjectId.makeUnsafe("project-1");
     const activeRoot = makeSummary({
       id: ThreadId.makeUnsafe("root-active"),
@@ -373,12 +382,15 @@ describe("createNewOrchestrationSession", () => {
         threads: expect.arrayContaining([expect.objectContaining({ id: newThreadId })]),
       }),
     );
+    expect(invalidateAgentsVxappControlPlaneQueries).toHaveBeenCalledTimes(1);
+    expect(invalidateAgentsVxappControlPlaneQueries).toHaveBeenCalledWith(queryClient);
     expect(invalidateQueries).toHaveBeenCalled();
     expect(fetchQuery).toHaveBeenCalledTimes(3);
     expect(navigateToThread).toHaveBeenCalledWith(newThreadId);
   });
 
   it("uses a fresh project catalog before creating so stale empty sidebar state cannot skip archiving", async () => {
+    vi.mocked(invalidateAgentsVxappControlPlaneQueries).mockClear();
     const projectId = ProjectId.makeUnsafe("project-1");
     const activeRoot = makeSummary({
       id: ThreadId.makeUnsafe("root-active"),
@@ -428,6 +440,7 @@ describe("createNewOrchestrationSession", () => {
 
     expect(fetchQuery).toHaveBeenCalledTimes(3);
     expect(confirm).toHaveBeenCalledTimes(1);
+    expect(invalidateAgentsVxappControlPlaneQueries).toHaveBeenCalledTimes(1);
     expect(dispatchCommand.mock.calls.map(([command]) => command.type)).toEqual([
       "thread.archive",
       "thread.create",
@@ -441,6 +454,7 @@ describe("createNewOrchestrationSession", () => {
   });
 
   it("skips archived session members and tolerates concurrent already-archived responses", async () => {
+    vi.mocked(invalidateAgentsVxappControlPlaneQueries).mockClear();
     const projectId = ProjectId.makeUnsafe("project-1");
     const activeRoot = makeSummary({
       id: ThreadId.makeUnsafe("root-active"),
@@ -499,6 +513,7 @@ describe("createNewOrchestrationSession", () => {
       "thread.create",
       "project.meta.update",
     ]);
+    expect(invalidateAgentsVxappControlPlaneQueries).toHaveBeenCalledTimes(1);
     expect(getCurrentState).not.toHaveBeenCalled();
   });
 });

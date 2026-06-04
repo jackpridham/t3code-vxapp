@@ -2468,6 +2468,92 @@ describe("ClaudeAdapterLive", () => {
   });
 
   it.effect(
+    "replaces an existing same-thread Claude session before starting a fresh restart",
+    () => {
+      const procRoot = mkdtempSync(path.join(os.tmpdir(), "t3-claude-restart-proc-"));
+      const killCalls: Array<{ readonly pid: number; readonly signal: NodeJS.Signals }> = [];
+      const queries: FakeClaudeQuery[] = [];
+      const createInputs: Array<{
+        readonly prompt: AsyncIterable<SDKUserMessage>;
+        readonly options: ClaudeQueryOptions;
+      }> = [];
+
+      const layer = makeClaudeAdapterLive({
+        createQuery: (input) => {
+          createInputs.push(input);
+          const query = new FakeClaudeQuery();
+          queries.push(query);
+          return query;
+        },
+        procRoot,
+        currentPid: 9999,
+        forceKillDelayMs: 60_000,
+        processKiller: (pid, signal) => {
+          killCalls.push({ pid, signal });
+        },
+      }).pipe(
+        Layer.provideMerge(ServerConfig.layerTest("/tmp/claude-adapter-test", "/tmp")),
+        Layer.provideMerge(ServerSettingsService.layerTest()),
+        Layer.provideMerge(NodeServices.layer),
+      );
+
+      return Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => rmSync(procRoot, { recursive: true, force: true })),
+        );
+
+        mkdirSync(path.join(procRoot, "1001"));
+        writeFileSync(
+          path.join(procRoot, "1001", "environ"),
+          `PATH=/usr/bin\0VX_T3_CURRENT_THREAD_ID=${THREAD_ID}\0`,
+        );
+        writeFileSync(
+          path.join(procRoot, "1001", "cmdline"),
+          "/usr/local/bin/claude\0--output-format\0stream-json\0",
+        );
+
+        const adapter = yield* ClaudeAdapter;
+        const firstSession = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+        const secondSession = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+
+        const firstResumeCursor = firstSession.resumeCursor as {
+          readonly threadId?: string;
+          readonly resume?: string;
+        };
+        const secondResumeCursor = secondSession.resumeCursor as {
+          readonly threadId?: string;
+          readonly resume?: string;
+        };
+
+        assert.equal(queries.length, 2);
+        assert.equal(queries[0]?.closeCalls, 1);
+        assert.deepEqual(killCalls, [{ pid: 1001, signal: "SIGTERM" }]);
+        assert.equal(firstResumeCursor.threadId, THREAD_ID);
+        assert.equal(secondResumeCursor.threadId, THREAD_ID);
+        assert.notEqual(secondResumeCursor.resume, firstResumeCursor.resume);
+        assert.equal(createInputs[0]?.options.resume, undefined);
+        assert.equal(createInputs[1]?.options.resume, undefined);
+        assert.equal(createInputs[1]?.options.sessionId, secondResumeCursor.resume);
+
+        const sessions = yield* adapter.listSessions();
+        assert.equal(sessions.length, 1);
+        assert.equal(sessions[0]?.threadId, THREAD_ID);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(layer),
+      );
+    },
+  );
+
+  it.effect(
     "supports rollbackThread by trimming in-memory turns and preserving earlier turns",
     () => {
       const harness = makeHarness();

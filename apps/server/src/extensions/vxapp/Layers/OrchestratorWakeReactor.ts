@@ -891,7 +891,9 @@ const make = Effect.gen(function* () {
   );
 
   const start: OrchestratorWakeReactorShape["start"] = Effect.fn("start")(function* () {
-    yield* _reconcileWakesOnStart;
+    // Startup wake reconciliation is best-effort owner synchronization. It
+    // must not block the HTTP/WebSocket listener from binding.
+    yield* Effect.forkScoped(_reconcileWakesOnStart);
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {

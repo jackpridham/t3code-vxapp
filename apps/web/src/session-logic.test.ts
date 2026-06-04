@@ -688,7 +688,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
   });
 
-  it("omits thinking updates from the generic work log", () => {
+  it("keeps thinking updates in the chronological work log as thinking bubbles", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "thinking-progress",
@@ -728,7 +728,14 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities, undefined);
 
-    expect(entries).toEqual([]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "thinking-progress",
+      tone: "thinking",
+      presentation: "thinking-bubble",
+      detail: "Need to inspect the ingestion path.",
+      thoughts: ["Compare the provider event shapes.", "Need to inspect the ingestion path."],
+    });
   });
 
   it("collapses consecutive thinking updates into a single turn-level thinking entry", () => {
@@ -861,6 +868,99 @@ describe("deriveWorkLogEntries", () => {
       "Inspect provider event ordering.",
       "Check the web store projection path.",
     ]);
+  });
+
+  it("keeps tool calls and thinking bubbles interleaved in chronological order", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-before",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+      }),
+      makeActivity({
+        id: "thinking-progress",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "task.progress",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          taskId: "turn-thinking",
+          detail: "Inspect provider event ordering.",
+        },
+      }),
+      makeActivity({
+        id: "tool-after",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Read file",
+        tone: "tool",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "tool-before",
+      "thinking-progress",
+      "tool-after",
+    ]);
+    expect(entries[1]).toMatchObject({
+      tone: "thinking",
+      presentation: "thinking-bubble",
+      thoughts: ["Inspect provider event ordering."],
+    });
+  });
+
+  it("does not splice different reasoning stream fragments into one broken thought", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "thinking-delta-1",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: "Rehydr",
+          itemId: "reasoning-item-1",
+          streamKind: "reasoning_text",
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-2",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: " control,_re",
+          itemId: "reasoning-item-1",
+          streamKind: "reasoning_summary_text",
+          summaryIndex: 0,
+        },
+      }),
+      makeActivity({
+        id: "thinking-delta-3",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        turnId: "turn-thinking",
+        kind: "thinking.delta",
+        summary: "Thinking",
+        tone: "thinking",
+        payload: {
+          text: "ation",
+          itemId: "reasoning-item-1",
+          streamKind: "reasoning_text",
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+
+    expect(entry?.thoughts).toEqual(["Rehydr", "control,_re", "ation"]);
   });
 
   it("filters by turn id when provided", () => {
@@ -1323,19 +1423,19 @@ describe("deriveTimelineEntries", () => {
       ],
       [
         {
+          id: "thinking-progress",
+          createdAt: "2026-02-23T00:00:01.500Z",
+          label: "Thinking",
+          detail: "Inspect the repo layout.",
+          thoughts: ["Inspect the repo layout."],
+          tone: "thinking",
+          presentation: "thinking-bubble",
+        },
+        {
           id: "work-1",
           createdAt: "2026-02-23T00:00:03.000Z",
           label: "Ran tests",
           tone: "tool",
-        },
-      ],
-      [
-        {
-          id: "thinking:turn-1",
-          createdAt: "2026-02-23T00:00:01.500Z",
-          turnId: TurnId.makeUnsafe("turn-1"),
-          thoughts: ["Inspect the repo layout."],
-          latestThought: "Inspect the repo layout.",
         },
       ],
     );
@@ -1374,7 +1474,6 @@ describe("deriveTimelineEntries", () => {
           streaming: false,
         },
       ],
-      [],
       [],
       [],
     );

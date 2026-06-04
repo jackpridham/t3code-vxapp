@@ -263,6 +263,64 @@ describe("live turn watcher correlation", () => {
       total_turn_duration: 910,
     });
   });
+
+  it("uses the latest assistant message on the correlated turn as the final assistant milestone", () => {
+    const threadId = "thread-1";
+    const commandId = "command-1";
+    const messageId = "message-1";
+    const turnId = "turn-1";
+    const frames = [
+      frame("out", 1000, {
+        id: "1",
+        body: {
+          _tag: "orchestration.dispatchCommand",
+          command: {
+            type: "thread.turn.start",
+            commandId,
+            threadId,
+            message: { messageId, role: "user", text: "abc123", attachments: [] },
+          },
+        },
+      }),
+      frame("in", 1100, { id: "1", result: { sequence: 10 } }),
+      domainFrame(1130, commandId, threadId, "thread.turn-start-requested", {
+        threadId,
+        messageId,
+      }),
+      domainFrame(1200, commandId, threadId, "thread.session-set", {
+        threadId,
+        session: { threadId, status: "running", activeTurnId: turnId },
+      }),
+      domainFrame(1300, commandId, threadId, "thread.activity-appended", {
+        threadId,
+        activity: { turnId },
+      }),
+      domainFrame(1600, commandId, threadId, "thread.message-sent", {
+        threadId,
+        messageId: "assistant-1",
+        role: "assistant",
+        text: "partial final",
+        streaming: false,
+        turnId,
+      }),
+      domainFrame(1800, commandId, threadId, "thread.message-sent", {
+        threadId,
+        messageId: "assistant-2",
+        role: "assistant",
+        text: "actual final",
+        streaming: false,
+        turnId,
+      }),
+      domainFrame(1900, commandId, threadId, "thread.session-set", {
+        threadId,
+        session: { threadId, status: "ready", activeTurnId: null },
+      }),
+    ];
+
+    const result = analyzeLiveTurn({ frames, threadId, browserSubmit: 990 });
+    expect(result?.milestones.final_assistant_message).toBe(1800);
+    expect(result?.deltasMs.final_to_settled).toBe(100);
+  });
 });
 
 describe("recorder and selector smoke checks", () => {

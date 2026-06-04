@@ -1221,9 +1221,7 @@ export async function fetchAgentsVxappExternalRoleAuthoritySnapshot() {
       "external_role_authority_snapshot",
       undefined,
       undefined,
-      {
-        coalesceRead: true,
-      },
+      { coalesceRead: true },
     )
   ).payload;
 }
@@ -1386,67 +1384,6 @@ export async function requestAgentsVxappProjectEventIngest(input: Readonly<JsonR
   ).payload;
 }
 
-export async function requestAgentsVxappWakeMutation(
-  input:
-    | {
-        readonly action: "upsert";
-        readonly wakeId: string;
-        readonly orchestratorThreadId: string;
-        readonly orchestratorProjectId?: string;
-        readonly programId?: string;
-        readonly workerThreadId?: string;
-        readonly workerProjectId?: string;
-        readonly workerTurnId?: string;
-        readonly workflowId?: string;
-        readonly workerTitleSnapshot?: string;
-        readonly outcome?: "completed" | "failed" | "interrupted";
-        readonly summary?: string;
-        readonly state?: "pending" | "delivering" | "delivered" | "consumed" | "dropped";
-        readonly stateSource?: "owner_payload" | "sqlite" | "projection_import";
-        readonly reason?: string;
-        readonly routingKind?: "worker_to_orchestrator" | "review_refresh" | "manual";
-      }
-    | {
-        readonly action: "deliver";
-        readonly wakeId: string;
-        readonly programId?: string;
-        readonly orchestratorThreadId?: string;
-        readonly stateSource?: "owner_payload" | "sqlite" | "projection_import";
-      }
-    | {
-        readonly action: "consume";
-        readonly wakeId: string;
-        readonly programId?: string;
-        readonly orchestratorThreadId?: string;
-        readonly reason:
-          | "worker_rechecked"
-          | "worker_superseded_by_new_turn"
-          | "worker_deleted"
-          | "worker_reparented"
-          | "orchestrator_missing"
-          | "orchestrator_deleted"
-          | "orchestrator_mismatch"
-          | "duplicate"
-          | "manual_dismiss";
-      }
-    | {
-        readonly action: "drop";
-        readonly wakeId: string;
-        readonly programId?: string;
-        readonly orchestratorThreadId?: string;
-        readonly reason?: string;
-        readonly stateSource?: "owner_payload" | "sqlite" | "projection_import";
-      },
-) {
-  return (
-    await callManifestCommandByName<JsonRecord>({
-      command: "t3code-wake-mutate",
-      surface: "wakes",
-      payloadJson: input,
-    })
-  ).payload;
-}
-
 async function requestAgentsVxappWakeOwnerCommand(input: {
   readonly command: AgentsVxappWakeOwnerCommand;
   readonly payloadJson: Readonly<JsonRecord>;
@@ -1502,27 +1439,6 @@ export async function requestAgentsVxappWakeProviderRequest(
     ownerCommand: "t3code-wake-provider-request",
     payload: authorityPayload.payload,
   });
-}
-
-export async function requestAgentsVxappCtoProviderRequest(input: {
-  readonly command:
-    | "t3code-cto-attention-list"
-    | "t3code-cto-notifications-list"
-    | "t3code-cto-operate-once"
-    | "t3code-cto-yacht-watch-inspect"
-    | "t3code-cto-yacht-watch-periodic-check";
-  readonly surface: "cto" | "cto_operate" | "cto_yacht_watch";
-  readonly args?: readonly string[];
-  readonly payloadJson?: unknown;
-}) {
-  return (
-    await callManifestCommandByName<JsonRecord>({
-      command: input.command,
-      surface: input.surface,
-      ...(input.args ? { args: input.args } : {}),
-      ...(input.payloadJson !== undefined ? { payloadJson: input.payloadJson } : {}),
-    })
-  ).payload;
 }
 
 export async function requestAgentsVxappApprovalRequest(input: Readonly<JsonRecord>) {

@@ -56,7 +56,6 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
-  deriveThinkingEntries,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -572,7 +571,6 @@ export default function ChatView({
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerInputFocused, setIsComposerInputFocused] = useState(false);
@@ -1015,13 +1013,6 @@ export default function ChatView({
       }),
     [latestTurnSettled, threadActivities],
   );
-  const thinkingEntries = useMemo(
-    () =>
-      deriveThinkingEntries(threadActivities, undefined, {
-        latestTurnSettled,
-      }),
-    [latestTurnSettled, threadActivities],
-  );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
     [activeLatestTurn?.turnId, threadActivities],
@@ -1310,13 +1301,8 @@ export default function ChatView({
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(
-        timelineMessages,
-        activeThread?.proposedPlans ?? [],
-        workLogEntries,
-        thinkingEntries,
-      ),
-    [activeThread?.proposedPlans, thinkingEntries, timelineMessages, workLogEntries],
+      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
+    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -2248,7 +2234,6 @@ export default function ChatView({
   }, [phase, scheduleStickToBottom, timelineEntries]);
 
   useEffect(() => {
-    setExpandedWorkGroups({});
     setPullRequestDialogState(null);
     if (planSidebarOpenOnNextThreadRef.current) {
       planSidebarOpenOnNextThreadRef.current = false;
@@ -3826,12 +3811,6 @@ export default function ChatView({
     }
     return false;
   };
-  const onToggleWorkGroup = useCallback((groupId: string) => {
-    setExpandedWorkGroups((existing) => ({
-      ...existing,
-      [groupId]: !existing[groupId],
-    }));
-  }, []);
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
@@ -4046,8 +4025,6 @@ export default function ChatView({
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionDuration={completionDuration}
                 nowIso={nowIso}
-                expandedWorkGroups={expandedWorkGroups}
-                onToggleWorkGroup={onToggleWorkGroup}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}

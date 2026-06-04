@@ -149,26 +149,47 @@ describe("ProviderCommandReactor authority boundary", () => {
     initialActiveError?: string | null;
     initialHistoricalError?: string | null;
     initialErrorPresentationSource?: "none" | "owner" | "session";
+    trackActiveSessions?: boolean;
   }) {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-reactor-"));
     tempDirs.push(stateRoot);
 
+    let activeSessions: Array<{
+      threadId: ThreadId;
+      provider: "codex";
+      status: "ready";
+      runtimeMode: "full-access" | "approval-required";
+      createdAt: string;
+      updatedAt: string;
+      cwd?: string;
+      model?: string;
+      resumeCursor?: {
+        threadId: string;
+        resume?: string;
+        resumeSessionAt?: string;
+      } | null;
+    }> = [];
     const respondToRequest = vi.fn(
       (_input: ProviderRespondToRequestInput) => Effect.void,
     ) satisfies ProviderServiceShape["respondToRequest"];
     const respondToUserInput = vi.fn(
       (_input: ProviderRespondToUserInputInput) => Effect.void,
     ) satisfies ProviderServiceShape["respondToUserInput"];
-    const startSession = vi.fn((threadId: ThreadId) =>
-      Effect.succeed({
+    const startSession = vi.fn((threadId: ThreadId, input) => {
+      const session = {
         threadId,
         provider: "codex" as const,
         status: "ready" as const,
-        runtimeMode: "full-access" as const,
+        runtimeMode: input.runtimeMode,
         createdAt: "2026-05-16T00:00:00.000Z",
         updatedAt: "2026-05-16T00:00:00.000Z",
-      }),
-    ) satisfies ProviderServiceShape["startSession"];
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
+        ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+      };
+      activeSessions = [session];
+      return Effect.succeed(session);
+    }) satisfies ProviderServiceShape["startSession"];
     const sendTurn = vi.fn((_input: ProviderSendTurnInput) =>
       Effect.succeed({
         threadId,
@@ -183,7 +204,7 @@ describe("ProviderCommandReactor authority boundary", () => {
       respondToRequest,
       respondToUserInput,
       stopSession: () => unsupportedEffect("ProviderService.stopSession"),
-      listSessions: () => Effect.succeed([]),
+      listSessions: () => Effect.succeed(activeSessions),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       rollbackConversation: () => unsupportedEffect("ProviderService.rollbackConversation"),
       streamEvents: Stream.empty,
@@ -362,6 +383,27 @@ describe("ProviderCommandReactor authority boundary", () => {
         Effect.runPromise(PubSub.publish(domainEventPubSub, event)),
       reactor,
       readThread,
+      setActiveSessionResumeCursor: (
+        resumeCursor: {
+          threadId: string;
+          resume?: string;
+          resumeSessionAt?: string;
+        } | null,
+      ) => {
+        for (const session of activeSessions) {
+          session.resumeCursor = resumeCursor;
+        }
+      },
+      settleThreadSession: () => {
+        if (threadState.session !== null) {
+          threadState.session = {
+            ...threadState.session,
+            status: "ready",
+            activeTurnId: null,
+            updatedAt: "2026-05-16T00:00:10.500Z",
+          };
+        }
+      },
       respondToRequest,
       respondToUserInput,
       sendTurn,
@@ -408,6 +450,90 @@ describe("ProviderCommandReactor authority boundary", () => {
     const thread = await harness.readThread();
     expect(thread.activities).toEqual([]);
     expect(thread.session?.runtimeMode).toBe("full-access");
+  });
+
+  it("restarts the provider session when ancestor instructions change under the same workspace", async () => {
+    const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-reactor-runtime-"));
+    tempDirs.push(runtimeRoot);
+    const worktreePath = path.join(runtimeRoot, "role-sessions", "cto", "session-1", "workspace");
+    fs.mkdirSync(worktreePath, { recursive: true });
+    fs.writeFileSync(path.join(runtimeRoot, "AGENTS.md"), "blocked by e2e safety\n");
+
+    const harness = await createHarness({
+      worktreePath,
+      trackActiveSessions: true,
+    });
+
+    await harness.publishEvent({
+      type: "thread.turn-start-requested",
+      eventId: EventId.makeUnsafe("evt-owner-provider-first"),
+      sequence: 10,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:10.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        messageId: "owner-message-1",
+        providerRequestStatus: "ready",
+        providerRequest: {
+          kind: "thread.turn.start",
+          requestId: "owner-request-1",
+          threadId: "thread-1",
+          message: "first message",
+          runtimeMode: "full-access",
+        },
+        createdAt: "2026-05-16T00:00:10.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-owner-provider-first"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    harness.settleThreadSession();
+    harness.setActiveSessionResumeCursor({
+      threadId: "poisoned-resume-thread",
+      resume: "poisoned-resume-session",
+      resumeSessionAt: "assistant-99",
+    });
+
+    fs.writeFileSync(path.join(runtimeRoot, "AGENTS.md"), "guard removed\n");
+
+    await harness.publishEvent({
+      type: "thread.turn-start-requested",
+      eventId: EventId.makeUnsafe("evt-owner-provider-second"),
+      sequence: 11,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:11.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        messageId: "owner-message-2",
+        providerRequestStatus: "ready",
+        providerRequest: {
+          kind: "thread.turn.start",
+          requestId: "owner-request-2",
+          threadId: "thread-1",
+          message: "second message",
+          runtimeMode: "full-access",
+        },
+        createdAt: "2026-05-16T00:00:11.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-owner-provider-second"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    expect(harness.startSession).toHaveBeenCalledTimes(2);
+    const restartedStartInput = harness.startSession.mock.calls[1]?.[1];
+    expect(restartedStartInput).toEqual(
+      expect.objectContaining({
+        threadId: asThreadId("thread-1"),
+        cwd: worktreePath,
+        runtimeMode: "full-access",
+      }),
+    );
+    expect(restartedStartInput).not.toHaveProperty("resumeCursor");
   });
 
   it("fails closed when owner marks provider request ready without a thread.turn.start request", async () => {

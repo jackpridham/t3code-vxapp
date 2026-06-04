@@ -60,6 +60,7 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
   thoughtMergeMode?: "append" | "push";
+  thoughtStreamKey?: string;
   turnId?: TurnId | null;
 }
 
@@ -495,7 +496,6 @@ export function deriveWorkLogEntries(
           options.latestTurnSettled === true && isTransientRuntimeRetryDiagnosticActivity(activity)
         ),
     )
-    .filter((activity) => activity.tone !== "thinking")
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.kind !== "context-window.updated")
@@ -642,7 +642,11 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     if (thinkingData.collapseKey) {
       entry.collapseKey = thinkingData.collapseKey;
     }
+    entry.presentation = "thinking-bubble";
     entry.thoughtMergeMode = thinkingData.mergeMode;
+    if (thinkingData.streamKey) {
+      entry.thoughtStreamKey = thinkingData.streamKey;
+    }
   } else if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
     const detail = stripTrailingExitCode(payload.detail).output;
     if (detail) {
@@ -692,6 +696,7 @@ function extractThinkingWorkLogData(
   preview?: string;
   collapseKey?: string;
   mergeMode: "append" | "push";
+  streamKey?: string;
 } | null {
   if (activity.tone !== "thinking") {
     return null;
@@ -708,6 +713,15 @@ function extractThinkingWorkLogData(
   const turnId = activity.turnId ? String(activity.turnId) : null;
   const taskId = asTrimmedString(payload?.taskId);
   const itemId = asTrimmedString(payload?.itemId);
+  const streamKind = asTrimmedString(payload?.streamKind);
+  const contentIndex =
+    typeof payload?.contentIndex === "number" && Number.isFinite(payload.contentIndex)
+      ? payload.contentIndex
+      : null;
+  const summaryIndex =
+    typeof payload?.summaryIndex === "number" && Number.isFinite(payload.summaryIndex)
+      ? payload.summaryIndex
+      : null;
   const collapseKey = turnId
     ? `thinking:${turnId}`
     : taskId
@@ -715,12 +729,17 @@ function extractThinkingWorkLogData(
       : itemId
         ? `thinking:item:${itemId}`
         : undefined;
+  const streamKey = [itemId ?? "", streamKind ?? "", contentIndex ?? "", summaryIndex ?? ""].join(
+    "\u001f",
+  );
+  const hasStreamKeyContent = streamKey.split("\u001f").some((part) => part.length > 0);
 
   return {
     thoughts,
     ...(preview ? { preview } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     mergeMode: activity.kind === "thinking.delta" ? "append" : "push",
+    ...(hasStreamKeyContent ? { streamKey } : {}),
   };
 }
 
@@ -930,10 +949,13 @@ function mergeThinkingEntries(
     next.thoughts,
     previous.thoughtMergeMode,
     next.thoughtMergeMode,
+    previous.thoughtStreamKey,
+    next.thoughtStreamKey,
   );
   const detail = latestThoughtPreview(thoughts) ?? next.detail ?? previous.detail;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
   const thoughtMergeMode = next.thoughtMergeMode ?? previous.thoughtMergeMode;
+  const thoughtStreamKey = next.thoughtStreamKey ?? previous.thoughtStreamKey;
   const turnId = next.turnId ?? previous.turnId;
 
   return {
@@ -942,11 +964,13 @@ function mergeThinkingEntries(
     label: previous.label,
     tone: "thinking",
     activityKind: next.activityKind,
+    presentation: "thinking-bubble",
     ...(turnId !== undefined ? { turnId } : {}),
     ...(detail ? { detail } : {}),
     ...(thoughts.length > 0 ? { thoughts } : {}),
     ...(collapseKey ? { collapseKey } : {}),
     ...(thoughtMergeMode ? { thoughtMergeMode } : {}),
+    ...(thoughtStreamKey ? { thoughtStreamKey } : {}),
   };
 }
 
@@ -955,13 +979,22 @@ function mergeThoughts(
   next: ReadonlyArray<string> | undefined,
   previousMode: "append" | "push" | undefined,
   nextMode: "append" | "push" | undefined,
+  previousStreamKey?: string,
+  nextStreamKey?: string,
 ): string[] {
   const merged = [...(previous ?? [])];
   if (!next || next.length === 0) {
     return merged;
   }
 
-  let shouldAppendToLast = nextMode === "append" && previousMode === "append" && merged.length > 0;
+  let shouldAppendToLast =
+    nextMode === "append" &&
+    previousMode === "append" &&
+    merged.length > 0 &&
+    ((previousStreamKey === undefined && nextStreamKey === undefined) ||
+      (previousStreamKey !== undefined &&
+        nextStreamKey !== undefined &&
+        previousStreamKey === nextStreamKey));
 
   for (const thought of next) {
     if (shouldAppendToLast) {
@@ -978,7 +1011,7 @@ function mergeThoughts(
     if (nextMode === "push" && previousNormalized === normalized) {
       continue;
     }
-    merged.push(thought);
+    merged.push(normalized);
   }
 
   return merged;
@@ -1269,27 +1302,12 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
-  thinkingEntries: ThinkingEntry[],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
     kind: "message",
     createdAt: message.createdAt,
     message,
-  }));
-  const thinkingRows: TimelineEntry[] = thinkingEntries.map((thinking) => ({
-    id: thinking.id,
-    kind: "work",
-    createdAt: thinking.createdAt,
-    entry: {
-      id: thinking.id,
-      createdAt: thinking.createdAt,
-      label: "Thinking",
-      detail: thinking.latestThought,
-      thoughts: thinking.thoughts,
-      tone: "thinking",
-      presentation: "thinking-bubble",
-    },
   }));
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
     id: proposedPlan.id,
@@ -1303,7 +1321,7 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...thinkingRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }

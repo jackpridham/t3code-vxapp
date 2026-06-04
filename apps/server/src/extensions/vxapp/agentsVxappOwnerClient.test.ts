@@ -15,6 +15,7 @@ import { runProcess } from "../../processRunner.ts";
 import {
   bootstrapAgentsVxappOwnerManifest,
   fetchAgentsVxappAgentRuntimeSnapshot,
+  fetchAgentsVxappExternalRoleAuthoritySnapshot,
   fetchAgentsVxappProgramsAuthoritySnapshot,
   fetchAgentsVxappSidebarAuthoritySnapshot,
   fetchAgentsVxappRoleSessionRuntimePaths,
@@ -61,6 +62,7 @@ t3code-bootstrap-snapshot	bootstrap_snapshot
 t3code-control-plane-snapshot	control_plane_snapshot
 t3code-programs-todos-snapshot	programs_todos_snapshot
 t3code-programs-authority-snapshot	programs_authority_snapshot
+t3code-external-role-authority-snapshot	external_role_authority_snapshot
 t3code-sidebar-graph-snapshot	sidebar_graph_snapshot
 t3code-sidebar-authority-snapshot	sidebar_authority_snapshot
 t3code-cto-status	cto
@@ -978,6 +980,34 @@ describe("agentsVxappOwnerClient", () => {
     await fetchAgentsVxappSidebarAuthoritySnapshot({ page: 1, limit: 20 });
 
     expect(mockedRunProcess).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces repeated external-role authority snapshot reads", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-external-role-authority-snapshot", "external_role_authority_snapshot", {
+            externalRoleAuthority: {
+              projects: [],
+              threadSummaries: [],
+            },
+          }),
+        ),
+      );
+
+    await fetchAgentsVxappExternalRoleAuthoritySnapshot();
+    await fetchAgentsVxappExternalRoleAuthoritySnapshot();
+
+    expect(mockedRunProcess).toHaveBeenCalledTimes(2);
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      ["t3code-external-role-authority-snapshot", "--json"],
+      expect.objectContaining({}),
+    );
   });
 
   it("keeps role-session runtime paths on the separate role-session owner surface", async () => {

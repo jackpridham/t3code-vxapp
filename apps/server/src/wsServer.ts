@@ -19,7 +19,6 @@ import {
   ORCHESTRATION_WS_METHODS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
-  ThreadId,
   WS_CHANNELS,
   WS_METHODS,
   WebSocketRequest,
@@ -263,7 +262,7 @@ function probeWebSocketControlPlane(input: {
       ws.send(
         JSON.stringify({
           id: requestId,
-          body: { _tag: ORCHESTRATION_WS_METHODS.getReadiness },
+          body: { _tag: WS_METHODS.serverGetConfig },
         }),
       );
     });
@@ -831,68 +830,72 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   yield* Scope.provide(orchestrationReactor.start(), subscriptionsScope);
   yield* readiness.markOrchestrationSubscriptionsReady;
 
-  let welcomeBootstrapProjectId: ProjectId | undefined;
-  let welcomeBootstrapThreadId: ThreadId | undefined;
-  let welcomeStartupAuthority:
-    | {
-        authoritySource: "agents-vxapp-owner";
-        startupContract: "external-role-authority-snapshot";
-        activeOwnerThreadId: ThreadId;
-        localBootstrapThreadId: ThreadId | null;
-        hint: string;
-      }
-    | undefined;
-
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
-      const serverSettings = yield* serverSettingsManager.getSettings;
       const bootstrapSummary = yield* projectionBootstrapSummaryQuery.getBootstrapSummary();
       const existingProject = bootstrapSummary.projects.find(
         (project) => project.workspaceRoot === cwd && project.deletedAt === null,
       );
-      let bootstrapProjectId: ProjectId;
-
-      if (!existingProject) {
-        const createdAt = new Date().toISOString();
-        bootstrapProjectId = ProjectId.makeUnsafe(crypto.randomUUID());
-        const bootstrapProjectTitle = path.basename(cwd) || "project";
-        const bootstrapProjectDefaultModelSelection = {
-          provider: "codex" as const,
-          model: "gpt-5-codex",
-        };
-        yield* orchestrationEngine.dispatch({
-          type: "project.create",
-          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-          projectId: bootstrapProjectId,
-          title: bootstrapProjectTitle,
-          workspaceRoot: cwd,
-          defaultModelSelection: bootstrapProjectDefaultModelSelection,
-          createdAt,
-        });
-      } else {
-        bootstrapProjectId = existingProject.id;
+      if (existingProject) {
+        return;
       }
 
-      const preferredStartupSelection = resolveStartupBootstrapSelectionDetail({
-        bootstrapProjectId,
-        programs: bootstrapSummary.programs,
-        projects: bootstrapSummary.projects,
-        threads: bootstrapSummary.threads,
-        startupThreadTarget: serverSettings.startupThreadTarget,
+      const createdAt = new Date().toISOString();
+      const bootstrapProjectId = ProjectId.makeUnsafe(crypto.randomUUID());
+      const bootstrapProjectTitle = path.basename(cwd) || "project";
+      const bootstrapProjectDefaultModelSelection = {
+        provider: "codex" as const,
+        model: "gpt-5-codex",
+      };
+      yield* orchestrationEngine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+        projectId: bootstrapProjectId,
+        title: bootstrapProjectTitle,
+        workspaceRoot: cwd,
+        defaultModelSelection: bootstrapProjectDefaultModelSelection,
+        createdAt,
       });
-      if (preferredStartupSelection) {
-        welcomeBootstrapProjectId = preferredStartupSelection.selection.projectId;
-        welcomeBootstrapThreadId = preferredStartupSelection.selection.threadId;
-        if (preferredStartupSelection.selection.diagnostic) {
-          welcomeStartupAuthority = preferredStartupSelection.selection.diagnostic;
-        }
-      }
     }).pipe(
       Effect.mapError(
         (cause) => new ServerLifecycleError({ operation: "autoBootstrapProject", cause }),
       ),
     );
   }
+
+  const resolveWelcomeBootstrapData = Effect.fn("Server.resolveWelcomeBootstrapData")(function* () {
+    if (!autoBootstrapProjectFromCwd) {
+      return {};
+    }
+
+    const serverSettings = yield* serverSettingsManager.getSettings;
+    const bootstrapSummary = yield* projectionBootstrapSummaryQuery.getBootstrapSummary();
+    const bootstrapProject = bootstrapSummary.projects.find(
+      (project) => project.workspaceRoot === cwd && project.deletedAt === null,
+    );
+    if (!bootstrapProject) {
+      return {};
+    }
+
+    const preferredStartupSelection = resolveStartupBootstrapSelectionDetail({
+      bootstrapProjectId: bootstrapProject.id,
+      programs: bootstrapSummary.programs,
+      projects: bootstrapSummary.projects,
+      threads: bootstrapSummary.threads,
+      startupThreadTarget: serverSettings.startupThreadTarget,
+    });
+    if (!preferredStartupSelection) {
+      return {};
+    }
+
+    return {
+      bootstrapProjectId: preferredStartupSelection.selection.projectId,
+      bootstrapThreadId: preferredStartupSelection.selection.threadId,
+      ...(preferredStartupSelection.selection.diagnostic
+        ? { startupAuthority: preferredStartupSelection.selection.diagnostic }
+        : {}),
+    };
+  });
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe((event) =>
     pushBus.publishAll(WS_CHANNELS.terminalEvent, event),
@@ -1306,19 +1309,27 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   wss.on("connection", (ws) => {
     const segments = cwd.split(/[/\\]/).filter(Boolean);
     const projectName = segments[segments.length - 1] ?? "project";
-
-    const welcomeData = {
-      cwd,
-      projectName,
-      ...(welcomeBootstrapProjectId ? { bootstrapProjectId: welcomeBootstrapProjectId } : {}),
-      ...(welcomeBootstrapThreadId ? { bootstrapThreadId: welcomeBootstrapThreadId } : {}),
-      ...(welcomeStartupAuthority ? { startupAuthority: welcomeStartupAuthority } : {}),
-    };
     // Send welcome before adding to broadcast set so publishAll calls
     // cannot reach this client before the welcome arrives.
     void runPromise(
       readiness.awaitServerReady.pipe(
-        Effect.flatMap(() => pushBus.publishClient(ws, WS_CHANNELS.serverWelcome, welcomeData)),
+        Effect.flatMap(() =>
+          resolveWelcomeBootstrapData().pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to resolve fresh bootstrap selection for welcome", {
+                cause,
+              }).pipe(Effect.as({})),
+            ),
+          ),
+        ),
+        Effect.map((bootstrapData) => ({
+          cwd,
+          projectName,
+          ...bootstrapData,
+        })),
+        Effect.flatMap((welcomeData) =>
+          pushBus.publishClient(ws, WS_CHANNELS.serverWelcome, welcomeData),
+        ),
         Effect.flatMap((delivered) =>
           delivered ? Ref.update(clients, (clients) => clients.add(ws)) : Effect.void,
         ),

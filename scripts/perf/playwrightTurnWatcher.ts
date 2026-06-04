@@ -253,8 +253,11 @@ export function analyzeLiveTurn(input: {
       turnId ??= event.payload.turnId;
       if (event.payload.streaming === true) {
         milestones.first_thinking ??= frame.wallTime;
-      } else {
-        milestones.final_assistant_message ??= frame.wallTime;
+      } else if (turnId === event.payload.turnId) {
+        milestones.final_assistant_message =
+          milestones.final_assistant_message === null
+            ? frame.wallTime
+            : Math.max(milestones.final_assistant_message, frame.wallTime);
       }
     }
   }

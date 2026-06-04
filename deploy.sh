@@ -80,6 +80,16 @@ READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-$(yaml_top_value "$DEPLOY_CONFIG
 WS_READY_TIMEOUT_SECONDS="${WS_READY_TIMEOUT_SECONDS:-$(yaml_top_value "$DEPLOY_CONFIG" wsReadyTimeoutSeconds)}"
 NO_WAKE_MARKER="${T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER:-$(yaml_top_value "$DEPLOY_CONFIG" noWakeMarker)}"
 NO_WAKE=0
+AGENTS_VXAPP_REPO_ROOT=""
+AGENTS_VXAPP_REPO_ROOT_ALIASES=(
+    T3_AGENTS_VXAPP_REPO_ROOT
+    AGENTS_VXAPP_REPO_ROOT
+    VX_AGENTS_REPO_ROOT
+)
+AGENTS_VXAPP_REQUIRED_ENTRYPOINTS=(
+    scripts/tools/t3-control-plane-owner
+    scripts/tools/role-session-owner
+)
 
 usage() {
     cat <<'EOF'
@@ -122,6 +132,82 @@ require_cmd() {
     fi
 }
 
+canonical_path() {
+    local candidate="$1"
+    if [[ -d "$candidate" ]]; then
+        (cd "$candidate" && pwd -P)
+    else
+        printf '%s\n' "$candidate"
+    fi
+}
+
+has_agents_vxapp_entrypoints() {
+    local repo_root="$1"
+    local entrypoint
+
+    for entrypoint in "${AGENTS_VXAPP_REQUIRED_ENTRYPOINTS[@]}"; do
+        if [[ ! -e "$repo_root/$entrypoint" ]]; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+resolve_agents_vxapp_repo_root() {
+    if [[ -n "$AGENTS_VXAPP_REPO_ROOT" ]]; then
+        return 0
+    fi
+
+    local alias
+    local value
+    local resolved=""
+    local details=()
+
+    for alias in "${AGENTS_VXAPP_REPO_ROOT_ALIASES[@]}"; do
+        value="${!alias:-}"
+        if [[ -z "$value" ]]; then
+            continue
+        fi
+
+        value="$(canonical_path "$value")"
+        details+=("$alias=$value")
+        if [[ -z "$resolved" ]]; then
+            resolved="$value"
+        elif [[ "$resolved" != "$value" ]]; then
+            printf 'agents-vxapp repo-root env aliases disagree: %s\n' "${details[*]}" >&2
+            return 1
+        fi
+    done
+
+    if [[ -z "$resolved" ]]; then
+        resolved="$(canonical_path "$REPO_ROOT/../agents-vxapp")"
+        log "Using sibling agents-vxapp checkout: $resolved"
+    fi
+
+    if ! has_agents_vxapp_entrypoints "$resolved"; then
+        printf 'Unable to resolve a valid agents-vxapp checkout at %s. Set one of %s.\n' \
+            "$resolved" "${AGENTS_VXAPP_REPO_ROOT_ALIASES[*]}" >&2
+        return 1
+    fi
+
+    AGENTS_VXAPP_REPO_ROOT="$resolved"
+    export T3_AGENTS_VXAPP_REPO_ROOT="$AGENTS_VXAPP_REPO_ROOT"
+}
+
+set_systemd_repo_link_env() {
+    resolve_agents_vxapp_repo_root
+
+    if can_use_sudo_systemctl; then
+        sudo -n systemctl set-environment "T3_AGENTS_VXAPP_REPO_ROOT=$AGENTS_VXAPP_REPO_ROOT"
+        return 0
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl set-environment "T3_AGENTS_VXAPP_REPO_ROOT=$AGENTS_VXAPP_REPO_ROOT" >/dev/null 2>&1 || true
+    fi
+}
+
 service_is_active() {
     if ! command -v systemctl >/dev/null 2>&1; then
         return 1
@@ -138,7 +224,7 @@ wait_for_http() {
     local attempt
 
     for attempt in $(seq 1 "$READY_TIMEOUT_SECONDS"); do
-        if curl -fsS --max-time 3 "$url" >/dev/null; then
+        if curl -fsS --max-time 3 "$url" >/dev/null 2>&1; then
             return 0
         fi
         sleep 1
@@ -194,20 +280,20 @@ prepare_startup_wake_suppression() {
 
 wait_for_t3_ws() {
     local attempt
-    local doctor_json=""
+    local status_json=""
 
     for attempt in $(seq 1 "$WS_READY_TIMEOUT_SECONDS"); do
-        if doctor_json=$("$VX_BIN" t3 doctor --json 2>/dev/null); then
-            if printf '%s\n' "$doctor_json" | jq -e '.ws_roundtrip.ok == true' >/dev/null 2>&1; then
+        if status_json=$("$VX_BIN" t3 status --json 2>/dev/null); then
+            if printf '%s\n' "$status_json" | jq -e '.ok == true' >/dev/null 2>&1; then
                 return 0
             fi
         fi
         sleep 1
     done
 
-    printf 'T3 WebSocket did not become ready after %s seconds.\n' "$WS_READY_TIMEOUT_SECONDS" >&2
-    if [[ -n "$doctor_json" ]]; then
-        printf '%s\n' "$doctor_json" >&2
+    printf 'T3 owner CLI did not become ready after %s seconds.\n' "$WS_READY_TIMEOUT_SECONDS" >&2
+    if [[ -n "$status_json" ]]; then
+        printf '%s\n' "$status_json" >&2
     fi
     return 1
 }
@@ -270,6 +356,7 @@ EOF
 restart_via_systemd() {
     step "Restarting systemd service"
     prepare_startup_wake_suppression
+    set_systemd_repo_link_env
 
     if can_use_sudo_systemctl; then
         sudo -n systemctl restart "$SERVICE_NAME"
@@ -292,6 +379,7 @@ restart_via_systemd() {
 start_direct_process() {
     step "Starting direct Node process"
     prepare_startup_wake_suppression
+    resolve_agents_vxapp_repo_root
 
     mkdir -p /tmp
     pkill -f "$REPO_ROOT/apps/server/dist/index.mjs --host ${HOST} --port ${PORT} --no-browser" >/dev/null 2>&1 || true
@@ -299,6 +387,7 @@ start_direct_process() {
 
     nohup env \
         NODE_ENV=production \
+        T3_AGENTS_VXAPP_REPO_ROOT="$AGENTS_VXAPP_REPO_ROOT" \
         T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE="$NO_WAKE" \
         T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER="$NO_WAKE_MARKER" \
         "$NODE_BIN" "$REPO_ROOT/apps/server/dist/index.mjs" \
@@ -324,7 +413,7 @@ show_status() {
         log "Service: ${SERVICE_NAME} inactive"
     fi
 
-    if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health/ready" >/dev/null; then
+    if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health/ready" >/dev/null 2>&1; then
         log "Ready:   http://127.0.0.1:${PORT}/health/ready responding"
     else
         log "Ready:   http://127.0.0.1:${PORT}/health/ready not responding"

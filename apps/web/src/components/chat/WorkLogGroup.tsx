@@ -17,30 +17,14 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/colla
 import { normalizeCompactToolLabel } from "./MessagesTimeline.logic";
 import { cn } from "~/lib/utils";
 
-const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
-
 interface WorkLogGroupProps {
-  groupId: string;
   groupedEntries: readonly WorkLogEntry[];
-  isExpanded: boolean;
-  onToggleGroup: (groupId: string) => void;
 }
 
-export const WorkLogGroup = memo(function WorkLogGroup({
-  groupId,
-  groupedEntries,
-  isExpanded,
-  onToggleGroup,
-}: WorkLogGroupProps) {
-  const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-  const visibleEntries =
-    hasOverflow && !isExpanded
-      ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : groupedEntries;
-  const hiddenCount = groupedEntries.length - visibleEntries.length;
+export const WorkLogGroup = memo(function WorkLogGroup({ groupedEntries }: WorkLogGroupProps) {
   const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
   const onlyThinkingEntries = groupedEntries.every((entry) => entry.tone === "thinking");
-  const showHeader = hasOverflow || !onlyToolEntries;
+  const showHeader = !onlyToolEntries;
   const groupLabel = onlyToolEntries ? "Tool calls" : onlyThinkingEntries ? "Thinking" : "Work log";
 
   return (
@@ -50,19 +34,10 @@ export const WorkLogGroup = memo(function WorkLogGroup({
           <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
             {groupLabel} ({groupedEntries.length})
           </p>
-          {hasOverflow && (
-            <button
-              type="button"
-              className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
-              onClick={() => onToggleGroup(groupId)}
-            >
-              {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
-            </button>
-          )}
         </div>
       )}
       <div className="space-y-0.5">
-        {visibleEntries.map((workEntry) => (
+        {groupedEntries.map((workEntry) => (
           <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
         ))}
       </div>
@@ -116,7 +91,7 @@ function workEntryPreview(
 ) {
   const latestThought = visibleThoughts(workEntry.thoughts).at(-1);
   if (latestThought) return latestThought;
-  if (workEntry.command) return workEntry.command;
+  if (workEntry.command) return displayToolCommand(workEntry.command);
   if (workEntry.detail) return workEntry.detail;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
   const [firstPath] = workEntry.changedFiles ?? [];
@@ -141,6 +116,45 @@ function visibleThoughts(thoughts: ReadonlyArray<string> | undefined): string[] 
     return [];
   }
   return thoughts.map((thought) => thought.trim()).filter((thought) => thought.length > 0);
+}
+
+function shellQuoteUnwrap(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return null;
+  }
+  const quote = trimmed[0];
+  if ((quote !== "'" && quote !== '"') || trimmed.at(-1) !== quote) {
+    return null;
+  }
+  if (quote === "'") {
+    return trimmed.slice(1, -1);
+  }
+  const inner = trimmed.slice(1, -1);
+  return inner.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+}
+
+function displayToolCommand(command: string): string {
+  const trimmed = command.trim();
+  const shellWrapperMatch =
+    /^(?:\/bin\/)?(?:ba|z|fi|da)?sh\s+-lc\s+([\s\S]+)$/i.exec(trimmed) ??
+    /^(?:\/usr\/bin\/env\s+)?(?:SHELL=.+?\s+)?(?:\/bin\/)?(?:ba|z|fi|da)?sh\s+-lc\s+([\s\S]+)$/i.exec(
+      trimmed,
+    );
+  if (!shellWrapperMatch?.[1]) {
+    return trimmed;
+  }
+  return shellQuoteUnwrap(shellWrapperMatch[1]) ?? shellWrapperMatch[1].trim();
+}
+
+function shouldHideToolHeading(workEntry: WorkLogEntry): boolean {
+  return (
+    (workEntry.itemType === "command_execution" ||
+      workEntry.requestKind === "command" ||
+      normalizeCompactToolLabel(workEntry.toolTitle ?? workEntry.label).toLowerCase() ===
+        "ran command") &&
+    Boolean(workEntry.command)
+  );
 }
 
 function workEntryIcon(workEntry: WorkLogEntry): LucideIcon {
@@ -190,11 +204,17 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
   const preview = workEntryPreview(workEntry);
-  const displayText = preview ? `${heading} - ${preview}` : heading;
+  const hideHeading = shouldHideToolHeading(workEntry);
+  const displayText = hideHeading
+    ? (preview ?? heading)
+    : preview
+      ? `${heading} - ${preview}`
+      : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
   const showExpandToggle = hasExpandableWorkEntryContent(workEntry);
   const thoughtItems = visibleThoughts(workEntry.thoughts);
+  const displayCommand = workEntry.command ? displayToolCommand(workEntry.command) : null;
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -217,10 +237,18 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
               )}
               title={displayText}
             >
-              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-                {heading}
-              </span>
-              {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
+              {!hideHeading && (
+                <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
+                  {heading}
+                </span>
+              )}
+              {preview && (
+                <span
+                  className={cn("text-muted-foreground/55", hideHeading && "text-foreground/80")}
+                >
+                  {hideHeading ? preview : ` - ${preview}`}
+                </span>
+              )}
             </p>
           </div>
           {showExpandToggle ? (
@@ -237,7 +265,6 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
               <ChevronDownIcon
                 className={cn("size-3 transition-transform", expanded && "rotate-180")}
               />
-              <span>{expanded ? "Hide" : "Show"}</span>
             </CollapsibleTrigger>
           ) : null}
         </div>
@@ -282,7 +309,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: { workEntry: 
                     Command
                   </p>
                   <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-border/55 bg-background/75 px-2 py-1.5 font-mono text-[11px] leading-5 text-foreground/85">
-                    {workEntry.command}
+                    {displayCommand}
                   </pre>
                 </div>
               ) : null}

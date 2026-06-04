@@ -241,6 +241,33 @@ function ownerProgramsAuthoritySnapshotForCwd(cwd: string) {
   } as Awaited<ReturnType<typeof fetchAgentsVxappProgramsAuthoritySnapshot>>;
 }
 
+function ownerProgramsAuthoritySnapshotWithSelection(input: {
+  executiveProjectId: string;
+  executiveThreadId: string | null;
+  currentOrchestratorThreadId: string | null;
+  updatedAt?: string;
+}) {
+  const timestamp = input.updatedAt ?? "2026-06-04T04:00:00.000Z";
+  return {
+    ...emptyOwnerProgramsAuthoritySnapshot,
+    programs: [
+      {
+        id: ProgramId.makeUnsafe(`program-owner-${input.executiveProjectId}`),
+        title: `${input.executiveProjectId} owner program`,
+        objective: null,
+        status: "active",
+        executiveProjectId: input.executiveProjectId,
+        executiveThreadId: input.executiveThreadId,
+        currentOrchestratorThreadId: input.currentOrchestratorThreadId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        completedAt: null,
+        deletedAt: null,
+      },
+    ],
+  } as Awaited<ReturnType<typeof fetchAgentsVxappProgramsAuthoritySnapshot>>;
+}
+
 const defaultOwnerRuntimePaths = {
   runtimeRoot: "/runtime",
   roleSessionsRoot: "/runtime/role-sessions",
@@ -1912,6 +1939,62 @@ describe("WebSocket Server", () => {
     );
   });
 
+  it("refreshes welcome bootstrap ids on reconnect after startup authority changes", async () => {
+    const baseDir = makeTempDir("t3code-state-bootstrap-refresh-");
+    const { dbPath } = deriveServerPathsSync(baseDir, undefined);
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath).pipe(
+      Layer.provide(NodeServices.layer),
+    );
+    const cwd = makeTempDir("t3code-ws-bootstrap-refresh-workspace-");
+
+    server = await createTestServer({
+      cwd,
+      baseDir,
+      persistenceLayer,
+      autoBootstrapProjectFromCwd: true,
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    expect(port).toBeGreaterThan(0);
+
+    const [firstWs, firstWelcome] = await connectAndAwaitWelcome(port);
+    connections.push(firstWs);
+    const bootstrapProjectId = (firstWelcome.data as { bootstrapProjectId?: string })
+      .bootstrapProjectId;
+    expect(bootstrapProjectId).toBeDefined();
+
+    await seedBootstrapSpecialProject({
+      ws: firstWs,
+      parentProjectId: bootstrapProjectId!,
+      kind: "executive",
+      projectId: "project-cto-live",
+      olderThreadId: "thread-cto-live-older",
+      activeThreadId: "thread-cto-live-active",
+      title: "CTO",
+      workspaceRoot: makeTempDir("t3code-ws-bootstrap-refresh-special-"),
+    });
+    mockedProgramsAuthoritySnapshot.mockResolvedValue(
+      ownerProgramsAuthoritySnapshotWithSelection({
+        executiveProjectId: "project-cto-live",
+        executiveThreadId: "thread-cto-live-active",
+        currentOrchestratorThreadId: null,
+      }),
+    );
+
+    firstWs.close();
+
+    const [secondWs, secondWelcome] = await connectAndAwaitWelcome(port);
+    connections.push(secondWs);
+    expect(secondWelcome.data).toEqual(
+      expect.objectContaining({
+        cwd,
+        bootstrapProjectId: "project-cto-live",
+        bootstrapThreadId: "thread-cto-live-active",
+      }),
+    );
+    expect((secondWelcome.data as { startupAuthority?: unknown }).startupAuthority).toBeUndefined();
+  });
+
   it("defaults startup bootstrap to the active CTO session for the cwd project", async () => {
     const baseDir = makeTempDir("t3code-state-bootstrap-cto-");
     const { dbPath } = deriveServerPathsSync(baseDir, undefined);
@@ -1957,6 +2040,13 @@ describe("WebSocket Server", () => {
       persistenceLayer,
       autoBootstrapProjectFromCwd: true,
     });
+    mockedProgramsAuthoritySnapshot.mockResolvedValue(
+      ownerProgramsAuthoritySnapshotWithSelection({
+        executiveProjectId: "project-cto",
+        executiveThreadId: "thread-cto-active",
+        currentOrchestratorThreadId: null,
+      }),
+    );
     addr = server.address();
     port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
@@ -1966,17 +2056,11 @@ describe("WebSocket Server", () => {
     expect(secondWelcome.data).toEqual(
       expect.objectContaining({
         cwd,
-        bootstrapProjectId,
-        bootstrapThreadId: (firstWelcome.data as { bootstrapThreadId?: string }).bootstrapThreadId,
-        startupAuthority: expect.objectContaining({
-          activeOwnerThreadId: (firstWelcome.data as { bootstrapThreadId?: string })
-            .bootstrapThreadId,
-          localBootstrapThreadId: "thread-cto-active",
-          authoritySource: "agents-vxapp-owner",
-          startupContract: "external-role-authority-snapshot",
-        }),
+        bootstrapProjectId: "project-cto",
+        bootstrapThreadId: "thread-cto-active",
       }),
     );
+    expect((secondWelcome.data as { startupAuthority?: unknown }).startupAuthority).toBeUndefined();
   });
 
   it("can switch startup bootstrap to the active orchestrator session", async () => {
@@ -2037,6 +2121,13 @@ describe("WebSocket Server", () => {
         startupThreadTarget: "orchestrator",
       },
     });
+    mockedProgramsAuthoritySnapshot.mockResolvedValue(
+      ownerProgramsAuthoritySnapshotWithSelection({
+        executiveProjectId: "project-cto-toggle",
+        executiveThreadId: "thread-cto-toggle-active",
+        currentOrchestratorThreadId: "thread-orchestrator-toggle-active",
+      }),
+    );
     addr = server.address();
     port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
@@ -2046,17 +2137,11 @@ describe("WebSocket Server", () => {
     expect(secondWelcome.data).toEqual(
       expect.objectContaining({
         cwd,
-        bootstrapProjectId,
-        bootstrapThreadId: (firstWelcome.data as { bootstrapThreadId?: string }).bootstrapThreadId,
-        startupAuthority: expect.objectContaining({
-          activeOwnerThreadId: (firstWelcome.data as { bootstrapThreadId?: string })
-            .bootstrapThreadId,
-          localBootstrapThreadId: "thread-orchestrator-toggle-active",
-          authoritySource: "agents-vxapp-owner",
-          startupContract: "external-role-authority-snapshot",
-        }),
+        bootstrapProjectId: "project-orchestrator-toggle",
+        bootstrapThreadId: "thread-orchestrator-toggle-active",
       }),
     );
+    expect((secondWelcome.data as { startupAuthority?: unknown }).startupAuthority).toBeUndefined();
   });
 
   it("logs outbound websocket push events in dev mode", async () => {

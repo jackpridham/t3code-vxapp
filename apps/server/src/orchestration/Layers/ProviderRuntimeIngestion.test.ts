@@ -43,7 +43,10 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProjectHooksService } from "../../extensions/vxapp/Services/ProjectHooksService.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
+import {
+  ProviderSessionDirectory,
+  type ProviderSessionDirectoryShape,
+} from "../../provider/Services/ProviderSessionDirectory.ts";
 import { AgentsVxappExternalRoleAuthority } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import * as providerHarnessBridge from "../../extensions/vxapp/providerHarnessBridge.ts";
 
@@ -201,6 +204,26 @@ async function waitForThread(
     }
     if (Date.now() >= deadline) {
       throw new Error("Timed out waiting for thread state");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return poll();
+  };
+  return poll();
+}
+
+async function waitForNoBinding(
+  directory: ProviderSessionDirectoryShape,
+  threadId: ThreadId,
+  timeoutMs = 2000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  const poll = async (): Promise<void> => {
+    const binding = await Effect.runPromise(directory.getBinding(threadId));
+    if (binding._tag === "None") {
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for provider binding ${threadId} to be pruned`);
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
     return poll();
@@ -738,15 +761,9 @@ describe("ProviderRuntimeIngestion", () => {
 
     await harness.start();
 
-    expect(
-      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-1"))),
-    ).toMatchObject({ _tag: "None" });
-    expect(
-      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-delete-target"))),
-    ).toMatchObject({ _tag: "None" });
-    expect(
-      await Effect.runPromise(harness.directory.getBinding(asThreadId("thread-missing"))),
-    ).toMatchObject({ _tag: "None" });
+    await waitForNoBinding(harness.directory, asThreadId("thread-1"));
+    await waitForNoBinding(harness.directory, asThreadId("thread-delete-target"));
+    await waitForNoBinding(harness.directory, asThreadId("thread-missing"));
   });
 
   it("applies provider session.state.changed transitions directly", async () => {

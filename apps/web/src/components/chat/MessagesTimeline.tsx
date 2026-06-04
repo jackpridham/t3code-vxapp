@@ -57,8 +57,6 @@ interface MessagesTimelineProps {
   completionDividerBeforeEntryId: string | null;
   completionDuration: string | null;
   nowIso: string;
-  expandedWorkGroups: Record<string, boolean>;
-  onToggleWorkGroup: (groupId: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -80,8 +78,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   completionDividerBeforeEntryId,
   completionDuration,
   nowIso,
-  expandedWorkGroups,
-  onToggleWorkGroup,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -264,7 +260,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       if (row.kind === "thinking") {
         return estimateTimelineThinkingHeight(
           row.thinking,
-          expandedThinkingById[row.id] ?? false,
+          resolveThinkingExpansionState(
+            row,
+            expandedThinkingById,
+            activeTurnInProgress,
+            activeTurnStartedAt,
+          ),
           timelineWidthPx,
         );
       }
@@ -328,20 +329,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     >
       {row.kind === "work" &&
         (() => {
-          return (
-            <WorkLogGroup
-              groupId={row.id}
-              groupedEntries={row.groupedEntries}
-              isExpanded={expandedWorkGroups[row.id] ?? false}
-              onToggleGroup={onToggleWorkGroup}
-            />
-          );
+          return <WorkLogGroup groupedEntries={row.groupedEntries} />;
         })()}
 
       {row.kind === "thinking" && (
         <ThinkingBubble
           thinking={row.thinking}
-          isExpanded={expandedThinkingById[row.id] ?? false}
+          isExpanded={resolveThinkingExpansionState(
+            row,
+            expandedThinkingById,
+            activeTurnInProgress,
+            activeTurnStartedAt,
+          )}
           onToggle={() => onToggleThinking(row.id)}
         />
       )}
@@ -654,27 +653,34 @@ function formatDividerTimestamp(createdAt: string, timestampFormat: TimestampFor
   return formatShortTimestamp(createdAt, timestampFormat).replace(/\s+/g, "").toUpperCase();
 }
 
+function resolveThinkingExpansionState(
+  row: Extract<TimelineRow, { kind: "thinking" }>,
+  expandedThinkingById: Record<string, boolean>,
+  activeTurnInProgress: boolean,
+  activeTurnStartedAt: string | null,
+): boolean {
+  const manuallyExpanded = expandedThinkingById[row.id];
+  if (manuallyExpanded !== undefined) {
+    return manuallyExpanded;
+  }
+  if (!activeTurnInProgress || activeTurnStartedAt === null) {
+    return false;
+  }
+  return row.createdAt >= activeTurnStartedAt;
+}
+
 const ThinkingBubble = memo(function ThinkingBubble(props: {
   thinking: TimelineThinking;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
   const latestThought = props.thinking.detail ?? props.thinking.thoughts.at(-1) ?? "";
-  const thoughtCountLabel = `${props.thinking.thoughts.length} ${
-    props.thinking.thoughts.length === 1 ? "thought" : "thoughts"
-  }`;
   const hasThoughtHistory = props.thinking.thoughts.length > 1;
   const thoughtOccurrences = new Map<string, number>();
 
   return (
-    <div className="max-w-[80%] rounded-2xl rounded-bl-sm border border-border/70 bg-card/55 px-4 py-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground/65">
-            Thinking
-          </p>
-          <p className="text-[11px] text-muted-foreground/60">{thoughtCountLabel}</p>
-        </div>
+    <div className="w-full rounded-2xl rounded-bl-sm border border-border/70 bg-card/55 px-4 py-3">
+      <div className="mb-2 flex items-center justify-end gap-3">
         {hasThoughtHistory ? (
           <button
             type="button"
@@ -692,7 +698,7 @@ const ThinkingBubble = memo(function ThinkingBubble(props: {
       </div>
 
       {props.isExpanded ? (
-        <ol className="space-y-2 pl-5 text-[13px] leading-6 text-foreground/88">
+        <ol className="space-y-2 pl-5 text-[13px] italic leading-6 text-muted-foreground/65">
           {props.thinking.thoughts.map((thought) => {
             const occurrence = (thoughtOccurrences.get(thought) ?? 0) + 1;
             thoughtOccurrences.set(thought, occurrence);
@@ -701,13 +707,15 @@ const ThinkingBubble = memo(function ThinkingBubble(props: {
                 key={`${props.thinking.id}:thought:${thought}:${occurrence}`}
                 className="list-decimal"
               >
-                <pre className="whitespace-pre-wrap break-words font-sans">{thought}</pre>
+                <pre className="whitespace-pre-wrap break-words font-sans italic text-inherit">
+                  {thought}
+                </pre>
               </li>
             );
           })}
         </ol>
       ) : (
-        <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-foreground/88">
+        <p className="whitespace-pre-wrap break-words text-[13px] italic leading-6 text-muted-foreground/65">
           {latestThought}
         </p>
       )}
