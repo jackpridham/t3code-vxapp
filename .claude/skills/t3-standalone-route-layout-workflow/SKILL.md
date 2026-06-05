@@ -86,10 +86,15 @@ When a new standalone route is added:
 
 ## Validation
 
-Use a real local URL when a dev server is running:
+Use the repo-local dev server surface to discover the active URL. Do not assume
+the web port is always `5733`; the localized dev server will move to the next
+free port when needed. See
+`.claude/skills/t3-local-dev-server-workflow/SKILL.md` for the full lifecycle
+contract.
 
 ```bash
-curl -I http://192.168.100.42:5733/<route>
+bash scripts/dev/dev.sh status --json
+curl -I http://127.0.0.1:<web-port>/<route>
 ```
 
 For final repo completion:

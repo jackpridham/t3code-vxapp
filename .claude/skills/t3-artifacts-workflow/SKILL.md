@@ -323,9 +323,14 @@ Do not treat preload cache freshness as enough for a detail view. Preload is for
 Light checks:
 
 ```bash
-vx apps t3 --dev-server status
-curl -I http://192.168.100.42:5733/artifacts
+bash scripts/dev/dev.sh status --json
+curl -I http://127.0.0.1:<web-port>/artifacts
 ```
+
+Do not assume the artifacts UI is always on `5733`; read `webUrl` from the
+localized dev-server status payload first. See
+`.claude/skills/t3-local-dev-server-workflow/SKILL.md` for the current local
+dev contract.
 
 For detail routes, verify at least one real target/title:
 

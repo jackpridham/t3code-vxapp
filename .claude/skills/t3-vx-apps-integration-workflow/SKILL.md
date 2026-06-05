@@ -114,12 +114,16 @@ Follow this order:
 7. Add the browser transport mapping in `apps/web/src/wsNativeApi.ts`.
 8. Add React Query options in `apps/web/src/lib/*ReactQuery.ts` if UI code will call it.
 
-If a contracts type changes and the dev server is running, restart the managed dev server so contracts are rebuilt:
+If a contracts type changes and the localized dev server is running, restart it
+through the repo-local surface so contracts are rebuilt:
 
 ```bash
-vx apps t3 --dev-server stop
-vx apps t3 --dev-server start --daemon
+bash scripts/dev/dev.sh stop --json
+bash scripts/dev/dev.sh start --json --mode dev
 ```
+
+See `.claude/skills/t3-local-dev-server-workflow/SKILL.md` for the full
+lifecycle and JSON contract.
 
 For optional request flags such as `includeArchived`, keep the field optional in contracts and only send it from the browser when true unless the server requires an explicit false. This keeps the browser compatible during local restart windows.
 
@@ -172,7 +176,7 @@ Artifact detail routes may use preloaded artifact metadata for instant display, 
 At minimum for RPC changes:
 
 ```bash
-vx apps t3 --dev-server status
+bash scripts/dev/dev.sh status --json
 ```
 
 Then exercise the WebSocket RPC directly or through the UI.
