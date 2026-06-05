@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -9,8 +11,8 @@ import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from 
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
-const BASE_SERVER_PORT = 3773;
-const BASE_WEB_PORT = 5733;
+export const BASE_SERVER_PORT = 3773;
+export const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 
@@ -18,7 +20,23 @@ export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3"),
 );
 
-const MODE_ARGS = {
+export function resolveTurboExecutable(): string {
+  const repoRoot = resolve(import.meta.dirname, "..");
+  const windowsPath = resolve(repoRoot, "node_modules/.bin/turbo.cmd");
+  const unixPath = resolve(repoRoot, "node_modules/.bin/turbo");
+
+  if (process.platform === "win32" && existsSync(windowsPath)) {
+    return windowsPath;
+  }
+
+  if (existsSync(unixPath)) {
+    return unixPath;
+  }
+
+  return "turbo";
+}
+
+export const DEV_RUNNER_MODE_ARGS = {
   dev: [
     "run",
     "dev",
@@ -32,10 +50,10 @@ const MODE_ARGS = {
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
-type DevMode = keyof typeof MODE_ARGS;
+export type DevMode = keyof typeof DEV_RUNNER_MODE_ARGS;
 type PortAvailabilityCheck<R = never> = (port: number) => Effect.Effect<boolean, never, R>;
 
-const DEV_RUNNER_MODES = Object.keys(MODE_ARGS) as Array<DevMode>;
+const DEV_RUNNER_MODES = Object.keys(DEV_RUNNER_MODE_ARGS) as Array<DevMode>;
 
 class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly message: string;
@@ -118,14 +136,16 @@ interface CreateDevRunnerEnvInput {
   readonly baseEnv: NodeJS.ProcessEnv;
   readonly serverOffset: number;
   readonly webOffset: number;
-  readonly t3Home: string | undefined;
-  readonly authToken: string | undefined;
-  readonly noBrowser: boolean | undefined;
-  readonly autoBootstrapProjectFromCwd: boolean | undefined;
-  readonly logWebSocketEvents: boolean | undefined;
-  readonly host: string | undefined;
-  readonly port: number | undefined;
-  readonly devUrl: URL | undefined;
+  readonly t3Home?: string | undefined;
+  readonly authToken?: string | undefined;
+  readonly noBrowser?: boolean | undefined;
+  readonly autoBootstrapProjectFromCwd?: boolean | undefined;
+  readonly logWebSocketEvents?: boolean | undefined;
+  readonly host?: string | undefined;
+  readonly publicHost?: string | undefined;
+  readonly port?: number | undefined;
+  readonly webPort?: number | undefined;
+  readonly devUrl?: URL | undefined;
 }
 
 export function createDevRunnerEnv({
@@ -139,22 +159,32 @@ export function createDevRunnerEnv({
   autoBootstrapProjectFromCwd,
   logWebSocketEvents,
   host,
+  publicHost,
   port,
+  webPort,
   devUrl,
 }: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
-    const webPort = BASE_WEB_PORT + webOffset;
+    const resolvedWebPort =
+      webPort ??
+      (devUrl?.port && devUrl.port.length > 0 ? Number(devUrl.port) : BASE_WEB_PORT + webOffset);
     const resolvedBaseDir = yield* resolveBaseDir(t3Home);
+    const resolvedPublicHost = publicHost?.trim() || host?.trim() || "localhost";
+    const resolvedDevUrl = devUrl ?? new URL(`http://${resolvedPublicHost}:${resolvedWebPort}`);
+    const websocketHost = resolvedDevUrl.host;
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
-      PORT: String(webPort),
-      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
+      PORT: String(resolvedWebPort),
+      VITE_DEV_SERVER_URL: resolvedDevUrl.toString(),
       T3CODE_MODE: "web",
       T3CODE_PORT: String(serverPort),
       T3CODE_HOME: resolvedBaseDir,
-      VITE_WS_URL: `ws://localhost:${serverPort}`,
+      VITE_HOST: "true",
+      VITE_HMR_HOST: resolvedPublicHost,
+      VITE_WS_PROXY_PORT: String(serverPort),
+      VITE_WS_URL: `ws://${websocketHost}/ws`,
     };
 
     if (host !== undefined) {
@@ -415,7 +445,9 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         envOverrides.logWebSocketEvents,
       ),
       host: input.host,
+      publicHost: input.host,
       port: input.port,
+      webPort: undefined,
       devUrl: input.devUrl,
     });
 
@@ -433,8 +465,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     }
 
     const child = yield* ChildProcess.make(
-      "turbo",
-      [...MODE_ARGS[input.mode], ...input.turboArgs],
+      resolveTurboExecutable(),
+      [...DEV_RUNNER_MODE_ARGS[input.mode], ...input.turboArgs],
       {
         stdin: "inherit",
         stdout: "inherit",

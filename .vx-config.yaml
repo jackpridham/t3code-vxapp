@@ -34,8 +34,8 @@ runtime:
 repoLinks:
   config: .vx/repo-links.yaml
 devServer:
-  adapter: scripts/dev-runner.ts
-  runner: node
+  adapter: scripts/dev/dev.sh
+  runner: bash
   serverPort: 3773
   webPort: 5733
   deployedPort:
