@@ -1,4 +1,5 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
@@ -57,6 +58,33 @@ afterEach(() => {
   }
 });
 
+async function listenOnIpv6Loopback(port: number): Promise<Server | null> {
+  const server = createServer();
+  return await new Promise((resolvePromise, reject) => {
+    server.once("error", (error) => {
+      if ((error as NodeJS.ErrnoException).code === "EAFNOSUPPORT") {
+        server.close();
+        resolvePromise(null);
+        return;
+      }
+      reject(error);
+    });
+    server.listen(port, "::1", () => resolvePromise(server));
+  });
+}
+
+async function occupyIpv6LoopbackPortAtOrAbove(
+  startPort: number,
+): Promise<{ server: Server; port: number } | null> {
+  for (let port = startPort; port < startPort + 50; port += 1) {
+    const server = await listenOnIpv6Loopback(port);
+    if (server) {
+      return { server, port };
+    }
+  }
+  return null;
+}
+
 describe("localized T3 dev surface", () => {
   it("workspace keys are stable and path-sensitive", () => {
     expect(workspaceKey("/tmp/example")).toEqual(workspaceKey("/tmp/example"));
@@ -110,5 +138,43 @@ describe("localized T3 dev surface", () => {
     expect(config.env.T3_AGENTS_VXAPP_REPO_ROOT).toBe(siblingRoot);
     expect(config.env.AGENTS_VXAPP_REPO_ROOT).toBe(siblingRoot);
     expect(config.env.VX_AGENTS_REPO_ROOT).toBe(siblingRoot);
+  });
+
+  it("skips web ports already occupied on IPv6 loopback", async () => {
+    const { repoRoot } = createRepoFixture();
+    const occupied = await occupyIpv6LoopbackPortAtOrAbove(6500);
+    if (!occupied) {
+      return;
+    }
+
+    const previousOffset = process.env.T3CODE_PORT_OFFSET;
+    process.env.T3CODE_PORT_OFFSET = String(occupied.port - 5733);
+    try {
+      const config = await resolveRunConfig({
+        workspaceRoot: repoRoot,
+        baseEnv: {},
+        mode: "dev:web",
+        bindHost: "0.0.0.0",
+        publicHost: "127.0.0.1",
+        t3Home: "/tmp/t3-home",
+      });
+
+      expect(config.webPort).toBeGreaterThan(occupied.port);
+    } finally {
+      if (previousOffset === undefined) {
+        delete process.env.T3CODE_PORT_OFFSET;
+      } else {
+        process.env.T3CODE_PORT_OFFSET = previousOffset;
+      }
+      await new Promise<void>((resolvePromise, reject) => {
+        occupied.server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolvePromise();
+        });
+      });
+    }
   });
 });

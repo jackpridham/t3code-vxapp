@@ -61,6 +61,30 @@ function loopbackHost(bindHost: string): string {
 }
 
 async function isPortAvailable(host: string, port: number): Promise<boolean> {
+  const probeHosts = loopbackProbeHosts(host);
+  const results = await Promise.all(
+    probeHosts.map((probeHost) => isPortAvailableOnHost(probeHost, port)),
+  );
+  return results.every(Boolean);
+}
+
+function loopbackProbeHosts(host: string): string[] {
+  switch (host) {
+    case "":
+    case "0.0.0.0":
+    case "127.0.0.1":
+    case "localhost":
+      return ["127.0.0.1", "::1"];
+    case "::":
+    case "[::]":
+    case "::1":
+      return ["::1", "127.0.0.1"];
+    default:
+      return [host];
+  }
+}
+
+async function isPortAvailableOnHost(host: string, port: number): Promise<boolean> {
   return await new Promise<boolean>((resolve) => {
     const socket = createConnection({ host, port });
     const done = (available: boolean) => {
@@ -115,8 +139,8 @@ async function resolvePorts(
 
   if (explicitServerPort !== undefined && explicitWebPort !== undefined) {
     const [serverAvailable, webAvailable] = await Promise.all([
-      isPortAvailable("127.0.0.1", explicitServerPort),
-      isPortAvailable("127.0.0.1", explicitWebPort),
+      isPortAvailable("0.0.0.0", explicitServerPort),
+      isPortAvailable("0.0.0.0", explicitWebPort),
     ]);
     if (!serverAvailable) {
       throw new Error(`Server port ${explicitServerPort} is already in use`);
@@ -132,9 +156,9 @@ async function resolvePorts(
     const webPort = explicitWebPort ?? BASE_WEB_PORT + candidate;
     const [serverAvailable, webAvailable] = await Promise.all([
       explicitServerPort === undefined
-        ? isPortAvailable("127.0.0.1", serverPort)
+        ? isPortAvailable("0.0.0.0", serverPort)
         : Promise.resolve(true),
-      explicitWebPort === undefined ? isPortAvailable("127.0.0.1", webPort) : Promise.resolve(true),
+      explicitWebPort === undefined ? isPortAvailable("0.0.0.0", webPort) : Promise.resolve(true),
     ]);
     if (serverAvailable && webAvailable) {
       return { serverPort, webPort };
@@ -146,7 +170,7 @@ async function resolvePorts(
 
 async function findNextAvailablePort(startPort: number): Promise<number> {
   for (let port = startPort; port <= 65535; port += 1) {
-    if (await isPortAvailable("127.0.0.1", port)) {
+    if (await isPortAvailable("0.0.0.0", port)) {
       return port;
     }
   }
