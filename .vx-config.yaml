@@ -31,18 +31,70 @@ runtime:
   operations: .vx/runtime/operations.yaml
   globalPackSource: agent-runtime/packs
   ownerClient: .vx/runtime/owner-client.yaml
+  install:
+    target: .agents/runtime/skills
+    agents_skills_dir: .agents/skills
+    mirror_agents_skills: false
+    runtime_dir: .agents/runtime
+    dispatch_contract_path: .agents/runtime/dispatch-contract.json
+    context_plan_path: .agents/runtime/context-plan.json
+    installed_packs_path: .agents/runtime/installed-packs.json
+    instruction_stack_audit_path: .agents/runtime/instruction-stack-audit.json
 repoLinks:
   config: .vx/repo-links.yaml
+worktrees:
+  bootstrap:
+    file_copies: []
+    generated_files: []
+    dependencies:
+    - path: node_modules
+      strategy: symlink
+      category: node_modules
+    - path: scripts/node_modules
+      strategy: symlink
+      category: node_modules
+    - path: apps/server/node_modules
+      strategy: symlink
+      category: node_modules
+    - path: apps/web/node_modules
+      strategy: symlink
+      category: node_modules
+    - path: packages/contracts/node_modules
+      strategy: symlink
+      category: node_modules
+    - path: packages/effect-codex-app-server/node_modules
+      strategy: symlink
+      category: node_modules
+    - path: packages/orchestration-core/node_modules
+      strategy: symlink
+      category: node_modules
+    - path: packages/shared/node_modules
+      strategy: symlink
+      category: node_modules
+    required_paths: []
+    guidance:
+      default_repo_claude: omit
+      default_workspace_skills: selected_packs
+      allow_disable_workspace_skills: true
+      allow_disable_agents_md: true
 devServer:
   adapter: scripts/dev/dev.sh
   runner: bash
+  supportedActions:
+  - start
+  - stop
+  - restart
+  - status
+  - logs
+  - list
+  - local-port
   serverPort: 3773
   webPort: 5733
   deployedPort:
     env: T3CODE_PORT
     default: 7421
   host:
-    default: 127.0.0.1
+    default: 192.168.100.42
 deploy:
   adapter: deploy.sh
   webAdapter: deploy-web.sh

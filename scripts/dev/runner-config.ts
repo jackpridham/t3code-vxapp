@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { createConnection } from "node:net";
 import { resolve } from "node:path";
 import { URL } from "node:url";
@@ -230,17 +232,35 @@ export async function resolveRunConfig(input: ResolvedRunConfigInput): Promise<R
 export async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url, { method: "GET" });
-      if (response.ok) {
-        return true;
-      }
-    } catch {
-      // keep polling
+    if (await httpOk(url)) {
+      return true;
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return false;
+}
+
+async function httpOk(url: string): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const target = new URL(url);
+    const request =
+      target.protocol === "https:"
+        ? httpsRequest(target, { method: "GET", agent: false })
+        : httpRequest(target, { method: "GET", agent: false });
+    request.once("response", (response) => {
+      response.resume();
+      resolve((response.statusCode ?? 500) >= 200 && (response.statusCode ?? 500) < 300);
+    });
+    request.once("error", () => {
+      resolve(false);
+    });
+    request.setTimeout(1_000, () => {
+      request.destroy();
+      // keep polling
+      resolve(false);
+    });
+    request.end();
+  });
 }
 
 function resolveReadyTimeoutMs(): number {

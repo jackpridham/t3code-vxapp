@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -256,6 +256,18 @@ function emitJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+async function writeStdout(message: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(message, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 function readLogLines(path: string, lines: number): string[] {
   if (!existsSync(path)) {
     return [];
@@ -311,13 +323,13 @@ async function startCommand(options: CliOptions): Promise<void> {
   if (existing && sameContract(existing, options)) {
     const payload = statusEnvelope("start", existing);
     if (options.json) {
-      emitJson(payload);
-      return;
+      await writeStdout(`${JSON.stringify(payload, null, 2)}\n`);
+      process.exit(0);
     }
-    process.stdout.write(
+    await writeStdout(
       `PASS: Dev server is already running\n  url: ${existing.primaryUrl}\n  log: ${existing.log}\n`,
     );
-    return;
+    process.exit(0);
   }
 
   if (existing) {
@@ -362,19 +374,19 @@ async function startCommand(options: CliOptions): Promise<void> {
   const logPath = logFile(projectRoot);
   ensureStateDir(projectRoot);
   writeFileSync(logPath, "", "utf8");
+  const logFd = openSync(logPath, "a");
   const child = spawn(resolveTurboExecutable(), [...resolved.turboArgs], {
     cwd: projectRoot,
     env: resolved.env,
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", logFd, logFd],
     shell: process.platform === "win32",
   });
+  closeSync(logFd);
   const spawnError = new Promise<never>((_, reject) => {
     child.once("error", (error) => reject(new CliError("execution_failure", error.message, 1)));
   });
   child.unref();
-  child.stdout?.on("data", (chunk) => appendFileSync(logPath, chunk));
-  child.stderr?.on("data", (chunk) => appendFileSync(logPath, chunk));
 
   const ready = await Promise.race([waitForModeReadiness(resolved), spawnError]);
   if (!ready) {
@@ -414,12 +426,13 @@ async function startCommand(options: CliOptions): Promise<void> {
 
   const payload = statusEnvelope("start", state);
   if (options.json) {
-    emitJson(payload);
-    return;
+    await writeStdout(`${JSON.stringify(payload, null, 2)}\n`);
+    process.exit(0);
   }
-  process.stdout.write(
+  await writeStdout(
     `PASS: Dev server started\n  url: ${state.primaryUrl}\n  log: ${state.log}\n`,
   );
+  process.exit(0);
 }
 
 async function stopCommand(options: CliOptions): Promise<void> {
