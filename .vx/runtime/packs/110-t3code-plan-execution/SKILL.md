@@ -20,7 +20,7 @@ Composed from: (authored).
 ## JSON Plan Defaults
 
 When the task includes a JSON plan key, this pack owns the repo-local JSON plan
-contract. Use only `vx apps t3 --plan <plan-key> ...` for plan reads, notes,
+contract. Use only `vx apps t3 plan ...` for plan reads, notes,
 blockers, and task completion. Do not use raw `vx plan`, do not create sidecar
 plan files or out-of-band phase tracking, and do not edit JSON plan files
 directly.
