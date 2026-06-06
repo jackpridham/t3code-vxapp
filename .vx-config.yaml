@@ -47,30 +47,30 @@ worktrees:
     file_copies: []
     generated_files: []
     dependencies:
-    - path: node_modules
-      strategy: symlink
-      category: node_modules
-    - path: scripts/node_modules
-      strategy: symlink
-      category: node_modules
-    - path: apps/server/node_modules
-      strategy: symlink
-      category: node_modules
-    - path: apps/web/node_modules
-      strategy: symlink
-      category: node_modules
-    - path: packages/contracts/node_modules
-      strategy: symlink
-      category: node_modules
-    - path: packages/effect-codex-app-server/node_modules
-      strategy: symlink
-      category: node_modules
-    - path: packages/orchestration-core/node_modules
-      strategy: symlink
-      category: node_modules
-    - path: packages/shared/node_modules
-      strategy: symlink
-      category: node_modules
+      - path: node_modules
+        strategy: symlink
+        category: node_modules
+      - path: scripts/node_modules
+        strategy: symlink
+        category: node_modules
+      - path: apps/server/node_modules
+        strategy: symlink
+        category: node_modules
+      - path: apps/web/node_modules
+        strategy: symlink
+        category: node_modules
+      - path: packages/contracts/node_modules
+        strategy: symlink
+        category: node_modules
+      - path: packages/effect-codex-app-server/node_modules
+        strategy: symlink
+        category: node_modules
+      - path: packages/orchestration-core/node_modules
+        strategy: symlink
+        category: node_modules
+      - path: packages/shared/node_modules
+        strategy: symlink
+        category: node_modules
     required_paths: []
     guidance:
       default_repo_claude: omit
@@ -81,13 +81,13 @@ devServer:
   adapter: scripts/dev/dev.sh
   runner: bash
   supportedActions:
-  - start
-  - stop
-  - restart
-  - status
-  - logs
-  - list
-  - local-port
+    - start
+    - stop
+    - restart
+    - status
+    - logs
+    - list
+    - local-port
   serverPort: 3773
   webPort: 5733
   deployedPort:

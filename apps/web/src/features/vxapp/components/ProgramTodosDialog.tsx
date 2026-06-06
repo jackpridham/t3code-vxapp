@@ -20,6 +20,12 @@ const NEUTRAL_BADGE_CLASSNAME = "h-5 border border-border/70 bg-background/70 px
 const EMPTY_TODOS: ServerGetAgentsVxappSidebarAuthoritySnapshotResult["todos"] = [];
 
 export function ProgramTodosDialog(props: {
+  demoData?: {
+    currentTodoId: string | null;
+    error: { message: string } | null;
+    status: "error" | "idle" | "loading" | "ready";
+    todos: readonly ServerGetAgentsVxappSidebarAuthoritySnapshotResult["todos"][number][];
+  } | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   programId: string;
@@ -34,7 +40,13 @@ export function ProgramTodosDialog(props: {
   const rawTodos = useAgentsVxappStore(
     (store) => store.todosByProgramId.get(props.programId) ?? EMPTY_TODOS,
   );
-  const todos = rawTodos.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const resolvedStatus = props.demoData?.status ?? status;
+  const resolvedError = props.demoData?.error ?? error;
+  const resolvedCurrentTodoId = props.demoData?.currentTodoId ?? currentTodoId;
+  const resolvedRawTodos = props.demoData?.todos ?? rawTodos;
+  const todos = resolvedRawTodos.toSorted((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
 
   return (
     <Dialog onOpenChange={props.onOpenChange} open={props.open}>
@@ -46,13 +58,13 @@ export function ProgramTodosDialog(props: {
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
-          {status === "loading" || status === "idle" ? (
+          {resolvedStatus === "loading" || resolvedStatus === "idle" ? (
             <div className="rounded-xl border border-border/70 bg-card/60 px-4 py-6 text-sm text-muted-foreground">
               Loading TODOs…
             </div>
-          ) : status === "error" ? (
+          ) : resolvedStatus === "error" ? (
             <div className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-6 text-sm text-destructive">
-              {error?.message ?? "Failed to load Program TODOs."}
+              {resolvedError?.message ?? "Failed to load Program TODOs."}
             </div>
           ) : todos.length === 0 ? (
             <Empty className="rounded-xl border border-dashed border-border/70 bg-card/40 py-12">
@@ -67,7 +79,7 @@ export function ProgramTodosDialog(props: {
           ) : (
             <div className="space-y-3">
               {todos.map((todo) => {
-                const isCurrent = currentTodoId === todo.todoId;
+                const isCurrent = resolvedCurrentTodoId === todo.todoId;
 
                 return (
                   <section

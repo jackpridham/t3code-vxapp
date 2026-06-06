@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://t3code-vxapp.local/schemas/t3-perf-success.schema.json",
+  "title": "T3 performance probe success envelope",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "repo",
+    "budgetId",
+    "status",
+    "metrics",
+    "gates",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "contractVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "const": "t3"
+    },
+    "budgetId": {
+      "type": ["string", "null"]
+    },
+    "status": {
+      "enum": ["pass", "fail"]
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "gates": {
+      "type": "array"
+    },
+    "evidence": {
+      "type": "object"
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "severity", "details"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "const": "error"
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

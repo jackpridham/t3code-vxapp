@@ -429,9 +429,7 @@ async function startCommand(options: CliOptions): Promise<void> {
     await writeStdout(`${JSON.stringify(payload, null, 2)}\n`);
     process.exit(0);
   }
-  await writeStdout(
-    `PASS: Dev server started\n  url: ${state.primaryUrl}\n  log: ${state.log}\n`,
-  );
+  await writeStdout(`PASS: Dev server started\n  url: ${state.primaryUrl}\n  log: ${state.log}\n`);
   process.exit(0);
 }
 

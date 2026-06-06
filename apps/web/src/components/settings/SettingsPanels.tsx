@@ -22,6 +22,7 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_UNIFIED_SETTINGS,
+  type SidebarOrchestrationDataMode,
   type SidebarWorkerActivityFilter,
   type SidebarWorkerLineageFilter,
   type SidebarWorkerVisibilityScope,
@@ -494,6 +495,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled
         ? ["Orchestration mode"]
         : []),
+      ...(settings.sidebarOrchestrationDataMode !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationDataMode
+        ? ["Orchestration sidebar data"]
+        : []),
       ...(settings.ideModeEnabled !== DEFAULT_UNIFIED_SETTINGS.ideModeEnabled ? ["IDE mode"] : []),
       ...(settings.startupThreadTarget !== DEFAULT_UNIFIED_SETTINGS.startupThreadTarget
         ? ["Startup thread"]
@@ -584,6 +589,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.startupThreadTarget,
       settings.sidebarGroupWorktreesWithParentProject,
       settings.sidebarOrchestrationModeEnabled,
+      settings.sidebarOrchestrationDataMode,
       settings.sidebarProjectSortOrder,
       settings.sidebarWorkerActivityFilter,
       settings.sidebarWorkerLineageFilter,
@@ -659,6 +665,11 @@ const WORKER_ORCHESTRATION_NOTICES_VISIBILITY_LABELS: Record<
 const SIDEBAR_WORKER_VISIBILITY_SCOPE_LABELS: Record<SidebarWorkerVisibilityScope, string> = {
   current_orchestrator: "Current Orchestrator",
   all_orchestrators: "All Orchestrators",
+};
+
+const SIDEBAR_ORCHESTRATION_DATA_MODE_LABELS: Record<SidebarOrchestrationDataMode, string> = {
+  live: "Live owner data",
+  demo: "Demo showcase",
 };
 
 const SIDEBAR_WORKER_LINEAGE_FILTER_LABELS: Record<SidebarWorkerLineageFilter, string> = {
@@ -1791,6 +1802,56 @@ export function OrchestrationSettingsPanel() {
               onCheckedChange={(checked) => updateSettings({ ideModeEnabled: Boolean(checked) })}
               aria-label="Toggle IDE mode"
             />
+          }
+        />
+        <SettingsRow
+          title="Sidebar Data Source"
+          description={
+            orchestrationModeEnabled
+              ? "Switch the orchestration sidebar between live owner-backed state and a fully populated demo showcase."
+              : "Enable orchestration mode to switch the sidebar between live and demo data."
+          }
+          resetAction={
+            settings.sidebarOrchestrationDataMode !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationDataMode ? (
+              <SettingResetButton
+                label="orchestration sidebar data source"
+                onClick={() =>
+                  updateSettings({
+                    sidebarOrchestrationDataMode:
+                      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationDataMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              disabled={!orchestrationModeEnabled}
+              value={settings.sidebarOrchestrationDataMode}
+              onValueChange={(value) => {
+                if (value === "live" || value === "demo") {
+                  updateSettings({ sidebarOrchestrationDataMode: value });
+                }
+              }}
+            >
+              <SelectTrigger
+                className="w-full sm:w-44"
+                aria-label="Orchestration sidebar data source"
+              >
+                <SelectValue>
+                  {SIDEBAR_ORCHESTRATION_DATA_MODE_LABELS[settings.sidebarOrchestrationDataMode]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="live">
+                  {SIDEBAR_ORCHESTRATION_DATA_MODE_LABELS.live}
+                </SelectItem>
+                <SelectItem hideIndicator value="demo">
+                  {SIDEBAR_ORCHESTRATION_DATA_MODE_LABELS.demo}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow

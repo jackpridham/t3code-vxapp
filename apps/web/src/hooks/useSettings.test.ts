@@ -1,6 +1,7 @@
 import {
   DEFAULT_CHAT_VIEW_INPUT_WHEN_SCROLLING,
   DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_SIDEBAR_ORCHESTRATION_DATA_MODE,
   DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER,
   DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER,
   DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE,
@@ -13,6 +14,12 @@ import { buildLegacyClientSettingsMigrationPatch } from "./useSettings";
 describe("buildLegacyClientSettingsMigrationPatch", () => {
   it("defaults sidebar orchestration mode to true", () => {
     expect(DEFAULT_CLIENT_SETTINGS.sidebarOrchestrationModeEnabled).toBe(true);
+  });
+
+  it("defaults sidebar orchestration data mode to live", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarOrchestrationDataMode).toBe(
+      DEFAULT_SIDEBAR_ORCHESTRATION_DATA_MODE,
+    );
   });
 
   it("defaults worktree grouping to true", () => {
@@ -64,6 +71,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
         ideModeEnabled: true,
         maxProjectThreadsBeforeFolding: 3,
         sidebarGroupWorktreesWithParentProject: false,
+        sidebarOrchestrationDataMode: "demo",
         sidebarOrchestrationModeEnabled: true,
         sidebarProjectSortOrder: "manual",
         sidebarWorkerActivityFilter: "active",
@@ -85,6 +93,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       maxProjectThreadsBeforeFolding: 3,
       rememberChangesDrawerWidth: true,
       sidebarGroupWorktreesWithParentProject: false,
+      sidebarOrchestrationDataMode: "demo",
       sidebarOrchestrationModeEnabled: true,
       sidebarProjectSortOrder: "manual",
       sidebarWorkerActivityFilter: "active",
@@ -103,6 +112,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       changesPanelWindowNavigationMode: "dynamic",
       ideModeEnabled: false,
       rememberChangesDrawerWidth: true,
+      sidebarOrchestrationDataMode: "live",
       sidebarWorkerActivityFilter: "all",
       sidebarWorkerLineageFilter: "hide_invalid",
       sidebarWorkerVisibilityScope: "current_orchestrator",

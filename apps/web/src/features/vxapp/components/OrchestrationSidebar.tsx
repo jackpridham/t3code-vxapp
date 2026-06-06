@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import {
   type AgentRuntimeAgentKind,
   type ServerGetAgentRuntimeSnapshotResult,
+  type ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
   type ServerGetWorkerRuntimeSnapshotResult,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -18,10 +19,6 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  useAgentsVxappSidebarAuthorityBootstrap,
-  useAgentsVxappStore,
-} from "~/features/vxapp/agentsVxappStore";
 import { isElectron } from "~/env";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings } from "~/hooks/useSettings";
@@ -32,7 +29,6 @@ import { cn, newCommandId } from "~/lib/utils";
 import { workerRuntimeSnapshotQueryOptions } from "~/features/vxapp/workerRuntimeReactQuery";
 import { readNativeApi } from "~/nativeApi";
 import { derivePendingApprovals, derivePendingUserInputs } from "~/session-logic";
-import { useStore } from "~/store";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { useThreadSelectionStore } from "~/threadSelectionStore";
 import { useUiStateStore } from "~/uiStateStore";
@@ -76,6 +72,7 @@ import { ProgramInfoDialog } from "./ProgramInfoDialog";
 import { ProgramTodosDialog } from "./ProgramTodosDialog";
 import { AgentRuntimeDetailsPanel } from "./AgentRuntimeDetailsPanel";
 import { deriveAgentRuntimeDialogState } from "./agentRuntimeDialogState";
+import { useOrchestrationSidebarData } from "./orchestrationSidebarData";
 import { deriveWorkerRuntimeDialogState } from "./workerRuntimeDialogState";
 import { WorkerRuntimeDetailsPanel } from "./WorkerRuntimeDetailsPanel";
 import { VortexErrorBanner } from "./VortexErrorBanner";
@@ -164,6 +161,7 @@ function AgentRuntimeInlineBadges({
   fallbackLabel,
   runtimeState,
   runtimeStateMessage,
+  snapshotOverride,
   threadId,
   workspace,
 }: {
@@ -171,6 +169,10 @@ function AgentRuntimeInlineBadges({
   fallbackLabel?: string | null;
   runtimeState: SidebarAgentRuntimeState;
   runtimeStateMessage: string | null;
+  snapshotOverride?:
+    | ServerGetAgentRuntimeSnapshotResult
+    | ServerGetWorkerRuntimeSnapshotResult
+    | null;
   threadId: ThreadId | null;
   workspace?: string | null;
 }) {
@@ -194,7 +196,8 @@ function AgentRuntimeInlineBadges({
     | ServerGetAgentRuntimeSnapshotResult
     | ServerGetWorkerRuntimeSnapshotResult
     | undefined;
-  if (!snapshot) {
+  const resolvedSnapshot = snapshotOverride ?? snapshot;
+  if (!resolvedSnapshot) {
     if (agentKind === "worker" && fallbackLabel) {
       return (
         <Badge
@@ -209,17 +212,17 @@ function AgentRuntimeInlineBadges({
     return <RuntimeStateBadge state={runtimeState} message={runtimeStateMessage} />;
   }
 
-  if (snapshot.availability !== "inspectable") {
+  if (resolvedSnapshot.availability !== "inspectable") {
     return (
       <RuntimeStateBadge
-        state={snapshot.availability}
-        message={snapshot.reasonCode ?? runtimeStateMessage}
+        state={resolvedSnapshot.availability}
+        message={resolvedSnapshot.reasonCode ?? runtimeStateMessage}
       />
     );
   }
 
   if (agentKind === "worker") {
-    const workerSnapshot = snapshot as ServerGetWorkerRuntimeSnapshotResult;
+    const workerSnapshot = resolvedSnapshot as ServerGetWorkerRuntimeSnapshotResult;
     const workerRepo =
       workerSnapshot.contextPlan?.repo?.trim() ||
       workerSnapshot.dispatchContract?.repo?.trim() ||
@@ -251,7 +254,7 @@ function AgentRuntimeInlineBadges({
     );
   }
 
-  const agentSnapshot = snapshot as ServerGetAgentRuntimeSnapshotResult;
+  const agentSnapshot = resolvedSnapshot as ServerGetAgentRuntimeSnapshotResult;
   const generatedAge = formatGeneratedAge(agentSnapshot.summary.generatedAt);
 
   return (
@@ -289,10 +292,15 @@ function AgentRuntimePopover({
   threadLabel,
   titleLabel,
   triggerClassName,
+  snapshotOverride,
 }: {
   agentKind: AgentRuntimeAgentKind;
   runtimeState: SidebarAgentRuntimeState;
   runtimeStateMessage: string | null;
+  snapshotOverride?:
+    | ServerGetAgentRuntimeSnapshotResult
+    | ServerGetWorkerRuntimeSnapshotResult
+    | null;
   threadId: ThreadId | null;
   workspace?: string | null;
   threadLabel: string;
@@ -300,7 +308,7 @@ function AgentRuntimePopover({
   triggerClassName?: string | undefined;
 }) {
   const [open, setOpen] = useState(false);
-  const runtimeLookupEnabled = open && runtimeState === "inspectable";
+  const runtimeLookupEnabled = open && runtimeState === "inspectable" && snapshotOverride == null;
   const workerRuntimeQuery = useQuery(
     workerRuntimeSnapshotQueryOptions({
       threadId: runtimeLookupEnabled && agentKind === "worker" ? threadId : null,
@@ -317,10 +325,12 @@ function AgentRuntimePopover({
   const content = useMemo(() => {
     if (agentKind === "worker") {
       return deriveWorkerRuntimeDialogState({
-        data: workerRuntimeQuery.data,
+        data:
+          (snapshotOverride as ServerGetWorkerRuntimeSnapshotResult | null) ??
+          workerRuntimeQuery.data,
         error: workerRuntimeQuery.error instanceof Error ? workerRuntimeQuery.error : null,
-        isError: workerRuntimeQuery.isError,
-        isLoading: workerRuntimeQuery.isLoading,
+        isError: snapshotOverride == null && workerRuntimeQuery.isError,
+        isLoading: snapshotOverride == null && workerRuntimeQuery.isLoading,
         unavailableHint:
           runtimeState === "inspectable"
             ? null
@@ -332,10 +342,11 @@ function AgentRuntimePopover({
       });
     }
     return deriveAgentRuntimeDialogState({
-      data: agentRuntimeQuery.data,
+      data:
+        (snapshotOverride as ServerGetAgentRuntimeSnapshotResult | null) ?? agentRuntimeQuery.data,
       error: agentRuntimeQuery.error instanceof Error ? agentRuntimeQuery.error : null,
-      isError: agentRuntimeQuery.isError,
-      isLoading: agentRuntimeQuery.isLoading,
+      isError: snapshotOverride == null && agentRuntimeQuery.isError,
+      isLoading: snapshotOverride == null && agentRuntimeQuery.isLoading,
       unavailableHint:
         runtimeState === "inspectable"
           ? null
@@ -354,6 +365,7 @@ function AgentRuntimePopover({
     runtimeState,
     runtimeStateMessage,
     threadId,
+    snapshotOverride,
     workerRuntimeQuery.data,
     workerRuntimeQuery.error,
     workerRuntimeQuery.isError,
@@ -361,6 +373,7 @@ function AgentRuntimePopover({
   ]);
 
   const runtimeQuery = agentKind === "worker" ? workerRuntimeQuery : agentRuntimeQuery;
+  const resolvedRuntimeData = snapshotOverride ?? runtimeQuery.data;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -394,7 +407,7 @@ function AgentRuntimePopover({
             title={`${titleLabel} runtime`}
           />
 
-          {content.mode !== "ready" || !runtimeQuery.data ? (
+          {content.mode !== "ready" || !resolvedRuntimeData ? (
             <div className="rounded-lg border border-dashed border-border/70 bg-secondary/20 px-3 py-4">
               <p className="text-xs font-medium text-foreground/90">{content.mode}</p>
               <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/70">
@@ -403,11 +416,11 @@ function AgentRuntimePopover({
             </div>
           ) : agentKind === "worker" ? (
             <WorkerRuntimeDetailsPanel
-              snapshot={workerRuntimeQuery.data as ServerGetWorkerRuntimeSnapshotResult}
+              snapshot={resolvedRuntimeData as ServerGetWorkerRuntimeSnapshotResult}
             />
           ) : (
             <AgentRuntimeDetailsPanel
-              snapshot={agentRuntimeQuery.data as ServerGetAgentRuntimeSnapshotResult}
+              snapshot={resolvedRuntimeData as ServerGetAgentRuntimeSnapshotResult}
             />
           )}
         </div>
@@ -729,26 +742,27 @@ function resolveAutoExpandedSidebarItems(input: {
 }
 
 export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
-  useAgentsVxappSidebarAuthorityBootstrap();
   const settings = useSettings();
+  const sidebarData = useOrchestrationSidebarData();
   const navigate = useNavigate();
   const location = useLocation();
   const routeThreadId = useParams({
     strict: false,
     select: (params) => (params.threadId ? (params.threadId as ThreadId) : null),
   });
-  const authoritySnapshot = useAgentsVxappStore((store) => store.snapshot);
-  const authorityStatus = useAgentsVxappStore((store) => store.status);
-  const authorityError = useAgentsVxappStore((store) => store.error);
-  const refreshSidebarAuthority = useAgentsVxappStore((store) => store.refreshSidebarAuthority);
+  const authoritySnapshot = sidebarData.authoritySnapshot;
+  const authorityStatus = sidebarData.authorityStatus;
+  const authorityError = sidebarData.authorityError;
+  const refreshSidebarAuthority = sidebarData.refreshSidebarAuthority;
   const programs = useMemo(
     () => authoritySnapshot?.programs.map((card) => card.program) ?? [],
     [authoritySnapshot],
   );
   const programsPagination = authoritySnapshot?.pagination ?? null;
-  const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
-  const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
+  const projects = sidebarData.projects;
+  const threads = sidebarData.threads;
+  const threadLastVisitedAtById = sidebarData.threadLastVisitedAtById;
+  const threadVisitedAtById = threadLastVisitedAtById as Record<string, string | undefined>;
   const markThreadUnread = useUiStateStore((store) => store.markThreadUnread);
   const selectedThreadIds = useThreadSelectionStore((store) => store.selectedThreadIds);
   const toggleThread = useThreadSelectionStore((store) => store.toggleThread);
@@ -765,6 +779,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const [programInfoDialogProgramId, setProgramInfoDialogProgramId] = useState<string | null>(null);
   const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
+  const [demoSelectedThreadId, setDemoSelectedThreadId] = useState<ThreadId | null>(null);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const animatedListsRef = useRef(new WeakSet<HTMLElement>());
   const attachAnimatedListRef = useCallback((node: HTMLElement | null) => {
@@ -791,6 +806,8 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       }),
     [authoritySnapshot, programs, projects, threads],
   );
+  const effectiveRouteThreadId =
+    sidebarData.dataMode === "demo" ? demoSelectedThreadId : routeThreadId;
 
   const orderedWorkerThreadIds = useMemo(
     () =>
@@ -815,11 +832,60 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     const suffix = parts.length > 0 ? parts.join(", ") : "referenced rows";
     return `Dev DB mirror is stale: ${suffix} from agents-vxapp SQLite disagree with local T3 state. Rerun python3 scripts/seed-dev-db.py.`;
   }, [model.diagnostics]);
+  const authorityProgramCardById = useMemo(
+    () =>
+      new Map((authoritySnapshot?.programs ?? []).map((card) => [card.program.id, card] as const)),
+    [authoritySnapshot],
+  );
+  const authorityTodosByProgramId = useMemo(() => {
+    const next = new Map<
+      string,
+      ServerGetAgentsVxappSidebarAuthoritySnapshotResult["todos"][number][]
+    >();
+    for (const todo of authoritySnapshot?.todos ?? []) {
+      if (!todo.programId) {
+        continue;
+      }
+      const existing = [...(next.get(todo.programId) ?? [])];
+      existing.push(todo);
+      next.set(todo.programId, existing);
+    }
+    return next;
+  }, [authoritySnapshot]);
+  const getDemoProgramDialogData = useCallback(
+    (programId: string) => ({
+      currentTodoId:
+        authoritySnapshot?.currentTodos.find((todo) => todo.programId === programId)?.todoId ??
+        null,
+      error: null,
+      programCard:
+        authorityProgramCardById.get(
+          programId as ServerGetAgentsVxappSidebarAuthoritySnapshotResult["programs"][number]["program"]["id"],
+        ) ?? null,
+      status: authorityStatus,
+      todoCount: authorityTodosByProgramId.get(programId)?.length ?? 0,
+      todos: authorityTodosByProgramId.get(programId) ?? [],
+    }),
+    [authorityProgramCardById, authoritySnapshot, authorityStatus, authorityTodosByProgramId],
+  );
+
+  useEffect(() => {
+    if (sidebarData.dataMode !== "demo" || demoSelectedThreadId !== null) {
+      return;
+    }
+    const firstThreadId =
+      model.executives[0]?.threadId ??
+      model.executives[0]?.programs[0]?.executiveThreadId ??
+      model.executives[0]?.programs[0]?.currentLane?.id ??
+      model.executives[0]?.programs[0]?.currentLane?.workers[0]?.id ??
+      null;
+    setDemoSelectedThreadId(firstThreadId as ThreadId | null);
+  }, [demoSelectedThreadId, model.executives, sidebarData.dataMode]);
 
   useEffect(() => {
     const nextAutoOpenState = resolveAutoExpandedSidebarItems({
       executives: model.executives,
-      routeThreadId,
+      routeThreadId: effectiveRouteThreadId,
     });
     if (nextAutoOpenState.openProgramIds.size > 0) {
       setOpenProgramIds((current) => mergeItems(current, nextAutoOpenState.openProgramIds));
@@ -827,7 +893,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     if (nextAutoOpenState.openLaneIds.size > 0) {
       setOpenLaneIds((current) => mergeItems(current, nextAutoOpenState.openLaneIds));
     }
-  }, [model.executives, routeThreadId]);
+  }, [effectiveRouteThreadId, model.executives]);
 
   useEffect(() => {
     if (renamingThreadId && renamingInputRef.current) {
@@ -838,13 +904,21 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
 
   const navigateToThread = useCallback(
     async (threadId: ThreadId) => {
+      if (sidebarData.dataMode === "demo") {
+        setDemoSelectedThreadId(threadId);
+        return;
+      }
       await navigate(resolveThreadRouteTarget(location.pathname, threadId));
     },
-    [location.pathname, navigate],
+    [location.pathname, navigate, sidebarData.dataMode],
   );
   const navigateToNoThread = useCallback(async () => {
+    if (sidebarData.dataMode === "demo") {
+      setDemoSelectedThreadId(null);
+      return;
+    }
     await navigate(resolveNoThreadRouteTarget(location.pathname));
-  }, [location.pathname, navigate]);
+  }, [location.pathname, navigate, sidebarData.dataMode]);
 
   const handleProgramToggle = useCallback(
     async (program: (typeof model.executives)[number]["programs"][number]) => {
@@ -852,19 +926,19 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       const programLanes = getProgramLanes(program);
       if (
         isOpen &&
-        routeThreadId &&
-        (routeThreadId === program.executiveThreadId ||
+        effectiveRouteThreadId &&
+        (effectiveRouteThreadId === program.executiveThreadId ||
           programLanes.some(
             (lane) =>
-              routeThreadId === lane.id ||
-              lane.workers.some((worker) => worker.id === routeThreadId),
+              effectiveRouteThreadId === lane.id ||
+              lane.workers.some((worker) => worker.id === effectiveRouteThreadId),
           ))
       ) {
         await navigateToNoThread();
       }
       setOpenProgramIds((current) => toggleItem(current, program.id));
     },
-    [navigateToNoThread, openProgramIds, routeThreadId],
+    [effectiveRouteThreadId, navigateToNoThread, openProgramIds],
   );
 
   const handleLaneToggle = useCallback(
@@ -876,14 +950,15 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       const isOpen = openLaneIds.has(laneId);
       if (
         isOpen &&
-        routeThreadId &&
-        (routeThreadId === laneId || lane.workers.some((worker) => worker.id === routeThreadId))
+        effectiveRouteThreadId &&
+        (effectiveRouteThreadId === laneId ||
+          lane.workers.some((worker) => worker.id === effectiveRouteThreadId))
       ) {
         await navigateToNoThread();
       }
       setOpenLaneIds((current) => toggleItem(current, laneId));
     },
-    [navigateToNoThread, openLaneIds, routeThreadId],
+    [effectiveRouteThreadId, navigateToNoThread, openLaneIds],
   );
 
   const handleLaneNavigate = useCallback(
@@ -958,6 +1033,14 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
 
   const handleWorkerContextMenu = useCallback(
     async (threadId: ThreadId) => {
+      if (sidebarData.isReadOnly) {
+        toastManager.add({
+          type: "info",
+          title: "Demo mode is read-only",
+          description: "Worker mutations are disabled while the sidebar is showing demo data.",
+        });
+        return;
+      }
       const api = readNativeApi();
       if (!api) {
         return;
@@ -1021,6 +1104,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       deleteThread,
       markThreadUnread,
       settings.confirmThreadArchive,
+      sidebarData.isReadOnly,
       threads,
     ],
   );
@@ -1028,13 +1112,14 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const renderWorkerRow = (worker: SidebarProgramLaneNode["workers"][number]) => {
     const thread = worker.thread;
     const workerThreadId = worker.id as ThreadId;
-    const isActive = routeThreadId === worker.id;
+    const workerRuntimeSnapshot = sidebarData.getWorkerRuntimeSnapshot(worker.id);
+    const isActive = effectiveRouteThreadId === worker.id;
     const isSelected = selectedThreadIds.has(workerThreadId);
     const threadStatus = resolveSidebarThreadStatus({
       archivedAt: worker.archivedAt,
       fallbackThreadLink: worker.fallbackThreadLink,
       isHistorical: worker.isHistorical,
-      lastVisitedAt: threadLastVisitedAtById[worker.id] ?? undefined,
+      lastVisitedAt: threadVisitedAtById[worker.id] ?? undefined,
       thread,
     });
 
@@ -1089,6 +1174,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
             fallbackLabel={worker.provenanceLabel}
             runtimeState={worker.runtimeState}
             runtimeStateMessage={worker.runtimeStateMessage}
+            snapshotOverride={workerRuntimeSnapshot}
             threadId={workerThreadId}
             workspace={worker.worktreePathHint}
           />
@@ -1124,6 +1210,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
           agentKind="worker"
           runtimeState={worker.runtimeState}
           runtimeStateMessage={worker.runtimeStateMessage}
+          snapshotOverride={workerRuntimeSnapshot}
           threadId={workerThreadId}
           workspace={worker.worktreePathHint}
           threadLabel={worker.title}
@@ -1139,11 +1226,15 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     showTodosAction: boolean,
   ) => {
     const laneOpen = lane.id ? openLaneIds.has(lane.id) : false;
+    const laneRuntimeSnapshot = sidebarData.getAgentRuntimeSnapshot(
+      "orchestrator",
+      lane.id as string | null,
+    );
     const laneStatus = resolveSidebarThreadStatus({
       archivedAt: lane.archivedAt,
       fallbackThreadLink: lane.fallbackThreadLink,
       isHistorical: lane.isHistorical,
-      lastVisitedAt: lane.id ? (threadLastVisitedAtById[lane.id] ?? undefined) : undefined,
+      lastVisitedAt: lane.id ? (threadVisitedAtById[lane.id] ?? undefined) : undefined,
       thread: lane.thread,
     });
 
@@ -1156,7 +1247,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
         <div
           className={cn(
             "relative isolate flex items-start gap-1 rounded-lg hover:bg-accent/40",
-            routeThreadId === lane.id ? "bg-accent/60" : "",
+            effectiveRouteThreadId === lane.id ? "bg-accent/60" : "",
           )}
         >
           <SidebarActiveRuntimeRail status={laneStatus} isActiveNow={lane.isActiveNow} />
@@ -1202,6 +1293,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                   agentKind="orchestrator"
                   runtimeState={lane.runtimeState}
                   runtimeStateMessage={lane.runtimeStateMessage}
+                  snapshotOverride={laneRuntimeSnapshot}
                   threadId={lane.id as ThreadId | null}
                 />
               </div>
@@ -1217,6 +1309,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
               agentKind="orchestrator"
               runtimeState={lane.runtimeState}
               runtimeStateMessage={lane.runtimeStateMessage}
+              snapshotOverride={laneRuntimeSnapshot}
               threadId={lane.id as ThreadId | null}
               threadLabel={lane.title}
               titleLabel={lane.title}
@@ -1320,10 +1413,14 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
           ) : null}
           <SidebarMenu>
             {model.executives.map((executive) => {
+              const executiveRuntimeSnapshot = sidebarData.getAgentRuntimeSnapshot(
+                "executive",
+                executive.threadId,
+              );
               const executiveStatus = resolveSidebarThreadStatus({
                 fallbackThreadLink: executive.fallbackThreadLink,
                 lastVisitedAt: executive.threadId
-                  ? (threadLastVisitedAtById[executive.threadId] ?? undefined)
+                  ? (threadVisitedAtById[executive.threadId] ?? undefined)
                   : undefined,
                 thread: executive.thread,
               });
@@ -1340,7 +1437,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                       executive.threadId ? "cursor-pointer" : "",
                     )}
                     render={executive.threadId ? <button type="button" /> : <div />}
-                    isActive={routeThreadId === executive.threadId}
+                    isActive={effectiveRouteThreadId === executive.threadId}
                     onClick={
                       executive.threadId
                         ? () => {
@@ -1371,6 +1468,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                           agentKind="executive"
                           runtimeState={executive.runtimeState}
                           runtimeStateMessage={executive.runtimeStateMessage}
+                          snapshotOverride={executiveRuntimeSnapshot}
                           threadId={executive.threadId as ThreadId | null}
                         />
                       </div>
@@ -1386,6 +1484,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                       agentKind="executive"
                       runtimeState={executive.runtimeState}
                       runtimeStateMessage={executive.runtimeStateMessage}
+                      snapshotOverride={executiveRuntimeSnapshot}
                       threadId={executive.threadId as ThreadId | null}
                       threadLabel={executive.label}
                       titleLabel={executive.label}
@@ -1651,6 +1750,11 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       </SidebarContent>
       {programTodosDialog ? (
         <ProgramTodosDialog
+          demoData={
+            sidebarData.dataMode === "demo"
+              ? getDemoProgramDialogData(programTodosDialog.programId)
+              : null
+          }
           open
           onOpenChange={(open) => {
             if (!open) {
@@ -1663,6 +1767,11 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
       ) : null}
       {programInfoDialogProgramId ? (
         <ProgramInfoDialog
+          demoData={
+            sidebarData.dataMode === "demo"
+              ? getDemoProgramDialogData(programInfoDialogProgramId)
+              : null
+          }
           open
           onOpenChange={(open) => {
             if (!open) {

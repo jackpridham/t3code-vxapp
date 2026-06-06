@@ -62,6 +62,8 @@ import {
 import { resolveThreadSessionRootId } from "../lib/orchestrationMode";
 import type { Project, Thread } from "../types";
 
+const WELCOME_BOOTSTRAP_FALLBACK_DELAY_MS = 750;
+
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
@@ -483,6 +485,9 @@ function EventRouter() {
     let disposed = false;
     const recovery = createOrchestrationRecoveryCoordinator();
     let needsProviderInvalidation = false;
+    let bootstrapInFlight = false;
+    let welcomeReceived = false;
+    let fallbackBootstrapTimer: ReturnType<typeof setTimeout> | null = null;
     // Suppress notifications during initial hydration (summary/snapshot + replay recovery).
     // Only fire notifications for real-time domain events after bootstrap completes.
     let notificationsReady = false;
@@ -625,6 +630,74 @@ function EventRouter() {
       });
     };
 
+    const finalizeBootstrapUi = async (input?: {
+      bootstrapThreadId?: ThreadId | null;
+      bootstrapProjectId?: ProjectId | null;
+    }): Promise<void> => {
+      if (disposed) {
+        return;
+      }
+
+      notificationsReady = true;
+
+      const preferredBootstrapThreadId =
+        resolveCurrentThreadId() ?? input?.bootstrapThreadId ?? null;
+      const preferredBootstrapProjectId =
+        (preferredBootstrapThreadId
+          ? useStore.getState().threads.find((thread) => thread.id === preferredBootstrapThreadId)
+              ?.projectId
+          : null) ??
+        input?.bootstrapProjectId ??
+        null;
+
+      if (!preferredBootstrapProjectId) {
+        return;
+      }
+      setProjectExpanded(preferredBootstrapProjectId, true);
+
+      if (!preferredBootstrapThreadId) {
+        return;
+      }
+
+      if (pathnameRef.current !== "/") {
+        return;
+      }
+      if (handledBootstrapThreadIdRef.current === preferredBootstrapThreadId) {
+        return;
+      }
+      await navigate({
+        to: "/$threadId",
+        params: { threadId: preferredBootstrapThreadId },
+        replace: true,
+      });
+      handledBootstrapThreadIdRef.current = preferredBootstrapThreadId;
+    };
+
+    const startBootstrap = async (input?: {
+      bootstrapThreadId?: ThreadId | null;
+      bootstrapProjectId?: ProjectId | null;
+    }): Promise<void> => {
+      if (disposed || bootstrapInFlight || useStore.getState().bootstrapComplete) {
+        return;
+      }
+
+      bootstrapInFlight = true;
+      try {
+        await bootstrapOrchestrationState({
+          api,
+          recovery,
+          syncServerReadModel,
+          reconcileSnapshotDerivedState,
+          recoverFromSequenceGap,
+          isDisposed: () => disposed,
+          getCurrentThreadId: resolveCurrentThreadId,
+        });
+        await finalizeBootstrapUi(input);
+      } finally {
+        bootstrapInFlight = false;
+      }
+    };
+
     const runSnapshotRecovery = async (reason: "bootstrap" | "replay-failed"): Promise<void> => {
       if (!recovery.beginSnapshotRecovery(reason)) {
         return;
@@ -692,59 +765,25 @@ function EventRouter() {
         );
     });
     const unsubWelcome = onServerWelcome((payload) => {
+      welcomeReceived = true;
+      if (fallbackBootstrapTimer !== null) {
+        clearTimeout(fallbackBootstrapTimer);
+        fallbackBootstrapTimer = null;
+      }
       // Migrate old localStorage settings to server on first connect
       migrateLocalSettingsToServer();
       authoritativeBootstrapThreadIdRef.current = payload.bootstrapThreadId ?? null;
-      void (async () => {
-        await bootstrapOrchestrationState({
-          api,
-          recovery,
-          syncServerReadModel,
-          reconcileSnapshotDerivedState,
-          recoverFromSequenceGap,
-          isDisposed: () => disposed,
-          getCurrentThreadId: resolveCurrentThreadId,
-        });
-        if (disposed) {
-          return;
-        }
-        // Enable notifications now that hydration is complete.
-        // Only real-time domain events from here forward will trigger toasts.
-        notificationsReady = true;
-
-        const preferredBootstrapThreadId =
-          resolveCurrentThreadId() ?? payload.bootstrapThreadId ?? null;
-        const preferredBootstrapProjectId =
-          (preferredBootstrapThreadId
-            ? useStore.getState().threads.find((thread) => thread.id === preferredBootstrapThreadId)
-                ?.projectId
-            : null) ??
-          payload.bootstrapProjectId ??
-          null;
-
-        if (!preferredBootstrapProjectId) {
-          return;
-        }
-        setProjectExpanded(preferredBootstrapProjectId, true);
-
-        if (!preferredBootstrapThreadId) {
-          return;
-        }
-
-        if (pathnameRef.current !== "/") {
-          return;
-        }
-        if (handledBootstrapThreadIdRef.current === preferredBootstrapThreadId) {
-          return;
-        }
-        await navigate({
-          to: "/$threadId",
-          params: { threadId: preferredBootstrapThreadId },
-          replace: true,
-        });
-        handledBootstrapThreadIdRef.current = preferredBootstrapThreadId;
-      })().catch(() => undefined);
+      void startBootstrap({
+        bootstrapThreadId: payload.bootstrapThreadId ?? null,
+        bootstrapProjectId: payload.bootstrapProjectId ?? null,
+      }).catch(() => undefined);
     });
+    fallbackBootstrapTimer = setTimeout(() => {
+      if (disposed || welcomeReceived || useStore.getState().bootstrapComplete) {
+        return;
+      }
+      void startBootstrap().catch(() => undefined);
+    }, WELCOME_BOOTSTRAP_FALLBACK_DELAY_MS);
     // onServerConfigUpdated replays the latest cached value synchronously
     // during subscribe. Skip the toast for that replay so effect re-runs
     // don't produce duplicate toasts.
@@ -803,6 +842,9 @@ function EventRouter() {
     return () => {
       disposed = true;
       needsProviderInvalidation = false;
+      if (fallbackBootstrapTimer !== null) {
+        clearTimeout(fallbackBootstrapTimer);
+      }
       queryInvalidationThrottler.cancel();
       unsubDomainEvent();
       unsubTerminalEvent();

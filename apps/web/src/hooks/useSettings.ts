@@ -33,6 +33,7 @@ import {
   DEFAULT_CHANGES_PANEL_WINDOW_NAVIGATION_MODE,
   DEFAULT_REMEMBER_CHANGES_DRAWER_WIDTH,
   DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER,
+  DEFAULT_SIDEBAR_ORCHESTRATION_DATA_MODE,
   DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER,
   DEFAULT_SIDEBAR_WORKER_VISIBILITY_SCOPE,
   DEFAULT_WORKER_ORCHESTRATION_NOTICES_VISIBILITY,
@@ -43,6 +44,7 @@ import {
   SidebarWorkerLineageFilter,
   SidebarWorkerVisibilityScope,
   SidebarProjectSortOrder,
+  SidebarOrchestrationDataMode,
   SidebarThreadSortOrder,
   TimestampFormat,
   UnifiedSettings,
@@ -228,6 +230,12 @@ export function buildLegacyClientSettingsMigrationPatch(
 
   if (Predicate.isBoolean(legacySettings.sidebarOrchestrationModeEnabled)) {
     patch.sidebarOrchestrationModeEnabled = legacySettings.sidebarOrchestrationModeEnabled;
+  }
+
+  if (Schema.is(SidebarOrchestrationDataMode)(legacySettings.sidebarOrchestrationDataMode)) {
+    patch.sidebarOrchestrationDataMode = legacySettings.sidebarOrchestrationDataMode;
+  } else if (legacySettings.sidebarOrchestrationDataMode === undefined) {
+    patch.sidebarOrchestrationDataMode = DEFAULT_SIDEBAR_ORCHESTRATION_DATA_MODE;
   }
 
   if (Predicate.isBoolean(legacySettings.ideModeEnabled)) {
