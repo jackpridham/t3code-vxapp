@@ -14,7 +14,7 @@ The public owner is:
 bash scripts/dev/dev.sh <command>
 ```
 
-Do not treat `vx apps t3 --dev-server` as the owner surface in this repo.
+Do not treat `vx apps t3 dev-server` as the owner surface in this repo.
 Do not treat `scripts/dev-runner.ts` as the public entrypoint; it is reused as
 lower-level env/port logic behind the localized manager.
 
@@ -232,7 +232,7 @@ Never run `bun test`; use `bun run test`.
 
 ## Footguns
 
-- Do not use `vx apps t3 --dev-server` as the owner contract here.
+- Do not use `vx apps t3 dev-server` as the owner contract here.
 - Do not assume the web URL is always `http://127.0.0.1:5733/`.
 - Do not use `scripts/dev-runner.ts` as the public command surface.
 - Do not treat `.vx/dev-state.yaml` as live runtime state.

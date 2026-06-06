@@ -1,6 +1,6 @@
 ---
 name: t3-vx-apps-integration-workflow
-description: Use when adding, changing, or debugging T3 Code integration with Vortex app wrappers, especially `vx apps --list --json`, `vx apps <target> --artifact ...`, app catalog data, app target IDs, app-scoped server RPCs, NativeApi methods, or UI features driven by configured Vortex apps. Triggers on vx apps, Vortex apps, app catalog, target_id, app wrappers, app-scoped artifacts, `server.listVortexApps`, `server.listVortexAppArtifacts`, or adding app data to navigation/artifacts pages.
+description: Use when adding, changing, or debugging T3 Code integration with Vortex app wrappers, especially `vx apps list --json`, `vx apps <target> artifacts ...`, app catalog data, app target IDs, app-scoped server RPCs, NativeApi methods, or UI features driven by configured Vortex apps. Triggers on vx apps, Vortex apps, app catalog, target_id, app wrappers, app-scoped artifacts, `server.listVortexApps`, `server.listVortexAppArtifacts`, or adding app data to navigation/artifacts pages.
 ---
 
 # T3 Vortex Apps Integration Workflow
@@ -37,7 +37,7 @@ Primary files:
 Configured apps come from:
 
 ```bash
-vx apps --list --json
+vx apps list --json
 ```
 
 Do not hard-code the app list in UI code.
@@ -62,13 +62,13 @@ When the browser needs configured apps:
 Use app wrappers for artifact lists:
 
 ```bash
-vx apps <target> --artifact list --json --limit 100 --page <n>
+vx apps <target> artifacts list --json --limit 100 --page <n>
 ```
 
 Include archived artifacts only when the UI explicitly requests them:
 
 ```bash
-vx apps <target> --artifact list --json --limit 100 --page <n> --include-archived
+vx apps <target> artifacts list --json --limit 100 --page <n> --include-archived
 ```
 
 The wrapper caps large limits, so page until backend pagination is complete.

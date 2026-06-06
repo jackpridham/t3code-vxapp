@@ -69,13 +69,13 @@ Do not move app/artifact list fetching into the route component unless the route
 Use:
 
 ```bash
-vx apps <target> --artifact list --json --limit 100 --page <n>
+vx apps <target> artifacts list --json --limit 100 --page <n>
 ```
 
 For archived artifacts, pass:
 
 ```bash
-vx apps <target> --artifact list --json --limit 100 --page <n> --include-archived
+vx apps <target> artifacts list --json --limit 100 --page <n> --include-archived
 ```
 
 Fetch every page. Page 1 is not enough.
