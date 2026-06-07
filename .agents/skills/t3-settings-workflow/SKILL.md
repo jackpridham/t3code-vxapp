@@ -148,6 +148,31 @@ Additional test guidance:
 
 ## Known Repo Patterns
 
+### Provider settings pattern
+
+For provider-backed settings, follow the existing path used by `providers.codex`,
+`providers.claudeAgent`, and now `providers.ollamaLocal`.
+
+Read these together:
+
+- `packages/contracts/src/settings.ts`
+- `apps/server/src/serverSettings.ts`
+- `apps/web/src/components/settings/SettingsPanels.tsx`
+- the provider consumer layer, for example `apps/server/src/provider/Layers/OllamaAdapter.ts`
+
+What to keep aligned:
+
+- schema defaults and patch shape
+- settings-panel controls
+- dirty/open-state behavior in the provider card
+- provider snapshot or runtime consumer that actually uses the value
+- focused server tests for normalization and deep-merge behavior
+
+For server-authoritative provider config, prefer one derived runtime helper when
+multiple server files need the same normalized value. Example: local-model
+providers should derive base URL or default model once in a small server helper
+instead of reassembling strings in every adapter/provider file.
+
 ### Client setting examples
 
 Look at these for copyable patterns:
@@ -193,6 +218,8 @@ If the new setting affects visibility, folding, sorting, or derived display stat
 - Do not forget that browser tests or local-storage-backed tests may seed `DEFAULT_CLIENT_SETTINGS`.
 - Do not collapse policy state and local override state into one variable when the consumer supports both automatic behavior and explicit user toggles.
 - Do not duplicate the same control in multiple UI locations unless there is a clear reason; a single persistent location is usually easier to understand and test.
+- Do not keep provider-backed endpoint or model configuration hardcoded in an adapter once it is meant to be configurable through settings.
+- Do not treat provider settings as "done" if the settings UI exists but the provider snapshot or runtime consumer still ignores the values.
 - Do not run `bun test`.
 
 ## If You Are Dropped Into This Codebase Cold

@@ -24,8 +24,6 @@ apps/web/src/components/__screenshots__
 __screenshots__/
 .tanstack
 .skills/
-.agents/
-.agents/skills
 .claude/skills/t3-orchestration-trace
 .claude/skills/t3-orchestrator-wake-flow
 .claude/skills/t3-provider-runtime-ingestion-map
