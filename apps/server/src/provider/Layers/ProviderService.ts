@@ -221,15 +221,41 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           }
         }
 
+        const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
+        const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+
         if (!hasResumeCursor) {
+          if (adapter.capabilities.sessionRecovery === "history-replay") {
+            const recovered = yield* adapter.startSession({
+              threadId: input.binding.threadId,
+              provider: input.binding.provider,
+              ...(persistedCwd ? { cwd: persistedCwd } : {}),
+              ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+              runtimeMode: input.binding.runtimeMode ?? "full-access",
+            });
+            if (recovered.provider !== adapter.provider) {
+              return yield* toValidationError(
+                input.operation,
+                `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${adapter.provider}', received '${recovered.provider}'.`,
+              );
+            }
+
+            yield* upsertSessionBinding(recovered, input.binding.threadId, {
+              modelSelection: persistedModelSelection,
+            });
+            yield* analytics.record("provider.session.recovered", {
+              provider: recovered.provider,
+              strategy: "replay-thread-history",
+              hasResumeCursor: false,
+            });
+            return { adapter, session: recovered } as const;
+          }
+
           return yield* toValidationError(
             input.operation,
             `Cannot recover thread '${input.binding.threadId}' because no provider resume state is persisted.`,
           );
         }
-
-        const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
-        const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
         const resumed = yield* adapter.startSession({
           threadId: input.binding.threadId,

@@ -7,12 +7,15 @@
  *
  * @module CodexAdapterLive
  */
+import path from "node:path";
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
+  type ProviderKind,
   type ProviderEvent,
   type ProviderRuntimeEvent,
   type ProviderRequestKind,
+  type ServerSettings,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
@@ -21,7 +24,7 @@ import {
   ThreadId,
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
-import { Effect, Exit, Fiber, FileSystem, Layer, Queue, Schema, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, FileSystem, Layer, Path, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -39,10 +42,21 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { CodexAdapter, type CodexAdapterShape } from "../Services/CodexAdapter.ts";
+import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  buildManagedCodexAppServerConfigOverrides,
+  resolveCodexProfileContents,
+  resolveManagedCodexProfileName,
+  resolveManagedCodexProfilePath,
+  resolveManagedOllamaCodexProfileName,
+} from "../codexProfileConfig.ts";
+import { resolveOllamaRuntimeConfig } from "../ollamaConfig.ts";
+import { getOllamaAgentSupport, isVerifiedOllamaAgentModel } from "../ollamaModelSupport.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
@@ -53,7 +67,8 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
-const PROVIDER = "codex" as const;
+const DEFAULT_PROVIDER = "codex" as const;
+type ManagedCodexProvider = "codex" | "ollamaLocal";
 
 export interface CodexAdapterLiveOptions {
   readonly makeRuntime?: (
@@ -67,6 +82,14 @@ export interface CodexAdapterLiveOptions {
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
 
+interface ManagedCodexLaunchSettings {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly profileName: string;
+  readonly profileContents: string;
+  readonly appServerConfigOverrides: ReadonlyArray<string>;
+}
+
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
   readonly scope: Scope.Closeable;
@@ -76,6 +99,7 @@ interface CodexAdapterSessionContext {
 }
 
 function mapCodexRuntimeError(
+  provider: ProviderKind,
   threadId: ThreadId,
   method: string,
   error: CodexSessionRuntimeError,
@@ -85,7 +109,7 @@ function mapCodexRuntimeError(
     Schema.is(CodexErrors.CodexAppServerTransportError)(error)
   ) {
     return new ProviderAdapterSessionClosedError({
-      provider: PROVIDER,
+      provider,
       threadId,
       cause: error,
     });
@@ -93,18 +117,82 @@ function mapCodexRuntimeError(
 
   if (Schema.is(CodexSessionRuntimeThreadIdMissingError)(error)) {
     return new ProviderAdapterSessionNotFoundError({
-      provider: PROVIDER,
+      provider,
       threadId,
       cause: error,
     });
   }
 
   return new ProviderAdapterRequestError({
-    provider: PROVIDER,
+    provider,
     method,
     detail: error.message,
     cause: error,
   });
+}
+
+function providerSupportsCodexOptions(provider: ManagedCodexProvider): provider is "codex" {
+  return provider === "codex";
+}
+
+function validateOllamaAgentModel(
+  provider: ManagedCodexProvider,
+  operation: "startSession" | "sendTurn",
+  model: string | undefined,
+) {
+  if (provider !== "ollamaLocal" || model === undefined || isVerifiedOllamaAgentModel(model)) {
+    return Effect.void;
+  }
+  const support = getOllamaAgentSupport(model);
+  return new ProviderAdapterValidationError({
+    provider,
+    operation,
+    issue: `Model '${model}' is not available for Codex tool-enabled Ollama agent turns. ${support.message}`,
+  });
+}
+
+function resolveManagedLaunchSettings(
+  provider: ManagedCodexProvider,
+  settings: ServerSettings,
+  model: string | undefined,
+): ManagedCodexLaunchSettings {
+  if (provider === "codex") {
+    const codexSettings = settings.providers.codex;
+    const profileName = resolveManagedCodexProfileName(codexSettings);
+    return {
+      binaryPath: codexSettings.binaryPath,
+      ...(codexSettings.homePath ? { homePath: codexSettings.homePath } : {}),
+      profileName,
+      profileContents: resolveCodexProfileContents({
+        provider,
+        codexSettings,
+        ...(model ? { model } : {}),
+      }),
+      appServerConfigOverrides: buildManagedCodexAppServerConfigOverrides({
+        provider,
+        codexSettings,
+        ...(model ? { model } : {}),
+      }),
+    };
+  }
+
+  const ollamaSettings = settings.providers.ollamaLocal;
+  const profileName = resolveManagedOllamaCodexProfileName(ollamaSettings);
+  return {
+    binaryPath: ollamaSettings.codexBinaryPath,
+    ...(ollamaSettings.codexHomePath ? { homePath: ollamaSettings.codexHomePath } : {}),
+    profileName,
+    profileContents: resolveCodexProfileContents({
+      provider,
+      ollamaSettings,
+      ...(model ? { model } : {}),
+    }),
+    appServerConfigOverrides: buildManagedCodexAppServerConfigOverrides({
+      provider,
+      ollamaSettings,
+      ...(model ? { model } : {}),
+    }),
+  };
 }
 
 type CodexLifecycleItem =
@@ -1373,10 +1461,12 @@ function mapToRuntimeEvents(
   return [];
 }
 
-const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
+export const makeManagedCodexAdapter = Effect.fn("makeManagedCodexAdapter")(function* (
+  provider: ManagedCodexProvider,
   options?: CodexAdapterLiveOptions,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig);
   const nativeEventLogger =
@@ -1392,14 +1482,57 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
 
+  const ensureManagedProfile = Effect.fn("ensureManagedProfile")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly launch: ManagedCodexLaunchSettings;
+  }) {
+    const profilePath = resolveManagedCodexProfilePath({
+      ...(input.launch.homePath ? { homePath: input.launch.homePath } : {}),
+      profileName: input.launch.profileName,
+    });
+    const currentContents = yield* fileSystem
+      .readFileString(profilePath)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (currentContents === input.launch.profileContents) {
+      return;
+    }
+    yield* fileSystem.makeDirectory(path.dirname(profilePath), { recursive: true }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterProcessError({
+            provider,
+            threadId: input.threadId,
+            detail: `Failed to create Codex profile directory: ${cause.message}`,
+            cause,
+          }),
+      ),
+    );
+    yield* writeFileStringAtomically({
+      filePath: profilePath,
+      contents: input.launch.profileContents,
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, pathService),
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterProcessError({
+            provider,
+            threadId: input.threadId,
+            detail: `Failed to write Codex profile '${input.launch.profileName}': ${cause.message}`,
+            cause,
+          }),
+      ),
+    );
+  });
+
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
       Effect.gen(function* () {
-        if (input.provider !== undefined && input.provider !== PROVIDER) {
+        if (input.provider !== undefined && input.provider !== provider) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider,
             operation: "startSession",
-            issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+            issue: `Expected provider '${provider}' but received '${input.provider}'.`,
           });
         }
 
@@ -1408,31 +1541,43 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
-        const codexSettings = yield* serverSettingsService.getSettings.pipe(
-          Effect.map((settings) => settings.providers.codex),
+        const settings = yield* serverSettingsService.getSettings.pipe(
           Effect.mapError(
             (error) =>
               new ProviderAdapterProcessError({
-                provider: PROVIDER,
+                provider,
                 threadId: input.threadId,
                 detail: error.message,
                 cause: error,
               }),
           ),
         );
+        const selectedModel =
+          input.modelSelection?.provider === provider ? input.modelSelection.model : undefined;
+        const effectiveModel =
+          provider === "ollamaLocal"
+            ? (selectedModel ?? resolveOllamaRuntimeConfig(settings.providers.ollamaLocal).model)
+            : selectedModel;
+        yield* validateOllamaAgentModel(provider, "startSession", effectiveModel);
+        const launch = resolveManagedLaunchSettings(provider, settings, selectedModel);
+        yield* ensureManagedProfile({ threadId: input.threadId, launch });
         const runtimeInput: CodexSessionRuntimeOptions = {
+          provider,
           threadId: input.threadId,
           cwd: input.cwd ?? process.cwd(),
-          binaryPath: codexSettings.binaryPath,
-          ...(codexSettings.homePath ? { homePath: codexSettings.homePath } : {}),
+          binaryPath: launch.binaryPath,
+          ...(launch.homePath ? { homePath: launch.homePath } : {}),
+          profileName: launch.profileName,
+          appServerConfigOverrides: launch.appServerConfigOverrides,
           ...(Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
           runtimeMode: input.runtimeMode,
-          ...(input.modelSelection?.provider === "codex"
+          ...(input.modelSelection?.provider === provider
             ? { model: input.modelSelection.model }
             : {}),
-          ...(input.modelSelection?.provider === "codex" &&
+          ...(providerSupportsCodexOptions(provider) &&
+          input.modelSelection?.provider === provider &&
           getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode") === true
             ? { serviceTier: "fast" }
             : {}),
@@ -1449,7 +1594,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           Effect.mapError(
             (cause) =>
               new ProviderAdapterProcessError({
-                provider: PROVIDER,
+                provider,
                 threadId: input.threadId,
                 detail: cause.message,
                 cause,
@@ -1478,7 +1623,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           Effect.mapError(
             (cause) =>
               new ProviderAdapterProcessError({
-                provider: PROVIDER,
+                provider,
                 threadId: input.threadId,
                 detail: cause.message,
                 cause,
@@ -1516,7 +1661,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     });
     if (!attachmentPath) {
       return yield* new ProviderAdapterRequestError({
-        provider: PROVIDER,
+        provider,
         method: "turn/start",
         detail: `Invalid attachment id '${attachment.id}'.`,
       });
@@ -1525,7 +1670,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.mapError(
         (cause) =>
           new ProviderAdapterRequestError({
-            provider: PROVIDER,
+            provider,
             method: "turn/start",
             detail: `Failed to read attachment file: ${cause.message}.`,
             cause,
@@ -1547,17 +1692,22 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
     const session = yield* requireSession(input.threadId);
     const reasoningEffort =
-      input.modelSelection?.provider === "codex"
+      providerSupportsCodexOptions(provider) && input.modelSelection?.provider === provider
         ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
         : undefined;
     const fastMode =
-      input.modelSelection?.provider === "codex"
+      providerSupportsCodexOptions(provider) && input.modelSelection?.provider === provider
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
+    yield* validateOllamaAgentModel(
+      provider,
+      "sendTurn",
+      input.modelSelection?.provider === provider ? input.modelSelection.model : undefined,
+    );
     return yield* session.runtime
       .sendTurn({
         ...(input.input !== undefined ? { input: input.input } : {}),
-        ...(input.modelSelection?.provider === "codex"
+        ...(input.modelSelection?.provider === provider
           ? { model: input.modelSelection.model }
           : {}),
         ...(reasoningEffort
@@ -1569,14 +1719,18 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
-      .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
+      .pipe(
+        Effect.mapError((cause) =>
+          mapCodexRuntimeError(provider, input.threadId, "turn/start", cause),
+        ),
+      );
   });
 
   const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
     const session = sessions.get(threadId);
     if (!session || session.stopped) {
       return yield* new ProviderAdapterSessionNotFoundError({
-        provider: PROVIDER,
+        provider,
         threadId,
       });
     }
@@ -1589,7 +1743,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
-          : mapCodexRuntimeError(threadId, "turn/interrupt", cause),
+          : mapCodexRuntimeError(provider, threadId, "turn/interrupt", cause),
       ),
     );
 
@@ -1599,7 +1753,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
-          : mapCodexRuntimeError(threadId, "thread/read", cause),
+          : mapCodexRuntimeError(provider, threadId, "thread/read", cause),
       ),
       Effect.map((snapshot) => ({
         threadId,
@@ -1611,7 +1765,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (!Number.isInteger(numTurns) || numTurns < 1) {
       return Effect.fail(
         new ProviderAdapterValidationError({
-          provider: PROVIDER,
+          provider,
           operation: "rollbackThread",
           issue: "numTurns must be an integer >= 1.",
         }),
@@ -1623,7 +1777,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
-          : mapCodexRuntimeError(threadId, "thread/rollback", cause),
+          : mapCodexRuntimeError(provider, threadId, "thread/rollback", cause),
       ),
       Effect.map((snapshot) => ({
         threadId,
@@ -1638,7 +1792,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
-          : mapCodexRuntimeError(threadId, "item/requestApproval/decision", cause),
+          : mapCodexRuntimeError(provider, threadId, "item/requestApproval/decision", cause),
       ),
     );
 
@@ -1652,7 +1806,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
-          : mapCodexRuntimeError(threadId, "item/tool/requestUserInput", cause),
+          : mapCodexRuntimeError(provider, threadId, "item/tool/requestUserInput", cause),
       ),
     );
 
@@ -1710,9 +1864,10 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   );
 
   return {
-    provider: PROVIDER,
+    provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      sessionRecovery: "resume-cursor",
     },
     startSession,
     sendTurn,
@@ -1728,11 +1883,21 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);
     },
-  } satisfies CodexAdapterShape;
+  } satisfies ProviderAdapterShape<ProviderAdapterError>;
 });
 
-export const CodexAdapterLive = Layer.effect(CodexAdapter, makeCodexAdapter());
+export const CodexAdapterLive = Layer.effect(
+  CodexAdapter,
+  makeManagedCodexAdapter(DEFAULT_PROVIDER).pipe(
+    Effect.map((adapter) => adapter as CodexAdapterShape),
+  ),
+);
 
 export function makeCodexAdapterLive(options?: CodexAdapterLiveOptions) {
-  return Layer.effect(CodexAdapter, makeCodexAdapter(options));
+  return Layer.effect(
+    CodexAdapter,
+    makeManagedCodexAdapter(DEFAULT_PROVIDER, options).pipe(
+      Effect.map((adapter) => adapter as CodexAdapterShape),
+    ),
+  );
 }

@@ -34,6 +34,8 @@ Prefer other skills for pure route authoring, TanStack Router structure, or isol
 
 In `t3code-vxapp`:
 
+- `apps/web/src/components/ChatView.tsx`
+- `apps/web/src/session-logic.ts`
 - `apps/web/src/routes/__root.tsx`
 - `apps/web/src/agentsVxappStore.ts`
 - `apps/web/src/lib/agentsVxappStoreBridge.ts`
@@ -44,8 +46,12 @@ In `t3code-vxapp`:
 - `apps/web/src/components/vx/ProgramTodosDialog.tsx`
 - `apps/web/src/wsNativeApi.ts`
 - `apps/server/src/wsServer.ts`
+- `apps/server/src/orchestration/localThreadErrorPresentation.ts`
 - `apps/server/src/orchestration/Layers/ProjectionBootstrapSummaryQuery.ts`
 - `apps/server/src/orchestration/Layers/ProjectionOperationalQuery.ts`
+- `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts`
+- `apps/server/src/provider/Layers/CodexSessionRuntime.ts`
+- `apps/server/src/provider/Layers/CodexAdapter.ts`
 - `apps/server/src/extensions/vxapp/**`
 - `apps/server/scripts/cli.ts`
 - `deploy.sh`
@@ -149,7 +155,74 @@ Then determine:
 - request sent but response is an error
 - response is valid but client ignores it
 
-### 3. Check the real server path directly
+### 3. Inspect the actual ChatView thread error before chasing backend guesses
+
+When a live thread is failing, look at the rendered ChatView error surface or the
+thread-detail RPC that feeds it before assuming the problem is only in logs.
+
+Preferred order:
+
+1. Open the failing thread route in Playwright.
+2. Read the visible ChatView error banner/body text.
+3. If the route is hard to automate, query the thread detail directly over websocket.
+4. Correlate that error with the persisted session/runtime state.
+
+Useful browser proof pattern:
+
+```bash
+bun --cwd apps/web - <<'BUN'
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1600, height: 1200 } });
+await page.goto('http://127.0.0.1:7421/<thread-id>', { waitUntil: 'domcontentloaded', timeout: 120000 });
+await page.waitForTimeout(5000);
+const bodyText = await page.locator('body').innerText();
+console.log(bodyText);
+await browser.close();
+BUN
+```
+
+Useful websocket proof pattern:
+
+```bash
+bun - <<'BUN'
+const ws = new WebSocket('ws://127.0.0.1:7421/ws');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    id: 'thread-detail',
+    body: { _tag: 'orchestration.getThreadById', threadId: '<thread-id>' },
+  }));
+};
+ws.onmessage = (event) => console.log(String(event.data));
+setTimeout(() => ws.close(), 8000);
+BUN
+```
+
+Look specifically for:
+
+- `thread.error` / `errorPresentationSource` in the thread detail payload
+- `projection_thread_sessions.last_error` backing the displayed failure
+- provider-runtime rows that show the session stuck in `starting` or `running`
+  without assistant output
+- process-exit failures such as `ProviderAdapterProcessError` or
+  `CodexAppServerProcessExitedError`
+
+Do not stop at “the smoke timed out.” If ChatView shows a concrete provider or
+runtime error, report that exact string and trace it to the authoritative server
+source.
+
+If browser-side websocket capture is incomplete or racy, fall back to the
+authoritative thread reads instead of treating missing browser evidence as
+failure. Important detail:
+
+- `orchestration.getThreadById` returns thread/session summary and error state
+- `orchestration.listThreadMessages` is required to prove the final persisted
+  user/assistant message bodies
+
+For live provider-smoke work, prefer proving both the session summary and the
+persisted messages before concluding the flow failed.
+
+### 4. Check the real server path directly
 
 When browser results are ambiguous, hit the live websocket yourself.
 
@@ -176,7 +249,34 @@ Use this to separate:
 - browser hydration failures
 - stale client bundle problems
 
-### 4. Prove owner-side truth when vxapp authority is involved
+When proving a live thread turn end to end, send both requests if needed:
+
+```bash
+bun - <<'BUN'
+const ws = new WebSocket('ws://127.0.0.1:7421/ws');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    id: 'thread-detail',
+    body: { _tag: 'orchestration.getThreadById', threadId: '<thread-id>' },
+  }));
+  ws.send(JSON.stringify({
+    id: 'thread-messages',
+    body: {
+      _tag: 'orchestration.listThreadMessages',
+      threadId: '<thread-id>',
+      page: { pageSize: 50, cursor: null },
+    },
+  }));
+};
+ws.onmessage = (event) => console.log(String(event.data));
+setTimeout(() => ws.close(), 8000);
+BUN
+```
+
+This is the authoritative fallback pattern used by
+`scripts/live-ollama-codex-selection-smoke.ts`.
+
+### 5. Prove owner-side truth when vxapp authority is involved
 
 For startup-safe or strict owner surfaces, run the owner command directly.
 
@@ -200,7 +300,7 @@ When the live UI depends on owner-backed data:
 - do not accept a worker runtime failure until you have verified the exact
   owner payload being sent, including authoritative `workspace`
 
-### 5. Check whether the app is serving stale assets
+### 6. Check whether the app is serving stale assets
 
 In this repo, `apps/server` build copies the existing `apps/web/dist` into `apps/server/dist/client`.
 
@@ -219,7 +319,7 @@ If the source file is fixed but the page still behaves like the old code:
 3. restart the actual live service
 4. rerun the Playwright proof
 
-### 6. Restart the real service carefully
+### 7. Restart the real service carefully
 
 Prefer the actual service manager if available. If systemd restart is blocked in the shell, confirm whether the running process is supervised before killing it.
 
@@ -237,11 +337,12 @@ Use this order:
 
 1. Route DOM proof
 2. Browser websocket request proof
-3. Live websocket response proof
-4. Server route/layer inspection
-5. Owner command proof
-6. Build artifact proof
-7. Restart/deploy proof
+3. ChatView thread error proof
+4. Live websocket response proof
+5. Server route/layer inspection
+6. Owner command proof
+7. Build artifact proof
+8. Restart/deploy proof
 
 This avoids wasting time patching tests for the wrong boundary.
 
@@ -264,6 +365,21 @@ Suspect:
 - browser request is gated by settings or an `enabled` query condition
 - websocket schema/tag mismatch
 - old bundle still served
+
+### Live thread exists but the turn never completes
+
+Suspect:
+
+- ChatView already contains a concrete thread error that the smoke harness did
+  not read
+- `projection_thread_sessions.last_error` or thread error presentation contains
+  the real failure
+- provider runtime started the session but never transitioned into an active
+  turn
+- Codex or provider child process exited before assistant output was projected
+- browser proof only waited for completion and missed an early fatal banner
+- browser capture missed the persisted success path and only the authoritative
+  thread/session state can distinguish a verifier bug from a product bug
 
 ### Strict owner command empty while UI has local rows
 
@@ -314,3 +430,5 @@ If you changed `agents-vxapp`, run the smallest focused validation that covers t
 - Do not leave background proof services running.
 - Do not broaden strict authority surfaces to make the UI look healthy.
 - Do not stop at browser proof if the underlying owner command is still broken.
+- Do not assume `getThreadById` alone proves assistant output; fetch persisted
+  thread messages too.

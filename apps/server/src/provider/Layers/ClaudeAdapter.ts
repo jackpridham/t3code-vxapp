@@ -3186,6 +3186,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      sessionRecovery: "resume-cursor",
     },
     startSession,
     sendTurn,

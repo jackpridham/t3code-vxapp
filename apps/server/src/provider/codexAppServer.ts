@@ -42,13 +42,21 @@ export function killCodexChildProcess(child: ChildProcessWithoutNullStreams): vo
   child.kill();
 }
 
+export function codexAppServerArgs(
+  configOverrides: ReadonlyArray<string> = [],
+): ReadonlyArray<string> {
+  return ["app-server", ...configOverrides.flatMap((override) => ["-c", override])];
+}
+
 export async function probeCodexAccount(input: {
   readonly binaryPath: string;
   readonly homePath?: string;
+  readonly profileName?: string;
+  readonly configOverrides?: ReadonlyArray<string>;
   readonly signal?: AbortSignal;
 }): Promise<CodexAccountSnapshot> {
   return await new Promise((resolve, reject) => {
-    const child = spawn(input.binaryPath, ["app-server"], {
+    const child = spawn(input.binaryPath, [...codexAppServerArgs(input.configOverrides)], {
       env: {
         ...process.env,
         ...(input.homePath ? { CODEX_HOME: expandHomePath(input.homePath) } : {}),

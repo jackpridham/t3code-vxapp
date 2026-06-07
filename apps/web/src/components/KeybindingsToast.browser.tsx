@@ -63,8 +63,27 @@ function createBaseServerConfig(): ServerConfig {
       defaultThreadEnvMode: "local" as const,
       textGenerationModelSelection: { provider: "codex" as const, model: "gpt-5.4-mini" },
       providers: {
-        codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
+        codex: {
+          enabled: true,
+          binaryPath: "",
+          homePath: "",
+          profileName: "t3-openai",
+          customModels: [],
+        },
         claudeAgent: { enabled: true, binaryPath: "", customModels: [] },
+        ollamaLocal: {
+          enabled: true,
+          protocol: "http",
+          host: "192.168.10.12",
+          port: 11435,
+          apiPath: "/api",
+          responsesApiPath: "/v1",
+          codexBinaryPath: "codex",
+          codexHomePath: "~/.codex-ollama",
+          codexProfileName: "t3-ollama-gpu",
+          defaultModel: "qwen3:8b",
+          customModels: [],
+        },
       },
     },
   };

@@ -49,6 +49,7 @@ import {
   type OrchestrationIntegrationHarness,
 } from "./OrchestrationEngineHarness.integration.ts";
 import { checkpointRefForThreadTurn } from "../src/checkpointing/Utils.ts";
+import { listOllamaModels } from "../src/provider/ollamaApi.ts";
 import type {
   CheckpointDiffFinalizedReceipt,
   TurnProcessingQuiescedReceipt,
@@ -77,6 +78,24 @@ class IntegrationWaitTimeoutError extends Schema.TaggedErrorClass<IntegrationWai
     description: Schema.String,
   },
 ) {}
+
+class LiveOllamaEndpointUnreachableError extends Schema.TaggedErrorClass<LiveOllamaEndpointUnreachableError>()(
+  "LiveOllamaEndpointUnreachableError",
+  {
+    description: Schema.String,
+  },
+) {}
+
+const LIVE_OLLAMA_TESTS_ENABLED = process.env.OLLAMA_LIVE_TESTS === "1";
+const LIVE_OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://192.168.10.12:11435/api";
+const LIVE_OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen3:8b";
+const LIVE_OLLAMA_PREFLIGHT_TIMEOUT_MS = 10_000;
+const isLiveOllamaEndpointUnreachableError = (
+  error: unknown,
+): error is LiveOllamaEndpointUnreachableError =>
+  typeof error === "object" && error !== null && "_tag" in error
+    ? error._tag === "LiveOllamaEndpointUnreachableError"
+    : false;
 
 function waitForSync<A>(
   read: () => A,
@@ -108,26 +127,65 @@ function runtimeBase(eventId: string, createdAt: string, provider: IntegrationPr
   };
 }
 
-function withHarness<A, E>(
-  use: (harness: OrchestrationIntegrationHarness) => Effect.Effect<A, E>,
+function withHarness<A, E, R>(
+  use: (harness: OrchestrationIntegrationHarness) => Effect.Effect<A, E, R>,
   provider: IntegrationProvider = "codex",
 ) {
-  return Effect.acquireUseRelease(
-    makeOrchestrationIntegrationHarness({ provider }),
-    use,
-    (harness) => harness.dispose,
+  return Effect.scoped(
+    Effect.acquireUseRelease(
+      makeOrchestrationIntegrationHarness({ provider }),
+      use,
+      (harness) => harness.dispose,
+    ),
   ).pipe(Effect.provide(NodeServices.layer));
 }
 
-function withRealCodexHarness<A, E>(
-  use: (harness: OrchestrationIntegrationHarness) => Effect.Effect<A, E>,
+function withRealCodexHarness<A, E, R>(
+  use: (harness: OrchestrationIntegrationHarness) => Effect.Effect<A, E, R>,
 ) {
-  return Effect.acquireUseRelease(
-    makeOrchestrationIntegrationHarness({ provider: "codex", realCodex: true }),
-    use,
-    (harness) => harness.dispose,
+  return Effect.scoped(
+    Effect.acquireUseRelease(
+      makeOrchestrationIntegrationHarness({ provider: "codex", realCodex: true }),
+      use,
+      (harness) => harness.dispose,
+    ),
   ).pipe(Effect.provide(NodeServices.layer));
 }
+
+function withRealOllamaHarness<A, E, R>(
+  use: (harness: OrchestrationIntegrationHarness) => Effect.Effect<A, E, R>,
+) {
+  return Effect.scoped(
+    Effect.acquireUseRelease(
+      makeOrchestrationIntegrationHarness({ provider: "ollamaLocal", realOllama: true }),
+      use,
+      (harness) => harness.dispose,
+    ),
+  ).pipe(Effect.provide(NodeServices.layer));
+}
+
+const ensureLiveOllamaEndpointReachable = () =>
+  listOllamaModels({
+    baseUrl: LIVE_OLLAMA_BASE_URL,
+    timeoutMs: LIVE_OLLAMA_PREFLIGHT_TIMEOUT_MS,
+  }).pipe(
+    Effect.flatMap((models) =>
+      models.includes(LIVE_OLLAMA_MODEL)
+        ? Effect.succeed(models)
+        : Effect.fail(
+            new LiveOllamaEndpointUnreachableError({
+              description: `Ollama endpoint ${LIVE_OLLAMA_BASE_URL} is reachable, but model ${LIVE_OLLAMA_MODEL} is unavailable.`,
+            }),
+          ),
+    ),
+    Effect.mapError((error) =>
+      isLiveOllamaEndpointUnreachableError(error)
+        ? error
+        : new LiveOllamaEndpointUnreachableError({
+            description: `Unable to reach live Ollama endpoint ${LIVE_OLLAMA_BASE_URL}: ${error instanceof Error ? error.message : String(error)}`,
+          }),
+    ),
+  );
 
 const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
   Effect.gen(function* () {
@@ -275,6 +333,505 @@ it.live("runs a single turn end-to-end and persists checkpoint state in sqlite +
       assert.equal(gitShowFileAtRef(harness.workspaceDir, ref1, "README.md"), "v1\n");
     }),
   ),
+);
+
+it.live.skipIf(!LIVE_OLLAMA_TESTS_ENABLED)(
+  "persists finalized Ollama user and assistant messages without replaying transient streaming rows",
+  () =>
+    withRealOllamaHarness((harness) =>
+      Effect.gen(function* () {
+        yield* ensureLiveOllamaEndpointReachable();
+
+        const createdAt = nowIso();
+
+        yield* harness.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cmd-ollama-project-persistence"),
+          projectId: PROJECT_ID,
+          title: "Ollama Persistence Project",
+          workspaceRoot: harness.workspaceDir,
+          defaultModelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+          createdAt,
+        });
+
+        yield* harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("cmd-ollama-thread-persistence"),
+          threadId: THREAD_ID,
+          projectId: PROJECT_ID,
+          title: "Ollama Persistence Thread",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: harness.workspaceDir,
+          createdAt,
+        });
+
+        yield* startTurn({
+          harness,
+          commandId: "cmd-ollama-turn-persistence-1",
+          messageId: "msg-ollama-persistence-1",
+          text: "Reply with exactly: PERSISTED",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+        });
+
+        yield* harness.waitForReceipt(
+          (receipt): receipt is TurnProcessingQuiescedReceipt =>
+            receipt.type === "turn.processing.quiesced" &&
+            receipt.threadId === THREAD_ID &&
+            receipt.checkpointTurnCount === 1,
+          180_000,
+        );
+
+        const thread = yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.providerName === "ollamaLocal" &&
+            entry.messages.some(
+              (message) => message.role === "assistant" && message.streaming === false,
+            ),
+          180_000,
+        );
+
+        const assistantMessage = thread.messages.find(
+          (message) => message.role === "assistant" && message.streaming === false,
+        );
+        assert.isDefined(assistantMessage);
+
+        const persistedRows = yield* harness.threadMessageRepository.listByThreadId({
+          threadId: THREAD_ID,
+        });
+
+        assert.deepEqual(
+          persistedRows.map((row) => ({
+            role: row.role,
+            text: row.text,
+            isStreaming: row.isStreaming,
+          })),
+          [
+            {
+              role: "user",
+              text: "Reply with exactly: PERSISTED",
+              isStreaming: false,
+            },
+            {
+              role: "assistant",
+              text: assistantMessage.text,
+              isStreaming: false,
+            },
+          ],
+        );
+        assert.equal(
+          persistedRows.some(
+            (row) => row.role === "assistant" && row.text.trim() !== assistantMessage.text.trim(),
+          ),
+          false,
+        );
+      }),
+    ),
+  240_000,
+);
+
+it.live.skipIf(!LIVE_OLLAMA_TESTS_ENABLED)(
+  "replays persisted Ollama history after runtime restart before sending the next turn",
+  () =>
+    withRealOllamaHarness((harness) =>
+      Effect.gen(function* () {
+        yield* ensureLiveOllamaEndpointReachable();
+
+        const createdAt = nowIso();
+
+        yield* harness.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cmd-ollama-project-restart"),
+          projectId: PROJECT_ID,
+          title: "Ollama Restart Project",
+          workspaceRoot: harness.workspaceDir,
+          defaultModelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+          createdAt,
+        });
+
+        yield* harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("cmd-ollama-thread-restart"),
+          threadId: THREAD_ID,
+          projectId: PROJECT_ID,
+          title: "Ollama Restart Thread",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: harness.workspaceDir,
+          createdAt,
+        });
+
+        yield* startTurn({
+          harness,
+          commandId: "cmd-ollama-turn-restart-1",
+          messageId: "msg-ollama-restart-1",
+          text: "Remember the secret token BANANAFROST and reply exactly READY.",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+        });
+
+        yield* harness.waitForReceipt(
+          (receipt): receipt is TurnProcessingQuiescedReceipt =>
+            receipt.type === "turn.processing.quiesced" &&
+            receipt.threadId === THREAD_ID &&
+            receipt.checkpointTurnCount === 1,
+          180_000,
+        );
+
+        const firstThread = yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.providerName === "ollamaLocal" &&
+            entry.messages.some(
+              (message) => message.role === "assistant" && message.streaming === false,
+            ),
+          180_000,
+        );
+        assert.equal(firstThread.session?.providerName, "ollamaLocal");
+
+        const restartedHarness = yield* harness.restart;
+
+        yield* startTurn({
+          harness: restartedHarness,
+          commandId: "cmd-ollama-turn-restart-2",
+          messageId: "msg-ollama-restart-2",
+          text: "What secret token did I tell you earlier? Reply exactly TOKEN:BANANAFROST.",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+        });
+
+        const recoveredThread = yield* restartedHarness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.providerName === "ollamaLocal" &&
+            entry.messages.filter(
+              (message) => message.role === "assistant" && message.streaming === false,
+            ).length >= 2,
+          180_000,
+        );
+
+        const finalizedAssistantMessages = recoveredThread.messages.filter(
+          (message) => message.role === "assistant" && message.streaming === false,
+        );
+        const lastAssistantMessage =
+          finalizedAssistantMessages[finalizedAssistantMessages.length - 1];
+
+        assert.isDefined(lastAssistantMessage);
+        assert.match(lastAssistantMessage.text.trim(), /^TOKEN:BANANAFROST\.?$/);
+
+        const persistedRows = yield* restartedHarness.threadMessageRepository.listByThreadId({
+          threadId: THREAD_ID,
+        });
+
+        assert.deepEqual(
+          persistedRows.map((row) => ({
+            role: row.role,
+            text: row.text,
+            isStreaming: row.isStreaming,
+          })),
+          [
+            {
+              role: "user",
+              text: "Remember the secret token BANANAFROST and reply exactly READY.",
+              isStreaming: false,
+            },
+            {
+              role: "assistant",
+              text: finalizedAssistantMessages[0]?.text ?? "",
+              isStreaming: false,
+            },
+            {
+              role: "user",
+              text: "What secret token did I tell you earlier? Reply exactly TOKEN:BANANAFROST.",
+              isStreaming: false,
+            },
+            {
+              role: "assistant",
+              text: lastAssistantMessage.text,
+              isStreaming: false,
+            },
+          ],
+        );
+
+        yield* restartedHarness.dispose;
+      }),
+    ),
+  240_000,
+);
+
+it.live.skipIf(!LIVE_OLLAMA_TESTS_ENABLED)(
+  "trims persisted Ollama conversation history after checkpoint revert before the next turn",
+  () =>
+    withRealOllamaHarness((harness) =>
+      Effect.gen(function* () {
+        yield* ensureLiveOllamaEndpointReachable();
+
+        const createdAt = nowIso();
+
+        yield* harness.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cmd-ollama-project-revert"),
+          projectId: PROJECT_ID,
+          title: "Ollama Revert Project",
+          workspaceRoot: harness.workspaceDir,
+          defaultModelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+          createdAt,
+        });
+
+        yield* harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("cmd-ollama-thread-revert"),
+          threadId: THREAD_ID,
+          projectId: PROJECT_ID,
+          title: "Ollama Revert Thread",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: harness.workspaceDir,
+          createdAt,
+        });
+
+        yield* startTurn({
+          harness,
+          commandId: "cmd-ollama-revert-turn-1",
+          messageId: "msg-ollama-revert-1",
+          text: "Reply with exactly ONE.",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+        });
+
+        yield* harness.waitForReceipt(
+          (receipt): receipt is TurnProcessingQuiescedReceipt =>
+            receipt.type === "turn.processing.quiesced" &&
+            receipt.threadId === THREAD_ID &&
+            receipt.checkpointTurnCount === 1,
+          180_000,
+        );
+
+        const firstThread = yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.providerName === "ollamaLocal" &&
+            entry.messages.filter(
+              (message) => message.role === "assistant" && message.streaming === false,
+            ).length === 1,
+          180_000,
+        );
+
+        const firstAssistantMessage = firstThread.messages.find(
+          (message) => message.role === "assistant" && message.streaming === false,
+        );
+        assert.isDefined(firstAssistantMessage);
+
+        yield* startTurn({
+          harness,
+          commandId: "cmd-ollama-revert-turn-2",
+          messageId: "msg-ollama-revert-2",
+          text: "Reply with exactly TWO.",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+        });
+
+        yield* harness.waitForReceipt(
+          (receipt): receipt is TurnProcessingQuiescedReceipt =>
+            receipt.type === "turn.processing.quiesced" &&
+            receipt.threadId === THREAD_ID &&
+            receipt.checkpointTurnCount === 2,
+          180_000,
+        );
+
+        const secondThread = yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.providerName === "ollamaLocal" &&
+            entry.messages.filter(
+              (message) => message.role === "assistant" && message.streaming === false,
+            ).length === 2,
+          180_000,
+        );
+
+        const secondAssistantMessage = secondThread.messages.findLast(
+          (message) => message.role === "assistant" && message.streaming === false,
+        );
+        assert.isDefined(secondAssistantMessage);
+
+        yield* harness.engine.dispatch({
+          type: "thread.checkpoint.revert",
+          commandId: CommandId.makeUnsafe("cmd-ollama-revert-history"),
+          threadId: THREAD_ID,
+          turnCount: 1,
+          createdAt: nowIso(),
+        });
+
+        yield* harness.waitForDomainEvent((event) => event.type === "thread.reverted", 180_000);
+
+        const revertedThread = yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.providerName === "ollamaLocal" &&
+            entry.checkpoints.length === 1 &&
+            entry.checkpoints[0]?.checkpointTurnCount === 1 &&
+            entry.messages.length === 2,
+          180_000,
+        );
+
+        assert.deepEqual(
+          revertedThread.messages.map((message) => ({
+            role: message.role,
+            text: message.text,
+            streaming: message.streaming,
+          })),
+          [
+            {
+              role: "user",
+              text: "Reply with exactly ONE.",
+              streaming: false,
+            },
+            {
+              role: "assistant",
+              text: firstAssistantMessage.text,
+              streaming: false,
+            },
+          ],
+        );
+
+        const persistedRowsAfterRevert = yield* harness.threadMessageRepository.listByThreadId({
+          threadId: THREAD_ID,
+        });
+
+        assert.deepEqual(
+          persistedRowsAfterRevert.map((row) => ({
+            role: row.role,
+            text: row.text,
+            isStreaming: row.isStreaming,
+          })),
+          [
+            {
+              role: "user",
+              text: "Reply with exactly ONE.",
+              isStreaming: false,
+            },
+            {
+              role: "assistant",
+              text: firstAssistantMessage.text,
+              isStreaming: false,
+            },
+          ],
+        );
+        assert.equal(
+          persistedRowsAfterRevert.some(
+            (row) =>
+              row.text === "Reply with exactly TWO." || row.text === secondAssistantMessage.text,
+          ),
+          false,
+        );
+
+        yield* startTurn({
+          harness,
+          commandId: "cmd-ollama-revert-turn-3",
+          messageId: "msg-ollama-revert-3",
+          text: "What was your exact previous reply? Reply with exactly MEMORY:ONE.",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: LIVE_OLLAMA_MODEL,
+          },
+        });
+
+        yield* harness.waitForReceipt(
+          (receipt): receipt is TurnProcessingQuiescedReceipt =>
+            receipt.type === "turn.processing.quiesced" &&
+            receipt.threadId === THREAD_ID &&
+            receipt.checkpointTurnCount === 2,
+          180_000,
+        );
+
+        const finalThread = yield* harness.waitForThread(
+          THREAD_ID,
+          (entry) =>
+            entry.session?.providerName === "ollamaLocal" &&
+            entry.messages.filter(
+              (message) => message.role === "assistant" && message.streaming === false,
+            ).length === 2,
+          180_000,
+        );
+
+        const finalAssistantMessage = finalThread.messages.findLast(
+          (message) => message.role === "assistant" && message.streaming === false,
+        );
+        assert.isDefined(finalAssistantMessage);
+        assert.match(finalAssistantMessage.text.trim(), /^MEMORY:ONE\.?$/);
+
+        const persistedRowsAfterThirdTurn = yield* harness.threadMessageRepository.listByThreadId({
+          threadId: THREAD_ID,
+        });
+
+        assert.deepEqual(
+          persistedRowsAfterThirdTurn.map((row) => ({
+            role: row.role,
+            text: row.text,
+            isStreaming: row.isStreaming,
+          })),
+          [
+            {
+              role: "user",
+              text: "Reply with exactly ONE.",
+              isStreaming: false,
+            },
+            {
+              role: "assistant",
+              text: firstAssistantMessage.text,
+              isStreaming: false,
+            },
+            {
+              role: "user",
+              text: "What was your exact previous reply? Reply with exactly MEMORY:ONE.",
+              isStreaming: false,
+            },
+            {
+              role: "assistant",
+              text: finalAssistantMessage.text,
+              isStreaming: false,
+            },
+          ],
+        );
+      }),
+    ),
+  240_000,
 );
 
 it.live.skipIf(!process.env.CODEX_BINARY_PATH)(

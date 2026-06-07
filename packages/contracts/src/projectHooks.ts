@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
 import type { ProviderInteractionMode, ProviderKind, RuntimeMode } from "./orchestration";
 
-const ProjectHookProviderKind = Schema.Literals(["codex", "claudeAgent"]);
+const ProjectHookProviderKind = Schema.Literals(["codex", "claudeAgent", "ollamaLocal"]);
 const ProjectHookInteractionMode = Schema.Literals(["default", "plan"]);
 const ProjectHookRuntimeMode = Schema.Literals(["approval-required", "full-access"]);
 

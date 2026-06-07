@@ -33,6 +33,7 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
 const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
   codex: OpenAI,
   claudeAgent: ClaudeAI,
+  ollamaLocal: OpenCodeIcon,
   cursor: CursorIcon,
 };
 
@@ -48,6 +49,16 @@ function providerIconClassName(
   fallbackClassName: string,
 ): string {
   return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
+}
+
+function getUnavailableProviderLabel(provider: ProviderKind, snapshot: ServerProvider): string {
+  if (!snapshot.enabled || snapshot.status === "disabled") {
+    return "Disabled";
+  }
+  if (!snapshot.installed) {
+    return provider === "ollamaLocal" ? "Unreachable" : "Not installed";
+  }
+  return "Unavailable";
 }
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
@@ -96,6 +107,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <MenuTrigger
         render={
           <Button
+            data-testid="provider-model-picker-trigger"
             size="sm"
             variant={props.triggerVariant ?? "ghost"}
             className={cn(
@@ -150,12 +162,14 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               const liveProvider = props.providers
                 ? getProviderSnapshot(props.providers, option.value)
                 : undefined;
-              if (liveProvider && liveProvider.status !== "ready") {
-                const unavailableLabel = !liveProvider.enabled
-                  ? "Disabled"
-                  : !liveProvider.installed
-                    ? "Not installed"
-                    : "Unavailable";
+              const providerUnavailable =
+                liveProvider !== undefined &&
+                (!liveProvider.enabled ||
+                  !liveProvider.installed ||
+                  liveProvider.status === "disabled" ||
+                  liveProvider.status === "error");
+              if (providerUnavailable) {
+                const unavailableLabel = getUnavailableProviderLabel(option.value, liveProvider);
                 return (
                   <MenuItem key={option.value} disabled>
                     <OptionIcon
@@ -172,6 +186,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   </MenuItem>
                 );
               }
+              const providerBadge =
+                liveProvider?.status === "warning"
+                  ? "Warning"
+                  : liveProvider?.status === "ready"
+                    ? null
+                    : null;
               return (
                 <MenuSub key={option.value}>
                   <MenuSubTrigger>
@@ -183,6 +203,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       )}
                     />
                     {option.label}
+                    {providerBadge ? (
+                      <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
+                        {providerBadge}
+                      </span>
+                    ) : null}
                   </MenuSubTrigger>
                   <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
                     <MenuGroup>

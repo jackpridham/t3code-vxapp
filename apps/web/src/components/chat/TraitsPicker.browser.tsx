@@ -491,3 +491,51 @@ describe("TraitsPicker (Codex)", () => {
     });
   });
 });
+
+describe("TraitsPicker (Ollama)", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+    useComposerDraftStore.setState({
+      draftsByThreadId: {},
+      draftThreadsByThreadId: {},
+      projectDraftThreadIdByProjectId: {},
+      stickyModelSelectionByProvider: {},
+    });
+  });
+
+  it("does not render a trigger when the model exposes no selectable traits", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <TraitsPicker
+        provider="ollamaLocal"
+        models={[
+          {
+            slug: "qwen3:8b",
+            name: "Qwen3 8B",
+            isCustom: false,
+            capabilities: {
+              reasoningEffortLevels: [],
+              supportsFastMode: false,
+              supportsThinkingToggle: false,
+              contextWindowOptions: [],
+              promptInjectedEffortLevels: [],
+            },
+          },
+        ]}
+        model="qwen3:8b"
+        onPromptChange={() => {}}
+        prompt=""
+        onModelOptionsChange={() => {}}
+      />,
+      { container: host },
+    );
+
+    try {
+      expect(document.querySelector("button")).toBeNull();
+    } finally {
+      await screen.unmount();
+      host.remove();
+    }
+  });
+});

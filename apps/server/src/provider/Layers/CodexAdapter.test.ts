@@ -251,9 +251,12 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
 
       assert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0], {
+        appServerConfigOverrides: ['model_provider="openai"', 'model="gpt-5.3-codex"'],
         binaryPath: "codex",
         cwd: process.cwd(),
         model: "gpt-5.3-codex",
+        profileName: "t3-openai",
+        provider: "codex",
         serviceTier: "fast",
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",

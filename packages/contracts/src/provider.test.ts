@@ -130,4 +130,20 @@ describe("ProviderSendTurnInput", () => {
     expect(parsed.modelSelection.options?.effort).toBe("ultrathink");
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
   });
+
+  it("accepts conversationHistory", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      input: "next turn",
+      conversationHistory: [
+        { role: "user", content: "first prompt" },
+        { role: "assistant", content: "first reply" },
+      ],
+    });
+
+    expect(parsed.conversationHistory).toEqual([
+      { role: "user", content: "first prompt" },
+      { role: "assistant", content: "first reply" },
+    ]);
+  });
 });

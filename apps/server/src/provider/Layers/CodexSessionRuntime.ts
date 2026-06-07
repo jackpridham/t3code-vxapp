@@ -8,6 +8,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderInteractionMode,
+  type ProviderKind,
   type ProviderRequestKind,
   type ProviderSession,
   type ProviderTurnStartResult,
@@ -25,14 +26,14 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { buildCodexInitializeParams } from "../codexAppServer.ts";
+import { buildCodexInitializeParams, codexAppServerArgs } from "../codexAppServer.ts";
 import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 
-const PROVIDER = "codex" as const;
+const DEFAULT_PROVIDER = "codex" as const;
 
 const ANSI_ESCAPE_CHAR = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE_CHAR}\\[[0-9;]*m`, "g");
@@ -78,8 +79,11 @@ type CodexThreadItem =
 
 export interface CodexSessionRuntimeOptions {
   readonly threadId: ThreadId;
+  readonly provider?: ProviderKind;
   readonly binaryPath: string;
   readonly homePath?: string;
+  readonly profileName?: string;
+  readonly appServerConfigOverrides?: ReadonlyArray<string>;
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
@@ -317,6 +321,7 @@ function runtimeModeToTurnSandboxPolicy(
 }
 
 function buildCodexCollaborationMode(input: {
+  readonly provider?: ProviderKind;
   readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
@@ -324,7 +329,8 @@ function buildCodexCollaborationMode(input: {
   if (input.interactionMode === undefined) {
     return undefined;
   }
-  const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL_BY_PROVIDER.codex;
+  const provider = input.provider ?? DEFAULT_PROVIDER;
+  const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL_BY_PROVIDER[provider];
   return {
     mode: input.interactionMode,
     settings: {
@@ -340,6 +346,7 @@ function buildCodexCollaborationMode(input: {
 
 export function buildTurnStartParams(input: {
   readonly threadId: string;
+  readonly provider?: ProviderKind;
   readonly runtimeMode: RuntimeMode;
   readonly prompt?: string;
   readonly attachments?: ReadonlyArray<{ readonly type: "image"; readonly url: string }>;
@@ -364,6 +371,7 @@ export function buildTurnStartParams(input: {
 
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   const collaborationMode = buildCodexCollaborationMode({
+    ...(input.provider ? { provider: input.provider } : {}),
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
@@ -700,6 +708,7 @@ export const makeCodexSessionRuntime = (
   ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
 > =>
   Effect.gen(function* () {
+    const provider = options.provider ?? DEFAULT_PROVIDER;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
     const events = yield* Queue.unbounded<ProviderEvent>();
@@ -711,21 +720,25 @@ export const makeCodexSessionRuntime = (
 
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(options.binaryPath, ["app-server"], {
-          cwd: options.cwd,
-          ...(options.homePath
-            ? { env: { ...process.env, CODEX_HOME: expandHomePath(options.homePath) } }
-            : {}),
-          forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
-          shell: process.platform === "win32",
-        }),
+        ChildProcess.make(
+          options.binaryPath,
+          [...codexAppServerArgs(options.appServerConfigOverrides)],
+          {
+            cwd: options.cwd,
+            ...(options.homePath
+              ? { env: { ...process.env, CODEX_HOME: expandHomePath(options.homePath) } }
+              : {}),
+            forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
+            shell: process.platform === "win32",
+          },
+        ),
       )
       .pipe(
         Effect.provideService(Scope.Scope, runtimeScope),
         Effect.mapError(
           (cause) =>
             new CodexErrors.CodexAppServerSpawnError({
-              command: `${options.binaryPath} app-server`,
+              command: `${options.binaryPath} ${codexAppServerArgs(options.appServerConfigOverrides).join(" ")}`,
               cause,
             }),
         ),
@@ -741,7 +754,7 @@ export const makeCodexSessionRuntime = (
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
 
     const initialSession = {
-      provider: PROVIDER,
+      provider,
       status: "connecting",
       runtimeMode: options.runtimeMode,
       cwd: options.cwd,
@@ -757,7 +770,7 @@ export const makeCodexSessionRuntime = (
     const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
       offerEvent({
         id: EventId.makeUnsafe(randomUUID()),
-        provider: PROVIDER,
+        provider,
         createdAt: new Date().toISOString(),
         ...event,
       });
@@ -1237,6 +1250,7 @@ export const makeCodexSessionRuntime = (
             runtimeMode: options.runtimeMode,
             ...(input.input ? { prompt: input.input } : {}),
             ...(input.attachments ? { attachments: input.attachments } : {}),
+            provider,
             ...(normalizedModel ? { model: normalizedModel } : {}),
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),

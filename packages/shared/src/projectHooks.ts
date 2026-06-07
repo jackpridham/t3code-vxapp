@@ -3,12 +3,13 @@ import type {
   ProjectHook,
   ProjectHookExecutionTarget,
   ProjectHookTurnState,
+  ProviderKind,
 } from "@t3tools/contracts";
 
 export function projectHookMatchesContext(
   hook: ProjectHook,
   context: {
-    provider: "codex" | "claudeAgent";
+    provider: ProviderKind;
     interactionMode: "default" | "plan";
     runtimeMode: "approval-required" | "full-access";
     turnState?: ProjectHookTurnState | undefined;

@@ -1,0 +1,10 @@
+{
+  "startedAt": "2026-06-07T13:46:28.998Z",
+  "webBaseUrl": "http://127.0.0.1:5733",
+  "serverBaseUrl": "http://127.0.0.1:3773",
+  "wsUrl": "ws://127.0.0.1:3773/ws",
+  "ollamaBaseUrl": "http://192.168.10.12:11435/api",
+  "ollamaModel": "qwen3:8b",
+  "ollamaCodexProfileName": "t3-ollama-gpu",
+  "ollamaCodexHomePath": "~/.codex-ollama"
+}

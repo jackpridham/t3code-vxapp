@@ -30,6 +30,8 @@ export interface AppModelOption {
   isCustom: boolean;
 }
 
+export type ModelSelectionSurface = "default" | "agentTurn";
+
 const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConfig> = {
   codex: {
     provider: "codex",
@@ -44,6 +46,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     description: "Save additional Claude model slugs for the picker and `/model` command.",
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
+  },
+  ollamaLocal: {
+    provider: "ollamaLocal",
+    title: "Ollama",
+    description: "Save additional Ollama model slugs for the picker and `/model` command.",
+    placeholder: "your-ollama-model-slug",
+    example: "qwen3:8b",
   },
 };
 
@@ -83,25 +92,31 @@ export function getAppModelOptions(
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderKind,
   selectedModel?: string | null,
+  surface: ModelSelectionSurface = "default",
 ): AppModelOption[] {
-  const options: AppModelOption[] = getProviderModels(providers, provider).map(
-    ({ slug, name, isCustom }) => ({
+  const providerModels = getProviderModels(providers, provider);
+  const allowAgentTurnModel = (slug: string): boolean => {
+    if (provider !== "ollamaLocal" || surface !== "agentTurn") {
+      return true;
+    }
+    return providerModels.find((model) => model.slug === slug)?.agentSupport?.status === "verified";
+  };
+  const options: AppModelOption[] = providerModels
+    .filter((model) => allowAgentTurnModel(model.slug))
+    .map(({ slug, name, isCustom }) => ({
       slug,
       name,
       isCustom,
-    }),
-  );
+    }));
   const seen = new Set(options.map((option) => option.slug));
   const trimmedSelectedModel = selectedModel?.trim().toLowerCase();
   const builtInModelSlugs = new Set(
-    getProviderModels(providers, provider)
-      .filter((model) => !model.isCustom)
-      .map((model) => model.slug),
+    providerModels.filter((model) => !model.isCustom).map((model) => model.slug),
   );
 
   const customModels = settings.providers[provider].customModels;
   for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs, provider)) {
-    if (seen.has(slug)) {
+    if (seen.has(slug) || !allowAgentTurnModel(slug)) {
       continue;
     }
 
@@ -120,7 +135,8 @@ export function getAppModelOptions(
   if (
     normalizedSelectedModel &&
     !seen.has(normalizedSelectedModel) &&
-    !selectedModelMatchesExistingName
+    !selectedModelMatchesExistingName &&
+    allowAgentTurnModel(normalizedSelectedModel)
   ) {
     options.push({
       slug: normalizedSelectedModel,
@@ -137,9 +153,10 @@ export function resolveAppModelSelection(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   selectedModel: string | null | undefined,
+  surface: ModelSelectionSurface = "default",
 ): string {
   const resolvedProvider = resolveSelectableProvider(providers, provider);
-  const options = getAppModelOptions(settings, providers, resolvedProvider, selectedModel);
+  const options = getAppModelOptions(settings, providers, resolvedProvider, selectedModel, surface);
   return (
     resolveSelectableModel(resolvedProvider, selectedModel, options) ??
     getDefaultServerModel(providers, resolvedProvider)
@@ -151,6 +168,7 @@ export function getCustomModelOptionsByProvider(
   providers: ReadonlyArray<ServerProvider>,
   selectedProvider?: ProviderKind | null,
   selectedModel?: string | null,
+  surface: ModelSelectionSurface = "default",
 ): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
     codex: getAppModelOptions(
@@ -158,12 +176,21 @@ export function getCustomModelOptionsByProvider(
       providers,
       "codex",
       selectedProvider === "codex" ? selectedModel : undefined,
+      surface,
     ),
     claudeAgent: getAppModelOptions(
       settings,
       providers,
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
+      surface,
+    ),
+    ollamaLocal: getAppModelOptions(
+      settings,
+      providers,
+      "ollamaLocal",
+      selectedProvider === "ollamaLocal" ? selectedModel : undefined,
+      surface,
     ),
   };
 }

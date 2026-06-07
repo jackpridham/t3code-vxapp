@@ -22,6 +22,7 @@ import {
 } from "@t3tools/contracts";
 import {
   DEFAULT_UNIFIED_SETTINGS,
+  type OllamaProtocol,
   type SidebarOrchestrationDataMode,
   type SidebarWorkerActivityFilter,
   type SidebarWorkerLineageFilter,
@@ -105,33 +106,60 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const OLLAMA_PROTOCOL_LABELS: Record<OllamaProtocol, string> = {
+  http: "HTTP",
+  https: "HTTPS",
+};
+
 const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
-  binaryPlaceholder: string;
-  binaryDescription: ReactNode;
-  homePathKey?: "codexHomePath";
+  binaryPathKey?: "binaryPath" | "codexBinaryPath";
+  binaryPlaceholder?: string;
+  binaryDescription?: ReactNode;
+  homePathKey?: "homePath" | "codexHomePath";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
+  profileNameKey?: "profileName" | "codexProfileName";
+  profilePlaceholder?: string;
+  profileDescription?: ReactNode;
 };
 
 const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
   {
     provider: "codex",
     title: "Codex",
+    binaryPathKey: "binaryPath",
     binaryPlaceholder: "Codex binary path",
     binaryDescription: "Path to the Codex binary",
-    homePathKey: "codexHomePath",
+    homePathKey: "homePath",
     homePlaceholder: "CODEX_HOME",
     homeDescription: "Optional custom Codex home and config directory.",
+    profileNameKey: "profileName",
+    profilePlaceholder: "t3-openai",
+    profileDescription: "Managed Codex profile used for OpenAI-backed Codex sessions.",
   },
   {
     provider: "claudeAgent",
     title: "Claude",
+    binaryPathKey: "binaryPath",
     binaryPlaceholder: "Claude binary path",
     binaryDescription: "Path to the Claude binary",
+  },
+  {
+    provider: "ollamaLocal",
+    title: "Ollama",
+    binaryPathKey: "codexBinaryPath",
+    binaryPlaceholder: "Codex binary path",
+    binaryDescription: "Codex binary used to run the Ollama-backed agent harness.",
+    homePathKey: "codexHomePath",
+    homePlaceholder: "~/.codex-ollama",
+    homeDescription: "Separate Codex home used for the Ollama profile and local runtime state.",
+    profileNameKey: "codexProfileName",
+    profilePlaceholder: "t3-ollama-gpu",
+    profileDescription: "Managed Codex profile used for Ollama-backed coding sessions.",
   },
 ] as const;
 
@@ -154,7 +182,31 @@ function getProviderSummary(provider: ServerProvider | undefined) {
   if (!provider) {
     return {
       headline: "Checking provider status",
-      detail: "Waiting for the server to report installation and authentication details.",
+      detail: "Waiting for the server to report provider status details.",
+    };
+  }
+  if (provider.provider === "ollamaLocal") {
+    if (!provider.enabled) {
+      return {
+        headline: "Disabled",
+        detail: provider.message ?? "Reachability checks are skipped while Ollama is disabled.",
+      };
+    }
+    if (!provider.installed || provider.status === "error") {
+      return {
+        headline: "Unreachable",
+        detail: provider.message ?? "The configured Ollama endpoint is not reachable.",
+      };
+    }
+    if (provider.status === "warning") {
+      return {
+        headline: "Reachable with warnings",
+        detail: provider.message ?? "The Ollama endpoint is reachable but needs attention.",
+      };
+    }
+    return {
+      headline: "Reachable",
+      detail: provider.message ?? "The Ollama endpoint is reachable and ready.",
     };
   }
   if (!provider.enabled) {
@@ -695,6 +747,8 @@ export function GeneralSettingsPanel() {
     codex: Boolean(
       settings.providers.codex.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
       settings.providers.codex.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath ||
+      settings.providers.codex.profileName !==
+        DEFAULT_UNIFIED_SETTINGS.providers.codex.profileName ||
       settings.providers.codex.customModels.length > 0,
     ),
     claudeAgent: Boolean(
@@ -702,13 +756,20 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
       settings.providers.claudeAgent.customModels.length > 0,
     ),
+    ollamaLocal: Boolean(
+      !Equal.equals(settings.providers.ollamaLocal, DEFAULT_UNIFIED_SETTINGS.providers.ollamaLocal),
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
     codex: "",
     claudeAgent: "",
+    ollamaLocal: "",
   });
+  const [ollamaPortInput, setOllamaPortInput] = useState(
+    String(settings.providers.ollamaLocal.port),
+  );
   const [maxProjectThreadsBeforeFoldingInput, setMaxProjectThreadsBeforeFoldingInput] = useState(
     String(settings.maxProjectThreadsBeforeFolding),
   );
@@ -724,6 +785,10 @@ export function GeneralSettingsPanel() {
     setMaxProjectThreadsBeforeFoldingInput(String(settings.maxProjectThreadsBeforeFolding));
   }, [settings.maxProjectThreadsBeforeFolding]);
 
+  useEffect(() => {
+    setOllamaPortInput(String(settings.providers.ollamaLocal.port));
+  }, [settings.providers.ollamaLocal.port]);
+
   const commitMaxProjectThreadsBeforeFolding = useCallback(() => {
     const parsedValue = Number.parseInt(maxProjectThreadsBeforeFoldingInput, 10);
     const nextValue = Number.isFinite(parsedValue)
@@ -738,6 +803,25 @@ export function GeneralSettingsPanel() {
     settings.maxProjectThreadsBeforeFolding,
     updateSettings,
   ]);
+
+  const commitOllamaPort = useCallback(() => {
+    const parsedValue = Number.parseInt(ollamaPortInput, 10);
+    const nextValue = Number.isFinite(parsedValue)
+      ? Math.max(1, Math.min(65_535, parsedValue))
+      : settings.providers.ollamaLocal.port;
+    setOllamaPortInput(String(nextValue));
+    if (nextValue !== settings.providers.ollamaLocal.port) {
+      updateSettings({
+        providers: {
+          ...settings.providers,
+          ollamaLocal: {
+            ...settings.providers.ollamaLocal,
+            port: nextValue,
+          },
+        },
+      });
+    }
+  }, [ollamaPortInput, settings.providers, updateSettings]);
 
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
@@ -758,7 +842,6 @@ export function GeneralSettingsPanel() {
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
   const serverProviders = serverConfigQuery.data?.providers ?? EMPTY_SERVER_PROVIDERS;
-  const codexHomePath = settings.providers.codex.homePath;
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenProvider = textGenerationModelSelection.provider;
@@ -904,16 +987,40 @@ export function GeneralSettingsPanel() {
         isCustom: true,
         capabilities: null,
       }));
+    const binaryPathValue =
+      providerSettings.provider === "codex"
+        ? settings.providers.codex.binaryPath
+        : providerSettings.provider === "claudeAgent"
+          ? settings.providers.claudeAgent.binaryPath
+          : settings.providers.ollamaLocal.codexBinaryPath;
+    const homePathValue =
+      providerSettings.provider === "codex"
+        ? settings.providers.codex.homePath
+        : providerSettings.provider === "ollamaLocal"
+          ? settings.providers.ollamaLocal.codexHomePath
+          : null;
+    const profileNameValue =
+      providerSettings.provider === "codex"
+        ? settings.providers.codex.profileName
+        : providerSettings.provider === "ollamaLocal"
+          ? settings.providers.ollamaLocal.codexProfileName
+          : null;
 
     return {
       provider: providerSettings.provider,
       title: providerSettings.title,
+      binaryPathKey: providerSettings.binaryPathKey,
       binaryPlaceholder: providerSettings.binaryPlaceholder,
       binaryDescription: providerSettings.binaryDescription,
       homePathKey: providerSettings.homePathKey,
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
-      binaryPathValue: providerConfig.binaryPath,
+      profileNameKey: providerSettings.profileNameKey,
+      profilePlaceholder: providerSettings.profilePlaceholder,
+      profileDescription: providerSettings.profileDescription,
+      binaryPathValue,
+      homePathValue,
+      profileNameValue,
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
       liveProvider,
       models,
@@ -1497,61 +1604,99 @@ export function GeneralSettingsPanel() {
               >
                 <CollapsibleContent>
                   <div className="space-y-0">
-                    <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-                      <label
-                        htmlFor={`provider-install-${providerCard.provider}-binary-path`}
-                        className="block"
-                      >
-                        <span className="text-xs font-medium text-foreground">
-                          {providerDisplayName} binary path
-                        </span>
-                        <Input
-                          id={`provider-install-${providerCard.provider}-binary-path`}
-                          className="mt-1.5"
-                          value={providerCard.binaryPathValue}
-                          onChange={(event) =>
-                            updateSettings({
-                              providers: {
-                                ...settings.providers,
-                                [providerCard.provider]: {
-                                  ...settings.providers[providerCard.provider],
-                                  binaryPath: event.target.value,
-                                },
-                              },
-                            })
-                          }
-                          placeholder={providerCard.binaryPlaceholder}
-                          spellCheck={false}
-                        />
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          {providerCard.binaryDescription}
-                        </span>
-                      </label>
-                    </div>
+                    {providerCard.binaryPathValue !== null ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-binary-path`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {providerDisplayName} binary path
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-binary-path`}
+                            className="mt-1.5"
+                            value={providerCard.binaryPathValue}
+                            onChange={(event) =>
+                              updateSettings(
+                                providerCard.provider === "codex"
+                                  ? {
+                                      providers: {
+                                        ...settings.providers,
+                                        codex: {
+                                          ...settings.providers.codex,
+                                          binaryPath: event.target.value,
+                                        },
+                                      },
+                                    }
+                                  : providerCard.provider === "claudeAgent"
+                                    ? {
+                                        providers: {
+                                          ...settings.providers,
+                                          claudeAgent: {
+                                            ...settings.providers.claudeAgent,
+                                            binaryPath: event.target.value,
+                                          },
+                                        },
+                                      }
+                                    : {
+                                        providers: {
+                                          ...settings.providers,
+                                          ollamaLocal: {
+                                            ...settings.providers.ollamaLocal,
+                                            codexBinaryPath: event.target.value,
+                                          },
+                                        },
+                                      },
+                              )
+                            }
+                            placeholder={providerCard.binaryPlaceholder}
+                            spellCheck={false}
+                          />
+                          {providerCard.binaryDescription ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {providerCard.binaryDescription}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    ) : null}
 
                     {providerCard.homePathKey ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
                         <label
-                          htmlFor={`provider-install-${providerCard.homePathKey}`}
+                          htmlFor={`provider-install-${providerCard.provider}-home-path`}
                           className="block"
                         >
                           <span className="text-xs font-medium text-foreground">
                             CODEX_HOME path
                           </span>
                           <Input
-                            id={`provider-install-${providerCard.homePathKey}`}
+                            id={`provider-install-${providerCard.provider}-home-path`}
                             className="mt-1.5"
-                            value={codexHomePath}
+                            value={providerCard.homePathValue ?? ""}
                             onChange={(event) =>
-                              updateSettings({
-                                providers: {
-                                  ...settings.providers,
-                                  codex: {
-                                    ...settings.providers.codex,
-                                    homePath: event.target.value,
-                                  },
-                                },
-                              })
+                              updateSettings(
+                                providerCard.provider === "codex"
+                                  ? {
+                                      providers: {
+                                        ...settings.providers,
+                                        codex: {
+                                          ...settings.providers.codex,
+                                          homePath: event.target.value,
+                                        },
+                                      },
+                                    }
+                                  : {
+                                      providers: {
+                                        ...settings.providers,
+                                        ollamaLocal: {
+                                          ...settings.providers.ollamaLocal,
+                                          codexHomePath: event.target.value,
+                                        },
+                                      },
+                                    },
+                              )
                             }
                             placeholder={providerCard.homePlaceholder}
                             spellCheck={false}
@@ -1563,6 +1708,236 @@ export function GeneralSettingsPanel() {
                           ) : null}
                         </label>
                       </div>
+                    ) : null}
+
+                    {providerCard.profileNameKey ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-profile-name`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">Codex profile</span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-profile-name`}
+                            className="mt-1.5"
+                            value={providerCard.profileNameValue ?? ""}
+                            onChange={(event) =>
+                              updateSettings(
+                                providerCard.provider === "codex"
+                                  ? {
+                                      providers: {
+                                        ...settings.providers,
+                                        codex: {
+                                          ...settings.providers.codex,
+                                          profileName: event.target.value,
+                                        },
+                                      },
+                                    }
+                                  : {
+                                      providers: {
+                                        ...settings.providers,
+                                        ollamaLocal: {
+                                          ...settings.providers.ollamaLocal,
+                                          codexProfileName: event.target.value,
+                                        },
+                                      },
+                                    },
+                              )
+                            }
+                            placeholder={providerCard.profilePlaceholder}
+                            spellCheck={false}
+                          />
+                          {providerCard.profileDescription ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {providerCard.profileDescription}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {providerCard.provider === "ollamaLocal" ? (
+                      <>
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <label
+                            htmlFor="provider-install-ollama-protocol"
+                            className="block space-y-1.5"
+                          >
+                            <span className="text-xs font-medium text-foreground">Protocol</span>
+                            <Select
+                              value={settings.providers.ollamaLocal.protocol}
+                              onValueChange={(value) => {
+                                if (value !== "http" && value !== "https") return;
+                                updateSettings({
+                                  providers: {
+                                    ...settings.providers,
+                                    ollamaLocal: {
+                                      ...settings.providers.ollamaLocal,
+                                      protocol: value,
+                                    },
+                                  },
+                                });
+                              }}
+                            >
+                              <SelectTrigger
+                                id="provider-install-ollama-protocol"
+                                className="w-full sm:w-32"
+                                aria-label="Ollama protocol"
+                              >
+                                <SelectValue>
+                                  {OLLAMA_PROTOCOL_LABELS[settings.providers.ollamaLocal.protocol]}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectPopup align="start" alignItemWithTrigger={false}>
+                                {(
+                                  Object.entries(OLLAMA_PROTOCOL_LABELS) as Array<
+                                    [OllamaProtocol, string]
+                                  >
+                                ).map(([value, label]) => (
+                                  <SelectItem hideIndicator key={value} value={value}>
+                                    {label}
+                                  </SelectItem>
+                                ))}
+                              </SelectPopup>
+                            </Select>
+                          </label>
+                        </div>
+
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <label htmlFor="provider-install-ollama-host" className="block">
+                            <span className="text-xs font-medium text-foreground">Host or IP</span>
+                            <Input
+                              id="provider-install-ollama-host"
+                              className="mt-1.5"
+                              value={settings.providers.ollamaLocal.host}
+                              onChange={(event) =>
+                                updateSettings({
+                                  providers: {
+                                    ...settings.providers,
+                                    ollamaLocal: {
+                                      ...settings.providers.ollamaLocal,
+                                      host: event.target.value,
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="192.168.10.12"
+                              spellCheck={false}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <label htmlFor="provider-install-ollama-port" className="block">
+                            <span className="text-xs font-medium text-foreground">Port</span>
+                            <Input
+                              id="provider-install-ollama-port"
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              max={65535}
+                              step={1}
+                              className="mt-1.5 w-full sm:w-32"
+                              value={ollamaPortInput}
+                              onChange={(event) => setOllamaPortInput(event.target.value)}
+                              onBlur={commitOllamaPort}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                              aria-label="Ollama port"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <label htmlFor="provider-install-ollama-api-path" className="block">
+                            <span className="text-xs font-medium text-foreground">API path</span>
+                            <Input
+                              id="provider-install-ollama-api-path"
+                              className="mt-1.5"
+                              value={settings.providers.ollamaLocal.apiPath}
+                              onChange={(event) =>
+                                updateSettings({
+                                  providers: {
+                                    ...settings.providers,
+                                    ollamaLocal: {
+                                      ...settings.providers.ollamaLocal,
+                                      apiPath: event.target.value,
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="/api"
+                              spellCheck={false}
+                            />
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Base path for direct Ollama HTTP calls such as provider health and git
+                              text generation.
+                            </span>
+                          </label>
+                        </div>
+
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <label
+                            htmlFor="provider-install-ollama-responses-api-path"
+                            className="block"
+                          >
+                            <span className="text-xs font-medium text-foreground">
+                              Codex responses path
+                            </span>
+                            <Input
+                              id="provider-install-ollama-responses-api-path"
+                              className="mt-1.5"
+                              value={settings.providers.ollamaLocal.responsesApiPath}
+                              onChange={(event) =>
+                                updateSettings({
+                                  providers: {
+                                    ...settings.providers,
+                                    ollamaLocal: {
+                                      ...settings.providers.ollamaLocal,
+                                      responsesApiPath: event.target.value,
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="/v1"
+                              spellCheck={false}
+                            />
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              OpenAI-compatible base path used by the Codex harness for Ollama
+                              coding sessions.
+                            </span>
+                          </label>
+                        </div>
+
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <label htmlFor="provider-install-ollama-default-model" className="block">
+                            <span className="text-xs font-medium text-foreground">
+                              Default model
+                            </span>
+                            <Input
+                              id="provider-install-ollama-default-model"
+                              className="mt-1.5"
+                              value={settings.providers.ollamaLocal.defaultModel}
+                              onChange={(event) =>
+                                updateSettings({
+                                  providers: {
+                                    ...settings.providers,
+                                    ollamaLocal: {
+                                      ...settings.providers.ollamaLocal,
+                                      defaultModel: event.target.value,
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="qwen3:8b"
+                              spellCheck={false}
+                            />
+                          </label>
+                        </div>
+                      </>
                     ) : null}
 
                     <div className="border-t border-border/60 px-4 py-3 sm:px-5">

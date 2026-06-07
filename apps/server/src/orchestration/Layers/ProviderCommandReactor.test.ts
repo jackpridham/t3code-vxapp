@@ -6,8 +6,13 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  MessageId,
+  type ModelSelection,
+  type OrchestrationMessage,
   ProjectId,
+  type ProviderKind,
   ThreadId,
+  TurnId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -41,7 +46,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as providerHarnessBridge from "../../extensions/vxapp/providerHarnessBridge.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
+const asMessageId = (value: string) => MessageId.makeUnsafe(value);
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
+const asTurnId = (value: string) => TurnId.makeUnsafe(value);
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
@@ -145,6 +152,8 @@ describe("ProviderCommandReactor authority boundary", () => {
   async function createHarness(options?: {
     worktreePath?: string | null;
     ownerAuthorityWorktreePaths?: ReadonlyArray<string>;
+    threadModelSelection?: ModelSelection;
+    threadMessages?: ReadonlyArray<OrchestrationMessage>;
     initialHasActiveError?: boolean;
     initialActiveError?: string | null;
     initialHistoricalError?: string | null;
@@ -153,10 +162,15 @@ describe("ProviderCommandReactor authority boundary", () => {
   }) {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-reactor-"));
     tempDirs.push(stateRoot);
+    const threadModelSelection: ModelSelection = options?.threadModelSelection ?? {
+      provider: "codex",
+      model: "gpt-5-codex",
+    };
+    const threadProvider: ProviderKind = threadModelSelection.provider;
 
     let activeSessions: Array<{
       threadId: ThreadId;
-      provider: "codex";
+      provider: ProviderKind;
       status: "ready";
       runtimeMode: "full-access" | "approval-required";
       createdAt: string;
@@ -176,9 +190,10 @@ describe("ProviderCommandReactor authority boundary", () => {
       (_input: ProviderRespondToUserInputInput) => Effect.void,
     ) satisfies ProviderServiceShape["respondToUserInput"];
     const startSession = vi.fn((threadId: ThreadId, input) => {
+      const provider = input.provider ?? input.modelSelection?.provider ?? threadProvider;
       const session = {
         threadId,
-        provider: "codex" as const,
+        provider,
         status: "ready" as const,
         runtimeMode: input.runtimeMode,
         createdAt: "2026-05-16T00:00:00.000Z",
@@ -205,7 +220,11 @@ describe("ProviderCommandReactor authority boundary", () => {
       respondToUserInput,
       stopSession: () => unsupportedEffect("ProviderService.stopSession"),
       listSessions: () => Effect.succeed(activeSessions),
-      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      getCapabilities: () =>
+        Effect.succeed({
+          sessionModelSwitch: "in-session",
+          sessionRecovery: "resume-cursor",
+        }),
       rollbackConversation: () => unsupportedEffect("ProviderService.rollbackConversation"),
       streamEvents: Stream.empty,
     };
@@ -215,10 +234,7 @@ describe("ProviderCommandReactor authority boundary", () => {
       id: asProjectId("project-1"),
       title: "Provider Project",
       workspaceRoot: stateRoot,
-      defaultModelSelection: {
-        provider: "codex" as const,
-        model: "gpt-5-codex",
-      },
+      defaultModelSelection: threadModelSelection,
       scripts: [],
       hooks: [],
       createdAt: "2026-05-16T00:00:00.000Z",
@@ -230,10 +246,7 @@ describe("ProviderCommandReactor authority boundary", () => {
       projectId: asProjectId("project-1"),
       title: "Thread",
       labels: [],
-      modelSelection: {
-        provider: "codex" as const,
-        model: "gpt-5-codex",
-      },
+      modelSelection: threadModelSelection,
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       runtimeMode: "approval-required" as const,
       branch: null,
@@ -242,11 +255,11 @@ describe("ProviderCommandReactor authority boundary", () => {
       updatedAt: "2026-05-16T00:00:00.000Z",
       archivedAt: null,
       latestTurn: null,
-      messages: [],
+      messages: [...(options?.threadMessages ?? [])],
       session: {
         threadId,
         status: "ready" as const,
-        providerName: "codex" as const,
+        providerName: threadProvider,
         runtimeMode: "approval-required" as const,
         activeTurnId: null,
         lastError: null,
@@ -323,10 +336,7 @@ describe("ProviderCommandReactor authority boundary", () => {
                     projectId: asProjectId("project-1"),
                     title: "Authority Thread",
                     labels: [],
-                    modelSelection: {
-                      provider: "codex" as const,
-                      model: "gpt-5-codex",
-                    },
+                    modelSelection: threadModelSelection,
                     runtimeMode: "approval-required" as const,
                     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
                     branch: "t3code/authority-thread",
@@ -450,6 +460,172 @@ describe("ProviderCommandReactor authority boundary", () => {
     const thread = await harness.readThread();
     expect(thread.activities).toEqual([]);
     expect(thread.session?.runtimeMode).toBe("full-access");
+  });
+
+  it("forwards authoritative conversation history for ollama turns without replaying transient rows", async () => {
+    const harness = await createHarness({
+      threadModelSelection: {
+        provider: "ollamaLocal",
+        model: "qwen3:8b",
+      },
+      threadMessages: [
+        {
+          id: asMessageId("system-1"),
+          role: "system",
+          text: "  You are a coding assistant.  ",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-05-16T00:00:00.000Z",
+          updatedAt: "2026-05-16T00:00:00.000Z",
+        },
+        {
+          id: asMessageId("user-1"),
+          role: "user",
+          text: "Explain this function.",
+          turnId: asTurnId("turn-1"),
+          streaming: false,
+          createdAt: "2026-05-16T00:00:01.000Z",
+          updatedAt: "2026-05-16T00:00:01.000Z",
+        },
+        {
+          id: asMessageId("assistant-stream"),
+          role: "assistant",
+          text: "partial delta",
+          turnId: asTurnId("turn-1"),
+          streaming: true,
+          createdAt: "2026-05-16T00:00:02.000Z",
+          updatedAt: "2026-05-16T00:00:02.000Z",
+        },
+        {
+          id: asMessageId("assistant-1"),
+          role: "assistant",
+          text: " It parses the input. ",
+          turnId: asTurnId("turn-1"),
+          streaming: false,
+          createdAt: "2026-05-16T00:00:03.000Z",
+          updatedAt: "2026-05-16T00:00:03.000Z",
+        },
+        {
+          id: asMessageId("assistant-empty"),
+          role: "assistant",
+          text: "   ",
+          turnId: asTurnId("turn-1"),
+          streaming: false,
+          createdAt: "2026-05-16T00:00:04.000Z",
+          updatedAt: "2026-05-16T00:00:04.000Z",
+        },
+        {
+          id: asMessageId("user-2"),
+          role: "user",
+          text: "Reply with pong",
+          turnId: asTurnId("turn-2"),
+          streaming: false,
+          createdAt: "2026-05-16T00:00:05.000Z",
+          updatedAt: "2026-05-16T00:00:05.000Z",
+        },
+      ],
+    });
+
+    await harness.publishEvent({
+      type: "thread.turn-start-requested",
+      eventId: EventId.makeUnsafe("evt-ollama-history"),
+      sequence: 8,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:06.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        messageId: asMessageId("user-2"),
+        createdAt: "2026-05-16T00:00:06.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-ollama-history"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).toHaveBeenCalledWith({
+      threadId: asThreadId("thread-1"),
+      input: "Reply with pong",
+      conversationHistory: [
+        { role: "system", content: "You are a coding assistant." },
+        { role: "user", content: "Explain this function." },
+        { role: "assistant", content: "It parses the input." },
+      ],
+    });
+  });
+
+  it("excludes the triggering user message for owner-mediated ollama turns", async () => {
+    const harness = await createHarness({
+      threadModelSelection: {
+        provider: "ollamaLocal",
+        model: "qwen3:8b",
+      },
+      threadMessages: [
+        {
+          id: asMessageId("user-1"),
+          role: "user",
+          text: "Previous prompt",
+          turnId: asTurnId("turn-1"),
+          streaming: false,
+          createdAt: "2026-05-16T00:00:00.000Z",
+          updatedAt: "2026-05-16T00:00:00.000Z",
+        },
+        {
+          id: asMessageId("assistant-1"),
+          role: "assistant",
+          text: "Previous answer",
+          turnId: asTurnId("turn-1"),
+          streaming: false,
+          createdAt: "2026-05-16T00:00:01.000Z",
+          updatedAt: "2026-05-16T00:00:01.000Z",
+        },
+        {
+          id: asMessageId("user-2"),
+          role: "user",
+          text: "Owner provided message",
+          turnId: asTurnId("turn-2"),
+          streaming: false,
+          createdAt: "2026-05-16T00:00:02.000Z",
+          updatedAt: "2026-05-16T00:00:02.000Z",
+        },
+      ],
+    });
+
+    await harness.publishEvent({
+      type: "thread.turn-start-requested",
+      eventId: EventId.makeUnsafe("evt-owner-ollama-history"),
+      sequence: 9,
+      aggregateKind: "thread",
+      aggregateId: asThreadId("thread-1"),
+      occurredAt: "2026-05-16T00:00:09.000Z",
+      payload: {
+        threadId: asThreadId("thread-1"),
+        messageId: asMessageId("user-2"),
+        providerRequestStatus: "ready",
+        providerRequest: {
+          kind: "thread.turn.start",
+          requestId: "owner-request-ollama-history",
+          threadId: "thread-1",
+          message: "Owner provided message",
+          runtimeMode: "full-access",
+        },
+        createdAt: "2026-05-16T00:00:09.000Z",
+      },
+      commandId: CommandId.makeUnsafe("cmd-owner-ollama-history"),
+    } as unknown as OrchestrationEvent);
+    await settleHotStream();
+    await Effect.runPromise(harness.reactor.drain);
+
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).toHaveBeenCalledWith({
+      threadId: asThreadId("thread-1"),
+      input: "Owner provided message",
+      conversationHistory: [
+        { role: "user", content: "Previous prompt" },
+        { role: "assistant", content: "Previous answer" },
+      ],
+    });
   });
 
   it("restarts the provider session when ancestor instructions change under the same workspace", async () => {

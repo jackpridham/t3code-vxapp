@@ -2,6 +2,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  type MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   type ProviderSessionRuntimeStatus,
@@ -27,6 +28,7 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { ProviderAdapterRequestError, ProviderServiceError } from "../../provider/Errors.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
+import { buildOllamaConversationHistory } from "../../provider/ollamaChat.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderSessionDirectoryLive } from "../../provider/Layers/ProviderSessionDirectory.ts";
 import { ProviderSessionDirectory } from "../../provider/Services/ProviderSessionDirectory.ts";
@@ -807,6 +809,7 @@ const make = Effect.gen(function* () {
   const sendTurnForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly messageText: string;
+    readonly currentUserMessageId?: MessageId;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
@@ -855,11 +858,23 @@ const make = Effect.gen(function* () {
             }
           : requestedModelSelection
         : input.modelSelection;
+    const providerForTurn =
+      activeSession?.provider ?? modelForTurn?.provider ?? requestedModelSelection.provider;
+    const conversationHistory =
+      providerForTurn === "ollamaLocal"
+        ? buildOllamaConversationHistory({
+            messages: preparedThread.messages,
+            ...(input.currentUserMessageId !== undefined
+              ? { excludeMessageId: input.currentUserMessageId }
+              : {}),
+          })
+        : undefined;
 
     const startedTurn = yield* providerService.sendTurn({
       threadId: input.threadId,
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
+      ...(conversationHistory !== undefined ? { conversationHistory } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     });
@@ -1050,6 +1065,7 @@ const make = Effect.gen(function* () {
       yield* sendTurnForThread({
         threadId: providerRequest.threadId,
         messageText: providerRequest.message,
+        currentUserMessageId: event.payload.messageId,
         ...(providerRequest.runtimeMode !== undefined
           ? { runtimeMode: providerRequest.runtimeMode }
           : {}),
@@ -1131,6 +1147,7 @@ const make = Effect.gen(function* () {
     yield* sendTurnForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
+      currentUserMessageId: message.id,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }

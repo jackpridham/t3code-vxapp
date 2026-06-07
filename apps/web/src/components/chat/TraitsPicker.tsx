@@ -138,6 +138,24 @@ function getSelectedTraits(
   };
 }
 
+function hasVisibleTraits(input: {
+  readonly effort: string | null;
+  readonly thinkingEnabled: boolean | null;
+  readonly supportsFastMode: boolean;
+  readonly contextWindowOptions: ReadonlyArray<{
+    readonly value: string;
+    readonly label: string;
+    readonly isDefault?: boolean | undefined;
+  }>;
+}): boolean {
+  return (
+    input.effort !== null ||
+    input.thinkingEnabled !== null ||
+    input.supportsFastMode ||
+    input.contextWindowOptions.length > 1
+  );
+}
+
 export interface TraitsMenuContentProps {
   provider: ProviderKind;
   models: ReadonlyArray<ServerProviderModel>;
@@ -184,6 +202,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ultrathinkInBodyText,
   } = getSelectedTraits(provider, models, model, prompt, modelOptions, allowPromptInjectedEffort);
   const defaultEffort = getDefaultEffort(caps);
+  const visibleTraits = hasVisibleTraits({
+    effort,
+    thinkingEnabled,
+    supportsFastMode: caps.supportsFastMode,
+    contextWindowOptions,
+  });
 
   const handleEffortChange = useCallback(
     (value: string) => {
@@ -221,7 +245,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ],
   );
 
-  if (effort === null && thinkingEnabled === null && contextWindowOptions.length <= 1) {
+  if (!visibleTraits) {
     return null;
   }
 
@@ -366,6 +390,17 @@ export const TraitsPicker = memo(function TraitsPicker({
     .join(" · ");
 
   const isCodexStyle = provider === "codex";
+
+  if (
+    !hasVisibleTraits({
+      effort,
+      thinkingEnabled,
+      supportsFastMode: caps.supportsFastMode,
+      contextWindowOptions,
+    })
+  ) {
+    return null;
+  }
 
   return (
     <Menu

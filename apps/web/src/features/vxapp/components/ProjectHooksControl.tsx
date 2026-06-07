@@ -53,7 +53,7 @@ import { Switch } from "~/components/ui/switch";
 import { Textarea } from "~/components/ui/textarea";
 
 type ProjectHookTrigger = ProjectHook["trigger"];
-type ProviderFilter = "any" | "codex" | "claudeAgent";
+type ProviderFilter = "any" | "codex" | "claudeAgent" | "ollamaLocal";
 type InteractionModeFilter = "any" | "default" | "plan";
 type RuntimeModeFilter = "any" | "approval-required" | "full-access";
 type TurnStateFilter = "any" | ProjectHookTurnState;
@@ -377,7 +377,12 @@ export default function ProjectHooksControl({
                   <Select
                     value={providerFilter}
                     onValueChange={(value) => {
-                      if (value === "any" || value === "codex" || value === "claudeAgent") {
+                      if (
+                        value === "any" ||
+                        value === "codex" ||
+                        value === "claudeAgent" ||
+                        value === "ollamaLocal"
+                      ) {
                         setProviderFilter(value);
                       }
                     }}
@@ -400,6 +405,9 @@ export default function ProjectHooksControl({
                       </SelectItem>
                       <SelectItem hideIndicator value="claudeAgent">
                         Claude
+                      </SelectItem>
+                      <SelectItem hideIndicator value="ollamaLocal">
+                        Ollama
                       </SelectItem>
                     </SelectPopup>
                   </Select>

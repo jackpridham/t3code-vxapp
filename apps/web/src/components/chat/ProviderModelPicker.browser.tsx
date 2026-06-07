@@ -395,6 +395,102 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("keeps warning providers selectable so users can pick an available live model", async () => {
+    const providersWithWarning: ReadonlyArray<ServerProvider> = [
+      ...TEST_PROVIDERS,
+      {
+        provider: "ollamaLocal",
+        enabled: true,
+        installed: true,
+        version: null,
+        status: "warning",
+        auth: { status: "unknown", type: "local", label: "Local Ollama" },
+        checkedAt: new Date().toISOString(),
+        message: "Connected, but the default model is unavailable.",
+        models: [
+          {
+            slug: "qwen3:8b",
+            name: "Qwen3 8B",
+            isCustom: false,
+            capabilities: null,
+          },
+        ],
+      },
+    ];
+    const mounted = await mountPicker({
+      provider: "codex",
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: providersWithWarning,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Ollama");
+        expect(text).toContain("Warning");
+      });
+
+      const providerTrigger = page.getByRole("menuitem", { name: /Ollama/i });
+      await providerTrigger.hover();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Qwen3 8B");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows unreachable for Ollama probe failures without changing other provider labels", async () => {
+    const providersWithUnavailable: ReadonlyArray<ServerProvider> = [
+      {
+        provider: "codex",
+        enabled: true,
+        installed: false,
+        version: null,
+        status: "error",
+        auth: { status: "unknown" },
+        checkedAt: new Date().toISOString(),
+        message: "CLI missing",
+        models: TEST_PROVIDERS[0]!.models,
+      },
+      TEST_PROVIDERS[1]!,
+      {
+        provider: "ollamaLocal",
+        enabled: true,
+        installed: false,
+        version: null,
+        status: "error",
+        auth: { status: "unknown", type: "local", label: "Local Ollama" },
+        checkedAt: new Date().toISOString(),
+        message: "Unable to reach http://192.168.10.12:11434/api",
+        models: [],
+      },
+    ];
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+      providers: providersWithUnavailable,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        const text = document.body.textContent ?? "";
+        expect(text).toContain("Ollama");
+        expect(text).toContain("Unreachable");
+        expect(text).toContain("Not installed");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("accepts outline trigger styling", async () => {
     const mounted = await mountPicker({
       provider: "codex",

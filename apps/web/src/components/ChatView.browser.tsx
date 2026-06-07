@@ -1707,6 +1707,83 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("submits on Enter in mobile view even when the draft contains new lines", async () => {
+    const mounted = await mountChatView({
+      viewport: TEXT_VIEWPORT_MATRIX[2],
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mobile-enter-submit" as MessageId,
+        targetText: "mobile enter submit target",
+      }),
+    });
+
+    try {
+      const composerEditor = page.getByTestId("composer-editor");
+      await expect.element(composerEditor).toBeInTheDocument();
+      await composerEditor.click();
+      await composerEditor.fill("line 1\nline 2");
+
+      await vi.waitFor(
+        () => {
+          expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
+            "line 1\nline 2",
+          );
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+                typeof request.command === "object" &&
+                request.command !== null &&
+                "type" in request.command &&
+                request.command.type === "thread.turn.start",
+            ),
+          ).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const composerEditorElement = await waitForComposerEditor();
+      composerEditorElement.focus();
+      composerEditorElement.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find((request) => {
+            if (request._tag !== ORCHESTRATION_WS_METHODS.dispatchCommand) {
+              return false;
+            }
+            const command = request.command;
+            return (
+              typeof command === "object" &&
+              command !== null &&
+              "type" in command &&
+              command.type === "thread.turn.start"
+            );
+          });
+
+          expect(dispatchRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            command: {
+              type: "thread.turn.start",
+              threadId: THREAD_ID,
+              message: {
+                text: "line 1\nline 2",
+              },
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps removed terminal context pills removed when a new one is added", async () => {
     const removedLabel = "Terminal 1 lines 1-2";
     const addedLabel = "Terminal 2 lines 9-10";

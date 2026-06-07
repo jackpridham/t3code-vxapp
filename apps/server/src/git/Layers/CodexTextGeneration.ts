@@ -167,6 +167,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
         const command = ChildProcess.make(
           codexSettings?.binaryPath || "codex",
           [
+            ...(codexSettings?.profileName ? ["--profile", codexSettings.profileName] : []),
             "exec",
             "--ephemeral",
             "-s",

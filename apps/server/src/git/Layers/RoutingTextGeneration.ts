@@ -18,6 +18,7 @@ import {
 } from "../Services/TextGeneration.ts";
 import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
+import { OllamaTextGenerationLive } from "./OllamaTextGeneration.ts";
 
 // ---------------------------------------------------------------------------
 // Internal service tags so both concrete layers can coexist.
@@ -31,16 +32,39 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
 ) {}
 
+class OllamaTextGen extends ServiceMap.Service<OllamaTextGen, TextGenerationShape>()(
+  "t3/git/Layers/RoutingTextGeneration/OllamaTextGen",
+) {}
+
 // ---------------------------------------------------------------------------
 // Routing implementation
 // ---------------------------------------------------------------------------
 
+export function routeTextGenerationProvider(input: {
+  readonly provider: TextGenerationProvider | undefined;
+  readonly codex: TextGenerationShape;
+  readonly claude: TextGenerationShape;
+  readonly ollama: TextGenerationShape;
+}): TextGenerationShape {
+  return input.provider === "claudeAgent"
+    ? input.claude
+    : input.provider === "ollamaLocal"
+      ? input.ollama
+      : input.codex;
+}
+
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
+  const ollama = yield* OllamaTextGen;
 
   const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider === "claudeAgent" ? claude : codex;
+    routeTextGenerationProvider({
+      provider,
+      codex,
+      claude,
+      ollama,
+    });
 
   return {
     generateCommitMessage: (input) =>
@@ -67,7 +91,19 @@ const InternalClaudeLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ClaudeTextGenerationLive));
 
+const InternalOllamaLayer = Layer.effect(
+  OllamaTextGen,
+  Effect.gen(function* () {
+    const svc = yield* TextGeneration;
+    return svc;
+  }),
+).pipe(Layer.provide(OllamaTextGenerationLive));
+
 export const RoutingTextGenerationLive = Layer.effect(
   TextGeneration,
   makeRoutingTextGeneration,
-).pipe(Layer.provide(InternalCodexLayer), Layer.provide(InternalClaudeLayer));
+).pipe(
+  Layer.provide(InternalCodexLayer),
+  Layer.provide(InternalClaudeLayer),
+  Layer.provide(InternalOllamaLayer),
+);

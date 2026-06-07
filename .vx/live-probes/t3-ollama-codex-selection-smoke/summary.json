@@ -1,0 +1,204 @@
+{
+  "ok": true,
+  "finishedAt": "2026-06-07T13:47:22.354Z",
+  "webBaseUrl": "http://127.0.0.1:5733",
+  "serverBaseUrl": "http://127.0.0.1:3773",
+  "ollamaBaseUrl": "http://192.168.10.12:11435/api",
+  "threadId": "thread-ollama-smoke-1780839994893",
+  "projectId": "project-ollama-smoke-1780839994893",
+  "modelLabel": "Qwen3 8B",
+  "proof": {
+    "source": "browser-ws",
+    "browserSubmit": 1780839999940,
+    "dispatch": {
+      "id": "24",
+      "method": "orchestration.dispatchCommand",
+      "requestBody": {
+        "command": {
+          "type": "thread.turn.start",
+          "commandId": "2f835e00-d96f-4283-ba0e-c9243a40b826",
+          "threadId": "thread-ollama-smoke-1780839994893",
+          "message": {
+            "messageId": "5febdf4d-2a00-480f-b3aa-8a1d781bb6ef",
+            "role": "user",
+            "text": "Use the exec_command tool to run exactly this shell command: printf smoke-tool-ok > /home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt. After running it, reply with exactly smoke-tool-ok.",
+            "attachments": []
+          },
+          "modelSelection": {
+            "provider": "ollamaLocal",
+            "model": "qwen3:8b"
+          },
+          "titleSeed": "Use the exec_command tool to run exactly this shel...",
+          "runtimeMode": "full-access",
+          "interactionMode": "default",
+          "createdAt": "2026-06-07T13:46:39.986Z"
+        },
+        "_tag": "orchestration.dispatchCommand"
+      },
+      "requestBytes": 760,
+      "responseBytes": 41,
+      "result": {
+        "sequence": 2886147
+      },
+      "sentAt": 1780840002577,
+      "receivedAt": 1780840002610
+    },
+    "toolStarted": {
+      "sequence": 2886607,
+      "eventId": "7dae5a1f-2121-4260-a94b-4a40dc6d4e2e",
+      "aggregateKind": "thread",
+      "aggregateId": "thread-ollama-smoke-1780839994893",
+      "occurredAt": "2026-06-07T13:47:05.383Z",
+      "commandId": "provider:1b653012-5bdd-4f36-864e-ad6faaa2616d:thread-activity-append:3c4b075e-f148-435f-b82b-f6be17207424",
+      "causationEventId": null,
+      "correlationId": "provider:1b653012-5bdd-4f36-864e-ad6faaa2616d:thread-activity-append:3c4b075e-f148-435f-b82b-f6be17207424",
+      "metadata": {},
+      "type": "thread.activity-appended",
+      "payload": {
+        "threadId": "thread-ollama-smoke-1780839994893",
+        "activity": {
+          "id": "1b653012-5bdd-4f36-864e-ad6faaa2616d",
+          "tone": "tool",
+          "kind": "tool.started",
+          "summary": "Ran command started",
+          "payload": {
+            "itemType": "command_execution",
+            "detail": "/bin/bash -lc \"printf 'smoke-tool-ok' > /home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt\"",
+            "data": {
+              "item": {
+                "aggregatedOutput": null,
+                "command": "/bin/bash -lc \"printf 'smoke-tool-ok' > /home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt\"",
+                "commandActions": [
+                  {
+                    "command": "printf 'smoke-tool-ok' > /home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt",
+                    "type": "unknown"
+                  }
+                ],
+                "cwd": "/home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace",
+                "durationMs": null,
+                "exitCode": null,
+                "id": "call_r74zrov7",
+                "processId": "22369",
+                "source": "unifiedExecStartup",
+                "status": "inProgress",
+                "type": "commandExecution"
+              },
+              "threadId": "019ea255-f6ea-73c2-abd6-140eb7508792",
+              "turnId": "019ea255-f92b-7d53-8d89-7067f27dcd65"
+            }
+          },
+          "turnId": "019ea255-f92b-7d53-8d89-7067f27dcd65",
+          "createdAt": "2026-06-07T13:47:05.383Z"
+        }
+      }
+    },
+    "toolCompleted": {
+      "sequence": 2886608,
+      "eventId": "e5a9bd55-5ae1-4d62-8885-d0901a6be58c",
+      "aggregateKind": "thread",
+      "aggregateId": "thread-ollama-smoke-1780839994893",
+      "occurredAt": "2026-06-07T13:47:05.383Z",
+      "commandId": "provider:a5015ba1-bef5-41db-b520-16b7c3179045:thread-activity-append:e172eb1b-c38b-479f-b601-765455ea019d",
+      "causationEventId": null,
+      "correlationId": "provider:a5015ba1-bef5-41db-b520-16b7c3179045:thread-activity-append:e172eb1b-c38b-479f-b601-765455ea019d",
+      "metadata": {},
+      "type": "thread.activity-appended",
+      "payload": {
+        "threadId": "thread-ollama-smoke-1780839994893",
+        "activity": {
+          "id": "a5015ba1-bef5-41db-b520-16b7c3179045",
+          "tone": "tool",
+          "kind": "tool.completed",
+          "summary": "Ran command",
+          "payload": {
+            "itemType": "command_execution",
+            "detail": "/bin/bash -lc \"printf 'smoke-tool-ok' > /home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt\"",
+            "data": {
+              "item": {
+                "aggregatedOutput": null,
+                "command": "/bin/bash -lc \"printf 'smoke-tool-ok' > /home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt\"",
+                "commandActions": [
+                  {
+                    "command": "printf 'smoke-tool-ok' > /home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt",
+                    "type": "unknown"
+                  }
+                ],
+                "cwd": "/home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace",
+                "durationMs": 0,
+                "exitCode": 0,
+                "id": "call_r74zrov7",
+                "processId": "22369",
+                "source": "unifiedExecStartup",
+                "status": "completed",
+                "type": "commandExecution"
+              },
+              "threadId": "019ea255-f6ea-73c2-abd6-140eb7508792",
+              "turnId": "019ea255-f92b-7d53-8d89-7067f27dcd65"
+            }
+          },
+          "turnId": "019ea255-f92b-7d53-8d89-7067f27dcd65",
+          "createdAt": "2026-06-07T13:47:05.383Z"
+        }
+      }
+    },
+    "runningEvent": {
+      "sequence": 2886150,
+      "eventId": "ec4d00e7-9278-431c-b15f-921d28dbf750",
+      "aggregateKind": "thread",
+      "aggregateId": "thread-ollama-smoke-1780839994893",
+      "occurredAt": "2026-06-07T13:46:39.986Z",
+      "commandId": "server:provider-session-set:7e7dffab-f850-435f-9490-1962ad884811",
+      "causationEventId": null,
+      "correlationId": "server:provider-session-set:7e7dffab-f850-435f-9490-1962ad884811",
+      "metadata": {},
+      "type": "thread.session-set",
+      "payload": {
+        "threadId": "thread-ollama-smoke-1780839994893",
+        "session": {
+          "threadId": "thread-ollama-smoke-1780839994893",
+          "status": "running",
+          "providerName": "ollamaLocal",
+          "runtimeMode": "full-access",
+          "activeTurnId": "019ea255-f92b-7d53-8d89-7067f27dcd65",
+          "lastError": null,
+          "updatedAt": "2026-06-07T13:46:39.986Z"
+        },
+        "hasActiveError": false,
+        "activeError": null,
+        "historicalError": null,
+        "errorPresentationSource": "none"
+      }
+    },
+    "readyEvent": {
+      "sequence": 2886149,
+      "eventId": "090b3b01-5a48-4dce-ad62-553b2883718b",
+      "aggregateKind": "thread",
+      "aggregateId": "thread-ollama-smoke-1780839994893",
+      "occurredAt": "2026-06-07T13:46:39.986Z",
+      "commandId": "server:provider-session-set:9e3683e8-933b-48d6-a7e2-aff8a3cc3443",
+      "causationEventId": null,
+      "correlationId": "server:provider-session-set:9e3683e8-933b-48d6-a7e2-aff8a3cc3443",
+      "metadata": {},
+      "type": "thread.session-set",
+      "payload": {
+        "threadId": "thread-ollama-smoke-1780839994893",
+        "session": {
+          "threadId": "thread-ollama-smoke-1780839994893",
+          "status": "ready",
+          "providerName": "ollamaLocal",
+          "runtimeMode": "full-access",
+          "activeTurnId": null,
+          "lastError": null,
+          "updatedAt": "2026-06-07T13:46:43.616Z"
+        },
+        "hasActiveError": false,
+        "activeError": null,
+        "historicalError": null,
+        "errorPresentationSource": "none"
+      }
+    },
+    "toolProbePath": "/home/gizmo/t3code-vxapp/.vx/live-probes/t3-ollama-codex-selection-smoke/workspace/smoke-tool.txt",
+    "toolProbeContents": "smoke-tool-ok",
+    "frameCount": 542
+  }
+}

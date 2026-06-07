@@ -8,17 +8,21 @@ import { Effect, Equal, Layer, PubSub, Ref, Stream } from "effect";
 
 import { ClaudeProviderLive } from "./ClaudeProvider";
 import { CodexProviderLive } from "./CodexProvider";
+import { OllamaProviderLive } from "./OllamaProvider";
 import type { ClaudeProviderShape } from "../Services/ClaudeProvider";
 import { ClaudeProvider } from "../Services/ClaudeProvider";
 import type { CodexProviderShape } from "../Services/CodexProvider";
 import { CodexProvider } from "../Services/CodexProvider";
+import type { OllamaProviderShape } from "../Services/OllamaProvider";
+import { OllamaProvider } from "../Services/OllamaProvider";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry";
 
 const loadProviders = (
   codexProvider: CodexProviderShape,
   claudeProvider: ClaudeProviderShape,
-): Effect.Effect<readonly [ServerProvider, ServerProvider]> =>
-  Effect.all([codexProvider.getSnapshot, claudeProvider.getSnapshot], {
+  ollamaProvider: OllamaProviderShape,
+): Effect.Effect<readonly [ServerProvider, ServerProvider, ServerProvider]> =>
+  Effect.all([codexProvider.getSnapshot, claudeProvider.getSnapshot, ollamaProvider.getSnapshot], {
     concurrency: "unbounded",
   });
 
@@ -32,18 +36,19 @@ export const ProviderRegistryLive = Layer.effect(
   Effect.gen(function* () {
     const codexProvider = yield* CodexProvider;
     const claudeProvider = yield* ClaudeProvider;
+    const ollamaProvider = yield* OllamaProvider;
     const changesPubSub = yield* Effect.acquireRelease(
       PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
       PubSub.shutdown,
     );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(
-      yield* loadProviders(codexProvider, claudeProvider),
+      yield* loadProviders(codexProvider, claudeProvider, ollamaProvider),
     );
 
     const syncProviders = (options?: { readonly publish?: boolean }) =>
       Effect.gen(function* () {
         const previousProviders = yield* Ref.get(providersRef);
-        const providers = yield* loadProviders(codexProvider, claudeProvider);
+        const providers = yield* loadProviders(codexProvider, claudeProvider, ollamaProvider);
         yield* Ref.set(providersRef, providers);
 
         if (options?.publish !== false && haveProvidersChanged(previousProviders, providers)) {
@@ -57,6 +62,9 @@ export const ProviderRegistryLive = Layer.effect(
       Effect.forkScoped,
     );
     yield* Stream.runForEach(claudeProvider.streamChanges, () => syncProviders()).pipe(
+      Effect.forkScoped,
+    );
+    yield* Stream.runForEach(ollamaProvider.streamChanges, () => syncProviders()).pipe(
       Effect.forkScoped,
     );
 
@@ -74,10 +82,14 @@ export const ProviderRegistryLive = Layer.effect(
             case "claudeAgent":
               yield* claudeProvider.refresh;
               break;
+            case "ollamaLocal":
+              yield* ollamaProvider.refresh;
+              break;
             default:
-              yield* Effect.all([codexProvider.refresh, claudeProvider.refresh], {
-                concurrency: "unbounded",
-              });
+              yield* Effect.all(
+                [codexProvider.refresh, claudeProvider.refresh, ollamaProvider.refresh],
+                { concurrency: "unbounded" },
+              );
               break;
           }
           return yield* syncProviders();
@@ -90,4 +102,8 @@ export const ProviderRegistryLive = Layer.effect(
       },
     } satisfies ProviderRegistryShape;
   }),
-).pipe(Layer.provideMerge(CodexProviderLive), Layer.provideMerge(ClaudeProviderLive));
+).pipe(
+  Layer.provideMerge(CodexProviderLive),
+  Layer.provideMerge(ClaudeProviderLive),
+  Layer.provideMerge(OllamaProviderLive),
+);

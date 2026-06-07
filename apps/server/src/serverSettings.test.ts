@@ -29,6 +29,66 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(decodePatch({ providers: { codex: { binaryPath: "/tmp/codex" } } }), {
         providers: { codex: { binaryPath: "/tmp/codex" } },
       });
+      assert.deepEqual(
+        decodePatch({
+          providers: {
+            codex: {
+              homePath: "/Users/me/.codex-openai",
+              profileName: "t3-openai",
+            },
+            ollamaLocal: {
+              host: "192.168.10.12",
+              port: 11435,
+              apiPath: "/api",
+              responsesApiPath: "/v1",
+              codexBinaryPath: "/opt/codex/bin/codex",
+              codexHomePath: "/Users/me/.codex-ollama",
+              codexProfileName: "t3-ollama-gpu",
+              defaultModel: "qwen3:8b",
+            },
+          },
+        }),
+        {
+          providers: {
+            codex: {
+              homePath: "/Users/me/.codex-openai",
+              profileName: "t3-openai",
+            },
+            ollamaLocal: {
+              host: "192.168.10.12",
+              port: 11435,
+              apiPath: "/api",
+              responsesApiPath: "/v1",
+              codexBinaryPath: "/opt/codex/bin/codex",
+              codexHomePath: "/Users/me/.codex-ollama",
+              codexProfileName: "t3-ollama-gpu",
+              defaultModel: "qwen3:8b",
+            },
+          },
+        },
+      );
+      assert.deepEqual(
+        decodePatch({
+          providers: {
+            ollamaLocal: {
+              host: "ollama.internal",
+              port: 11435,
+              apiPath: "/api",
+              defaultModel: "qwen3:14b",
+            },
+          },
+        }),
+        {
+          providers: {
+            ollamaLocal: {
+              host: "ollama.internal",
+              port: 11435,
+              apiPath: "/api",
+              defaultModel: "qwen3:14b",
+            },
+          },
+        },
+      );
 
       assert.deepEqual(
         decodePatch({
@@ -58,10 +118,20 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           codex: {
             binaryPath: "/usr/local/bin/codex",
             homePath: "/Users/julius/.codex",
+            profileName: "t3-openai",
           },
           claudeAgent: {
             binaryPath: "/usr/local/bin/claude",
             customModels: ["claude-custom"],
+          },
+          ollamaLocal: {
+            host: "ollama.internal",
+            port: 11435,
+            responsesApiPath: "/v1",
+            codexBinaryPath: "/usr/local/bin/codex",
+            codexHomePath: "/Users/julius/.codex-ollama",
+            codexProfileName: "t3-ollama-gpu",
+            defaultModel: "qwen3:14b",
           },
         },
         textGenerationModelSelection: {
@@ -79,6 +149,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
           },
+          ollamaLocal: {
+            apiPath: "gpu-api",
+          },
         },
         textGenerationModelSelection: {
           options: {
@@ -91,12 +164,26 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/codex",
         homePath: "/Users/julius/.codex",
+        profileName: "t3-openai",
         customModels: [],
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
         binaryPath: "/usr/local/bin/claude",
         customModels: ["claude-custom"],
+      });
+      assert.deepEqual(next.providers.ollamaLocal, {
+        enabled: true,
+        protocol: "http",
+        host: "ollama.internal",
+        port: 11435,
+        apiPath: "/gpu-api",
+        responsesApiPath: "/v1",
+        codexBinaryPath: "/usr/local/bin/codex",
+        codexHomePath: "/Users/julius/.codex-ollama",
+        codexProfileName: "t3-ollama-gpu",
+        defaultModel: "qwen3:14b",
+        customModels: [],
       });
       assert.deepEqual(next.textGenerationModelSelection, {
         provider: "codex",
@@ -195,11 +282,44 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/codex",
         homePath: "",
+        profileName: "t3-openai",
         customModels: [],
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/claude",
+        customModels: [],
+      });
+      assert.deepEqual(next.providers.ollamaLocal, DEFAULT_SERVER_SETTINGS.providers.ollamaLocal);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("normalizes ollama connection settings when updates are applied", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({
+        providers: {
+          ollamaLocal: {
+            host: "  ollama.internal  ",
+            port: 70_000,
+            apiPath: "v1",
+            defaultModel: "  qwen3:14b  ",
+          },
+        },
+      });
+
+      assert.deepEqual(next.providers.ollamaLocal, {
+        enabled: true,
+        protocol: "http",
+        host: "ollama.internal",
+        port: 65_535,
+        apiPath: "/v1",
+        responsesApiPath: "/v1",
+        codexBinaryPath: "codex",
+        codexHomePath: "~/.codex-ollama",
+        codexProfileName: "t3-ollama-gpu",
+        defaultModel: "qwen3:14b",
         customModels: [],
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),

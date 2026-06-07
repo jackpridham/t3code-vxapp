@@ -6,6 +6,7 @@ import {
   ClaudeModelOptions,
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  OllamaModelOptions,
 } from "./model";
 import { ModelSelection } from "./orchestration";
 
@@ -133,6 +134,17 @@ export type ThreadEnvMode = typeof ThreadEnvMode.Type;
 export const StartupThreadTarget = Schema.Literals(["executive", "orchestrator"]);
 export type StartupThreadTarget = typeof StartupThreadTarget.Type;
 export const DEFAULT_STARTUP_THREAD_TARGET: StartupThreadTarget = "executive";
+export const OllamaProtocol = Schema.Literals(["http", "https"]);
+export type OllamaProtocol = typeof OllamaProtocol.Type;
+export const DEFAULT_OLLAMA_PROTOCOL: OllamaProtocol = "http";
+export const DEFAULT_OLLAMA_HOST = "192.168.10.12";
+export const DEFAULT_OLLAMA_PORT = 11435;
+export const DEFAULT_OLLAMA_API_PATH = "/api";
+export const DEFAULT_OLLAMA_RESPONSES_API_PATH = "/v1";
+export const DEFAULT_OLLAMA_MODEL = "qwen3:8b";
+export const DEFAULT_CODEX_PROFILE_NAME = "t3-openai";
+export const DEFAULT_OLLAMA_CODEX_HOME_PATH = "~/.codex-ollama";
+export const DEFAULT_OLLAMA_CODEX_PROFILE_NAME = "t3-ollama-gpu";
 
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
@@ -146,10 +158,83 @@ const makeBinaryPathSetting = (fallback: string) =>
     Schema.withDecodingDefault(() => fallback),
   );
 
+const makeOllamaHostSetting = () =>
+  TrimmedString.pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transformOrFail({
+        decode: (value) => Effect.succeed(value || DEFAULT_OLLAMA_HOST),
+        encode: (value) => Effect.succeed(value),
+      }),
+    ),
+    Schema.withDecodingDefault(() => DEFAULT_OLLAMA_HOST),
+  );
+
+const makeOllamaApiPathSetting = () =>
+  TrimmedString.pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transformOrFail({
+        decode: (value) => {
+          const normalized = value ? (value.startsWith("/") ? value : `/${value}`) : "";
+          return Effect.succeed(normalized || DEFAULT_OLLAMA_API_PATH);
+        },
+        encode: (value) => Effect.succeed(value),
+      }),
+    ),
+    Schema.withDecodingDefault(() => DEFAULT_OLLAMA_API_PATH),
+  );
+
+const makeOllamaResponsesApiPathSetting = () =>
+  TrimmedString.pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transformOrFail({
+        decode: (value) => {
+          const normalized = value ? (value.startsWith("/") ? value : `/${value}`) : "";
+          return Effect.succeed(normalized || DEFAULT_OLLAMA_RESPONSES_API_PATH);
+        },
+        encode: (value) => Effect.succeed(value),
+      }),
+    ),
+    Schema.withDecodingDefault(() => DEFAULT_OLLAMA_RESPONSES_API_PATH),
+  );
+
+const makeOllamaModelSetting = () =>
+  TrimmedString.pipe(
+    Schema.decodeTo(
+      Schema.String,
+      SchemaTransformation.transformOrFail({
+        decode: (value) => Effect.succeed(value || DEFAULT_OLLAMA_MODEL),
+        encode: (value) => Effect.succeed(value),
+      }),
+    ),
+    Schema.withDecodingDefault(() => DEFAULT_OLLAMA_MODEL),
+  );
+
+const makeOllamaPortSetting = () =>
+  Schema.Number.pipe(
+    Schema.decodeTo(
+      Schema.Int,
+      SchemaTransformation.transformOrFail({
+        decode: (value) => {
+          if (!Number.isFinite(value)) {
+            return Effect.succeed(DEFAULT_OLLAMA_PORT);
+          }
+          const normalized = Math.trunc(value);
+          return Effect.succeed(Math.max(1, Math.min(65_535, normalized)));
+        },
+        encode: (value) => Effect.succeed(value),
+      }),
+    ),
+    Schema.withDecodingDefault(() => DEFAULT_OLLAMA_PORT),
+  );
+
 export const CodexSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   binaryPath: makeBinaryPathSetting("codex"),
   homePath: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  profileName: TrimmedString.pipe(Schema.withDecodingDefault(() => DEFAULT_CODEX_PROFILE_NAME)),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type CodexSettings = typeof CodexSettings.Type;
@@ -160,6 +245,25 @@ export const ClaudeSettings = Schema.Struct({
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
+
+export const OllamaSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  protocol: OllamaProtocol.pipe(Schema.withDecodingDefault(() => DEFAULT_OLLAMA_PROTOCOL)),
+  host: makeOllamaHostSetting(),
+  port: makeOllamaPortSetting(),
+  apiPath: makeOllamaApiPathSetting(),
+  responsesApiPath: makeOllamaResponsesApiPathSetting(),
+  codexBinaryPath: makeBinaryPathSetting("codex"),
+  codexHomePath: TrimmedString.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_OLLAMA_CODEX_HOME_PATH),
+  ),
+  codexProfileName: TrimmedString.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_OLLAMA_CODEX_PROFILE_NAME),
+  ),
+  defaultModel: makeOllamaModelSetting(),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+});
+export type OllamaSettings = typeof OllamaSettings.Type;
 
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
@@ -183,6 +287,7 @@ export const ServerSettings = Schema.Struct({
   providers: Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    ollamaLocal: OllamaSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
@@ -211,6 +316,10 @@ const ClaudeModelOptionsPatch = Schema.Struct({
   contextWindow: Schema.optionalKey(ClaudeModelOptions.fields.contextWindow),
 });
 
+const OllamaModelOptionsPatch = Schema.Struct({
+  ...OllamaModelOptions.fields,
+});
+
 const ModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
@@ -222,18 +331,38 @@ const ModelSelectionPatch = Schema.Union([
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(ClaudeModelOptionsPatch),
   }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("ollamaLocal")),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(OllamaModelOptionsPatch),
+  }),
 ]);
 
 const CodexSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
   homePath: Schema.optionalKey(Schema.String),
+  profileName: Schema.optionalKey(Schema.String),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
 const ClaudeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
+const OllamaSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  protocol: Schema.optionalKey(OllamaProtocol),
+  host: Schema.optionalKey(Schema.String),
+  port: Schema.optionalKey(Schema.Number),
+  apiPath: Schema.optionalKey(Schema.String),
+  responsesApiPath: Schema.optionalKey(Schema.String),
+  codexBinaryPath: Schema.optionalKey(Schema.String),
+  codexHomePath: Schema.optionalKey(Schema.String),
+  codexProfileName: Schema.optionalKey(Schema.String),
+  defaultModel: Schema.optionalKey(Schema.String),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
@@ -247,6 +376,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
+      ollamaLocal: Schema.optionalKey(OllamaSettingsPatch),
     }),
   ),
 });

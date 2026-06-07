@@ -31,11 +31,13 @@ import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/La
 import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
 import { ProjectionCheckpointRepositoryLive } from "../src/persistence/Layers/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../src/persistence/Layers/ProjectionPendingApprovals.ts";
+import { ProjectionThreadMessageRepositoryLive } from "../src/persistence/Layers/ProjectionThreadMessages.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
 import type { ProjectionPendingApproval } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
+import { ProjectionThreadMessageRepository } from "../src/persistence/Services/ProjectionThreadMessages.ts";
 import { ProviderUnsupportedError } from "../src/provider/Errors.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
@@ -44,6 +46,8 @@ import { ProjectHooksService } from "../src/extensions/vxapp/Services/ProjectHoo
 import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
 import { makeCodexAdapterLive } from "../src/provider/Layers/CodexAdapter.ts";
 import { CodexAdapter } from "../src/provider/Services/CodexAdapter.ts";
+import { makeOllamaAdapterLive } from "../src/provider/Layers/OllamaAdapter.ts";
+import { OllamaAdapter } from "../src/provider/Services/OllamaAdapter.ts";
 import { ProviderService } from "../src/provider/Services/ProviderService.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
@@ -174,6 +178,7 @@ export interface OrchestrationIntegrationHarness {
   readonly checkpointStore: CheckpointStore["Service"];
   readonly checkpointRepository: ProjectionCheckpointRepository["Service"];
   readonly pendingApprovalRepository: ProjectionPendingApprovalRepository["Service"];
+  readonly threadMessageRepository: ProjectionThreadMessageRepository["Service"];
   readonly waitForThread: (
     threadId: string,
     predicate: (thread: OrchestrationThread) => boolean,
@@ -198,28 +203,50 @@ export interface OrchestrationIntegrationHarness {
       timeoutMs?: number,
     ): Effect.Effect<Receipt, never>;
   };
+  readonly restart: Effect.Effect<
+    OrchestrationIntegrationHarness,
+    never,
+    FileSystem.FileSystem | Path.Path | Scope.Scope
+  >;
   readonly dispose: Effect.Effect<void, never>;
 }
 
 interface MakeOrchestrationIntegrationHarnessOptions {
   readonly provider?: ProviderKind;
   readonly realCodex?: boolean;
+  readonly realOllama?: boolean;
+  readonly rootDir?: string;
+  readonly workspaceDir?: string;
+  readonly dbPath?: string;
+  readonly preserveDirectories?: boolean;
 }
 
-export const makeOrchestrationIntegrationHarness = (
+interface HarnessBuildServices {
+  readonly path: typeof Path.Path.Service;
+  readonly fileSystem: typeof FileSystem.FileSystem.Service;
+}
+
+const buildOrchestrationIntegrationHarness = (
   options?: MakeOrchestrationIntegrationHarnessOptions,
-) =>
+  services?: HarnessBuildServices,
+): Effect.Effect<
+  OrchestrationIntegrationHarness,
+  never,
+  FileSystem.FileSystem | Path.Path | Scope.Scope
+> =>
   Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const fileSystem = yield* FileSystem.FileSystem;
+    const path = services?.path ?? (yield* Path.Path);
+    const fileSystem = services?.fileSystem ?? (yield* FileSystem.FileSystem);
 
     const provider = options?.provider ?? "codex";
     const useRealCodex = options?.realCodex === true;
-    const adapterHarness = useRealCodex
-      ? null
-      : yield* makeTestProviderAdapterHarness({
-          provider,
-        });
+    const useRealOllama = options?.realOllama === true;
+    const adapterHarness =
+      useRealCodex || useRealOllama
+        ? null
+        : yield* makeTestProviderAdapterHarness({
+            provider,
+          });
     const fakeRegistry = adapterHarness
       ? Layer.succeed(ProviderAdapterRegistry, {
           getByProvider: (resolvedProvider) =>
@@ -229,16 +256,42 @@ export const makeOrchestrationIntegrationHarness = (
           listProviders: () => Effect.succeed([adapterHarness.provider]),
         } as typeof ProviderAdapterRegistry.Service)
       : null;
-    const rootDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-orchestration-integration-",
-    });
-    const workspaceDir = path.join(rootDir, "workspace");
-    const { stateDir, dbPath } = yield* deriveServerPaths(rootDir, undefined).pipe(
+    const shouldPreserveDirectories = options?.preserveDirectories === true;
+    const rootDir =
+      options?.rootDir ??
+      (yield* fileSystem
+        .makeTempDirectoryScoped({
+          prefix: "t3-orchestration-integration-",
+        })
+        .pipe(Effect.orDie));
+    const workspaceDir = options?.workspaceDir ?? path.join(rootDir, "workspace");
+    const derivedServerPaths = yield* deriveServerPaths(rootDir, undefined).pipe(
       Effect.provideService(Path.Path, path),
     );
-    yield* fileSystem.makeDirectory(workspaceDir, { recursive: true });
-    yield* fileSystem.makeDirectory(stateDir, { recursive: true });
-    yield* initializeGitWorkspace(workspaceDir);
+    const stateDir = path.dirname(options?.dbPath ?? derivedServerPaths.dbPath);
+    const dbPath = options?.dbPath ?? derivedServerPaths.dbPath;
+
+    if (!shouldPreserveDirectories) {
+      yield* fileSystem.makeDirectory(workspaceDir, { recursive: true }).pipe(Effect.orDie);
+      yield* fileSystem.makeDirectory(stateDir, { recursive: true }).pipe(Effect.orDie);
+      yield* initializeGitWorkspace(workspaceDir).pipe(Effect.orDie);
+    }
+
+    const liveOllamaBaseUrl = process.env.OLLAMA_BASE_URL ?? "http://192.168.10.12:11435/api";
+    const liveOllamaUrl = new URL(liveOllamaBaseUrl);
+    const liveOllamaSettings = {
+      providers: {
+        ollamaLocal: {
+          protocol: liveOllamaUrl.protocol === "https:" ? ("https" as const) : ("http" as const),
+          host: liveOllamaUrl.hostname,
+          port: Number(liveOllamaUrl.port || (liveOllamaUrl.protocol === "https:" ? "443" : "80")),
+          apiPath: liveOllamaUrl.pathname || "/api",
+          responsesApiPath: process.env.OLLAMA_RESPONSES_API_PATH ?? "/v1",
+          codexHomePath: path.join(rootDir, "ollama-codex-home"),
+          defaultModel: process.env.OLLAMA_MODEL ?? "qwen3:8b",
+        },
+      },
+    } as const;
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath);
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
@@ -258,21 +311,37 @@ export const makeOrchestrationIntegrationHarness = (
       }),
     ).pipe(
       Layer.provide(makeCodexAdapterLive()),
+      Layer.provideMerge(ServerSettingsService.layerTest(useRealOllama ? liveOllamaSettings : {})),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
-    const providerLayer = useRealCodex
-      ? makeProviderServiceLive().pipe(
-          Layer.provide(providerSessionDirectoryLayer),
-          Layer.provide(realCodexRegistry),
-          Layer.provide(AnalyticsService.layerTest),
-        )
-      : makeProviderServiceLive().pipe(
-          Layer.provide(providerSessionDirectoryLayer),
-          Layer.provide(fakeRegistry!),
-          Layer.provide(AnalyticsService.layerTest),
-        );
+    const realOllamaRegistry = Layer.effect(
+      ProviderAdapterRegistry,
+      Effect.gen(function* () {
+        const ollamaAdapter = yield* OllamaAdapter;
+        return {
+          getByProvider: (resolvedProvider) =>
+            resolvedProvider === "ollamaLocal"
+              ? Effect.succeed(ollamaAdapter)
+              : Effect.fail(new ProviderUnsupportedError({ provider: resolvedProvider })),
+          listProviders: () => Effect.succeed(["ollamaLocal"] as const),
+        } as typeof ProviderAdapterRegistry.Service;
+      }),
+    ).pipe(
+      Layer.provide(makeOllamaAdapterLive()),
+      Layer.provideMerge(ServerSettingsService.layerTest(liveOllamaSettings)),
+      Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(providerSessionDirectoryLayer),
+    );
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(providerSessionDirectoryLayer),
+      Layer.provide(
+        useRealCodex ? realCodexRegistry : useRealOllama ? realOllamaRegistry : fakeRegistry!,
+      ),
+      Layer.provide(AnalyticsService.layerTest),
+    );
 
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -286,11 +355,14 @@ export const makeOrchestrationIntegrationHarness = (
       OrchestrationProjectionSnapshotQueryLive,
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
+      ProjectionThreadMessageRepositoryLive,
       checkpointStoreLayer,
       providerLayer,
       RuntimeReceiptBusLive,
     );
-    const serverSettingsLayer = ServerSettingsService.layerTest();
+    const serverSettingsLayer = ServerSettingsService.layerTest(
+      useRealOllama ? liveOllamaSettings : {},
+    );
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(serverSettingsLayer),
@@ -358,6 +430,10 @@ export const makeOrchestrationIntegrationHarness = (
     const pendingApprovalRepository = yield* tryRuntimePromise(
       "load ProjectionPendingApprovalRepository service",
       () => runtime.runPromise(Effect.service(ProjectionPendingApprovalRepository)),
+    ).pipe(Effect.orDie);
+    const threadMessageRepository = yield* tryRuntimePromise(
+      "load ProjectionThreadMessageRepository service",
+      () => runtime.runPromise(Effect.service(ProjectionThreadMessageRepository)),
     ).pipe(Effect.orDie);
     const runtimeReceiptBus = yield* tryRuntimePromise("load RuntimeReceiptBus service", () =>
       runtime.runPromise(Effect.service(RuntimeReceiptBus)),
@@ -450,7 +526,7 @@ export const makeOrchestrationIntegrationHarness = (
     }
 
     let disposed = false;
-    const dispose = Effect.gen(function* () {
+    const dispose: OrchestrationIntegrationHarness["dispose"] = Effect.gen(function* () {
       if (disposed) {
         return;
       }
@@ -474,6 +550,22 @@ export const makeOrchestrationIntegrationHarness = (
       yield* shutdown;
     });
 
+    const restart: OrchestrationIntegrationHarness["restart"] = Effect.gen(function* () {
+      yield* dispose;
+      return yield* buildOrchestrationIntegrationHarness(
+        {
+          provider,
+          realCodex: useRealCodex,
+          realOllama: useRealOllama,
+          rootDir,
+          workspaceDir,
+          dbPath,
+          preserveDirectories: true,
+        },
+        { path, fileSystem },
+      );
+    });
+
     return {
       rootDir,
       workspaceDir,
@@ -485,10 +577,20 @@ export const makeOrchestrationIntegrationHarness = (
       checkpointStore,
       checkpointRepository,
       pendingApprovalRepository,
+      threadMessageRepository,
       waitForThread,
       waitForDomainEvent,
       waitForPendingApproval,
       waitForReceipt,
+      restart,
       dispose,
     } satisfies OrchestrationIntegrationHarness;
   });
+
+export const makeOrchestrationIntegrationHarness = (
+  options?: MakeOrchestrationIntegrationHarnessOptions,
+): Effect.Effect<
+  OrchestrationIntegrationHarness,
+  never,
+  FileSystem.FileSystem | Path.Path | Scope.Scope
+> => buildOrchestrationIntegrationHarness(options);

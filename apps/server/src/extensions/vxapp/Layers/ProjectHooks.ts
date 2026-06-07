@@ -5,6 +5,7 @@ import {
   type OrchestrationReadModel,
   type ProjectHook,
   type ProjectHookTurnState,
+  type ProviderKind,
   type ProviderRuntimeEvent,
   type ThreadTurnStartCommand,
 } from "@t3tools/contracts";
@@ -74,7 +75,7 @@ function makeHookEnv(input: {
   hook: ProjectHook;
   project: OrchestrationReadModel["projects"][number];
   thread: OrchestrationReadModel["threads"][number];
-  provider: "codex" | "claudeAgent";
+  provider: ProviderKind;
   messageId?: string;
   promptText?: string;
   turnId?: string;
@@ -145,7 +146,7 @@ function buildPromptHookContextJson(input: {
   hook: BeforePromptProjectHook;
   project: OrchestrationReadModel["projects"][number];
   thread: OrchestrationReadModel["threads"][number];
-  provider: "codex" | "claudeAgent";
+  provider: ProviderKind;
   command: ThreadTurnStartCommand;
   promptText: string;
 }): string {

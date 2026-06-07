@@ -1,4 +1,3 @@
-import * as OS from "node:os";
 import type {
   ModelCapabilities,
   CodexSettings,
@@ -34,6 +33,8 @@ import {
   type CommandResult,
 } from "../providerSnapshot";
 import { makeManagedServerProvider } from "../makeManagedServerProvider";
+import { readTopLevelTomlModelProvider } from "../codexConfig";
+import { resolveManagedCodexHomePath } from "../codexProfileConfig";
 import {
   formatCodexCliUpgradeMessage,
   isCodexCliVersionSupported,
@@ -254,56 +255,39 @@ export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvi
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const settingsService = yield* ServerSettingsService;
-  const codexHome = yield* settingsService.getSettings.pipe(
-    Effect.map(
-      (settings) =>
-        settings.providers.codex.homePath ||
-        process.env.CODEX_HOME ||
-        path.join(OS.homedir(), ".codex"),
-    ),
+  const codexSettings = yield* settingsService.getSettings.pipe(
+    Effect.map((settings) => settings.providers.codex),
   );
-  const configPath = path.join(expandHomePath(codexHome), "config.toml");
+  const codexHomePath = resolveManagedCodexHomePath(codexSettings.homePath);
+  const configPath = path.join(codexHomePath, "config.toml");
+  const profileConfigPath = codexSettings.profileName
+    ? path.join(codexHomePath, `${codexSettings.profileName}.config.toml`)
+    : undefined;
 
-  const content = yield* fileSystem
+  const baseContent = yield* fileSystem
     .readFileString(configPath)
     .pipe(Effect.orElseSucceed(() => undefined));
-  if (content === undefined) {
-    return undefined;
+  const baseProvider = baseContent ? readTopLevelTomlModelProvider(baseContent) : undefined;
+
+  if (!profileConfigPath) {
+    return baseProvider;
   }
 
-  let inTopLevel = true;
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    if (trimmed.startsWith("[")) {
-      inTopLevel = false;
-      continue;
-    }
-    if (!inTopLevel) continue;
-
-    const match = trimmed.match(/^model_provider\s*=\s*["']([^"']+)["']/);
-    if (match) return match[1];
+  const profileContent = yield* fileSystem
+    .readFileString(profileConfigPath)
+    .pipe(Effect.orElseSucceed(() => undefined));
+  if (!profileContent) {
+    return baseProvider;
   }
-  return undefined;
+
+  const profileProvider = readTopLevelTomlModelProvider(profileContent);
+  return profileProvider ?? baseProvider;
 });
 
 export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
   Effect.map((provider) => provider !== undefined && !OPENAI_AUTH_PROVIDERS.has(provider)),
   Effect.orElseSucceed(() => false),
 );
-
-const probeCodexCapabilities = (input: {
-  readonly binaryPath: string;
-  readonly homePath?: string;
-}) =>
-  Effect.tryPromise((signal) => probeCodexAccount({ ...input, signal })).pipe(
-    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
-    Effect.result,
-    Effect.map((result) => {
-      if (Result.isFailure(result)) return undefined;
-      return Option.isSome(result.success) ? result.success.value : undefined;
-    }),
-  );
 
 const runCodexCommand = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
@@ -325,6 +309,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   resolveAccount?: (input: {
     readonly binaryPath: string;
     readonly homePath?: string;
+    readonly profileName?: string;
   }) => Effect.Effect<CodexAccountSnapshot | undefined>,
 ): Effect.fn.Return<
   ServerProvider,
@@ -381,28 +366,31 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     });
   }
 
-  if (Option.isNone(versionProbe.success)) {
+  const versionResult = versionProbe.success;
+  if (Option.isNone(versionResult)) {
     return buildServerProvider({
       provider: PROVIDER,
       enabled: codexSettings.enabled,
       checkedAt,
       models,
       probe: {
-        installed: true,
+        installed: false,
         version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: "Codex CLI is installed but failed to run. Timed out while running command.",
+        message: "Codex CLI health check timed out.",
       },
     });
   }
 
-  const version = versionProbe.success.value;
-  const parsedVersion =
-    parseCodexCliVersion(`${version.stdout}\n${version.stderr}`) ??
-    parseGenericCliVersion(`${version.stdout}\n${version.stderr}`);
-  if (version.code !== 0) {
-    const detail = detailFromResult(version);
+  const versionProbeResult = versionResult.value;
+  const version = parseGenericCliVersion(versionProbeResult.stdout);
+  const supportedVersion = parseCodexCliVersion(versionProbeResult.stdout);
+  if (
+    version === null ||
+    supportedVersion === null ||
+    !isCodexCliVersionSupported(supportedVersion)
+  ) {
     return buildServerProvider({
       provider: PROVIDER,
       enabled: codexSettings.enabled,
@@ -410,28 +398,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       models,
       probe: {
         installed: true,
-        version: parsedVersion,
+        version,
         status: "error",
         auth: { status: "unknown" },
-        message: detail
-          ? `Codex CLI is installed but failed to run. ${detail}`
-          : "Codex CLI is installed but failed to run.",
-      },
-    });
-  }
-
-  if (parsedVersion && !isCodexCliVersionSupported(parsedVersion)) {
-    return buildServerProvider({
-      provider: PROVIDER,
-      enabled: codexSettings.enabled,
-      checkedAt,
-      models,
-      probe: {
-        installed: true,
-        version: parsedVersion,
-        status: "error",
-        auth: { status: "unknown" },
-        message: formatCodexCliUpgradeMessage(parsedVersion),
+        message: formatCodexCliUpgradeMessage(version),
       },
     });
   }
@@ -444,9 +414,13 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       models,
       probe: {
         installed: true,
-        version: parsedVersion,
+        version,
         status: "ready",
-        auth: { status: "unknown" },
+        auth: {
+          status: "unknown",
+          type: "custom-provider",
+          label: "Custom model provider",
+        },
         message: "Using a custom Codex model provider; OpenAI login check skipped.",
       },
     });
@@ -459,10 +433,13 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const account = resolveAccount
     ? yield* resolveAccount({
         binaryPath: codexSettings.binaryPath,
-        homePath: codexSettings.homePath,
+        ...(codexSettings.homePath ? { homePath: codexSettings.homePath } : {}),
+        ...(codexSettings.profileName ? { profileName: codexSettings.profileName } : {}),
       })
     : undefined;
-  const resolvedModels = adjustCodexModelsForAccount(models, account);
+  const authType = codexAuthSubType(account);
+  const authLabel = codexAuthSubLabel(account);
+  const adjustedModels = adjustCodexModelsForAccount(models, account);
 
   if (Result.isFailure(authProbe)) {
     const error = authProbe.failure;
@@ -470,10 +447,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       provider: PROVIDER,
       enabled: codexSettings.enabled,
       checkedAt,
-      models: resolvedModels,
+      models: adjustedModels,
       probe: {
         installed: true,
-        version: parsedVersion,
+        version,
         status: "warning",
         auth: { status: "unknown" },
         message:
@@ -489,10 +466,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       provider: PROVIDER,
       enabled: codexSettings.enabled,
       checkedAt,
-      models: resolvedModels,
+      models: adjustedModels,
       probe: {
         installed: true,
-        version: parsedVersion,
+        version,
         status: "warning",
         auth: { status: "unknown" },
         message: "Could not verify Codex authentication status. Timed out while running command.",
@@ -501,16 +478,15 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const parsed = parseAuthStatusFromOutput(authProbe.success.value);
-  const authType = codexAuthSubType(account);
-  const authLabel = codexAuthSubLabel(account);
+
   return buildServerProvider({
     provider: PROVIDER,
     enabled: codexSettings.enabled,
     checkedAt,
-    models: resolvedModels,
+    models: adjustedModels,
     probe: {
       installed: true,
-      version: parsedVersion,
+      version,
       status: parsed.status,
       auth: {
         ...parsed.auth,
@@ -532,17 +508,34 @@ export const CodexProviderLive = Layer.effect(
     const accountProbeCache = yield* Cache.make({
       capacity: 4,
       timeToLive: Duration.minutes(5),
-      lookup: (key: string) => {
-        const [binaryPath, homePath] = JSON.parse(key) as [string, string | undefined];
-        return probeCodexCapabilities({
-          binaryPath,
-          ...(homePath ? { homePath } : {}),
-        });
-      },
+      lookup: (key: string) =>
+        Effect.tryPromise((signal) => {
+          const [binaryPath, homePath, profileName] = JSON.parse(key) as [
+            string,
+            string | undefined,
+            string | undefined,
+          ];
+          return probeCodexAccount({
+            binaryPath,
+            ...(homePath ? { homePath } : {}),
+            ...(profileName ? { profileName } : {}),
+            signal,
+          });
+        }).pipe(
+          Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
+          Effect.result,
+          Effect.map((result) => {
+            if (Result.isFailure(result)) return undefined;
+            return Option.isSome(result.success) ? result.success.value : undefined;
+          }),
+        ),
     });
 
     const checkProvider = checkCodexProviderStatus((input) =>
-      Cache.get(accountProbeCache, JSON.stringify([input.binaryPath, input.homePath])),
+      Cache.get(
+        accountProbeCache,
+        JSON.stringify([input.binaryPath, input.homePath, input.profileName]),
+      ),
     ).pipe(
       Effect.provideService(ServerSettingsService, serverSettings),
       Effect.provideService(FileSystem.FileSystem, fileSystem),

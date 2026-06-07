@@ -1,5 +1,5 @@
 import { Option, Schema, SchemaIssue, SchemaTransformation, Struct } from "effect";
-import { ClaudeModelOptions, CodexModelOptions } from "./model";
+import { ClaudeModelOptions, CodexModelOptions, OllamaModelOptions } from "./model";
 import { ProjectHooks } from "./projectHooks";
 import {
   ApprovalRequestId,
@@ -49,7 +49,7 @@ export const ORCHESTRATION_WS_CHANNELS = {
   domainEvent: "orchestration.domainEvent",
 } as const;
 
-export const ProviderKind = Schema.Literals(["codex", "claudeAgent"]);
+export const ProviderKind = Schema.Literals(["codex", "claudeAgent", "ollamaLocal"]);
 export type ProviderKind = typeof ProviderKind.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
@@ -81,7 +81,18 @@ export const ClaudeModelSelection = Schema.Struct({
 });
 export type ClaudeModelSelection = typeof ClaudeModelSelection.Type;
 
-export const ModelSelection = Schema.Union([CodexModelSelection, ClaudeModelSelection]);
+export const OllamaModelSelection = Schema.Struct({
+  provider: Schema.Literal("ollamaLocal"),
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(OllamaModelOptions),
+});
+export type OllamaModelSelection = typeof OllamaModelSelection.Type;
+
+export const ModelSelection = Schema.Union([
+  CodexModelSelection,
+  ClaudeModelSelection,
+  OllamaModelSelection,
+]);
 export type ModelSelection = typeof ModelSelection.Type;
 
 export const RuntimeMode = Schema.Literals(["approval-required", "full-access"]);

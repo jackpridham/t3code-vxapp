@@ -124,7 +124,10 @@ function makeMutableServerSettingsService(
  * Create a temporary CODEX_HOME scoped to the current Effect test.
  * Cleanup is registered in the test scope rather than via Vitest hooks.
  */
-function withTempCodexHome(configContent?: string) {
+function withTempCodexHome(
+  configContent?: string,
+  profileConfig?: { name: string; content: string },
+) {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -148,6 +151,12 @@ function withTempCodexHome(configContent?: string) {
 
     if (configContent !== undefined) {
       yield* fileSystem.writeFileString(path.join(tmpDir, "config.toml"), configContent);
+    }
+    if (profileConfig !== undefined) {
+      yield* fileSystem.writeFileString(
+        path.join(tmpDir, `${profileConfig.name}.config.toml`),
+        profileConfig.content,
+      );
     }
 
     return { tmpDir } as const;
@@ -777,6 +786,46 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(yield* readCodexConfigModelProvider(), "mistral");
         }),
       );
+
+      it.effect("prefers the selected profile config over config.toml", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome('model_provider = "openai"\n', {
+            name: "t3-openai",
+            content: 'model_provider = "azure"\n',
+          });
+          assert.strictEqual(yield* readCodexConfigModelProvider(), "azure");
+        }).pipe(
+          Effect.provide(
+            ServerSettingsService.layerTest({
+              providers: {
+                codex: {
+                  profileName: "t3-openai",
+                },
+              },
+            }),
+          ),
+        ),
+      );
+
+      it.effect("falls back to config.toml when the selected profile has no model_provider", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome('model_provider = "portkey"\n', {
+            name: "t3-openai",
+            content: 'model = "gpt-5.4"\n',
+          });
+          assert.strictEqual(yield* readCodexConfigModelProvider(), "portkey");
+        }).pipe(
+          Effect.provide(
+            ServerSettingsService.layerTest({
+              providers: {
+                codex: {
+                  profileName: "t3-openai",
+                },
+              },
+            }),
+          ),
+        ),
+      );
     });
 
     // ── hasCustomModelProvider tests ───────────────────────────────────
@@ -831,6 +880,43 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
         }),
       );
     });
+
+    it.effect("passes the configured profileName into the codex account resolver", () =>
+      Effect.gen(function* () {
+        yield* withTempCodexHome();
+        let capturedProfileName: string | undefined;
+
+        const status = yield* checkCodexProviderStatus((input) => {
+          capturedProfileName = input.profileName;
+          return Effect.succeed({
+            type: "chatgpt" as const,
+            planType: "pro" as const,
+            sparkEnabled: true,
+          });
+        });
+
+        assert.strictEqual(status.provider, "codex");
+        assert.strictEqual(capturedProfileName, "t3-openai");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ServerSettingsService.layerTest({
+              providers: {
+                codex: {
+                  profileName: "t3-openai",
+                },
+              },
+            }),
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
+              if (joined === "login status") return { stdout: "Logged in\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      ),
+    );
 
     // ── checkClaudeProviderStatus tests ──────────────────────────
 

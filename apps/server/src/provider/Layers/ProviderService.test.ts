@@ -68,6 +68,7 @@ type LegacyProviderRuntimeEvent = {
 function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
   const sessions = new Map<ThreadId, ProviderSession>();
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
+  const sessionRecovery = "resume-cursor";
 
   const startSession = vi.fn((input: ProviderSessionStartInput) =>
     Effect.sync(() => {
@@ -77,10 +78,12 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
         status: "ready",
         runtimeMode: input.runtimeMode,
         threadId: input.threadId,
-        resumeCursor: input.resumeCursor ?? { opaque: `resume-${String(input.threadId)}` },
         cwd: input.cwd ?? process.cwd(),
         createdAt: now,
         updatedAt: now,
+        ...(sessionRecovery === "resume-cursor"
+          ? { resumeCursor: input.resumeCursor ?? { opaque: `resume-${String(input.threadId)}` } }
+          : {}),
       };
       sessions.set(session.threadId, session);
       return session;
@@ -179,6 +182,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      sessionRecovery,
     },
     startSession,
     sendTurn,
@@ -233,14 +237,17 @@ const sleep = (ms: number) =>
 function makeProviderServiceLayer() {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter("claudeAgent");
+  const ollama = makeFakeCodexAdapter("ollamaLocal");
   const registry: typeof ProviderAdapterRegistry.Service = {
     getByProvider: (provider) =>
       provider === "codex"
         ? Effect.succeed(codex.adapter)
         : provider === "claudeAgent"
           ? Effect.succeed(claude.adapter)
-          : Effect.fail(new ProviderUnsupportedError({ provider })),
-    listProviders: () => Effect.succeed(["codex", "claudeAgent"]),
+          : provider === "ollamaLocal"
+            ? Effect.succeed(ollama.adapter)
+            : Effect.fail(new ProviderUnsupportedError({ provider })),
+    listProviders: () => Effect.succeed(["codex", "claudeAgent", "ollamaLocal"]),
   };
 
   const providerAdapterLayer = Layer.succeed(ProviderAdapterRegistry, registry);
@@ -267,6 +274,7 @@ function makeProviderServiceLayer() {
   return {
     codex,
     claude,
+    ollama,
     layer,
   };
 }
@@ -736,6 +744,96 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect(
+    "recovers stale ollamaLocal sessions for sendTurn with its persisted resumeCursor",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* ProviderService;
+
+        const initial = yield* provider.startSession(asThreadId("thread-ollama-send-turn"), {
+          provider: "ollamaLocal",
+          threadId: asThreadId("thread-ollama-send-turn"),
+          cwd: "/tmp/project-ollama-send-turn",
+          modelSelection: {
+            provider: "ollamaLocal",
+            model: "qwen3:14b",
+          },
+          runtimeMode: "full-access",
+        });
+        assert.deepEqual(initial.resumeCursor, {
+          opaque: "resume-thread-ollama-send-turn",
+        });
+
+        yield* routing.ollama.stopAll();
+        routing.ollama.startSession.mockClear();
+        routing.ollama.sendTurn.mockClear();
+
+        yield* provider.sendTurn({
+          threadId: initial.threadId,
+          input: "resume with ollama",
+          attachments: [],
+        });
+
+        assert.equal(routing.ollama.startSession.mock.calls.length, 1);
+        const resumedStartInput = routing.ollama.startSession.mock.calls[0]?.[0];
+        assert.equal(typeof resumedStartInput === "object" && resumedStartInput !== null, true);
+        if (resumedStartInput && typeof resumedStartInput === "object") {
+          const startPayload = resumedStartInput as {
+            provider?: string;
+            cwd?: string;
+            modelSelection?: unknown;
+            resumeCursor?: unknown;
+            threadId?: string;
+          };
+          assert.equal(startPayload.provider, "ollamaLocal");
+          assert.equal(startPayload.cwd, "/tmp/project-ollama-send-turn");
+          assert.deepEqual(startPayload.modelSelection, {
+            provider: "ollamaLocal",
+            model: "qwen3:14b",
+          });
+          assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
+          assert.equal(startPayload.threadId, initial.threadId);
+        }
+        assert.equal(routing.ollama.sendTurn.mock.calls.length, 1);
+      }),
+  );
+
+  it.effect("forwards conversationHistory to the routed adapter sendTurn call", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+
+      const session = yield* provider.startSession(asThreadId("thread-conversation-history"), {
+        provider: "codex",
+        threadId: asThreadId("thread-conversation-history"),
+        runtimeMode: "full-access",
+      });
+      routing.codex.sendTurn.mockClear();
+
+      yield* provider.sendTurn({
+        threadId: session.threadId,
+        input: "continue",
+        attachments: [],
+        conversationHistory: [
+          { role: "user", content: "first prompt" },
+          { role: "assistant", content: "first reply" },
+        ],
+      });
+
+      assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+      const sendTurnInput = routing.codex.sendTurn.mock.calls[0]?.[0];
+      assert.equal(typeof sendTurnInput === "object" && sendTurnInput !== null, true);
+      if (sendTurnInput && typeof sendTurnInput === "object") {
+        const payload = sendTurnInput as {
+          conversationHistory?: ReadonlyArray<{ role: string; content: string }>;
+        };
+        assert.deepEqual(payload.conversationHistory, [
+          { role: "user", content: "first prompt" },
+          { role: "assistant", content: "first reply" },
+        ]);
+      }
+    }),
+  );
+
   it.effect("lists no sessions after adapter runtime clears", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;
@@ -753,6 +851,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       yield* routing.codex.stopAll();
       yield* routing.claude.stopAll();
+      yield* routing.ollama.stopAll();
 
       const remaining = yield* provider.listSessions();
       assert.equal(remaining.length, 0);

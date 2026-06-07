@@ -43,7 +43,11 @@ const provider: ProviderServiceShape = {
   respondToUserInput: () => Effect.die("unused"),
   stopSession: () => Effect.die("unused"),
   listSessions: () => Effect.succeed([] satisfies ProviderSession[]),
-  getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+  getCapabilities: () =>
+    Effect.succeed({
+      sessionModelSwitch: "in-session",
+      sessionRecovery: "resume-cursor",
+    }),
   rollbackConversation: () => Effect.die("unused"),
   streamEvents: Stream.empty,
 };

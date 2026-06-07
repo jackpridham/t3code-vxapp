@@ -6,6 +6,7 @@ import {
   type CodexModelOptions,
   type ModelCapabilities,
   type ModelSelection,
+  type OllamaModelOptions,
   type ProviderKind,
 } from "@t3tools/contracts";
 
@@ -52,9 +53,14 @@ export function createModelSelection(
   options?: ClaudeModelOptions | null,
 ): ModelSelection;
 export function createModelSelection(
+  provider: "ollamaLocal",
+  model: string,
+  options?: OllamaModelOptions | null,
+): ModelSelection;
+export function createModelSelection(
   provider: ProviderKind,
   model: string,
-  options?: CodexModelOptions | ClaudeModelOptions | null,
+  options?: CodexModelOptions | ClaudeModelOptions | OllamaModelOptions | null,
 ): ModelSelection {
   return {
     provider,
@@ -164,6 +170,13 @@ export function normalizeClaudeModelOptionsWithCapabilities(
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeOllamaModelOptionsWithCapabilities(
+  _caps: ModelCapabilities,
+  _modelOptions: OllamaModelOptions | null | undefined,
+): OllamaModelOptions | undefined {
+  return undefined;
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {

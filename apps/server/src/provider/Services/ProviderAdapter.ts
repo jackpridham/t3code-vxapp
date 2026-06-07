@@ -24,12 +24,17 @@ import type { Effect } from "effect";
 import type { Stream } from "effect";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "restart-session" | "unsupported";
+export type ProviderSessionRecoveryMode = "resume-cursor" | "history-replay";
 
 export interface ProviderAdapterCapabilities {
   /**
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  /**
+   * Declares how a provider session is recovered after the in-memory adapter state is gone.
+   */
+  readonly sessionRecovery: ProviderSessionRecoveryMode;
 }
 
 export interface ProviderThreadTurnSnapshot {

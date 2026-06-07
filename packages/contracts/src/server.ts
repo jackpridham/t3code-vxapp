@@ -69,11 +69,26 @@ export const ServerProviderAuth = Schema.Struct({
 });
 export type ServerProviderAuth = typeof ServerProviderAuth.Type;
 
+export const ServerProviderModelAgentSupportStatus = Schema.Literals([
+  "verified",
+  "unverified",
+  "unsupported",
+]);
+export type ServerProviderModelAgentSupportStatus =
+  typeof ServerProviderModelAgentSupportStatus.Type;
+
+export const ServerProviderModelAgentSupport = Schema.Struct({
+  status: ServerProviderModelAgentSupportStatus,
+  message: TrimmedNonEmptyString,
+});
+export type ServerProviderModelAgentSupport = typeof ServerProviderModelAgentSupport.Type;
+
 export const ServerProviderModel = Schema.Struct({
   slug: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   isCustom: Schema.Boolean,
   capabilities: Schema.NullOr(ModelCapabilities),
+  agentSupport: Schema.optional(ServerProviderModelAgentSupport),
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 

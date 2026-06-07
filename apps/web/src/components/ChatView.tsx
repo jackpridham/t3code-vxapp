@@ -102,7 +102,6 @@ import { LRUCache } from "../lib/lruCache";
 
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import { useIsMobile } from "../hooks/useMediaQuery";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
@@ -143,7 +142,7 @@ import {
   resolveSelectableProvider,
 } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
-import { resolveAppModelSelection } from "../modelSelection";
+import { getCustomModelOptionsByProvider, resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -462,7 +461,6 @@ export default function ChatView({
 }: ChatViewProps) {
   useAgentsVxappSidebarAuthorityBootstrap();
   const serverThread = useThreadById(threadId);
-  const isMobile = useIsMobile();
   const isDrawerLayout = layoutMode === "drawer";
   const allowAuxiliaryPanels = !isDrawerLayout;
   const projects = useStore((store) => store.projects);
@@ -1387,12 +1385,15 @@ export default function ChatView({
   const branchesQuery = useQuery(gitBranchesQueryOptions(gitCwd));
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const modelOptionsByProvider = useMemo(
-    () => ({
-      codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
-      claudeAgent:
-        providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
-    }),
-    [providerStatuses],
+    () =>
+      getCustomModelOptionsByProvider(
+        settings,
+        providerStatuses,
+        selectedProvider,
+        selectedModel,
+        "agentTurn",
+      ),
+    [providerStatuses, selectedModel, selectedProvider, settings],
   );
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByProvider[selectedProvider];
@@ -3472,6 +3473,7 @@ export default function ChatView({
         settings,
         providerStatuses,
         model,
+        "agentTurn",
       );
       const nextModelSelection: ModelSelection = {
         provider: resolvedProvider,
@@ -3805,7 +3807,7 @@ export default function ChatView({
       }
     }
 
-    if (key === "Enter" && !event.shiftKey && !isMobile) {
+    if (key === "Enter" && !event.shiftKey) {
       void onSend();
       return true;
     }
