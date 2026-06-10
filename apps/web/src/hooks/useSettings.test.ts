@@ -133,7 +133,6 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       ideModeEnabled: false,
       rememberChangesDrawerWidth: true,
       sidebarOrchestrationDataMode: "live",
-      sidebarVariant: "project",
       sidebarWorkerActivityFilter: "all",
       sidebarWorkerLineageFilter: "hide_invalid",
       sidebarWorkerVisibilityScope: "current_orchestrator",

@@ -233,8 +233,6 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.sidebarVariant = legacySettings.sidebarOrchestrationModeEnabled
       ? "orchestration"
       : "project";
-  } else if (legacySettings.sidebarOrchestrationModeEnabled === undefined) {
-    patch.sidebarVariant = DEFAULT_SIDEBAR_VARIANT;
   }
 
   if (Schema.is(SidebarOrchestrationDataMode)(legacySettings.sidebarOrchestrationDataMode)) {
