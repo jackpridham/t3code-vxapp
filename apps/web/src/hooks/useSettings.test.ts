@@ -12,8 +12,28 @@ import { describe, expect, it } from "vitest";
 import { buildLegacyClientSettingsMigrationPatch } from "./useSettings";
 
 describe("buildLegacyClientSettingsMigrationPatch", () => {
-  it("defaults sidebar orchestration mode to true", () => {
-    expect(DEFAULT_CLIENT_SETTINGS.sidebarOrchestrationModeEnabled).toBe(true);
+  it("defaults the sidebar variant to the standard project sidebar", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarVariant).toBe("project");
+  });
+
+  it("migrates legacy sidebarOrchestrationModeEnabled=true to the orchestration variant", () => {
+    expect(
+      buildLegacyClientSettingsMigrationPatch({
+        sidebarOrchestrationModeEnabled: true,
+      }),
+    ).toMatchObject({
+      sidebarVariant: "orchestration",
+    });
+  });
+
+  it("migrates legacy sidebarOrchestrationModeEnabled=false to the project variant", () => {
+    expect(
+      buildLegacyClientSettingsMigrationPatch({
+        sidebarOrchestrationModeEnabled: false,
+      }),
+    ).toMatchObject({
+      sidebarVariant: "project",
+    });
   });
 
   it("defaults sidebar orchestration data mode to live", () => {
@@ -94,7 +114,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       rememberChangesDrawerWidth: true,
       sidebarGroupWorktreesWithParentProject: false,
       sidebarOrchestrationDataMode: "demo",
-      sidebarOrchestrationModeEnabled: true,
+      sidebarVariant: "orchestration",
       sidebarProjectSortOrder: "manual",
       sidebarWorkerActivityFilter: "active",
       sidebarWorkerLineageFilter: "only_invalid",
@@ -113,6 +133,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       ideModeEnabled: false,
       rememberChangesDrawerWidth: true,
       sidebarOrchestrationDataMode: "live",
+      sidebarVariant: "project",
       sidebarWorkerActivityFilter: "all",
       sidebarWorkerLineageFilter: "hide_invalid",
       sidebarWorkerVisibilityScope: "current_orchestrator",

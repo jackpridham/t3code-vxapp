@@ -64,13 +64,16 @@ export const DEFAULT_SIDEBAR_WORKER_LINEAGE_FILTER: SidebarWorkerLineageFilter =
 export const SidebarWorkerActivityFilter = Schema.Literals(["all", "active", "needs_attention"]);
 export type SidebarWorkerActivityFilter = typeof SidebarWorkerActivityFilter.Type;
 export const DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER: SidebarWorkerActivityFilter = "all";
+export const SidebarVariant = Schema.Literals(["project", "orchestration"]);
+export type SidebarVariant = typeof SidebarVariant.Type;
+export const DEFAULT_SIDEBAR_VARIANT: SidebarVariant = "project";
 export const SidebarOrchestrationDataMode = Schema.Literals(["live", "demo"]);
 export type SidebarOrchestrationDataMode = typeof SidebarOrchestrationDataMode.Type;
 export const DEFAULT_SIDEBAR_ORCHESTRATION_DATA_MODE: SidebarOrchestrationDataMode = "live";
 
 export const ClientSettingsSchema = Schema.Struct({
   allowActiveThreadsInFold: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
-  sidebarOrchestrationModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  sidebarVariant: SidebarVariant.pipe(Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_VARIANT)),
   sidebarOrchestrationDataMode: SidebarOrchestrationDataMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_ORCHESTRATION_DATA_MODE),
   ),
