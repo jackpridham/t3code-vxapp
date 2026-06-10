@@ -11,29 +11,9 @@ import {
 import { describe, expect, it } from "vitest";
 import { buildLegacyClientSettingsMigrationPatch } from "./useSettings";
 
-describe("buildLegacyClientSettingsMigrationPatch", () => {
+describe("DEFAULT_CLIENT_SETTINGS", () => {
   it("defaults the sidebar variant to the standard project sidebar", () => {
     expect(DEFAULT_CLIENT_SETTINGS.sidebarVariant).toBe("project");
-  });
-
-  it("migrates legacy sidebar variant from sidebarOrchestrationModeEnabled=true to orchestration", () => {
-    expect(
-      buildLegacyClientSettingsMigrationPatch({
-        sidebarOrchestrationModeEnabled: true,
-      }),
-    ).toMatchObject({
-      sidebarVariant: "orchestration",
-    });
-  });
-
-  it("migrates legacy sidebar variant from sidebarOrchestrationModeEnabled=false to project", () => {
-    expect(
-      buildLegacyClientSettingsMigrationPatch({
-        sidebarOrchestrationModeEnabled: false,
-      }),
-    ).toMatchObject({
-      sidebarVariant: "project",
-    });
   });
 
   it("defaults sidebar orchestration data mode to live", () => {
@@ -78,6 +58,28 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     expect(DEFAULT_CLIENT_SETTINGS.sidebarWorkerActivityFilter).toBe(
       DEFAULT_SIDEBAR_WORKER_ACTIVITY_FILTER,
     );
+  });
+});
+
+describe("buildLegacyClientSettingsMigrationPatch", () => {
+  it("migrates legacy sidebar variant from sidebarOrchestrationModeEnabled=true to orchestration", () => {
+    expect(
+      buildLegacyClientSettingsMigrationPatch({
+        sidebarOrchestrationModeEnabled: true,
+      }),
+    ).toMatchObject({
+      sidebarVariant: "orchestration",
+    });
+  });
+
+  it("migrates legacy sidebar variant from sidebarOrchestrationModeEnabled=false to project", () => {
+    expect(
+      buildLegacyClientSettingsMigrationPatch({
+        sidebarOrchestrationModeEnabled: false,
+      }),
+    ).toMatchObject({
+      sidebarVariant: "project",
+    });
   });
 
   it("migrates archive confirmation from legacy local settings", () => {
