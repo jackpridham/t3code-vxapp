@@ -24,6 +24,7 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   type OllamaProtocol,
   type SidebarOrchestrationDataMode,
+  type SidebarVariant,
   type SidebarWorkerActivityFilter,
   type SidebarWorkerLineageFilter,
   type SidebarWorkerVisibilityScope,
@@ -543,9 +544,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
         ? ["Project sidebar order"]
         : []),
-      ...(settings.sidebarOrchestrationModeEnabled !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled
-        ? ["Orchestration mode"]
+      ...(settings.sidebarVariant !== DEFAULT_UNIFIED_SETTINGS.sidebarVariant
+        ? ["Sidebar mode"]
         : []),
       ...(settings.sidebarOrchestrationDataMode !==
       DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationDataMode
@@ -640,7 +640,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.notifyActiveOrchestratorOnRejectedWorkerWake,
       settings.startupThreadTarget,
       settings.sidebarGroupWorktreesWithParentProject,
-      settings.sidebarOrchestrationModeEnabled,
+      settings.sidebarVariant,
       settings.sidebarOrchestrationDataMode,
       settings.sidebarProjectSortOrder,
       settings.sidebarWorkerActivityFilter,
@@ -722,6 +722,11 @@ const SIDEBAR_WORKER_VISIBILITY_SCOPE_LABELS: Record<SidebarWorkerVisibilityScop
 const SIDEBAR_ORCHESTRATION_DATA_MODE_LABELS: Record<SidebarOrchestrationDataMode, string> = {
   live: "Live owner data",
   demo: "Demo showcase",
+};
+
+const SIDEBAR_VARIANT_LABELS: Record<SidebarVariant, string> = {
+  project: "Standard T3 sidebar",
+  orchestration: "Orchestration sidebar",
 };
 
 const SIDEBAR_WORKER_LINEAGE_FILTER_LABELS: Record<SidebarWorkerLineageFilter, string> = {
@@ -2124,36 +2129,47 @@ export function GeneralSettingsPanel() {
 export function OrchestrationSettingsPanel() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
-  const orchestrationModeEnabled = settings.sidebarOrchestrationModeEnabled;
+  const orchestrationModeEnabled = settings.sidebarVariant === "orchestration";
 
   return (
     <SettingsPageContainer>
       <SettingsSection title="Orchestration" icon={<NetworkIcon className="size-3.5" />}>
         <SettingsRow
-          title="Enable Orchestration Mode"
-          description="Show orchestrator projects as session-scoped worker navigation grouped by core project."
+          title="Sidebar mode"
+          description="Choose whether the shared sidebar uses the standard T3 project/thread view or the orchestration worker view."
           resetAction={
-            settings.sidebarOrchestrationModeEnabled !==
-            DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled ? (
+            settings.sidebarVariant !== DEFAULT_UNIFIED_SETTINGS.sidebarVariant ? (
               <SettingResetButton
-                label="orchestration mode"
+                label="sidebar mode"
                 onClick={() =>
                   updateSettings({
-                    sidebarOrchestrationModeEnabled:
-                      DEFAULT_UNIFIED_SETTINGS.sidebarOrchestrationModeEnabled,
+                    sidebarVariant: DEFAULT_UNIFIED_SETTINGS.sidebarVariant,
                   })
                 }
               />
             ) : null
           }
           control={
-            <Switch
-              checked={settings.sidebarOrchestrationModeEnabled}
-              onCheckedChange={(checked) =>
-                updateSettings({ sidebarOrchestrationModeEnabled: Boolean(checked) })
-              }
-              aria-label="Enable orchestration mode"
-            />
+            <Select
+              value={settings.sidebarVariant}
+              onValueChange={(value) => {
+                if (value === "project" || value === "orchestration") {
+                  updateSettings({ sidebarVariant: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-48" aria-label="Sidebar mode">
+                <SelectValue>{SIDEBAR_VARIANT_LABELS[settings.sidebarVariant]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="project">
+                  {SIDEBAR_VARIANT_LABELS.project}
+                </SelectItem>
+                <SelectItem hideIndicator value="orchestration">
+                  {SIDEBAR_VARIANT_LABELS.orchestration}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow
@@ -2184,7 +2200,7 @@ export function OrchestrationSettingsPanel() {
           description={
             orchestrationModeEnabled
               ? "Switch the orchestration sidebar between live owner-backed state and a fully populated demo showcase."
-              : "Enable orchestration mode to switch the sidebar between live and demo data."
+              : "Set Sidebar mode to Orchestration sidebar to switch between live and demo data."
           }
           resetAction={
             settings.sidebarOrchestrationDataMode !==

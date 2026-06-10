@@ -42,6 +42,7 @@ import {
   SidebarTrigger,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { SidebarModeSwitch } from "./SidebarModeSwitch";
 import { VortexWordmark } from "./SidebarShared";
 
 type AppNavigationItem = {
@@ -364,6 +365,7 @@ export function SidebarBrandHeader({
       <div className="flex w-full min-w-0 items-center gap-2">
         {!isStandaloneWindow ? <SidebarTrigger className="shrink-0 md:hidden" /> : null}
         <SidebarBrandMark />
+        <SidebarModeSwitch />
         <SidebarNavigationMenu />
       </div>
     </SidebarHeader>
