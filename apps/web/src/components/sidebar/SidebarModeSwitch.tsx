@@ -6,7 +6,7 @@ import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 
-const SIDEBAR_VARIANTS = [
+export const SIDEBAR_VARIANTS = [
   { value: "project", label: "Use standard sidebar", shortLabel: "T3", icon: FolderIcon },
   {
     value: "orchestration",
@@ -22,8 +22,7 @@ const SIDEBAR_VARIANTS = [
 }>;
 
 export function SidebarModeSwitch() {
-  const settings = useSettings();
-  const sidebarVariant = settings.sidebarVariant;
+  const sidebarVariant = useSettings((settings) => settings.sidebarVariant);
   const { updateSettings } = useUpdateSettings();
 
   return (

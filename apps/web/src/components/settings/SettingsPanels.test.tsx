@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const state = vi.hoisted(() => ({
   settings: {
@@ -33,43 +33,11 @@ vi.mock("../ProjectFavicon", () => ({
 
 import { OrchestrationSettingsPanel } from "./SettingsPanels";
 
-type InspectableElement = ReactElement<Record<string, unknown>>;
-
-function visitReactNodes(node: ReactNode, visitor: (element: InspectableElement) => void) {
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      visitReactNodes(child, visitor);
-    }
-    return;
-  }
-
-  if (!isValidElement(node)) {
-    return;
-  }
-
-  visitor(node as InspectableElement);
-
-  for (const value of Object.values(node.props as Record<string, unknown>)) {
-    visitReactNodes(value as ReactNode, visitor);
-  }
-}
-
 describe("OrchestrationSettingsPanel", () => {
   it("renders a sidebar mode control labeled Sidebar mode", () => {
-    const tree = OrchestrationSettingsPanel();
-    let hasSidebarModeTitle = false;
-    let hasSidebarModeAriaLabel = false;
+    const html = renderToStaticMarkup(<OrchestrationSettingsPanel />);
 
-    visitReactNodes(tree, (element) => {
-      if (element.props.title === "Sidebar mode") {
-        hasSidebarModeTitle = true;
-      }
-      if (element.props["aria-label"] === "Sidebar mode") {
-        hasSidebarModeAriaLabel = true;
-      }
-    });
-
-    expect(hasSidebarModeTitle).toBe(true);
-    expect(hasSidebarModeAriaLabel).toBe(true);
+    expect(html).toContain("Sidebar mode");
+    expect(html).toContain('aria-label="Sidebar mode"');
   });
 });

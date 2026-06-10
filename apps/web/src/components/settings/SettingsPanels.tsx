@@ -85,6 +85,7 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { SIDEBAR_VARIANTS } from "../sidebar/SidebarModeSwitch";
 
 const THEME_OPTIONS = [
   {
@@ -724,10 +725,12 @@ const SIDEBAR_ORCHESTRATION_DATA_MODE_LABELS: Record<SidebarOrchestrationDataMod
   demo: "Demo showcase",
 };
 
-const SIDEBAR_VARIANT_LABELS: Record<SidebarVariant, string> = {
-  project: "Standard T3 sidebar",
-  orchestration: "Orchestration sidebar",
-};
+const SIDEBAR_VARIANT_LABELS = Object.fromEntries(
+  SIDEBAR_VARIANTS.map((variant) => [
+    variant.value,
+    variant.value === "project" ? "Standard T3 sidebar" : "Orchestration sidebar",
+  ]),
+) as Record<SidebarVariant, string>;
 
 const SIDEBAR_WORKER_LINEAGE_FILTER_LABELS: Record<SidebarWorkerLineageFilter, string> = {
   hide_invalid: "Hide Problems",
