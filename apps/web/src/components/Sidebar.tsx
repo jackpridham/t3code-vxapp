@@ -7,7 +7,7 @@ import VxOrchestrationSidebar from "~/features/vxapp/components/OrchestrationSid
 
 export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const sidebarVariant = useSettings().sidebarVariant;
+  const sidebarVariant = useSettings((settings) => settings.sidebarVariant);
   const sidebarSurfaceVariant = resolveSidebarSurfaceVariant({
     pathname,
     sidebarVariant,
