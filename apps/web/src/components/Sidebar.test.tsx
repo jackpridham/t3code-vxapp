@@ -1,11 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  Fragment,
-  isValidElement,
-  type JSXElementConstructor,
-  type ReactElement,
-  type ReactNode,
-} from "react";
+import { type PropsWithChildren, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -13,6 +7,7 @@ const state = vi.hoisted(() => ({
   sidebarVariant: "project" as "project" | "orchestration",
   navigate: vi.fn(),
   updateSettings: vi.fn<(patch: { sidebarVariant: "project" | "orchestration" }) => void>(),
+  buttonPropsByLabel: new Map<string, Record<string, unknown>>(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -21,6 +16,16 @@ vi.mock("@tanstack/react-router", () => ({
     return options?.select ? options.select(location) : location;
   },
   useNavigate: () => state.navigate,
+  useRouterState: (options?: { select?: (state: { location: { pathname: string } }) => unknown }) => {
+    const routerState = { location: { pathname: state.pathname } };
+    return options?.select ? options.select(routerState) : routerState;
+  },
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({
+    data: undefined,
+  }),
 }));
 
 vi.mock("../hooks/useSettings", () => ({
@@ -33,36 +38,115 @@ vi.mock("../hooks/useSettings", () => ({
   }),
 }));
 
-function MockSidebarBrandHeader() {
+vi.mock("~/features/vxapp/vortexAppsReactQuery", () => ({
+  vortexAppsListQueryOptions: () => ({
+    queryKey: ["vortex-apps"],
+    queryFn: async () => ({ catalog: { projects: [] } }),
+  }),
+}));
+
+vi.mock("./ui/button", () => ({
+  Button: ({
+    children,
+    onClick,
+    ...props
+  }: PropsWithChildren<{ onClick?: () => void } & Record<string, unknown>>) => (
+    (() => {
+      const ariaLabel = props["aria-label"];
+      if (typeof ariaLabel === "string") {
+        state.buttonPropsByLabel.set(ariaLabel, { onClick, ...props });
+      }
+      return (
+        <button onClick={onClick} type="button" {...props}>
+          {children}
+        </button>
+      );
+    })()
+  ),
+}));
+
+vi.mock("./ui/tooltip", () => ({
+  Tooltip: ({ children }: PropsWithChildren) => <>{children}</>,
+  TooltipPopup: ({ children }: PropsWithChildren) => <>{children}</>,
+  TooltipTrigger: ({ children, render }: PropsWithChildren<{ render?: ReactNode }>) => (
+    <>{render ?? children}</>
+  ),
+}));
+
+vi.mock("./ui/sheet", () => ({
+  Sheet: ({ children }: PropsWithChildren) => <>{children}</>,
+  SheetDescription: ({ children }: PropsWithChildren) => <>{children}</>,
+  SheetHeader: ({ children }: PropsWithChildren) => <>{children}</>,
+  SheetPopup: ({ children }: PropsWithChildren) => <>{children}</>,
+  SheetTitle: ({ children }: PropsWithChildren) => <>{children}</>,
+  SheetTrigger: ({ children, render }: PropsWithChildren<{ render?: ReactNode }>) => (
+    <>{render ?? children}</>
+  ),
+}));
+
+vi.mock("./ui/sidebar", () => ({
+  Sidebar: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarContent: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarFooter: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarGroup: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarHeader: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarMenu: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarMenuButton: ({
+    children,
+    onClick,
+    ...props
+  }: PropsWithChildren<{ onClick?: () => void } & Record<string, unknown>>) => (
+    <button onClick={onClick} type="button" {...props}>
+      {children}
+    </button>
+  ),
+  SidebarMenuItem: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarMenuSub: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarMenuSubButton: ({
+    children,
+    onClick,
+    ...props
+  }: PropsWithChildren<{ onClick?: () => void } & Record<string, unknown>>) => (
+    <button onClick={onClick} type="button" {...props}>
+      {children}
+    </button>
+  ),
+  SidebarMenuSubItem: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarProvider: ({ children }: PropsWithChildren) => <>{children}</>,
+  SidebarSeparator: () => null,
+  SidebarTrigger: (props: Record<string, unknown>) => <button type="button" {...props} />,
+}));
+
+vi.mock("./sidebar/SidebarShared", () => ({
+  VortexWordmark: () => <span>Vortex</span>,
+}));
+
+import { SidebarBrandHeader } from "./sidebar/SidebarBrandHeader";
+
+function TestSidebarShell({
+  mode,
+  testId,
+}: {
+  mode?: "app" | "standalone";
+  testId: string;
+}) {
+  const isStandaloneWindow = mode === "standalone";
   return (
-    <div data-testid="sidebar-brand-header">
-      <button
-        aria-label="Use standard sidebar"
-        onClick={() => state.updateSettings({ sidebarVariant: "project" })}
-        type="button"
-      />
-      <button
-        aria-label="Use orchestration sidebar"
-        onClick={() => state.updateSettings({ sidebarVariant: "orchestration" })}
-        type="button"
-      />
+    <div data-mode={mode ?? "app"} data-testid={testId}>
+      <SidebarBrandHeader isElectron={false} isStandaloneWindow={isStandaloneWindow} />
     </div>
   );
 }
 
 vi.mock("./ProjectSidebar", () => ({
   default: ({ mode }: { mode?: "app" | "standalone" }) => (
-    <div data-mode={mode ?? "app"} data-testid="project-sidebar">
-      <MockSidebarBrandHeader />
-    </div>
+    <TestSidebarShell mode={mode} testId="project-sidebar" />
   ),
 }));
 
 vi.mock("~/features/vxapp/components/OrchestrationSidebar", () => ({
   default: ({ mode }: { mode?: "app" | "standalone" }) => (
-    <div data-mode={mode ?? "app"} data-testid="orchestration-sidebar">
-      <MockSidebarBrandHeader />
-    </div>
+    <TestSidebarShell mode={mode} testId="orchestration-sidebar" />
   ),
 }));
 
@@ -73,53 +157,16 @@ vi.mock("./settings/SettingsAppSidebar", () => ({
 import Sidebar from "./Sidebar";
 
 function renderSidebar(mode?: "app" | "standalone") {
+  state.buttonPropsByLabel.clear();
   return renderToStaticMarkup(mode ? <Sidebar mode={mode} /> : <Sidebar />);
 }
 
-type HostElement = ReactElement<Record<string, unknown>, string>;
-
-function renderHostElements(node: ReactNode): HostElement[] {
-  if (Array.isArray(node)) {
-    return node.flatMap((child) => renderHostElements(child));
-  }
-
-  if (!isValidElement(node)) {
-    return [];
-  }
-
-  const element = node as ReactElement<
-    Record<string, unknown>,
-    string | JSXElementConstructor<Record<string, unknown>>
-  >;
-
-  if (element.type === Fragment) {
-    return renderHostElements(element.props.children as ReactNode);
-  }
-
-  if (typeof element.type === "function") {
-    const rendered = (element.type as (props: Record<string, unknown>) => ReactNode)(element.props);
-    return renderHostElements(rendered);
-  }
-
-  const hostElement = element as HostElement;
-  return [
-    hostElement,
-    ...renderHostElements((hostElement.props.children as ReactNode | undefined) ?? null),
-  ];
-}
-
-function findButtonByLabel(root: ReactNode, label: string): HostElement | undefined {
-  return renderHostElements(root).find(
-    (element) => element.type === "button" && element.props["aria-label"] === label,
-  );
-}
-
-function expectElement(element: HostElement | undefined, message: string): HostElement {
-  if (!element) {
+function getButtonPropsByLabel(label: string, message: string): Record<string, unknown> {
+  const props = state.buttonPropsByLabel.get(label);
+  if (!props) {
     throw new Error(message);
   }
-
-  return element;
+  return props;
 }
 
 describe("Sidebar", () => {
@@ -128,6 +175,7 @@ describe("Sidebar", () => {
     state.sidebarVariant = "project";
     state.navigate.mockReset();
     state.updateSettings.mockReset();
+    state.buttonPropsByLabel.clear();
     state.updateSettings.mockImplementation((patch) => {
       state.sidebarVariant = patch.sidebarVariant;
     });
@@ -171,13 +219,13 @@ describe("Sidebar", () => {
     state.pathname = "/projects/thread-1";
     state.sidebarVariant = "project";
 
-    const tree = <Sidebar />;
-    const control = expectElement(
-      findButtonByLabel(tree, "Use orchestration sidebar"),
+    renderSidebar();
+    const controlProps = getButtonPropsByLabel(
+      "Use orchestration sidebar",
       "Expected to find the orchestration sidebar switch control in the shared header.",
     );
 
-    (control.props.onClick as undefined | (() => void))?.();
+    (controlProps.onClick as undefined | (() => void))?.();
 
     expect(state.updateSettings).toHaveBeenCalledWith({ sidebarVariant: "orchestration" });
     expect(state.navigate).not.toHaveBeenCalled();
@@ -189,13 +237,13 @@ describe("Sidebar", () => {
     state.pathname = "/projects/thread-1";
     state.sidebarVariant = "orchestration";
 
-    const tree = <Sidebar />;
-    const control = expectElement(
-      findButtonByLabel(tree, "Use standard sidebar"),
+    renderSidebar();
+    const controlProps = getButtonPropsByLabel(
+      "Use standard sidebar",
       "Expected to find the standard sidebar switch control in the shared header.",
     );
 
-    (control.props.onClick as undefined | (() => void))?.();
+    (controlProps.onClick as undefined | (() => void))?.();
 
     expect(state.updateSettings).toHaveBeenCalledWith({ sidebarVariant: "project" });
     expect(state.navigate).not.toHaveBeenCalled();
