@@ -1,11 +1,23 @@
+import { useLocation } from "@tanstack/react-router";
 import { useSettings } from "~/hooks/useSettings";
+import { resolveSidebarSurfaceVariant } from "~/lib/sidebarMode";
+import { SettingsAppSidebar } from "./settings/SettingsAppSidebar";
 import ProjectSidebar from "./ProjectSidebar";
 import VxOrchestrationSidebar from "~/features/vxapp/components/OrchestrationSidebar";
 
 export default function Sidebar({ mode = "app" }: { mode?: "app" | "standalone" }) {
-  const appSettings = useSettings();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const sidebarVariant = useSettings().sidebarVariant;
+  const sidebarSurfaceVariant = resolveSidebarSurfaceVariant({
+    pathname,
+    sidebarVariant,
+  });
 
-  if (appSettings.sidebarOrchestrationModeEnabled) {
+  if (sidebarSurfaceVariant === "settings") {
+    return <SettingsAppSidebar />;
+  }
+
+  if (sidebarSurfaceVariant === "orchestration") {
     return <VxOrchestrationSidebar mode={mode} />;
   }
 

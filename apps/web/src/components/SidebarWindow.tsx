@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-import ThreadSidebar from "./Sidebar";
+import SidebarSurface from "./Sidebar";
 import { Sidebar, SidebarProvider } from "./ui/sidebar";
 
 const SIDEBAR_WINDOW_STYLE = {
@@ -21,7 +21,7 @@ export function SidebarWindow() {
           collapsible="none"
           className="h-full w-full border-r-0 bg-card text-foreground"
         >
-          <ThreadSidebar mode="standalone" />
+          <SidebarSurface mode="standalone" />
         </Sidebar>
       </SidebarProvider>
     </div>
