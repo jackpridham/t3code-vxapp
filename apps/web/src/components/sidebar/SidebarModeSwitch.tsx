@@ -1,25 +1,7 @@
-import { type ComponentType } from "react";
-import { FolderIcon, NetworkIcon } from "lucide-react";
-import type { SidebarVariant } from "@t3tools/contracts/settings";
-
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { SIDEBAR_VARIANTS } from "../../lib/sidebarMode";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
-
-export const SIDEBAR_VARIANTS = [
-  { value: "project", label: "Use standard sidebar", shortLabel: "T3", icon: FolderIcon },
-  {
-    value: "orchestration",
-    label: "Use orchestration sidebar",
-    shortLabel: "Orch",
-    icon: NetworkIcon,
-  },
-] as const satisfies ReadonlyArray<{
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  shortLabel: string;
-  value: SidebarVariant;
-}>;
 
 export function SidebarModeSwitch() {
   const sidebarVariant = useSettings((settings) => settings.sidebarVariant);

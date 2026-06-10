@@ -6,7 +6,9 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
+import { SIDEBAR_VARIANTS } from "../../lib/sidebarMode";
 const state = vi.hoisted(() => ({
   sidebarVariant: "project" as "project" | "orchestration",
   updateSettings: vi.fn<(patch: { sidebarVariant: "project" | "orchestration" }) => void>(),
@@ -73,10 +75,20 @@ describe("SidebarModeSwitch", () => {
     state.updateSettings.mockReset();
   });
 
-  it("updates settings to project when the standard sidebar control is pressed", () => {
+  it("renders the expected switch labels and discovers the host buttons", () => {
     const tree = <SidebarModeSwitch />;
+    const html = renderToStaticMarkup(tree);
+
+    for (const variant of SIDEBAR_VARIANTS) {
+      expect(html).toContain(variant.shortLabel);
+      expect(html).toContain(`aria-label="${variant.label}"`);
+      expect(findButtonByLabel(tree, variant.label)).toBeDefined();
+    }
+  });
+
+  it("updates settings to project when the standard sidebar control is pressed", () => {
     const control = expectElement(
-      findButtonByLabel(tree, "Use standard sidebar"),
+      findButtonByLabel(<SidebarModeSwitch />, "Use standard sidebar"),
       "Expected to find the standard sidebar control.",
     );
 
@@ -86,9 +98,8 @@ describe("SidebarModeSwitch", () => {
   });
 
   it("updates settings to orchestration when the orchestration control is pressed", () => {
-    const tree = <SidebarModeSwitch />;
     const control = expectElement(
-      findButtonByLabel(tree, "Use orchestration sidebar"),
+      findButtonByLabel(<SidebarModeSwitch />, "Use orchestration sidebar"),
       "Expected to find the orchestration sidebar control.",
     );
 

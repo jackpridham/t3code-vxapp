@@ -24,7 +24,6 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   type OllamaProtocol,
   type SidebarOrchestrationDataMode,
-  type SidebarVariant,
   type SidebarWorkerActivityFilter,
   type SidebarWorkerLineageFilter,
   type SidebarWorkerVisibilityScope,
@@ -85,7 +84,7 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { SIDEBAR_VARIANTS } from "../sidebar/SidebarModeSwitch";
+import { SIDEBAR_VARIANT_SETTINGS_LABELS, SIDEBAR_VARIANTS } from "../../lib/sidebarMode";
 
 const THEME_OPTIONS = [
   {
@@ -724,13 +723,6 @@ const SIDEBAR_ORCHESTRATION_DATA_MODE_LABELS: Record<SidebarOrchestrationDataMod
   live: "Live owner data",
   demo: "Demo showcase",
 };
-
-const SIDEBAR_VARIANT_LABELS = Object.fromEntries(
-  SIDEBAR_VARIANTS.map((variant) => [
-    variant.value,
-    variant.value === "project" ? "Standard T3 sidebar" : "Orchestration sidebar",
-  ]),
-) as Record<SidebarVariant, string>;
 
 const SIDEBAR_WORKER_LINEAGE_FILTER_LABELS: Record<SidebarWorkerLineageFilter, string> = {
   hide_invalid: "Hide Problems",
@@ -2162,15 +2154,14 @@ export function OrchestrationSettingsPanel() {
               }}
             >
               <SelectTrigger className="w-full sm:w-48" aria-label="Sidebar mode">
-                <SelectValue>{SIDEBAR_VARIANT_LABELS[settings.sidebarVariant]}</SelectValue>
+                <SelectValue>{SIDEBAR_VARIANT_SETTINGS_LABELS[settings.sidebarVariant]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="project">
-                  {SIDEBAR_VARIANT_LABELS.project}
-                </SelectItem>
-                <SelectItem hideIndicator value="orchestration">
-                  {SIDEBAR_VARIANT_LABELS.orchestration}
-                </SelectItem>
+                {SIDEBAR_VARIANTS.map((variant) => (
+                  <SelectItem hideIndicator key={variant.value} value={variant.value}>
+                    {SIDEBAR_VARIANT_SETTINGS_LABELS[variant.value]}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
           }

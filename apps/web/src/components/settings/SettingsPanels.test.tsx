@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { SIDEBAR_VARIANTS, SIDEBAR_VARIANT_SETTINGS_LABELS } from "../../lib/sidebarMode";
 const state = vi.hoisted(() => ({
   settings: {
     sidebarVariant: "project" as "project" | "orchestration",
@@ -39,5 +40,8 @@ describe("OrchestrationSettingsPanel", () => {
 
     expect(html).toContain("Sidebar mode");
     expect(html).toContain('aria-label="Sidebar mode"');
+    for (const variant of SIDEBAR_VARIANTS) {
+      expect(html).toContain(SIDEBAR_VARIANT_SETTINGS_LABELS[variant.value]);
+    }
   });
 });
