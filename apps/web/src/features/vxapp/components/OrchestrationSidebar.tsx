@@ -18,7 +18,15 @@ import {
   ListTodoIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type PropsWithChildren,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { isElectron } from "~/env";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings } from "~/hooks/useSettings";
@@ -84,6 +92,18 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 
 const CHIP_CLASSNAME =
   "h-4 shrink-0 border border-border/70 bg-background/70 px-1 text-[8px] font-medium leading-none text-foreground/80";
+
+export function OrchestrationSidebarShell({
+  children,
+  mode = "app",
+}: PropsWithChildren<{ mode?: "app" | "standalone" }>) {
+  return (
+    <>
+      <SidebarBrandHeader isElectron={isElectron} isStandaloneWindow={mode === "standalone"} />
+      {children}
+    </>
+  );
+}
 
 function WakeBadge({ state }: { state: "pending" | "delivering" | null }) {
   if (state === null) {
@@ -1357,8 +1377,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
   const isStandaloneWindow = mode === "standalone";
 
   return (
-    <>
-      <SidebarBrandHeader isElectron={isElectron} isStandaloneWindow={isStandaloneWindow} />
+    <OrchestrationSidebarShell mode={mode}>
       <SidebarContent className="gap-0">
         <SidebarGroup className="px-2 py-2" data-testid="vx-orchestration-sidebar">
           {authorityStatus === "error" ? (
@@ -1781,6 +1800,6 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
           programId={programInfoDialogProgramId}
         />
       ) : null}
-    </>
+    </OrchestrationSidebarShell>
   );
 }

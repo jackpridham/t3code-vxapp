@@ -19,6 +19,7 @@ import {
   useState,
   type MouseEvent,
   type PointerEvent,
+  type PropsWithChildren,
   type Ref,
 } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -156,6 +157,18 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
+
+export function ProjectSidebarShell({
+  children,
+  mode = "app",
+}: PropsWithChildren<{ mode?: "app" | "standalone" }>) {
+  return (
+    <>
+      <SidebarBrandHeader isElectron={isElectron} isStandaloneWindow={mode === "standalone"} />
+      {children}
+    </>
+  );
+}
 
 type SidebarThreadSnapshot = Pick<
   Thread,
@@ -1752,8 +1765,7 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
   );
 
   return (
-    <>
-      <SidebarBrandHeader isElectron={isElectron} isStandaloneWindow={isStandaloneWindow} />
+    <ProjectSidebarShell mode={mode}>
       <SidebarContent className="gap-0">
         {showArm64IntelBuildWarning && arm64IntelBuildWarningDescription ? (
           <SidebarGroup className="px-2 pt-2 pb-0">
@@ -2157,6 +2169,6 @@ export default function ProjectSidebar({ mode = "app" }: { mode?: "app" | "stand
           </SidebarMenu>
         </SidebarFooter>
       ) : null}
-    </>
+    </ProjectSidebarShell>
   );
 }

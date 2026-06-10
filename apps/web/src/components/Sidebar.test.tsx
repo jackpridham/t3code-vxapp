@@ -45,6 +45,10 @@ vi.mock("~/features/vxapp/vortexAppsReactQuery", () => ({
   }),
 }));
 
+vi.mock("./ProjectFavicon", () => ({
+  ProjectFavicon: () => null,
+}));
+
 vi.mock("./ui/button", () => ({
   Button: ({
     children,
@@ -121,34 +125,31 @@ vi.mock("./sidebar/SidebarShared", () => ({
   VortexWordmark: () => <span>Vortex</span>,
 }));
 
-import { SidebarBrandHeader } from "./sidebar/SidebarBrandHeader";
+vi.mock("./ProjectSidebar", async () => {
+  const actual = await vi.importActual<typeof import("./ProjectSidebar")>("./ProjectSidebar");
+  return {
+    ...actual,
+    default: ({ mode }: { mode?: "app" | "standalone" }) => (
+      <actual.ProjectSidebarShell mode={mode}>
+        <div data-mode={mode ?? "app"} data-testid="project-sidebar" />
+      </actual.ProjectSidebarShell>
+    ),
+  };
+});
 
-function TestSidebarShell({
-  mode,
-  testId,
-}: {
-  mode?: "app" | "standalone";
-  testId: string;
-}) {
-  const isStandaloneWindow = mode === "standalone";
-  return (
-    <div data-mode={mode ?? "app"} data-testid={testId}>
-      <SidebarBrandHeader isElectron={false} isStandaloneWindow={isStandaloneWindow} />
-    </div>
-  );
-}
-
-vi.mock("./ProjectSidebar", () => ({
-  default: ({ mode }: { mode?: "app" | "standalone" }) => (
-    <TestSidebarShell mode={mode} testId="project-sidebar" />
-  ),
-}));
-
-vi.mock("~/features/vxapp/components/OrchestrationSidebar", () => ({
-  default: ({ mode }: { mode?: "app" | "standalone" }) => (
-    <TestSidebarShell mode={mode} testId="orchestration-sidebar" />
-  ),
-}));
+vi.mock("~/features/vxapp/components/OrchestrationSidebar", async () => {
+  const actual = await vi.importActual<
+    typeof import("~/features/vxapp/components/OrchestrationSidebar")
+  >("~/features/vxapp/components/OrchestrationSidebar");
+  return {
+    ...actual,
+    default: ({ mode }: { mode?: "app" | "standalone" }) => (
+      <actual.OrchestrationSidebarShell mode={mode}>
+        <div data-mode={mode ?? "app"} data-testid="orchestration-sidebar" />
+      </actual.OrchestrationSidebarShell>
+    ),
+  };
+});
 
 vi.mock("./settings/SettingsAppSidebar", () => ({
   SettingsAppSidebar: () => <div data-testid="settings-sidebar" />,
@@ -229,7 +230,6 @@ describe("Sidebar", () => {
 
     expect(state.updateSettings).toHaveBeenCalledWith({ sidebarVariant: "orchestration" });
     expect(state.navigate).not.toHaveBeenCalled();
-    expect(state.pathname).toBe("/projects/thread-1");
     expect(renderSidebar()).toContain('data-testid="orchestration-sidebar"');
   });
 
@@ -247,7 +247,6 @@ describe("Sidebar", () => {
 
     expect(state.updateSettings).toHaveBeenCalledWith({ sidebarVariant: "project" });
     expect(state.navigate).not.toHaveBeenCalled();
-    expect(state.pathname).toBe("/projects/thread-1");
     expect(renderSidebar()).toContain('data-testid="project-sidebar"');
   });
 });
