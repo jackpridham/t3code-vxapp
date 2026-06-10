@@ -16,7 +16,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     expect(DEFAULT_CLIENT_SETTINGS.sidebarVariant).toBe("project");
   });
 
-  it("migrates legacy sidebarOrchestrationModeEnabled=true to the orchestration variant", () => {
+  it("migrates legacy sidebar variant from sidebarOrchestrationModeEnabled=true to orchestration", () => {
     expect(
       buildLegacyClientSettingsMigrationPatch({
         sidebarOrchestrationModeEnabled: true,
@@ -26,7 +26,7 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
     });
   });
 
-  it("migrates legacy sidebarOrchestrationModeEnabled=false to the project variant", () => {
+  it("migrates legacy sidebar variant from sidebarOrchestrationModeEnabled=false to project", () => {
     expect(
       buildLegacyClientSettingsMigrationPatch({
         sidebarOrchestrationModeEnabled: false,
