@@ -92,4 +92,25 @@ describe("deriveOrchestrationSidebarEmptyState", () => {
       description: "The sidebar owner returned zero visible programs for this authority snapshot.",
     });
   });
+
+  it("returns null for error status even when the snapshot is otherwise empty and degraded", () => {
+    expect(
+      deriveOrchestrationSidebarEmptyState({
+        authorityStatus: "error",
+        authoritySnapshot: {
+          currentTodos: [],
+          hints: [],
+          ownerDiagnostics: [
+            {
+              code: "current_todo_authority_missing",
+              message: "Current TODO authority is unavailable for this Program.",
+            },
+          ],
+          pagination: null,
+          programs: [],
+          todos: [],
+        },
+      }),
+    ).toBeNull();
+  });
 });
