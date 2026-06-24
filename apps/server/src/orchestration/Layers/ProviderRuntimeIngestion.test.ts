@@ -2186,7 +2186,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(finalMessage?.streaming).toBe(false);
   });
 
-  it("batches subsequent assistant streaming deltas after the first live update", async () => {
+  it("flushes each assistant streaming delta immediately after the first live update", async () => {
     const harness = await createHarness({
       serverSettings: { enableAssistantStreaming: true },
     });
@@ -2242,6 +2242,15 @@ describe("ProviderRuntimeIngestion", () => {
         delta: "b",
       },
     });
+    await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-streaming-batched" &&
+          message.streaming &&
+          message.text === "ab",
+      ),
+    );
+
     harness.emit({
       type: "content.delta",
       eventId: asEventId("evt-message-delta-streaming-batched-3"),
@@ -2255,13 +2264,20 @@ describe("ProviderRuntimeIngestion", () => {
         delta: "c",
       },
     });
-    await harness.drain();
+    await waitForThread(harness.engine, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-streaming-batched" &&
+          message.streaming &&
+          message.text === "abc",
+      ),
+    );
 
     const beforeCompletion = await Effect.runPromise(harness.engine.getReadModel());
     const beforeCompletionMessage = beforeCompletion.threads[0]?.messages.find(
       (message) => message.id === "assistant:item-streaming-batched",
     );
-    expect(beforeCompletionMessage?.text).toBe("a");
+    expect(beforeCompletionMessage?.text).toBe("abc");
 
     harness.emit({
       type: "item.completed",
@@ -2300,7 +2316,7 @@ describe("ProviderRuntimeIngestion", () => {
         event.type === "thread.message-sent" &&
         event.payload.messageId === "assistant:item-streaming-batched",
     );
-    expect(persistedMessageEvents.map((event) => event.payload.text)).toEqual(["a", "bc", ""]);
+    expect(persistedMessageEvents.map((event) => event.payload.text)).toEqual(["a", "b", "c", ""]);
   });
 
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {

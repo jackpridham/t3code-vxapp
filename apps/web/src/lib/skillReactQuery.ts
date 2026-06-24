@@ -27,8 +27,8 @@ const EMPTY_SKILL_CATALOG_ROOTS: SkillCatalogRoot[] = [];
 
 export const skillQueryKeys = {
   all: ["skills"] as const,
-  searchEntries: (projectCwd: string | null, query: string, limit: number) =>
-    ["skills", "search-entries", projectCwd, query, limit] as const,
+  searchEntries: (rootPaths: ReadonlyArray<string>, query: string, limit: number) =>
+    ["skills", "search-entries", rootPaths, query, limit] as const,
 };
 
 export function isMissingSkillDirectoryError(error: unknown): boolean {
@@ -55,39 +55,57 @@ export function projectSkillEntriesQueryOptions(input: {
   const limit = input.limit ?? DEFAULT_SKILL_SEARCH_LIMIT;
   const context = input.context ?? { projectCwd: input.projectCwd ?? null };
   const roots = resolveSkillCatalogRoots(context);
-  const primaryRoot = roots[0] ?? null;
-  const skillsRootPath = primaryRoot?.rootPath ?? null;
+  const rootPaths = roots.map((root) => root.rootPath);
 
   return queryOptions({
-    queryKey: skillQueryKeys.searchEntries(skillsRootPath, input.query, limit),
+    queryKey: skillQueryKeys.searchEntries(rootPaths, input.query, limit),
     queryFn: async () => {
-      if (!skillsRootPath || !primaryRoot) {
+      if (roots.length === 0) {
         throw new Error("Skill search is unavailable.");
       }
 
       const api = ensureNativeApi();
-      const result: ProjectSearchEntriesResult = await api.projects
-        .searchEntries({
-          cwd: skillsRootPath,
-          query: input.query,
-          limit,
-          includeIgnored: true,
-        })
-        .catch((error) => {
-          if (isMissingSkillDirectoryError(error)) {
-            return EMPTY_PROJECT_SEARCH_ENTRIES_RESULT;
+      const results = await Promise.all(
+        roots.map(async (root) => {
+          const result: ProjectSearchEntriesResult = await api.projects
+            .searchEntries({
+              cwd: root.rootPath,
+              query: input.query,
+              limit,
+              includeIgnored: true,
+            })
+            .catch((error) => {
+              if (isMissingSkillDirectoryError(error)) {
+                return EMPTY_PROJECT_SEARCH_ENTRIES_RESULT;
+              }
+              throw error;
+            });
+          return {
+            root,
+            result,
+          };
+        }),
+      );
+
+      const mergedEntries = new Map<string, SkillCatalogEntry>();
+      let truncated = false;
+      for (const { root, result } of results) {
+        truncated ||= result.truncated;
+        for (const entry of result.entries) {
+          const catalogEntry = toSkillCatalogEntry(root, entry);
+          if (!catalogEntry || mergedEntries.has(catalogEntry.name)) {
+            continue;
           }
-          throw error;
-        });
+          mergedEntries.set(catalogEntry.name, catalogEntry);
+        }
+      }
 
       return {
-        truncated: result.truncated,
-        entries: result.entries
-          .map((entry) => toSkillCatalogEntry(primaryRoot, entry))
-          .filter((entry): entry is SkillCatalogEntry => entry !== null),
+        truncated,
+        entries: [...mergedEntries.values()],
       };
     },
-    enabled: (input.enabled ?? true) && skillsRootPath !== null,
+    enabled: (input.enabled ?? true) && roots.length > 0,
     staleTime: input.staleTime ?? DEFAULT_SKILL_SEARCH_STALE_TIME,
     placeholderData: (previous) => previous ?? EMPTY_SKILL_ENTRIES_RESULT,
   });

@@ -153,6 +153,36 @@ Important verifier learnings:
   - `orchestration.listThreadMessages`
 - local-model verification must check a real tool side effect, not only assistant text
 
+### 9. Standalone Codex instruction and skill loading proof
+
+Follow-up investigation against a real `ollamaLocal` standalone thread confirmed:
+
+- Codex persisted a synthetic `# AGENTS.md instructions for /home/gizmo/kb-vxapp` message in the rollout JSONL for the live thread
+- the same rollout also persisted the collaboration-mode turn context injected by T3
+- therefore `AGENTS.md` was actually loaded for the standalone Codex-backed thread, even though the model later answered as if it had no startup instructions
+- the model's self-report was wrong; the persisted rollout is the authoritative proof source
+
+Follow-up investigation also confirmed the native standalone Codex skill boundary:
+
+- `skills/list` for `/home/gizmo/kb-vxapp` returned repo skills from `.agents/skills`
+- `skills/list` also returned user and bundled system skills
+- `.claude/skills` was not part of the native standalone Codex `skills/list` result in this setup
+- T3's browser-side `.claude/skills` suggestion catalog and Codex native standalone skill discovery are different surfaces
+
+Authoritative proof sources from the investigation:
+
+- managed Ollama Codex home: `/home/gizmo/.codex-ollama`
+- managed trust config: `/home/gizmo/.codex-ollama/config.toml`
+- managed profile config: `/home/gizmo/.codex-ollama/t3-ollama-gpu.config.toml`
+- persisted thread state: `/home/gizmo/.codex-ollama/state_5.sqlite`
+- investigated rollout:
+  - `/home/gizmo/.codex-ollama/sessions/2026/06/10/rollout-2026-06-10T20-10-56-019eb103-7b93-7510-91e2-ba93b7bcb7d4.jsonl`
+
+Operational conclusion:
+
+- when debugging standalone Codex-backed `ollamaLocal` behavior, do not infer instruction or skill loading from the model's self-description alone
+- inspect rollout JSONL plus direct `config/read` and `skills/list` probes against the same managed `codex app-server` launch
+
 ## Web/UI Changes
 
 Relevant UI changes made or relied on in this session:

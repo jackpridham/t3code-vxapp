@@ -40,14 +40,20 @@ describe("agents-vxapp projection authority boundary", () => {
     expect(snapshotQuerySource).toContain("getNotificationSummaryExport()");
     expect(snapshotQuerySource).toContain("getRuntimePaths()");
     expect(snapshotQuerySource).toContain("AgentsVxappControlPlane");
-    expect(snapshotQuerySource).toContain("snapshot.programs.map(mapOwnerProgram)");
+    expect(snapshotQuerySource).toContain(
+      "filterOwnerProgramsWithExecutiveIds(snapshot.programs).map(mapOwnerProgram)",
+    );
+    expect(snapshotQuerySource).not.toContain("snapshot.programs.map(mapOwnerProgram)");
 
     const operationalSource = read("src/extensions/vxapp/Layers/ProjectionOperationalQuery.ts");
     expect(operationalSource).toContain("controlPlane.getProgramsAuthoritySnapshot()");
     expect(operationalSource).toContain("getNotificationSummaryExport()");
     expect(operationalSource).toContain("getRuntimePaths()");
     expect(operationalSource).toContain("AgentsVxappControlPlane");
-    expect(operationalSource).toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
+    expect(operationalSource).toContain(
+      "filterOwnerProgramsWithExecutiveIds(ownerSnapshot.programs).map(mapOwnerProgram)",
+    );
+    expect(operationalSource).not.toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
     expect(operationalSource).toContain(
       "vxapp projection boundary requires external role authority runtime paths.",
     );
@@ -57,7 +63,10 @@ describe("agents-vxapp projection authority boundary", () => {
       expect(source).toContain("controlPlane.getProgramsAuthoritySnapshot()");
       expect(source).toContain("getRuntimePaths()");
       expect(source).toContain("AgentsVxappControlPlane");
-      expect(source).toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
+      expect(source).toContain(
+        "filterOwnerProgramsWithExecutiveIds(ownerSnapshot.programs).map(mapOwnerProgram)",
+      );
+      expect(source).not.toContain("ownerSnapshot.programs.map(mapOwnerProgram)");
       expect(source).toContain(
         "vxapp projection boundary requires external role authority runtime paths.",
       );

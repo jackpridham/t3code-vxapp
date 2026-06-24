@@ -75,6 +75,7 @@ import {
   type ProjectionOperationalQueryShape,
   type ProjectionThreadCheckpointContext,
 } from "../Services/ProjectionOperationalQuery.ts";
+import { filterOwnerProgramsWithExecutiveIds } from "./ownerProgramAuthority.ts";
 
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
@@ -2229,8 +2230,9 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
             selectOperationalCtoAttentionItems(
               attentionSummaryExport.attention.map(mapOwnerCtoAttentionItem),
             );
-          const programs: ReadonlyArray<OrchestrationProgram> =
-            ownerSnapshot.programs.map(mapOwnerProgram);
+          const programs: ReadonlyArray<OrchestrationProgram> = filterOwnerProgramsWithExecutiveIds(
+            ownerSnapshot.programs,
+          ).map(mapOwnerProgram);
           if (vxappBacked) {
             const bindingAuthorityExport = yield* controlPlane.getBindingAuthorityExport();
             bindingAuthority = {
@@ -2345,7 +2347,7 @@ const makeProjectionOperationalQuery = Effect.gen(function* () {
 
           const readModel = {
             snapshotSequence: computeSnapshotSequence(stateRows),
-            snapshotProfile: "bootstrap-summary" as const,
+            snapshotProfile: "operational" as const,
             snapshotCoverage: {
               includeArchivedThreads: false,
               wakeItemCount: 0,

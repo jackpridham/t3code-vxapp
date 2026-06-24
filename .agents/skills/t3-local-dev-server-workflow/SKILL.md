@@ -8,6 +8,10 @@ description: Use when starting, stopping, restarting, inspecting, or documenting
 Use this skill whenever the task is about the authoritative repo-local T3 dev
 server surface.
 
+This skill is only for local development. It does not prove what is deployed.
+The deployed browser authority is the systemd-managed `t3code.service` on port
+`7421`.
+
 The public owner is:
 
 ```bash
@@ -124,6 +128,9 @@ Default bases are:
 - server: `3773`
 - web: `5733`
 
+These are local-dev defaults only. They are not deployment proof and must not
+be cited as evidence that the live T3 UI is healthy.
+
 Do not assume those exact ports are free. The localized manager probes for the
 next available port and now checks both IPv4 and IPv6 loopback occupancy.
 
@@ -233,6 +240,8 @@ Never run `bun test`; use `bun run test`.
 ## Footguns
 
 - Do not use `vx apps t3 dev-server` as the owner contract here.
+- Do not treat local `3773` or `5733` as evidence about the deployed service;
+  deployed browser authority is `t3code.service` on `7421`.
 - Do not assume the web URL is always `http://127.0.0.1:5733/`.
 - Do not use `scripts/dev-runner.ts` as the public command surface.
 - Do not treat `.vx/dev-state.yaml` as live runtime state.

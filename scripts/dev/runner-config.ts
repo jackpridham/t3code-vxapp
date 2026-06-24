@@ -38,7 +38,7 @@ export interface ResolvedRunConfig {
   readonly publicHost: string;
   readonly serverPort: number;
   readonly webPort: number;
-  readonly webUrl: string;
+  readonly webUrl: string | null;
   readonly serverUrl: string;
   readonly serverHealthUrl: string;
   readonly env: NodeJS.ProcessEnv;
@@ -189,7 +189,8 @@ export async function resolveRunConfig(input: ResolvedRunConfigInput): Promise<R
     input.serverPort,
     input.webPort,
   );
-  const webUrl = new URL(`http://${input.publicHost}:${webPort}/`);
+  const browserUrl =
+    input.mode === "dev:server" ? null : new URL(`http://${input.publicHost}:${webPort}/`);
   const agentsRepoLink = resolveAgentsVxappRepoLink(workspaceRoot, baseEnv);
   const childEnv = {
     ...baseEnv,
@@ -210,7 +211,7 @@ export async function resolveRunConfig(input: ResolvedRunConfigInput): Promise<R
       publicHost: input.publicHost,
       port: serverPort,
       webPort,
-      devUrl: webUrl,
+      devUrl: browserUrl ?? undefined,
     }).pipe(Effect.provide(runtimeLayer)),
   );
 
@@ -220,7 +221,7 @@ export async function resolveRunConfig(input: ResolvedRunConfigInput): Promise<R
     publicHost: input.publicHost,
     serverPort,
     webPort,
-    webUrl: webUrl.toString(),
+    webUrl: browserUrl?.toString() ?? null,
     serverUrl: `ws://${input.publicHost}:${serverPort}/`,
     serverHealthUrl: `http://${loopbackHost(input.bindHost)}:${serverPort}/health/live`,
     env,
@@ -281,6 +282,10 @@ export async function waitForModeReadiness(config: ResolvedRunConfig): Promise<b
   const readyUrl = readyUrlFromLiveUrl(config.serverHealthUrl);
   if (config.mode === "dev:server") {
     return await waitForHttp(readyUrl, timeoutMs);
+  }
+
+  if (!config.webUrl) {
+    return false;
   }
 
   const checks: Array<Promise<boolean>> = [waitForHttp(config.webUrl, timeoutMs)];

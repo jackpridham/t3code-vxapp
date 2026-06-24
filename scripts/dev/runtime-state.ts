@@ -18,7 +18,7 @@ export interface DevServerState {
   readonly webPort: number;
   readonly serverUrl: string;
   readonly serverHealthUrl: string;
-  readonly webUrl: string;
+  readonly webUrl: string | null;
   readonly primaryUrl: string;
   readonly log: string;
   readonly branch: string | null;

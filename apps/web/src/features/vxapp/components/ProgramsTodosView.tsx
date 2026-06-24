@@ -97,18 +97,15 @@ import {
   validateProgramScope,
 } from "./programsTodosModel";
 import { ProgramOverviewCard } from "./ProgramOverviewCard";
+import { ProgramTodoListPane } from "./ProgramTodoListPane";
+import {
+  buildEditableTodoPlanLinkDrafts,
+  type EditableTodoPlanLinkDraft,
+} from "./programTodoSnapshot";
 import { resolveProgramDisplay } from "./programDisplay";
 
 type ProgramEditorMode = "create" | "edit";
 type TodoEditorMode = "create" | "edit";
-
-type EditablePlanLink = {
-  id: string;
-  phase: string | null;
-  planKey: string;
-  repo: string;
-  step: string | null;
-};
 
 type ProgramFormState = {
   currentOrchestratorThreadId: string;
@@ -127,7 +124,7 @@ type ProgramLifecycleState = {
 type TodoFormState = {
   agent: string;
   nextAction: string;
-  planLinks: EditablePlanLink[];
+  planLinks: EditableTodoPlanLinkDraft[];
   priority: string;
   programId: string;
   status: string;
@@ -174,7 +171,9 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-function makeEditablePlanLink(input: Partial<Omit<EditablePlanLink, "id">> = {}): EditablePlanLink {
+function makeEditablePlanLink(
+  input: Partial<Omit<EditableTodoPlanLinkDraft, "id">> = {},
+): EditableTodoPlanLinkDraft {
   return {
     id: randomUUID(),
     repo: input.repo ?? "",
@@ -238,15 +237,7 @@ function defaultTodoFormState(
   return {
     agent: todo?.agent ?? agents[0] ?? "jasper",
     nextAction: todo?.nextAction ?? "",
-    planLinks:
-      todo?.planLinks.map((link) =>
-        makeEditablePlanLink({
-          repo: link.repo,
-          planKey: link.planKey,
-          phase: link.phase ?? null,
-          step: link.step ?? null,
-        }),
-      ) ?? [],
+    planLinks: buildEditableTodoPlanLinkDrafts(todo),
     priority: todo?.priority ?? optionDefaults?.priority ?? "",
     programId: todo?.programId ?? "",
     status: todo?.status ?? optionDefaults?.status ?? "",
@@ -284,8 +275,8 @@ function mutationProgramId(result: unknown): string | null {
 }
 
 function PlanLinksEditor(props: {
-  planLinks: EditablePlanLink[];
-  onChange: (next: EditablePlanLink[]) => void;
+  planLinks: EditableTodoPlanLinkDraft[];
+  onChange: (next: EditableTodoPlanLinkDraft[]) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -582,141 +573,21 @@ const SelectedGroupPane = memo(function SelectedGroupPane(props: {
         totalTodoCount={activeGroupCard.group.todos.length}
         verdict={activeGroupCard.verdict}
       />
-
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <div className="min-w-0 flex-1">
-            <CardTitle>{selectedProgram ? "Program TODOs" : "Grouped TODOs"}</CardTitle>
-            <CardDescription>
-              Showing {props.visibleTodos.length} matching TODO
-              {props.visibleTodos.length === 1 ? "" : "s"} for this selection.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardPanel className="flex flex-col gap-3 overflow-hidden">
-          <div className="grid gap-3 lg:grid-cols-3">
-            <Input
-              value={props.todoSearch}
-              onChange={(event) => props.onTodoSearchChange(event.target.value)}
-              placeholder="Search TODOs"
-              type="search"
-            />
-            <Select
-              value={props.selectedTodoAgent}
-              onValueChange={(value) => props.setSelectedTodoAgent(String(value))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Agent" />
-              </SelectTrigger>
-              <SelectPopup>
-                <SelectItem value="all">All agents</SelectItem>
-                {props.agents.map((agent) => (
-                  <SelectItem key={agent} value={agent}>
-                    {agent}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-            <Select
-              value={props.selectedTodoStatus}
-              onValueChange={(value) => props.setSelectedTodoStatus(String(value))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectPopup>
-                <SelectItem value="all">All statuses</SelectItem>
-                {props.todoStatuses.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {status}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          </div>
-          <ScrollArea
-            className="min-h-0 sm:max-h-[48rem] 2xl:max-h-[calc(100dvh-24rem)]"
-            scrollbarGutter
-          >
-            <div className="space-y-3 pe-2">
-              {props.visibleTodos.map((todo) => {
-                const isCurrentTodo = activeGroupCard.currentTodoId === todo.todoId;
-                return (
-                  <Card key={`${todo.agent}:${todo.todoId}`} className="border-border/70">
-                    <CardHeader className="pb-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <CardTitle className="text-base">{todo.title}</CardTitle>
-                          {isCurrentTodo ? (
-                            <Badge className="h-5 border-0 bg-fuchsia-500/12 px-1.5 text-[10px] text-fuchsia-700 dark:text-fuchsia-300">
-                              Current
-                            </Badge>
-                          ) : null}
-                          <Badge className={cn(NEUTRAL_BADGE_CLASSNAME)}>{todo.status}</Badge>
-                          <Badge className={cn(NEUTRAL_BADGE_CLASSNAME)}>{todo.priority}</Badge>
-                          <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                            {todo.agent}
-                          </Badge>
-                        </div>
-                        <CardDescription className="mt-2 leading-relaxed">
-                          {todo.summary || "No summary recorded."}
-                        </CardDescription>
-                      </div>
-                    </CardHeader>
-                    <CardPanel className="space-y-3 pt-0 text-sm">
-                      {todo.nextAction ? (
-                        <div className="rounded-xl bg-muted/55 px-3 py-2 text-sm">
-                          <div className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-                            Next action
-                          </div>
-                          <div className="mt-1">{todo.nextAction}</div>
-                        </div>
-                      ) : null}
-                      {todo.planLinks.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                          {todo.planLinks.map((link) => (
-                            <Badge
-                              key={`${todo.todoId}:${link.repo}:${link.planKey}:${link.phase ?? ""}:${link.step ?? ""}`}
-                              variant="outline"
-                              className="h-5 px-1.5 text-[10px]"
-                            >
-                              {link.repo}:{link.planKey}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : null}
-                    </CardPanel>
-                    <CardFooter className="gap-2 pt-0">
-                      <Button size="sm" variant="outline" onClick={() => props.onEditTodo(todo)}>
-                        <PencilIcon className="size-3.5" />
-                        Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => props.onDeleteTodo(todo)}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                        Delete
-                      </Button>
-                    </CardFooter>
-                  </Card>
-                );
-              })}
-              {props.visibleTodos.length === 0 ? (
-                <Empty className="rounded-2xl border border-dashed border-border/70 bg-card/30 py-12">
-                  <EmptyHeader>
-                    <ListTodoIcon className="size-8 text-muted-foreground/60" />
-                    <EmptyTitle>No matching TODOs</EmptyTitle>
-                    <EmptyDescription>Adjust the filters or create a new TODO.</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              ) : null}
-            </div>
-          </ScrollArea>
-        </CardPanel>
-      </Card>
+      <ProgramTodoListPane
+        agents={props.agents}
+        currentTodoId={activeGroupCard.currentTodoId}
+        isProgramSelection={selectedProgram !== null}
+        onDeleteTodo={props.onDeleteTodo}
+        onEditTodo={props.onEditTodo}
+        onTodoSearchChange={props.onTodoSearchChange}
+        selectedTodoAgent={props.selectedTodoAgent}
+        selectedTodoStatus={props.selectedTodoStatus}
+        setSelectedTodoAgent={props.setSelectedTodoAgent}
+        setSelectedTodoStatus={props.setSelectedTodoStatus}
+        todoSearch={props.todoSearch}
+        todoStatuses={props.todoStatuses}
+        visibleTodos={props.visibleTodos}
+      />
     </div>
   );
 });

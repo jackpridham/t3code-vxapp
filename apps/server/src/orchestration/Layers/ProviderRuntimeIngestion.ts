@@ -59,7 +59,6 @@ const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120);
 const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000;
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120);
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000;
-const STREAMING_ASSISTANT_DELTA_FLUSH_CHARS = 512;
 const MAX_ACTIVITY_DATA_DEPTH = 6;
 const MAX_ACTIVITY_DATA_OBJECT_KEYS = 80;
 const MAX_ACTIVITY_DATA_ARRAY_ITEMS = 80;
@@ -1614,13 +1613,10 @@ const make = Effect.fn("make")(function* () {
           });
         }
       } else {
-        const hasPersistedAssistantMessage = thread.messages.some(
-          (message) => message.id === assistantMessageId,
-        );
         const streamingChunk = yield* appendBufferedAssistantText(
           assistantMessageId,
           assistantDelta,
-          hasPersistedAssistantMessage ? STREAMING_ASSISTANT_DELTA_FLUSH_CHARS : 1,
+          1,
         );
         if (streamingChunk.length > 0) {
           yield* orchestrationEngine.dispatch({

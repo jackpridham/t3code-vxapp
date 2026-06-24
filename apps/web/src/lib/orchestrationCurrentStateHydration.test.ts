@@ -319,6 +319,64 @@ describe("orchestration current-state hydration", () => {
     );
   });
 
+  it("upgrades direct orchestrator-thread hydration to session detail in one pass", async () => {
+    const orchestratorSummary = makeThreadSummary(rootThreadId, {
+      spawnRole: "orchestrator",
+    });
+    const workerSummary = makeThreadSummary(workerThreadId, {
+      parentThreadId: rootThreadId,
+      orchestratorThreadId: rootThreadId,
+      spawnRole: "worker",
+      workflowId: "wf-root-thread",
+    });
+    const checkpoint = {
+      turnId: TurnId.makeUnsafe("turn-2"),
+      checkpointTurnCount: 1,
+      checkpointRef: "checkpoint-2",
+      status: "ready",
+      files: [],
+      assistantMessageId: MessageId.makeUnsafe("message-2"),
+      completedAt: "2026-04-14T00:00:02.000Z",
+    };
+    const api = makeApi({
+      listSessionThreads: vi.fn().mockResolvedValue([orchestratorSummary, workerSummary]),
+      listThreadCheckpoints: vi.fn().mockResolvedValue([checkpoint]),
+    });
+
+    const next = await loadTargetedThreadDetailReadModel({
+      api,
+      threadId: rootThreadId,
+      baseReadModel: null,
+    });
+
+    expect(api.orchestration.getCurrentState).not.toHaveBeenCalled();
+    expect(api.orchestration.listThreadCheckpoints).toHaveBeenCalledTimes(1);
+    expect(api.orchestration.listThreadCheckpoints).toHaveBeenCalledWith({
+      threadId: workerThreadId,
+      limit: 1000,
+    });
+    expect(next.threads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: rootThreadId,
+          spawnRole: "orchestrator",
+          messages: [expect.objectContaining({ text: "loaded history" })],
+          snapshotCoverage: expect.objectContaining({
+            checkpointLimit: null,
+          }),
+        }),
+        expect.objectContaining({
+          id: workerThreadId,
+          checkpoints: [checkpoint],
+          snapshotCoverage: expect.objectContaining({
+            checkpointCount: 1,
+            checkpointLimit: null,
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("dedupes only thread-detail fragments and merges them with each caller base", async () => {
     const summary = makeThreadSummary(rootThreadId);
     const extraProjectId = ProjectId.makeUnsafe("project-extra");

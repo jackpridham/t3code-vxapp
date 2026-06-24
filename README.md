@@ -740,6 +740,18 @@ The sidebar, program metadata, thread metadata, wake queue, notification list, a
 
 SQLite: `~/.t3/userdata/state.sqlite`
 
+Deployed-vs-dev contract:
+
+- Deployed browser authority is the systemd-managed `t3code.service` on
+  `7421`.
+- Local development commonly uses server `3773` and web `5733`; those ports
+  are not proof that the deployed service is healthy.
+- The live service depends on `T3_AGENTS_VXAPP_REPO_ROOT` from the surviving
+  `30-agents-vxapp-repo-root.conf` drop-in.
+- `20-jasper-autoresume.conf` and `t3code-autoresume.service` are retired and
+  should not be expected during deployment or recovery.
+- Live validation should include actual browser/HTML proof on `7421`.
+
 ---
 
 ## Repo Map

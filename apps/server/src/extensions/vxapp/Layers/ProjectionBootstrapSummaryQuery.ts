@@ -46,6 +46,7 @@ import {
   ProjectionBootstrapSummaryQuery,
   type ProjectionBootstrapSummaryQueryShape,
 } from "../Services/ProjectionBootstrapSummaryQuery.ts";
+import { filterOwnerProgramsWithExecutiveIds } from "./ownerProgramAuthority.ts";
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 
@@ -587,7 +588,7 @@ const makeProjectionBootstrapSummaryQuery = Effect.gen(function* () {
           );
           const ownerSnapshot = yield* controlPlane.getProgramsAuthoritySnapshot();
           const ownerPrograms: ReadonlyArray<OrchestrationProgram> =
-            ownerSnapshot.programs.map(mapOwnerProgram);
+            filterOwnerProgramsWithExecutiveIds(ownerSnapshot.programs).map(mapOwnerProgram);
           if (vxappBacked) {
             const bindingAuthorityExport = yield* controlPlane.getBindingAuthorityExport();
             bindingAuthority = {

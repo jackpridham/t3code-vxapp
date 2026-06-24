@@ -1,6 +1,6 @@
 ---
 name: t3-skill-catalog-workflow
-description: Use when adding, changing, debugging, or reviewing how T3 Code discovers, lists, inserts, parses, or displays agent skills, especially `.claude/skills`, `SKILL.md`, `//` skill suggestions, `useSkillSuggestions`, `skillCatalog`, `skillReferences`, skill prompt references, skill chips, or configured skills for an agent. Trigger on skill catalog, skill suggestions, agent skills, configured skills, `.claude/skills`, `SKILL.md`, skill mention, skill reference, skill chip, skill picker, or double-slash skills in ChatView.
+description: Use when adding, changing, debugging, or reviewing how T3 Code discovers, lists, inserts, parses, or displays agent skills, especially `.agents/skills`, legacy `.claude/skills`, `SKILL.md`, `//` skill suggestions, `useSkillSuggestions`, `skillCatalog`, `skillReferences`, skill prompt references, skill chips, or configured skills for an agent. Trigger on skill catalog, skill suggestions, agent skills, configured skills, `.agents/skills`, `.claude/skills`, `SKILL.md`, skill mention, skill reference, skill chip, skill picker, or double-slash skills in ChatView.
 ---
 
 # T3 Skill Catalog Workflow
@@ -9,13 +9,21 @@ Use this skill when the app is dealing with agent skills as selectable reference
 
 The current product behavior is:
 
-- skills are discovered from the active project or worktree `.claude/skills` directory
-- only top-level directories under `.claude/skills` are selectable skills
+- skills are discovered from the active project or worktree, preferring `.agents/skills`
+- legacy absolute references under `.claude/skills` must still parse and render correctly
+- only top-level skill directories are selectable skills
 - selecting a skill inserts `@<absolute path to SKILL.md> `
 - composer and message display render that absolute path as a compact skill-name chip
 - copied/sent text preserves the original absolute `@.../SKILL.md` reference
 
 Keep those transport and display concerns separate.
+
+Important boundary:
+
+- this skill documents T3's browser-side skill catalog and prompt-reference UX
+- it does not define native standalone Codex runtime skill discovery
+- native standalone Codex skill discovery currently uses `.agents/skills` plus user/system skill roots
+- do not use legacy `.claude/skills` assumptions to explain what a standalone Codex thread actually had available at runtime
 
 ## Primary Files
 
@@ -67,9 +75,11 @@ It owns:
 - building prompt references
 - parsing prompt references back into skill metadata
 
-Do not make components construct `.claude/skills` paths directly. Do not make `ChatView` or message rendering infer skill roots.
+Do not make components construct skill-root paths directly. Do not make `ChatView` or message rendering infer skill roots.
 
 When adding a new skill source, extend `SkillCatalogRoot` and `resolveSkillCatalogRoots()` first. Examples of future sources might include provider/user/global skills, but do not invent those sources unless the task needs them.
+
+If the task is about runtime truth inside a standalone Codex provider session rather than browser suggestion UX, inspect Codex `skills/list` for the target `cwd` instead of assuming the browser catalog is authoritative.
 
 ## Suggestion Data Flow
 
@@ -80,7 +90,7 @@ detectComposerTrigger()
   -> kind: "skill"
   -> useSkillSuggestions()
   -> projectSkillEntriesQueryOptions()
-  -> projects.searchEntries({ cwd: <root>/.claude/skills, includeIgnored: true })
+  -> projects.searchEntries({ cwd: <root>/.agents/skills, includeIgnored: true })
   -> toSkillCatalogEntry()
   -> buildSkillComposerItems()
   -> ComposerCommandMenu
@@ -104,7 +114,7 @@ The `provider` field exists in `SkillCatalogContext` for future provider-specifi
 
 ## Missing Directory Behavior
 
-Missing `.claude/skills` is not an error in the UI.
+Missing skill directories are not an error in the UI.
 
 `skillReactQuery.ts` intentionally treats ENOENT / missing-path errors as an empty result set. Preserve this behavior so projects without local skills do not show noisy errors.
 
@@ -114,11 +124,13 @@ Do not hide unrelated errors like permission denied or server failures; those sh
 
 Use `buildSkillPromptReference(entry)` to insert a selected skill.
 
-The inserted prompt reference should be:
+The inserted prompt reference should usually be:
 
 ```text
-@/absolute/project/or/worktree/.claude/skills/<skill-name>/SKILL.md[space]
+@/absolute/project/or/worktree/.agents/skills/<skill-name>/SKILL.md[space]
 ```
+
+Legacy `@.../.claude/skills/.../SKILL.md` references must still parse and display.
 
 The `[space]` suffix represents the literal trailing space that is part of the selection UX. Keep replacement range handling in `ChatView` responsible for avoiding double spaces.
 
@@ -139,7 +151,7 @@ Use shared display helpers:
 - trailing punctuation after `SKILL.md`
 - references wrapped in punctuation
 
-Do not show the absolute `.claude/skills/.../SKILL.md` path in normal message or composer display. Do preserve it for copying and sending.
+Do not show the absolute skill path in normal message or composer display. Do preserve it for copying and sending.
 
 ## Server Search Considerations
 
@@ -192,9 +204,9 @@ If tests are relevant, use `bun run test`, never `bun test`.
 
 ## Footguns
 
-- Do not hand-build `.claude/skills` paths in components.
+- Do not hand-build `.agents/skills` or `.claude/skills` paths in components.
 - Do not call `projects.searchEntries` directly for skill suggestions from UI components.
-- Do not treat a missing `.claude/skills` directory as a user-facing error.
+- Do not treat a missing skill directory as a user-facing error.
 - Do not include nested files like `references/foo.md` as selectable skills.
 - Do not drop `includeIgnored: true`; configured skills may be symlinked or ignored.
 - Do not replace absolute `@.../SKILL.md` prompt references with display labels in sent/copied text.

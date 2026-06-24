@@ -56,6 +56,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  deriveRevertTurnCountByUserMessageId,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -481,7 +482,7 @@ export default function ChatView({
   );
   const chatViewInputWhenScrolling = settings.chatViewInputWhenScrolling;
   const ideModeEnabled = settings.ideModeEnabled;
-  const sidebarOrchestrationModeEnabled = settings.sidebarOrchestrationModeEnabled;
+  const sidebarOrchestrationModeEnabled = settings.sidebarVariant === "orchestration";
   const timestampFormat = settings.timestampFormat;
   const workerChatViewVisibility = settings.workerChatViewVisibility;
   const workerOrchestrationNoticesVisibility = settings.workerOrchestrationNoticesVisibility;
@@ -577,7 +578,6 @@ export default function ChatView({
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
   // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false);
-  const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
@@ -611,6 +611,8 @@ export default function ChatView({
     top: number;
   } | null>(null);
   const pendingInteractionAnchorFrameRef = useRef<number | null>(null);
+  const previousTimelineEntriesRef = useRef<ReturnType<typeof deriveTimelineEntries>>([]);
+  const previousTimelineThreadIdRef = useRef<ThreadId | null>(null);
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerFormHeightRef = useRef(0);
@@ -1099,8 +1101,11 @@ export default function ChatView({
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
-  const nowIso = new Date(nowTick).toISOString();
+  const isWorking =
+    (phase === "running" && !latestTurnSettled) ||
+    isSendBusy ||
+    isConnecting ||
+    isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -1297,11 +1302,22 @@ export default function ChatView({
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
-  const timelineEntries = useMemo(
-    () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
-  );
+  const timelineEntries = useMemo(() => {
+    const previousTimelineEntries =
+      previousTimelineThreadIdRef.current === activeThread?.id
+        ? previousTimelineEntriesRef.current
+        : [];
+    return deriveTimelineEntries(
+      timelineMessages,
+      activeThread?.proposedPlans ?? [],
+      workLogEntries,
+      previousTimelineEntries,
+    );
+  }, [activeThread?.id, activeThread?.proposedPlans, timelineMessages, workLogEntries]);
+  useEffect(() => {
+    previousTimelineThreadIdRef.current = activeThread?.id ?? null;
+    previousTimelineEntriesRef.current = timelineEntries;
+  }, [activeThread?.id, timelineEntries]);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
@@ -1313,37 +1329,12 @@ export default function ChatView({
     return byMessageId;
   }, [turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
-    const byUserMessageId = new Map<MessageId, number>();
-    for (let index = 0; index < timelineEntries.length; index += 1) {
-      const entry = timelineEntries[index];
-      if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
-        continue;
-      }
-
-      for (let nextIndex = index + 1; nextIndex < timelineEntries.length; nextIndex += 1) {
-        const nextEntry = timelineEntries[nextIndex];
-        if (!nextEntry || nextEntry.kind !== "message") {
-          continue;
-        }
-        if (nextEntry.message.role === "user") {
-          break;
-        }
-        const summary = turnDiffSummaryByAssistantMessageId.get(nextEntry.message.id);
-        if (!summary) {
-          continue;
-        }
-        const turnCount =
-          summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
-        if (typeof turnCount !== "number") {
-          break;
-        }
-        byUserMessageId.set(entry.message.id, Math.max(0, turnCount - 1));
-        break;
-      }
-    }
-
-    return byUserMessageId;
-  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+    return deriveRevertTurnCountByUserMessageId(
+      timelineMessages,
+      turnDiffSummaryByAssistantMessageId,
+      inferredCheckpointTurnCountByTurnId,
+    );
+  }, [inferredCheckpointTurnCountByTurnId, timelineMessages, turnDiffSummaryByAssistantMessageId]);
 
   const completionDuration = useMemo(() => {
     if (!latestTurnSettled) return null;
@@ -2448,16 +2439,6 @@ export default function ChatView({
     : isLocalDraftThread
       ? (draftThread?.envMode ?? "local")
       : "local";
-
-  useEffect(() => {
-    if (phase !== "running") return;
-    const timer = window.setInterval(() => {
-      setNowTick(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [phase]);
 
   useEffect(() => {
     if (!activeThreadId) return;
@@ -4026,7 +4007,6 @@ export default function ChatView({
                 timelineEntries={timelineEntries}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionDuration={completionDuration}
-                nowIso={nowIso}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}

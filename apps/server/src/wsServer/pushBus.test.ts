@@ -138,7 +138,7 @@ describe("makeServerPushBus", () => {
     ),
   );
 
-  it.live("coalesces queued assistant streaming deltas and preserves final completions", () =>
+  it.live("keeps distinct assistant streaming deltas separate for healthy clients", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const client = new MockWebSocket();
@@ -149,12 +149,12 @@ describe("makeServerPushBus", () => {
         });
 
         yield* Effect.all(
-          Array.from({ length: 50 }, (_, index) =>
+          Array.from({ length: 3 }, (_, index) =>
             pushBus.publishAll(
               ORCHESTRATION_WS_CHANNELS.domainEvent,
               assistantMessageEvent({
                 sequence: index + 1,
-                text: `${index + 1},`,
+                text: String.fromCharCode("a".charCodeAt(0) + index),
                 streaming: true,
               }),
             ),
@@ -163,10 +163,10 @@ describe("makeServerPushBus", () => {
         );
         yield* pushBus.publishAll(
           ORCHESTRATION_WS_CHANNELS.domainEvent,
-          assistantMessageEvent({ sequence: 51, text: "", streaming: false }),
+          assistantMessageEvent({ sequence: 4, text: "", streaming: false }),
         );
 
-        yield* Effect.promise(() => client.waitForSentCount(2));
+        yield* Effect.promise(() => client.waitForSentCount(4));
         const health = yield* pushBus.getHealth;
         const pushes = client.sent.map(
           (message) =>
@@ -176,8 +176,10 @@ describe("makeServerPushBus", () => {
             },
         );
 
-        expect(health.domainEventPublishCount).toBe(51);
-        expect(health.coalescedAssistantDeltaCount).toBeGreaterThan(0);
+        expect(health.domainEventPublishCount).toBe(4);
+        expect(health.coalescedAssistantDeltaCount).toBe(0);
+        expect(pushes.map((push) => push.data.payload.text)).toEqual(["a", "b", "c", ""]);
+        expect(pushes.slice(0, 3).every((push) => push.data.payload.streaming)).toBe(true);
         expect(pushes.at(-1)?.data.payload.streaming).toBe(false);
       }),
     ),

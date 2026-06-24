@@ -1,0 +1,132 @@
+#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === "--version") {
+  console.log("codex-cli 99.0.0");
+  process.exit(0);
+}
+if (args.length === 2 && args[0] === "login" && args[1] === "status") {
+  console.log(JSON.stringify({ authenticated: true }));
+  process.exit(0);
+}
+if (args.length !== 1 || args[0] !== "app-server") {
+  console.error("Unsupported fake Codex command: " + args.join(" "));
+  process.exit(2);
+}
+let remainder = "";
+let providerThreadId = "provider-thread-live-probe";
+let turnCounter = 0;
+const write = (message) => process.stdout.write(JSON.stringify(message) + "\n");
+const respond = (id, result) => write({ id, result });
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+const thread = (cwd) => ({
+  cliVersion: "probe",
+  createdAt: nowSeconds(),
+  cwd,
+  ephemeral: false,
+  id: providerThreadId,
+  modelProvider: "openai",
+  name: "T3Code app-server live probe",
+  path: null,
+  preview: "T3Code app-server live probe",
+  source: "appServer",
+  status: { type: "idle" },
+  turns: [],
+  updatedAt: nowSeconds(),
+});
+const turn = (id, status) => ({
+  completedAt: status === "completed" ? nowSeconds() : null,
+  durationMs: status === "completed" ? 25 : null,
+  error: null,
+  id,
+  items: [],
+  startedAt: nowSeconds(),
+  status,
+});
+const handle = (message) => {
+  if (message.method === "initialize") {
+    respond(message.id, {
+      userAgent: "t3code-live-probe-codex-app-server",
+      codexHome: process.cwd(),
+      platformFamily: process.platform === "win32" ? "windows" : "unix",
+      platformOs: process.platform === "darwin" ? "macos" : process.platform,
+    });
+    return;
+  }
+  if (message.method === "initialized") {
+    return;
+  }
+  if (message.method === "thread/start" || message.method === "thread/resume") {
+    if (message.params && typeof message.params.threadId === "string") {
+      providerThreadId = message.params.threadId;
+    }
+    const payload = {
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      cwd: process.cwd(),
+      instructionSources: [],
+      model: message.params?.model || "gpt-5-codex",
+      modelProvider: "openai",
+      reasoningEffort: null,
+      sandbox: { type: "dangerFullAccess" },
+      serviceTier: null,
+      thread: thread(process.cwd()),
+    };
+    respond(message.id, payload);
+    write({ method: "thread/started", params: { thread: payload.thread } });
+    return;
+  }
+  if (message.method === "turn/start") {
+    turnCounter += 1;
+    const turnId = "provider-turn-live-probe-" + turnCounter;
+    const itemId = "provider-item-live-probe-" + turnCounter;
+    const startedTurn = turn(turnId, "inProgress");
+    respond(message.id, { turn: startedTurn });
+    setTimeout(() => {
+      write({ method: "turn/started", params: { threadId: providerThreadId, turn: startedTurn } });
+      write({
+        method: "item/started",
+        params: {
+          threadId: providerThreadId,
+          turnId,
+          item: { id: itemId, text: "", type: "agentMessage" },
+        },
+      });
+      write({
+        method: "item/agentMessage/delta",
+        params: {
+          delta: "provider final reached browser path",
+          itemId,
+          threadId: providerThreadId,
+          turnId,
+        },
+      });
+      write({
+        method: "item/completed",
+        params: {
+          threadId: providerThreadId,
+          turnId,
+          item: { id: itemId, phase: "final_answer", text: "provider final reached browser path", type: "agentMessage" },
+        },
+      });
+      write({ method: "turn/completed", params: { threadId: providerThreadId, turn: turn(turnId, "completed") } });
+    }, 25);
+    return;
+  }
+  if (message.method === "thread/read") {
+    respond(message.id, { thread: thread(process.cwd()) });
+    return;
+  }
+  if (message.id !== undefined) {
+    write({ id: message.id, error: { code: -32601, message: "Unhandled request: " + message.method } });
+  }
+};
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  remainder += chunk;
+  const lines = remainder.split("\n");
+  remainder = lines.pop() || "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    handle(JSON.parse(line));
+  }
+});

@@ -9,6 +9,10 @@ Use this skill for the provider-runtime side of orchestration: starting sessions
 
 This is the right skill when the bug smells like "the orchestration state and the provider process/session got out of sync."
 
+For deployed recovery, the browser/UI authority is the systemd-managed
+`t3code.service` listening on `7421`. Repo-local dev ports such as `3773` and
+`5733` are not deployed proof.
+
 This is not the right skill for vxapp startup-authority cutovers in the
 projection/bootstrap layers. Those now depend on dedicated startup-safe owner
 surfaces outside the provider callback path.
@@ -267,11 +271,24 @@ Known example:
 Useful diagnostics when `:7421` looks dead:
 
 ```bash
+systemctl status t3code.service --no-pager
+systemctl cat t3code.service
+systemctl cat t3code.service | rg '30-agents-vxapp-repo-root.conf|T3_AGENTS_VXAPP_REPO_ROOT'
 ss -ltnp '( sport = :7421 )'
 curl -sf http://127.0.0.1:7421/ >/dev/null && echo LIVE_7421_OK || echo LIVE_7421_DOWN
 tail -n 20 /home/gizmo/.t3/userdata/logs/server.log
 lsof /home/gizmo/.t3/userdata/state.sqlite
 ```
+
+Deployment notes:
+
+- The live service depends on `T3_AGENTS_VXAPP_REPO_ROOT` coming from the
+  surviving `30-agents-vxapp-repo-root.conf` systemd drop-in.
+- Do not expect `20-jasper-autoresume.conf` or
+  `t3code-autoresume.service`; both are retired and should not appear in
+  recovery docs or deployment checklists.
+- Live validation must include actual browser/HTML proof on `7421`, not only a
+  process check or local-dev port check.
 
 If the real home is locked or wedged, validate perf-sensitive client/server
 logic on an isolated home and port first, then come back and fix the startup or
@@ -280,6 +297,8 @@ recovery blocker on the real home before calling the workflow complete.
 ## Footguns
 
 - Do not patch `ChatView` or browser state first for provider runtime bugs that originate server-side.
+- Do not document or depend on retired `20-jasper-autoresume.conf` or
+  `t3code-autoresume.service` recovery steps.
 - Do not assume resume cursor format is interchangeable across providers.
 - Do not "fix" a resume bug by discarding persisted state unless that semantic loss is intentional.
 - Do not validate only fresh-start behavior when the bug report is about restart/recovery.

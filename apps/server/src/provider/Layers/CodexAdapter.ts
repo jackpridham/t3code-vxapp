@@ -92,6 +92,7 @@ interface ManagedCodexLaunchSettings {
 
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
+  readonly cwd: string;
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
@@ -217,6 +218,43 @@ function readPayload<A>(
 function trimText(value: string | undefined | null): string | undefined {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+const LOCAL_MODEL_REPO_GROUNDING_QUERY_PATTERN =
+  /\b(readme|docs?|documentation|api|route|endpoint|workflow|architecture|repo|repository|service|how does|what does|why does|where is|explain|investigate)\b/i;
+const LOCAL_MODEL_REPO_GROUNDING_README_MAX_CHARS = 12_000;
+
+function shouldApplyLocalModelRepoGrounding(prompt: string | undefined): prompt is string {
+  const trimmed = trimText(prompt);
+  return trimmed !== undefined && LOCAL_MODEL_REPO_GROUNDING_QUERY_PATTERN.test(trimmed);
+}
+
+function truncateRepoGroundingReadmePreview(input: string): string {
+  if (input.length <= LOCAL_MODEL_REPO_GROUNDING_README_MAX_CHARS) {
+    return input;
+  }
+  return `${input.slice(0, LOCAL_MODEL_REPO_GROUNDING_README_MAX_CHARS).trimEnd()}\n...[truncated]`;
+}
+
+function buildLocalModelRepoGroundingPrompt(input: {
+  readonly prompt: string;
+  readonly readmePreview?: string;
+}): string {
+  const sections = [
+    "<repo_grounding_guard>",
+    "You are answering inside a local repository workspace.",
+    "For repository, documentation, API, architecture, or workflow questions:",
+    "1. Read `README.md` in the workspace root before answering.",
+    "2. Follow the most relevant linked README or doc before answering.",
+    "3. Do not answer from memory if workspace files should be the source of truth.",
+    "4. Cite the repo-relative file path(s) you relied on in the final answer.",
+    "5. If the docs do not answer the question, say that directly instead of guessing.",
+  ];
+  if (input.readmePreview) {
+    sections.push("", "Workspace root README preview:", "```md", input.readmePreview, "```");
+  }
+  sections.push("</repo_grounding_guard>", "", "User request:", input.prompt);
+  return sections.join("\n");
 }
 
 const FATAL_CODEX_STDERR_SNIPPETS = ["failed to connect to websocket"];
@@ -1640,6 +1678,7 @@ export const makeManagedCodexAdapter = Effect.fn("makeManagedCodexAdapter")(func
 
         sessions.set(input.threadId, {
           threadId: input.threadId,
+          cwd: runtimeInput.cwd,
           scope: sessionScope,
           runtime,
           eventFiber,
@@ -1683,6 +1722,23 @@ export const makeManagedCodexAdapter = Effect.fn("makeManagedCodexAdapter")(func
     };
   });
 
+  const maybeApplyLocalModelRepoGrounding = Effect.fn("maybeApplyLocalModelRepoGrounding")(
+    function* (input: { readonly cwd: string; readonly prompt?: string }) {
+      if (provider !== "ollamaLocal" || !shouldApplyLocalModelRepoGrounding(input.prompt)) {
+        return input.prompt;
+      }
+      const readmePath = path.join(input.cwd, "README.md");
+      const readmePreview = yield* fileSystem.readFileString(readmePath).pipe(
+        Effect.map((contents) => truncateRepoGroundingReadmePreview(contents)),
+        Effect.orElseSucceed(() => undefined),
+      );
+      return buildLocalModelRepoGroundingPrompt({
+        prompt: input.prompt,
+        ...(readmePreview ? { readmePreview } : {}),
+      });
+    },
+  );
+
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
     const codexAttachments = yield* Effect.forEach(
       input.attachments ?? [],
@@ -1704,9 +1760,13 @@ export const makeManagedCodexAdapter = Effect.fn("makeManagedCodexAdapter")(func
       "sendTurn",
       input.modelSelection?.provider === provider ? input.modelSelection.model : undefined,
     );
+    const groundedInput = yield* maybeApplyLocalModelRepoGrounding({
+      cwd: session.cwd,
+      ...(input.input !== undefined ? { prompt: input.input } : {}),
+    });
     return yield* session.runtime
       .sendTurn({
-        ...(input.input !== undefined ? { input: input.input } : {}),
+        ...(groundedInput !== undefined ? { input: groundedInput } : {}),
         ...(input.modelSelection?.provider === provider
           ? { model: input.modelSelection.model }
           : {}),

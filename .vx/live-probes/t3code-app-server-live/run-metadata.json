@@ -1,0 +1,12 @@
+{
+  "proof_kind": "harness/shim",
+  "real_provider": false,
+  "real_provider_proof_blocker": "This probe installs a deterministic fake Codex app-server shim; real provider proof requires running against an authenticated real Codex CLI/app-server without the shimmed binary.",
+  "port": 39661,
+  "fakeCodexPath": "/home/gizmo/t3code-vxapp/.vx/live-probes/t3code-app-server-live/bin/codex",
+  "t3Home": "/home/gizmo/t3code-vxapp/.vx/live-probes/t3code-app-server-live/t3-home",
+  "activeProgramId": "c34b07db-5716-4d8f-a830-dd4f47037646",
+  "ctoThreadId": "thread-3323f8d5fb2e",
+  "jasperThreadId": "thread-be41f9805865",
+  "startedAt": "2026-06-09T02:59:28.197Z"
+}

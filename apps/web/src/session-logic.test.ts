@@ -11,6 +11,7 @@ import {
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveRevertTurnCountByUserMessageId,
   PROVIDER_OPTIONS,
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -1486,6 +1487,47 @@ describe("deriveTimelineEntries", () => {
       }),
     ).toBe("assistant-final");
   });
+
+  it("reuses unchanged entries by reference when only the active assistant message changes", () => {
+    const userMessage = {
+      id: MessageId.makeUnsafe("message-user"),
+      role: "user" as const,
+      text: "Investigate",
+      createdAt: "2026-02-23T00:00:00.000Z",
+      streaming: false,
+    };
+    const assistantMessage = {
+      id: MessageId.makeUnsafe("message-assistant"),
+      role: "assistant" as const,
+      text: "Starting",
+      createdAt: "2026-02-23T00:00:01.000Z",
+      streaming: true,
+    };
+    const workEntry = {
+      id: "work-1",
+      createdAt: "2026-02-23T00:00:00.500Z",
+      label: "Read file",
+      tone: "tool" as const,
+    };
+
+    const initialEntries = deriveTimelineEntries([userMessage, assistantMessage], [], [workEntry]);
+    const updatedEntries = deriveTimelineEntries(
+      [
+        userMessage,
+        {
+          ...assistantMessage,
+          text: "Starting to inspect the render path",
+        },
+      ],
+      [],
+      [workEntry],
+      initialEntries,
+    );
+
+    expect(updatedEntries[0]).toBe(initialEntries[0]);
+    expect(updatedEntries[1]).toBe(initialEntries[1]);
+    expect(updatedEntries[2]).not.toBe(initialEntries[2]);
+  });
 });
 
 describe("deriveWorkLogEntries context window handling", () => {
@@ -1531,6 +1573,121 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
   });
+
+  it("ignores hidden tool and task lifecycle events before sorting visible work rows", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "hidden-tool-start",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          turnId: "turn-1",
+          kind: "tool.started",
+          summary: "Started command",
+          tone: "tool",
+        }),
+        makeActivity({
+          id: "visible-tool-complete",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          turnId: "turn-1",
+          kind: "tool.completed",
+          summary: "Ran command",
+          tone: "tool",
+        }),
+        makeActivity({
+          id: "hidden-task-complete",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          turnId: "turn-1",
+          kind: "task.completed",
+          summary: "Task completed",
+          tone: "info",
+        }),
+      ],
+      TurnId.makeUnsafe("turn-1"),
+    );
+
+    expect(entries).toEqual([
+      expect.objectContaining({
+        id: "visible-tool-complete",
+        label: "Ran command",
+      }),
+    ]);
+  });
+});
+
+describe("deriveRevertTurnCountByUserMessageId", () => {
+  it("uses the first assistant summary after each user message", () => {
+    const userMessageId = MessageId.makeUnsafe("user-1");
+    const assistantMessageId = MessageId.makeUnsafe("assistant-1");
+    const entries = deriveRevertTurnCountByUserMessageId(
+      [
+        {
+          id: userMessageId,
+          role: "user",
+          text: "hello",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          streaming: false,
+        },
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          text: "hi",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          streaming: false,
+        },
+      ],
+      new Map([
+        [
+          assistantMessageId,
+          {
+            turnId: TurnId.makeUnsafe("turn-2"),
+            completedAt: "2026-02-23T00:00:03.000Z",
+            checkpointTurnCount: 4,
+            files: [],
+          },
+        ],
+      ]),
+      {},
+    );
+
+    expect(entries.get(userMessageId)).toBe(3);
+  });
+
+  it("falls back to inferred checkpoint counts when the summary omits checkpointTurnCount", () => {
+    const userMessageId = MessageId.makeUnsafe("user-2");
+    const assistantMessageId = MessageId.makeUnsafe("assistant-2");
+    const turnId = TurnId.makeUnsafe("turn-5");
+    const entries = deriveRevertTurnCountByUserMessageId(
+      [
+        {
+          id: userMessageId,
+          role: "user",
+          text: "ship it",
+          createdAt: "2026-02-23T00:00:10.000Z",
+          streaming: false,
+        },
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          text: "working",
+          createdAt: "2026-02-23T00:00:11.000Z",
+          streaming: true,
+        },
+      ],
+      new Map([
+        [
+          assistantMessageId,
+          {
+            turnId,
+            completedAt: "2026-02-23T00:00:12.000Z",
+            files: [],
+          },
+        ],
+      ]),
+      { [turnId]: 2 },
+    );
+
+    expect(entries.get(userMessageId)).toBe(1);
+  });
 });
 
 describe("hasToolActivityForTurn", () => {
@@ -1561,13 +1718,13 @@ describe("isLatestTurnSettled", () => {
     completedAt: "2026-02-27T21:10:06.000Z",
   } as const;
 
-  it("returns false while the same turn is still active in a running session", () => {
+  it("returns true when the latest turn is completed even if the session status is stale running", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
         orchestrationStatus: "running",
         activeTurnId: TurnId.makeUnsafe("turn-1"),
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("returns false while any turn is running to avoid stale latest-turn banners", () => {
@@ -1583,6 +1740,15 @@ describe("isLatestTurnSettled", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
         orchestrationStatus: "ready",
+        activeTurnId: undefined,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns true when the running session has no active turn id for a completed latest turn", () => {
+    expect(
+      isLatestTurnSettled(latestTurn, {
+        orchestrationStatus: "running",
         activeTurnId: undefined,
       }),
     ).toBe(true);
@@ -1615,7 +1781,7 @@ describe("deriveActiveWorkStartedAt", () => {
         latestTurn,
         {
           orchestrationStatus: "running",
-          activeTurnId: TurnId.makeUnsafe("turn-1"),
+          activeTurnId: TurnId.makeUnsafe("turn-2"),
         },
         "2026-02-27T21:11:00.000Z",
       ),
@@ -1653,15 +1819,22 @@ describe("deriveActiveWorkStartedAt", () => {
 describe("PROVIDER_OPTIONS", () => {
   it("advertises Claude as available while keeping Cursor as a placeholder", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeAgent");
+    const ollama = PROVIDER_OPTIONS.find((option) => option.value === "ollamaLocal");
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
       { value: "claudeAgent", label: "Claude", available: true },
+      { value: "ollamaLocal", label: "Ollama", available: true },
       { value: "cursor", label: "Cursor", available: false },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",
       label: "Claude",
+      available: true,
+    });
+    expect(ollama).toEqual({
+      value: "ollamaLocal",
+      label: "Ollama",
       available: true,
     });
     expect(cursor).toEqual({

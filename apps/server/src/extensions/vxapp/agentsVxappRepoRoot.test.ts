@@ -62,12 +62,16 @@ describe("agentsVxappRepoRoot resolution", () => {
     );
   });
 
-  it("fails closed instead of using sibling checkout as owner-client authority", async () => {
+  it("uses the validated sibling checkout when env aliases are unset", async () => {
     for (const alias of ENV_ALIASES) {
       delete process.env[alias];
     }
 
-    await expect(loadMissingEnvModule()).rejects.toThrow("sibling checkout");
+    const module = await loadMissingEnvModule();
+
+    expect(module.AGENTS_VXAPP_REPO_ROOT).toBe(
+      path.resolve(import.meta.dirname, "../../../../../../agents-vxapp"),
+    );
   });
 
   it("fails closed when repo-root env aliases disagree", async () => {

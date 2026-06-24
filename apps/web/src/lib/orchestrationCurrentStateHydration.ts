@@ -58,6 +58,13 @@ function threadSummaryToReadModelThread(
   };
 }
 
+function isRoleAuthorityThread(thread: OrchestrationThreadSummary): boolean {
+  return (
+    thread.spawnRole === "supervisor" ||
+    (typeof thread.worktreePath === "string" && thread.worktreePath.includes("/role-sessions/"))
+  );
+}
+
 function mergeSessionThreadsIntoReadModel(
   readModel: OrchestrationReadModel,
   sessionThreads: readonly OrchestrationThreadSummary[],
@@ -144,24 +151,35 @@ function emptyActiveThreadReadModel(input: {
 async function resolveTargetThreadSummaries(
   api: NativeApi,
   threadId: ThreadId,
+  mode: TargetedHydrationMode,
 ): Promise<readonly OrchestrationThreadSummary[]> {
   const sessionThreads = await api.orchestration.listSessionThreads({
     rootThreadId: threadId,
     includeArchived: true,
     includeDeleted: false,
   });
-  if (sessionThreads.some((thread) => thread.id === threadId && thread.deletedAt === null)) {
-    return sessionThreads;
-  }
-
   const directThread = await api.orchestration.getThreadById({ threadId });
   if (!directThread || directThread.deletedAt !== null) {
-    return [];
+    return sessionThreads.some((thread) => thread.id === threadId && thread.deletedAt === null)
+      ? sessionThreads
+      : [];
   }
-  if (sessionThreads.some((thread) => thread.id === directThread.id)) {
-    return sessionThreads;
+  const directThreadMatchesTarget = directThread.id === threadId;
+  const directThreadIsRoleAuthority = isRoleAuthorityThread(directThread);
+  if (mode === "thread" && directThreadMatchesTarget && directThreadIsRoleAuthority) {
+    return [directThread];
   }
-  return [...sessionThreads, directThread];
+  if (!directThreadMatchesTarget) {
+    return sessionThreads.some((thread) => thread.id === threadId && thread.deletedAt === null)
+      ? sessionThreads
+      : [];
+  }
+  const replaced = sessionThreads.map((thread) =>
+    thread.id === directThread.id ? directThread : thread,
+  );
+  return sessionThreads.some((thread) => thread.id === directThread.id)
+    ? replaced
+    : [...sessionThreads, directThread];
 }
 
 async function resolveFullProjectsForThreads(
@@ -202,12 +220,19 @@ async function fetchTargetedThreadDetailFragment(input: {
   includeOrchestratorWakes: boolean;
 }): Promise<TargetedThreadDetailFragment> {
   const snapshotSequence = (await input.api.orchestration.getReadiness()).snapshotSequence;
-  const threadSummaries = await resolveTargetThreadSummaries(input.api, input.threadId);
+  const threadSummaries = await resolveTargetThreadSummaries(input.api, input.threadId, input.mode);
+  const resolvedMode =
+    input.mode === "orchestrator-session" ||
+    threadSummaries.some(
+      (thread) => thread.id === input.threadId && thread.spawnRole === "orchestrator",
+    )
+      ? "orchestrator-session"
+      : "thread";
   if (threadSummaries.length === 0) {
     return {
       found: false,
       snapshotSequence,
-      mode: input.mode,
+      mode: resolvedMode,
       threadId: input.threadId,
       projects: [],
       threadSummaries: [],
@@ -226,7 +251,7 @@ async function fetchTargetedThreadDetailFragment(input: {
     return {
       found: false,
       snapshotSequence,
-      mode: input.mode,
+      mode: resolvedMode,
       threadId: input.threadId,
       projects: [],
       threadSummaries: [],
@@ -257,7 +282,7 @@ async function fetchTargetedThreadDetailFragment(input: {
   ]);
 
   const workerThreadIds =
-    input.mode === "orchestrator-session"
+    resolvedMode === "orchestrator-session"
       ? threadSummaries
           .filter((thread) => thread.id !== input.threadId && thread.spawnRole === "worker")
           .map((thread) => thread.id)
@@ -274,7 +299,7 @@ async function fetchTargetedThreadDetailFragment(input: {
   return {
     found: true,
     snapshotSequence,
-    mode: input.mode,
+    mode: resolvedMode,
     threadId: input.threadId,
     projects,
     threadSummaries,
@@ -334,13 +359,19 @@ function mergeTargetedThreadDetailFragment(
     },
     fragment.threadSummaries,
   );
+  const targetThreadSummary = fragment.threadSummaries.find(
+    (thread) => thread.id === fragment.threadId,
+  );
   const threads = mergedWithThreads.threads.map((thread) => {
     if (thread.id === fragment.threadId) {
       return {
         ...thread,
         messages: [...fragment.messages],
         activities: [...fragment.activities],
-        session: fragment.sessions[0] ?? thread.session,
+        session:
+          targetThreadSummary && isRoleAuthorityThread(targetThreadSummary)
+            ? targetThreadSummary.session
+            : (fragment.sessions[0] ?? thread.session),
         snapshotCoverage: {
           messageCount: fragment.messages.length,
           messageLimit:

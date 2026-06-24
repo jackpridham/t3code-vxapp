@@ -12,6 +12,10 @@ describe("skillCatalog", () => {
     expect(resolveSkillCatalogRoots({ projectCwd: "/workspace/app" })).toEqual([
       {
         source: "project",
+        rootPath: "/workspace/app/.agents/skills",
+      },
+      {
+        source: "project",
         rootPath: "/workspace/app/.claude/skills",
       },
     ]);
@@ -26,6 +30,10 @@ describe("skillCatalog", () => {
     ).toEqual([
       {
         source: "worktree",
+        rootPath: "/workspace/app-worktree/.agents/skills",
+      },
+      {
+        source: "worktree",
         rootPath: "/workspace/app-worktree/.claude/skills",
       },
     ]);
@@ -34,33 +42,33 @@ describe("skillCatalog", () => {
   it("maps top-level directories to catalog entries", () => {
     expect(
       toSkillCatalogEntry(
-        { source: "project", rootPath: "/workspace/app/.claude/skills" },
+        { source: "project", rootPath: "/workspace/app/.agents/skills" },
         { path: "find-skills", kind: "directory" },
       ),
     ).toEqual({
-      id: "project:/workspace/app/.claude/skills/find-skills/SKILL.md",
+      id: "project:/workspace/app/.agents/skills/find-skills/SKILL.md",
       name: "find-skills",
       source: "project",
-      rootPath: "/workspace/app/.claude/skills",
+      rootPath: "/workspace/app/.agents/skills",
       relativeDirectory: "find-skills",
-      skillMarkdownPath: "/workspace/app/.claude/skills/find-skills/SKILL.md",
-      displayPath: "/workspace/app/.claude/skills/find-skills/SKILL.md",
+      skillMarkdownPath: "/workspace/app/.agents/skills/find-skills/SKILL.md",
+      displayPath: "/workspace/app/.agents/skills/find-skills/SKILL.md",
     });
   });
 
   it("ignores nested skill entries", () => {
     expect(
       toSkillCatalogEntry(
-        { source: "project", rootPath: "/workspace/app/.claude/skills" },
+        { source: "project", rootPath: "/workspace/app/.agents/skills" },
         { path: "find-skills/SKILL.md", kind: "file" },
       ),
     ).toBeNull();
   });
 
   it("builds and parses prompt references", () => {
-    const skillMarkdownPath = "/workspace/app/.claude/skills/find-skills/SKILL.md";
+    const skillMarkdownPath = "/workspace/app/.agents/skills/find-skills/SKILL.md";
     expect(buildSkillPromptReference({ skillMarkdownPath })).toBe(
-      "@/workspace/app/.claude/skills/find-skills/SKILL.md ",
+      "@/workspace/app/.agents/skills/find-skills/SKILL.md ",
     );
     expect(parseSkillPromptReference(skillMarkdownPath)).toEqual({
       skillName: "find-skills",

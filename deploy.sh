@@ -67,6 +67,11 @@ BUN_BIN="${BUN_BIN:-$(yaml_tool_value "$TOOLCHAIN_CONFIG" bun default)}"
 NODE_BIN="${NODE_BIN:-$(yaml_tool_value "$TOOLCHAIN_CONFIG" node default)}"
 VX_BIN="${VX_BIN:-$(yaml_tool_value "$TOOLCHAIN_CONFIG" vx default)}"
 SERVICE_NAME="${SERVICE_NAME:-$(yaml_top_value "$DEPLOY_CONFIG" serviceName)}"
+SYSTEMD_DROPIN_DIR="/etc/systemd/system/${SERVICE_NAME}.service.d"
+REPO_ROOT_DROPIN="${SYSTEMD_DROPIN_DIR}/30-agents-vxapp-repo-root.conf"
+AUTORESUME_DROPIN="${SYSTEMD_DROPIN_DIR}/20-jasper-autoresume.conf"
+AUTORESUME_UNIT_BASENAME="t3code-autoresume.service"
+AUTORESUME_UNIT="/etc/systemd/system/${AUTORESUME_UNIT_BASENAME}"
 HOST_ENV_KEY="$(yaml_nested_value "$DEPLOY_CONFIG" host env)"
 HOST_DEFAULT="$(yaml_nested_value "$DEPLOY_CONFIG" host default)"
 PORT_ENV_KEY="$(yaml_nested_value "$DEPLOY_CONFIG" port env)"
@@ -195,19 +200,6 @@ resolve_agents_vxapp_repo_root() {
     export T3_AGENTS_VXAPP_REPO_ROOT="$AGENTS_VXAPP_REPO_ROOT"
 }
 
-set_systemd_repo_link_env() {
-    resolve_agents_vxapp_repo_root
-
-    if can_use_sudo_systemctl; then
-        sudo -n systemctl set-environment "T3_AGENTS_VXAPP_REPO_ROOT=$AGENTS_VXAPP_REPO_ROOT"
-        return 0
-    fi
-
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl set-environment "T3_AGENTS_VXAPP_REPO_ROOT=$AGENTS_VXAPP_REPO_ROOT" >/dev/null 2>&1 || true
-    fi
-}
-
 service_is_active() {
     if ! command -v systemctl >/dev/null 2>&1; then
         return 1
@@ -217,6 +209,30 @@ service_is_active() {
 
 can_use_sudo_systemctl() {
     command -v systemctl >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+}
+
+can_manage_systemd_service() {
+    command -v systemctl >/dev/null 2>&1 && ([[ "${EUID:-$(id -u)}" -eq 0 ]] || can_use_sudo_systemctl)
+}
+
+run_system_service_cmd() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        "$@"
+        return 0
+    fi
+
+    sudo -n "$@"
+}
+
+install_repo_root_dropin() {
+    resolve_agents_vxapp_repo_root
+    run_system_service_cmd install -d "$SYSTEMD_DROPIN_DIR"
+    printf '[Service]\nEnvironment=T3_AGENTS_VXAPP_REPO_ROOT=%s\n' "$AGENTS_VXAPP_REPO_ROOT" |
+        run_system_service_cmd tee "$REPO_ROOT_DROPIN" >/dev/null
+}
+
+retire_autoresume_systemd_units() {
+    run_system_service_cmd rm -f "$AUTORESUME_DROPIN" "$AUTORESUME_UNIT"
 }
 
 wait_for_http() {
@@ -356,24 +372,19 @@ EOF
 restart_via_systemd() {
     step "Restarting systemd service"
     prepare_startup_wake_suppression
-    set_systemd_repo_link_env
-
-    if can_use_sudo_systemctl; then
-        sudo -n systemctl restart "$SERVICE_NAME"
-        wait_for_http || return 1
-        verify_systemd_service || return 1
-        wake_cto_after_deploy || return 1
-        return 0
+    if ! can_manage_systemd_service; then
+        return 1
     fi
 
-    if systemctl restart "$SERVICE_NAME" >/dev/null 2>&1; then
-        wait_for_http || return 1
-        verify_systemd_service || return 1
-        wake_cto_after_deploy || return 1
-        return 0
-    fi
+    install_repo_root_dropin
+    retire_autoresume_systemd_units
+    run_system_service_cmd systemctl daemon-reload
+    run_system_service_cmd systemctl restart "$SERVICE_NAME"
+    wait_for_http || return 1
+    verify_systemd_service || return 1
+    wake_cto_after_deploy || return 1
+    return 0
 
-    return 1
 }
 
 start_direct_process() {

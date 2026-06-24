@@ -232,6 +232,65 @@ it.effect("forwards ollamaLocal model selection without codex-only turn options"
   }),
 );
 
+it.effect("injects repo grounding context for docs-like ollamaLocal turns", () =>
+  Effect.gen(function* () {
+    const runtimeFactory = makeRuntimeFactory();
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "t3-ollama-codex-home-"));
+    const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-ollama-docs-repo-"));
+    fs.writeFileSync(
+      path.join(repoDir, "README.md"),
+      "# Repo Docs\n\nThis repo documents the API and architecture.\n",
+      "utf8",
+    );
+    const layer = makeOllamaAdapterLive({ makeRuntime: runtimeFactory.factory }).pipe(
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(
+        ServerSettingsService.layerTest({
+          providers: {
+            ollamaLocal: {
+              codexHomePath: codexHome,
+            },
+          },
+        }),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    const adapter = yield* Effect.service(OllamaAdapter).pipe(Effect.provide(layer));
+
+    yield* adapter
+      .startSession({
+        provider: "ollamaLocal",
+        threadId: asThreadId("thread-ollama-grounding"),
+        runtimeMode: "full-access",
+        cwd: repoDir,
+      })
+      .pipe(Effect.provide(layer));
+
+    const runtime = runtimeFactory.lastRuntime;
+    assert.ok(runtime);
+    runtime.sendTurnImpl.mockClear();
+
+    yield* adapter
+      .sendTurn({
+        threadId: asThreadId("thread-ollama-grounding"),
+        input: "How does this repo's API work?",
+        modelSelection: createModelSelection("ollamaLocal", "qwen3:8b"),
+      })
+      .pipe(Effect.provide(layer));
+
+    const sentInput = runtime.sendTurnImpl.mock.calls[0]?.[0];
+    assert.ok(sentInput);
+    assert.equal(sentInput.model, "qwen3:8b");
+    assert.match(sentInput.input ?? "", /<repo_grounding_guard>/);
+    assert.match(
+      sentInput.input ?? "",
+      /Read `README\.md` in the workspace root before answering\./,
+    );
+    assert.match(sentInput.input ?? "", /# Repo Docs/);
+    assert.match(sentInput.input ?? "", /How does this repo's API work\?/);
+  }),
+);
+
 it.effect(
   "rejects unsupported ollamaLocal models before starting a Codex-backed agent session",
   () =>

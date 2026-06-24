@@ -124,6 +124,17 @@ function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function ownerMessagePayload(value: unknown): { messageId: string | null; text: string | null } {
+  const record = asRecord(value);
+  if (!record) {
+    return { messageId: null, text: null };
+  }
+  return {
+    messageId: asNonEmptyString(record.messageId),
+    text: asNonEmptyString(record.text),
+  };
+}
+
 function ownerThreadTurnStartCommandFromPayload(
   value: unknown,
   createdAt: string,
@@ -134,8 +145,10 @@ function ownerThreadTurnStartCommandFromPayload(
   }
   const requestId = asNonEmptyString(providerRequest.requestId);
   const threadId = asNonEmptyString(providerRequest.threadId);
-  const message = asNonEmptyString(providerRequest.prompt ?? providerRequest.message);
-  const messageId = asNonEmptyString(providerRequest.messageId);
+  const nestedMessage = ownerMessagePayload(providerRequest.message);
+  const message =
+    nestedMessage.text ?? asNonEmptyString(providerRequest.prompt ?? providerRequest.message);
+  const messageId = nestedMessage.messageId ?? asNonEmptyString(providerRequest.messageId);
   if (!requestId || !threadId || !message || !messageId) {
     return null;
   }

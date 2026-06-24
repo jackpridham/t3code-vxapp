@@ -49,4 +49,13 @@ describe("Phase 05 deploy config", () => {
       'VX_BIN="${VX_BIN:-$(yaml_tool_value "$TOOLCHAIN_CONFIG" vx default)}"',
     );
   });
+
+  it("owns the deployed repo-root drop-in and retires the jasper autoresume unit", () => {
+    const deployScript = read("deploy.sh");
+
+    expect(deployScript).toContain("30-agents-vxapp-repo-root.conf");
+    expect(deployScript).toContain("20-jasper-autoresume.conf");
+    expect(deployScript).toContain("t3code-autoresume.service");
+    expect(deployScript).toContain("daemon-reload");
+  });
 });

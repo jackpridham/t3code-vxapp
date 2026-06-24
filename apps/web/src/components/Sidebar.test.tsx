@@ -16,7 +16,9 @@ vi.mock("@tanstack/react-router", () => ({
     return options?.select ? options.select(location) : location;
   },
   useNavigate: () => state.navigate,
-  useRouterState: (options?: { select?: (state: { location: { pathname: string } }) => unknown }) => {
+  useRouterState: (options?: {
+    select?: (state: { location: { pathname: string } }) => unknown;
+  }) => {
     const routerState = { location: { pathname: state.pathname } };
     return options?.select ? options.select(routerState) : routerState;
   },
@@ -54,7 +56,7 @@ vi.mock("./ui/button", () => ({
     children,
     onClick,
     ...props
-  }: PropsWithChildren<{ onClick?: () => void } & Record<string, unknown>>) => (
+  }: PropsWithChildren<{ onClick?: () => void } & Record<string, unknown>>) =>
     (() => {
       const ariaLabel = props["aria-label"];
       if (typeof ariaLabel === "string") {
@@ -65,8 +67,7 @@ vi.mock("./ui/button", () => ({
           {children}
         </button>
       );
-    })()
-  ),
+    })(),
 }));
 
 vi.mock("./ui/tooltip", () => ({
@@ -130,7 +131,7 @@ vi.mock("./ProjectSidebar", async () => {
   return {
     ...actual,
     default: ({ mode }: { mode?: "app" | "standalone" }) => (
-      <actual.ProjectSidebarShell mode={mode}>
+      <actual.ProjectSidebarShell {...(mode ? { mode } : {})}>
         <div data-mode={mode ?? "app"} data-testid="project-sidebar" />
       </actual.ProjectSidebarShell>
     ),
@@ -144,7 +145,7 @@ vi.mock("~/features/vxapp/components/OrchestrationSidebar", async () => {
   return {
     ...actual,
     default: ({ mode }: { mode?: "app" | "standalone" }) => (
-      <actual.OrchestrationSidebarShell mode={mode}>
+      <actual.OrchestrationSidebarShell {...(mode ? { mode } : {})}>
         <div data-mode={mode ?? "app"} data-testid="orchestration-sidebar" />
       </actual.OrchestrationSidebarShell>
     ),

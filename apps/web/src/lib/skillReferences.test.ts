@@ -11,22 +11,22 @@ import {
 
 describe("skillReferences", () => {
   it("builds a skills root path under the project cwd", () => {
-    expect(buildSkillsRootPath("/workspace/app")).toBe("/workspace/app/.claude/skills");
+    expect(buildSkillsRootPath("/workspace/app")).toBe("/workspace/app/.agents/skills");
   });
 
   it("builds the absolute SKILL.md path for a selected skill", () => {
-    expect(buildSkillMarkdownPath("/workspace/app/.claude/skills", "find-skills")).toBe(
-      "/workspace/app/.claude/skills/find-skills/SKILL.md",
+    expect(buildSkillMarkdownPath("/workspace/app/.agents/skills", "find-skills")).toBe(
+      "/workspace/app/.agents/skills/find-skills/SKILL.md",
     );
   });
 
-  it("detects skill reference paths and extracts the skill name", () => {
-    const skillPath = "/workspace/app/.claude/skills/find-skills/SKILL.md";
+  it("detects native .agents skill reference paths and extracts the skill name", () => {
+    const skillPath = "/workspace/app/.agents/skills/find-skills/SKILL.md";
     expect(isSkillReferencePath(skillPath)).toBe(true);
     expect(getSkillReferenceName(skillPath)).toBe("find-skills");
   });
 
-  it("extracts a skill name from windows-style paths", () => {
+  it("extracts a skill name from legacy .claude windows-style paths", () => {
     expect(
       getSkillReferenceName("C:\\workspace\\app\\.claude\\skills\\find-skills\\SKILL.md"),
     ).toBe("find-skills");
@@ -34,20 +34,20 @@ describe("skillReferences", () => {
 
   it("maps top-level skill directory entries into selectable skill entries", () => {
     expect(
-      toProjectSkillEntry("/workspace/app/.claude/skills", {
+      toProjectSkillEntry("/workspace/app/.agents/skills", {
         path: "find-skills",
         kind: "directory",
       }),
     ).toEqual({
       name: "find-skills",
       relativeDirectory: "find-skills",
-      skillMarkdownPath: "/workspace/app/.claude/skills/find-skills/SKILL.md",
+      skillMarkdownPath: "/workspace/app/.agents/skills/find-skills/SKILL.md",
     });
   });
 
   it("ignores nested workspace entries that are not top-level skills", () => {
     expect(
-      toProjectSkillEntry("/workspace/app/.claude/skills", {
+      toProjectSkillEntry("/workspace/app/.agents/skills", {
         path: "find-skills/references",
         kind: "directory",
       }),
@@ -57,14 +57,14 @@ describe("skillReferences", () => {
   it("splits user-visible text around inline skill references", () => {
     expect(
       splitTextIntoSkillReferenceSegments(
-        "Use @/workspace/app/.claude/skills/find-skills/SKILL.md before continuing",
+        "Use @/workspace/app/.agents/skills/find-skills/SKILL.md before continuing",
       ),
     ).toEqual([
       { type: "text", text: "Use " },
       {
         type: "skill",
         skillName: "find-skills",
-        skillMarkdownPath: "/workspace/app/.claude/skills/find-skills/SKILL.md",
+        skillMarkdownPath: "/workspace/app/.agents/skills/find-skills/SKILL.md",
       },
       { type: "text", text: " before continuing" },
     ]);
@@ -73,14 +73,14 @@ describe("skillReferences", () => {
   it("keeps trailing punctuation outside rendered skill references", () => {
     expect(
       splitTextIntoSkillReferenceSegments(
-        "Use @/workspace/app/.claude/skills/find-skills/SKILL.md, then continue.",
+        "Use @/workspace/app/.agents/skills/find-skills/SKILL.md, then continue.",
       ),
     ).toEqual([
       { type: "text", text: "Use " },
       {
         type: "skill",
         skillName: "find-skills",
-        skillMarkdownPath: "/workspace/app/.claude/skills/find-skills/SKILL.md",
+        skillMarkdownPath: "/workspace/app/.agents/skills/find-skills/SKILL.md",
       },
       { type: "text", text: ", then continue." },
     ]);
@@ -89,14 +89,14 @@ describe("skillReferences", () => {
   it("recognizes skill references wrapped in punctuation", () => {
     expect(
       splitTextIntoSkillReferenceSegments(
-        "Run (@/workspace/app/.claude/skills/find-skills/SKILL.md) before continuing.",
+        "Run (@/workspace/app/.agents/skills/find-skills/SKILL.md) before continuing.",
       ),
     ).toEqual([
       { type: "text", text: "Run (" },
       {
         type: "skill",
         skillName: "find-skills",
-        skillMarkdownPath: "/workspace/app/.claude/skills/find-skills/SKILL.md",
+        skillMarkdownPath: "/workspace/app/.agents/skills/find-skills/SKILL.md",
       },
       { type: "text", text: ") before continuing." },
     ]);

@@ -5,6 +5,7 @@ import {
   buildSkillsRootPath,
   getSkillReferenceName,
   isTopLevelSkillDirectoryEntry,
+  joinFilePath,
 } from "./skillReferences";
 
 export interface SkillCatalogContext {
@@ -43,6 +44,10 @@ export function resolveSkillCatalogRoots(context: SkillCatalogContext): SkillCat
     {
       source: context.worktreePath ? "worktree" : "project",
       rootPath: buildSkillsRootPath(activeCwd),
+    },
+    {
+      source: context.worktreePath ? "worktree" : "project",
+      rootPath: joinFilePath(activeCwd, ".claude/skills"),
     },
   ];
 }

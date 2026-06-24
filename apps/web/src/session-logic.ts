@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
+  type MessageId,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
@@ -164,7 +165,13 @@ export function isLatestTurnSettled(
   if (!latestTurn?.startedAt) return false;
   if (!latestTurn.completedAt) return false;
   if (!session) return true;
-  if (session.orchestrationStatus === "running") return false;
+  if (
+    session.orchestrationStatus === "running" &&
+    session.activeTurnId &&
+    session.activeTurnId !== latestTurn.turnId
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -488,24 +495,41 @@ export function deriveWorkLogEntries(
   latestTurnId: TurnId | undefined,
   options: { latestTurnSettled?: boolean } = {},
 ): WorkLogEntry[] {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const entries = ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
-    .filter(
-      (activity) =>
-        !(
-          options.latestTurnSettled === true && isTransientRuntimeRetryDiagnosticActivity(activity)
-        ),
+  const ordered = activities
+    .filter((activity) =>
+      shouldIncludeActivityInWorkLog(activity, latestTurnId, options.latestTurnSettled === true),
     )
-    .filter((activity) => activity.kind !== "tool.started")
-    .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
-    .filter((activity) => activity.kind !== "context-window.updated")
-    .filter((activity) => activity.summary !== "Checkpoint captured")
-    .filter((activity) => !isPlanBoundaryToolActivity(activity))
-    .map(toDerivedWorkLogEntry);
+    .toSorted(compareActivitiesByOrder);
+  const entries = ordered.map(toDerivedWorkLogEntry);
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+function shouldIncludeActivityInWorkLog(
+  activity: OrchestrationThreadActivity,
+  latestTurnId: TurnId | undefined,
+  latestTurnSettled: boolean,
+): boolean {
+  if (latestTurnId && activity.turnId !== latestTurnId) {
+    return false;
+  }
+  if (latestTurnSettled && isTransientRuntimeRetryDiagnosticActivity(activity)) {
+    return false;
+  }
+  if (activity.kind === "tool.started") {
+    return false;
+  }
+  if (activity.kind === "task.started" || activity.kind === "task.completed") {
+    return false;
+  }
+  if (activity.kind === "context-window.updated") {
+    return false;
+  }
+  if (activity.summary === "Checkpoint captured") {
+    return false;
+  }
+  return !isPlanBoundaryToolActivity(activity);
 }
 
 export function deriveThinkingEntries(
@@ -1291,6 +1315,134 @@ function compareActivityLifecycleRank(kind: string): number {
   return 1;
 }
 
+function timelineEntryKey(entry: TimelineEntry): string {
+  return `${entry.kind}:${entry.id}`;
+}
+
+function reuseTimelineEntry<TEntry extends TimelineEntry>(
+  previousEntry: TimelineEntry | undefined,
+  nextEntry: TEntry,
+): TEntry {
+  if (
+    !previousEntry ||
+    previousEntry.kind !== nextEntry.kind ||
+    previousEntry.id !== nextEntry.id
+  ) {
+    return nextEntry;
+  }
+
+  if (
+    nextEntry.kind === "message" &&
+    previousEntry.kind === "message" &&
+    previousEntry.message === nextEntry.message
+  ) {
+    return previousEntry as TEntry;
+  }
+  if (
+    nextEntry.kind === "proposed-plan" &&
+    previousEntry.kind === "proposed-plan" &&
+    previousEntry.proposedPlan === nextEntry.proposedPlan
+  ) {
+    return previousEntry as TEntry;
+  }
+  if (
+    nextEntry.kind === "work" &&
+    previousEntry.kind === "work" &&
+    previousEntry.entry === nextEntry.entry
+  ) {
+    return previousEntry as TEntry;
+  }
+
+  return nextEntry;
+}
+
+function mergeSortedTimelineEntries(
+  messageRows: ReadonlyArray<Extract<TimelineEntry, { kind: "message" }>>,
+  proposedPlanRows: ReadonlyArray<Extract<TimelineEntry, { kind: "proposed-plan" }>>,
+  workRows: ReadonlyArray<Extract<TimelineEntry, { kind: "work" }>>,
+): TimelineEntry[] {
+  const merged: TimelineEntry[] = [];
+  let messageIndex = 0;
+  let proposedPlanIndex = 0;
+  let workIndex = 0;
+
+  while (
+    messageIndex < messageRows.length ||
+    proposedPlanIndex < proposedPlanRows.length ||
+    workIndex < workRows.length
+  ) {
+    const candidates: TimelineEntry[] = [];
+    const messageRow = messageRows[messageIndex];
+    const proposedPlanRow = proposedPlanRows[proposedPlanIndex];
+    const workRow = workRows[workIndex];
+    if (messageRow) {
+      candidates.push(messageRow);
+    }
+    if (proposedPlanRow) {
+      candidates.push(proposedPlanRow);
+    }
+    if (workRow) {
+      candidates.push(workRow);
+    }
+
+    const nextEntry = candidates.reduce((best, candidate) =>
+      compareTimelineEntries(candidate, best) < 0 ? candidate : best,
+    );
+    merged.push(nextEntry);
+
+    if (nextEntry.kind === "message") {
+      messageIndex += 1;
+      continue;
+    }
+    if (nextEntry.kind === "proposed-plan") {
+      proposedPlanIndex += 1;
+      continue;
+    }
+    workIndex += 1;
+  }
+
+  return merged;
+}
+
+function compareTimelineEntries(left: TimelineEntry, right: TimelineEntry): number {
+  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
+  if (createdAtComparison !== 0) {
+    return createdAtComparison;
+  }
+
+  const kindRankComparison = timelineEntryKindRank(left.kind) - timelineEntryKindRank(right.kind);
+  if (kindRankComparison !== 0) {
+    return kindRankComparison;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function timelineEntryKindRank(kind: TimelineEntry["kind"]): number {
+  if (kind === "message") {
+    return 0;
+  }
+  if (kind === "proposed-plan") {
+    return 1;
+  }
+  return 2;
+}
+
+function timelineEntriesEqualByReference(
+  nextEntries: ReadonlyArray<TimelineEntry>,
+  previousEntries: ReadonlyArray<TimelineEntry>,
+): boolean {
+  if (nextEntries.length !== previousEntries.length) {
+    return false;
+  }
+  for (let index = 0; index < nextEntries.length; index += 1) {
+    if (nextEntries[index] !== previousEntries[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function hasToolActivityForTurn(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   turnId: TurnId | null | undefined,
@@ -1300,31 +1452,74 @@ export function hasToolActivityForTurn(
 }
 
 export function deriveTimelineEntries(
-  messages: ChatMessage[],
-  proposedPlans: ProposedPlan[],
-  workEntries: WorkLogEntry[],
+  messages: ReadonlyArray<ChatMessage>,
+  proposedPlans: ReadonlyArray<ProposedPlan>,
+  workEntries: ReadonlyArray<WorkLogEntry>,
+  previousEntries: ReadonlyArray<TimelineEntry> = [],
 ): TimelineEntry[] {
-  const messageRows: TimelineEntry[] = messages.map((message) => ({
-    id: message.id,
-    kind: "message",
-    createdAt: message.createdAt,
-    message,
-  }));
-  const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
-    id: proposedPlan.id,
-    kind: "proposed-plan",
-    createdAt: proposedPlan.createdAt,
-    proposedPlan,
-  }));
-  const workRows: TimelineEntry[] = workEntries.map((entry) => ({
-    id: entry.id,
-    kind: "work",
-    createdAt: entry.createdAt,
-    entry,
-  }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
+  const previousByKey = new Map(previousEntries.map((entry) => [timelineEntryKey(entry), entry]));
+  const messageRows = messages.map((message) =>
+    reuseTimelineEntry(previousByKey.get(`message:${message.id}`), {
+      id: message.id,
+      kind: "message",
+      createdAt: message.createdAt,
+      message,
+    }),
   );
+  const proposedPlanRows = proposedPlans.map((proposedPlan) =>
+    reuseTimelineEntry(previousByKey.get(`proposed-plan:${proposedPlan.id}`), {
+      id: proposedPlan.id,
+      kind: "proposed-plan",
+      createdAt: proposedPlan.createdAt,
+      proposedPlan,
+    }),
+  );
+  const workRows = workEntries.map((entry) =>
+    reuseTimelineEntry(previousByKey.get(`work:${entry.id}`), {
+      id: entry.id,
+      kind: "work",
+      createdAt: entry.createdAt,
+      entry,
+    }),
+  );
+  const merged = mergeSortedTimelineEntries(messageRows, proposedPlanRows, workRows);
+  return timelineEntriesEqualByReference(merged, previousEntries)
+    ? (previousEntries as TimelineEntry[])
+    : merged;
+}
+
+export function deriveRevertTurnCountByUserMessageId(
+  messages: ReadonlyArray<ChatMessage>,
+  turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>,
+  inferredCheckpointTurnCountByTurnId: Partial<Record<TurnId, number>>,
+): Map<MessageId, number> {
+  const byUserMessageId = new Map<MessageId, number>();
+  let pendingUserMessageId: MessageId | null = null;
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      pendingUserMessageId = message.id;
+      continue;
+    }
+    if (message.role !== "assistant" || pendingUserMessageId === null) {
+      continue;
+    }
+
+    const summary = turnDiffSummaryByAssistantMessageId.get(message.id);
+    if (!summary) {
+      continue;
+    }
+    const turnCount =
+      summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
+    if (typeof turnCount !== "number") {
+      continue;
+    }
+
+    byUserMessageId.set(pendingUserMessageId, Math.max(0, turnCount - 1));
+    pendingUserMessageId = null;
+  }
+
+  return byUserMessageId;
 }
 
 export function deriveCompletionDividerBeforeEntryId(

@@ -2154,7 +2154,9 @@ export function OrchestrationSettingsPanel() {
               }}
             >
               <SelectTrigger className="w-full sm:w-48" aria-label="Sidebar mode">
-                <SelectValue>{SIDEBAR_VARIANT_SETTINGS_LABELS[settings.sidebarVariant]}</SelectValue>
+                <SelectValue>
+                  {SIDEBAR_VARIANT_SETTINGS_LABELS[settings.sidebarVariant]}
+                </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 {SIDEBAR_VARIANTS.map((variant) => (

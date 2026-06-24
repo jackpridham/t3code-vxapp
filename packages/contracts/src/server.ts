@@ -52,6 +52,18 @@ const openStringToDecodedSchema = <T>() =>
     ),
   );
 
+const nullishArrayToDecodedSchema = <TSchema extends Schema.Schema<any>>(item: TSchema) =>
+  Schema.NullOr(Schema.Array(item)).pipe(
+    Schema.decodeTo(
+      Schema.Array(item),
+      SchemaTransformation.transform({
+        decode: (value) => value ?? [],
+        encode: (value) => value,
+      }),
+    ),
+    Schema.withDecodingDefault(() => []),
+  );
+
 export const ServerProviderState = Schema.Literals(["ready", "warning", "error", "disabled"]);
 export type ServerProviderState = typeof ServerProviderState.Type;
 
@@ -389,8 +401,8 @@ export const ServerAgentsVxappTodoSnapshot = Schema.Struct({
   priority: TrimmedNonEmptyString,
   filePath: Schema.NullOr(TrimmedNonEmptyString),
   owner: Schema.NullOr(JsonRecord),
-  planLinks: Schema.Array(ServerAgentsVxappTodoPlanLink),
-  notes: Schema.Array(JsonValue),
+  planLinks: nullishArrayToDecodedSchema(ServerAgentsVxappTodoPlanLink),
+  notes: nullishArrayToDecodedSchema(JsonValue),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

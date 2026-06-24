@@ -1,17 +1,12 @@
+import { type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  Fragment,
-  isValidElement,
-  type JSXElementConstructor,
-  type ReactElement,
-  type ReactNode,
-} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { SIDEBAR_VARIANTS } from "../../lib/sidebarMode";
 const state = vi.hoisted(() => ({
   sidebarVariant: "project" as "project" | "orchestration",
   updateSettings: vi.fn<(patch: { sidebarVariant: "project" | "orchestration" }) => void>(),
+  buttonPropsByLabel: new Map<string, Record<string, unknown>>(),
 }));
 
 vi.mock("../../hooks/useSettings", () => ({
@@ -24,86 +19,80 @@ vi.mock("../../hooks/useSettings", () => ({
   }),
 }));
 
+vi.mock("../ui/button", () => ({
+  Button: ({
+    children,
+    onClick,
+    ...props
+  }: {
+    children?: ReactNode;
+    onClick?: () => void;
+    [key: string]: unknown;
+  }) => {
+    const ariaLabel = props["aria-label"];
+    if (typeof ariaLabel === "string") {
+      state.buttonPropsByLabel.set(ariaLabel, { onClick, ...props });
+    }
+    return (
+      <button onClick={onClick} type="button" {...props}>
+        {children}
+      </button>
+    );
+  },
+}));
+
 import { SidebarModeSwitch } from "./SidebarModeSwitch";
 
-type HostElement = ReactElement<Record<string, unknown>, string>;
-
-function renderHostElements(node: ReactNode): HostElement[] {
-  if (Array.isArray(node)) {
-    return node.flatMap((child) => renderHostElements(child));
-  }
-
-  if (!isValidElement(node)) {
-    return [];
-  }
-
-  if (node.type === Fragment) {
-    return renderHostElements(node.props.children as ReactNode);
-  }
-
-  if (typeof node.type === "function") {
-    const rendered = (node.type as JSXElementConstructor<Record<string, unknown>>)(
-      node.props as Record<string, unknown>,
-    );
-    return renderHostElements(rendered);
-  }
-
-  const hostElement = node as HostElement;
-  return [
-    hostElement,
-    ...renderHostElements((hostElement.props.children as ReactNode | undefined) ?? null),
-  ];
+function renderSwitch() {
+  state.buttonPropsByLabel.clear();
+  return renderToStaticMarkup(<SidebarModeSwitch />);
 }
 
-function findButtonByLabel(root: ReactNode, label: string): HostElement | undefined {
-  return renderHostElements(root).find(
-    (element) => element.type === "button" && element.props["aria-label"] === label,
-  );
-}
-
-function expectElement(element: HostElement | undefined, message: string): HostElement {
-  if (!element) {
+function getButtonPropsByLabel(label: string, message: string): Record<string, unknown> {
+  const props = state.buttonPropsByLabel.get(label);
+  if (!props) {
     throw new Error(message);
   }
-
-  return element;
+  return props;
 }
 
 describe("SidebarModeSwitch", () => {
   beforeEach(() => {
     state.sidebarVariant = "project";
     state.updateSettings.mockReset();
+    state.buttonPropsByLabel.clear();
   });
 
   it("renders the expected switch labels and discovers the host buttons", () => {
-    const tree = <SidebarModeSwitch />;
-    const html = renderToStaticMarkup(tree);
+    const html = renderSwitch();
 
     for (const variant of SIDEBAR_VARIANTS) {
       expect(html).toContain(variant.shortLabel);
       expect(html).toContain(`aria-label="${variant.label}"`);
-      expect(findButtonByLabel(tree, variant.label)).toBeDefined();
+      expect(state.buttonPropsByLabel.has(variant.label)).toBe(true);
     }
   });
 
   it("updates settings to project when the standard sidebar control is pressed", () => {
-    const control = expectElement(
-      findButtonByLabel(<SidebarModeSwitch />, "Use standard sidebar"),
+    renderSwitch();
+    const controlProps = getButtonPropsByLabel(
+      "Use standard sidebar",
       "Expected to find the standard sidebar control.",
     );
 
-    (control.props.onClick as undefined | (() => void))?.();
+    (controlProps.onClick as undefined | (() => void))?.();
 
     expect(state.updateSettings).toHaveBeenCalledWith({ sidebarVariant: "project" });
   });
 
   it("updates settings to orchestration when the orchestration control is pressed", () => {
-    const control = expectElement(
-      findButtonByLabel(<SidebarModeSwitch />, "Use orchestration sidebar"),
+    renderSwitch();
+    const controlProps = getButtonPropsByLabel(
+      "Use orchestration sidebar",
       "Expected to find the orchestration sidebar control.",
     );
 
-    (control.props.onClick as undefined | (() => void))?.();
+    (controlProps.onClick as undefined | (() => void))?.();
 
     expect(state.updateSettings).toHaveBeenCalledWith({ sidebarVariant: "orchestration" });
   });

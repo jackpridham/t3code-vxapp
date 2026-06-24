@@ -79,9 +79,7 @@ function assistantDeltaCoalesceKey<C extends WsPushChannel>(
   if (!event) {
     return null;
   }
-  return [event.payload.threadId, event.payload.messageId, event.payload.turnId ?? "no-turn"].join(
-    ":",
-  );
+  return String(event.eventId);
 }
 
 function mergeAssistantDelta(current: PushJob, next: PushJob): PushJob {

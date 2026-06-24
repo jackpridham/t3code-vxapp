@@ -339,13 +339,12 @@ export function resolvePreferredCurrentThreadId(input: {
 }
 
 export function resolveRouteThreadId(pathname: string): ThreadId | null {
-  const match = /^\/([^/?#]+)/.exec(pathname);
-  if (!match) {
-    return null;
-  }
-  const routeThreadId = match[1];
+  const chatRouteMatch = /^\/_chat\/([^/?#]+)/.exec(pathname);
+  const rootRouteMatch = /^\/([^/?#]+)/.exec(pathname);
+  const routeThreadId = chatRouteMatch?.[1] ?? rootRouteMatch?.[1] ?? null;
   if (
     !routeThreadId ||
+    routeThreadId === "_chat" ||
     routeThreadId === "artifact" ||
     routeThreadId === "artifacts" ||
     routeThreadId === "changes" ||
@@ -436,14 +435,24 @@ export async function bootstrapOrchestrationState({
       } catch {
         // Keep the targeted route snapshot if summary enrichment fails.
       }
+      try {
+        const currentState = await api.orchestration.getCurrentState();
+        const merged = await loadPreferredThreadDetailReadModel(routeThreadId, currentState);
+        applyReadModel(merged);
+      } catch {
+        // Keep the most recent targeted route snapshot if current-state convergence fails.
+      }
       return;
     }
   }
 
   const summaryApplied = await runSnapshotRecovery(() => api.orchestration.getBootstrapSummary());
+  const currentStateApplied = await runSnapshotRecovery(() => api.orchestration.getCurrentState());
   const preferredThreadId =
-    routeThreadId ?? (summaryApplied ? findCurrentSessionRootThreadId(summaryApplied) : null);
+    routeThreadId ??
+    findCurrentSessionRootThreadId(currentStateApplied ?? summaryApplied ?? { projects: [] });
   const bootstrapState =
+    currentStateApplied ??
     summaryApplied ??
     (preferredThreadId
       ? await runSnapshotRecovery(() => loadPreferredThreadDetailReadModel(preferredThreadId, null))

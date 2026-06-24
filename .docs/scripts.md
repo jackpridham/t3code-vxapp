@@ -6,6 +6,8 @@
 - Dev commands default `T3CODE_STATE_DIR` to `~/.t3/dev` to keep dev state isolated from desktop/prod state.
 - Override server CLI-equivalent flags from root dev commands with `--`, for example:
   `bun run dev -- --base-dir ~/.t3-2`
+- Local dev defaults are server `3773` and web `5733`. Those ports are for
+  repo-local work only and are not proof of what is deployed.
 - `bun run start` — Runs the production server (serves built web app as static files).
 - `bun run build` — Builds contracts, web app, and server through Turbo.
 - `bun run typecheck` — Strict TypeScript checks for all packages.
@@ -40,3 +42,13 @@ Set `T3CODE_DEV_INSTANCE` to any value to deterministically shift all dev ports 
 - Example: `T3CODE_DEV_INSTANCE=branch-a bun run dev:desktop`
 
 If you want full control instead of hashing, set `T3CODE_PORT_OFFSET` to a numeric offset.
+
+## Deployed Service Contract
+
+- Deployed browser authority is `systemd` unit `t3code.service` on port `7421`.
+- Validate the live page with actual HTML or browser proof on `7421`, not only
+  local-dev commands or port `3773`/`5733` checks.
+- The live service depends on `T3_AGENTS_VXAPP_REPO_ROOT` from the surviving
+  `30-agents-vxapp-repo-root.conf` drop-in.
+- Do not expect `20-jasper-autoresume.conf` or
+  `t3code-autoresume.service`; both are retired.

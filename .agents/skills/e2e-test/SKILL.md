@@ -7,6 +7,10 @@ description: Use when debugging or verifying live user-facing behavior in T3 Cod
 
 Use this skill when the success criterion is the real running application, not just unit coverage.
 
+For deployed proof, the browser authority is the systemd-managed
+`t3code.service` on `7421`. Local-dev ports `3773` and `5733` are useful for
+development but do not prove deployment health.
+
 Default mindset:
 
 1. Prove the live failure on the real route first.
@@ -67,6 +71,7 @@ In sibling repos when vxapp authority is involved:
 ### 1. Reproduce on the real page
 
 Use Playwright against the actual served route, not only component tests.
+For deployed validation, that means the real `http://127.0.0.1:7421/` page.
 
 Minimal proof pattern:
 
@@ -95,6 +100,8 @@ Capture the actual DOM outcome:
 - error banner
 
 Do not infer success from server startup alone.
+Do not accept `ss`, `curl`, or websocket-only checks as sufficient deployed
+proof unless you also captured real HTML/DOM from `7421`.
 
 ### 2. Prove whether the browser is requesting the expected data
 
@@ -323,11 +330,24 @@ If the source file is fixed but the page still behaves like the old code:
 
 Prefer the actual service manager if available. If systemd restart is blocked in the shell, confirm whether the running process is supervised before killing it.
 
+For deployed T3 on this machine, treat `systemctl restart t3code.service` as
+the restart authority and verify the unit/drop-ins, not local dev scripts.
+
 Always prove the restarted state with:
 
 - `ps -ef | rg 'apps/server/dist/index.mjs'`
+- `systemctl status t3code.service --no-pager`
 - a fresh route load
 - a websocket proof call
+
+Also confirm the surviving deployment env contract:
+
+- `systemctl cat t3code.service | rg '30-agents-vxapp-repo-root.conf|T3_AGENTS_VXAPP_REPO_ROOT'`
+
+Do not expect retired deployment artifacts:
+
+- `20-jasper-autoresume.conf`
+- `t3code-autoresume.service`
 
 Do not leave an extra isolated proof server running on a second port unless the user asked for that.
 
@@ -426,6 +446,7 @@ If you changed `agents-vxapp`, run the smallest focused validation that covers t
 
 - Do not treat passing unit tests as proof of live behavior.
 - Do not skip Playwright or direct websocket proof when the user asked for actual outcome.
+- Do not call deployment healthy without HTML/DOM proof from `7421`.
 - Do not rebuild `apps/server` and assume the browser bundle changed.
 - Do not leave background proof services running.
 - Do not broaden strict authority surfaces to make the UI look healthy.

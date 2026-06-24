@@ -1,0 +1,67 @@
+{
+  "threadId": "thread-909213dcae09",
+  "runtimeKind": "worker_runtime",
+  "agentKind": "worker",
+  "workspace": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609",
+  "availability": "inspectable",
+  "reasonCode": null,
+  "runtimeDir": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609/.agents/runtime",
+  "runtimeRoot": null,
+  "stateRoot": null,
+  "workspaceResolution": "thread-worktree",
+  "sourceFiles": {
+    "contextPlan": {
+      "status": "loaded",
+      "failureCode": null,
+      "failureMessage": null
+    },
+    "dispatchContract": {
+      "status": "loaded",
+      "failureCode": null,
+      "failureMessage": null
+    },
+    "installedPacks": {
+      "status": "loaded",
+      "failureCode": null,
+      "failureMessage": null
+    }
+  },
+  "audit": {
+    "schema_version": "1.0.0",
+    "repo": "agents-vxapp",
+    "taskClass": "review-only",
+    "contextMode": "review-only",
+    "closeoutAuthority": "code_only",
+    "workspace": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609",
+    "runtimeDir": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609/.agents/runtime",
+    "skillsDir": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609/.claude/skills",
+    "agentsSkillsDir": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609/.agents/skills",
+    "instructionStackStatus": "clean",
+    "packAuditStatus": "clean",
+    "status": "clean",
+    "issues": []
+  },
+  "contextPlan": null,
+  "dispatchContract": null,
+  "installedPacks": null,
+  "instructionStack": {
+    "schema_version": "1.0.0",
+    "repo": "agents-vxapp",
+    "taskClass": "review-only",
+    "contextMode": "review-only",
+    "closeoutAuthority": "code_only",
+    "workspace": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609",
+    "status": "clean",
+    "findings": [],
+    "packAudit": {
+      "agentsSkillsDir": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609/.agents/skills",
+      "issues": [],
+      "runtimeDir": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609/.agents/runtime",
+      "skillsDir": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609/.claude/skills",
+      "status": "clean",
+      "workspace": "/home/gizmo/worktrees/plan-040-2-proof-lane-20260609"
+    }
+  },
+  "findings": [],
+  "issues": []
+}

@@ -1,0 +1,100 @@
+{
+  "threadId": "thread-3323f8d5fb2e",
+  "agentKind": "executive",
+  "runtimeKind": "role-runtime",
+  "availability": "inspectable",
+  "reasonCode": null,
+  "workspaceRoot": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace",
+  "runtimeDir": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace/.agents/runtime",
+  "workspaceResolution": {
+    "kind": "role-session-thread-worktree",
+    "detail": "Resolved from the active thread-specific role-session binding."
+  },
+  "sourceFiles": [
+    {
+      "key": "selectedProfile",
+      "label": "Selected Profile",
+      "fileName": "selected-profile.json",
+      "absolutePath": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace/.agents/runtime/selected-profile.json",
+      "status": "loaded",
+      "detail": null
+    },
+    {
+      "key": "selectionReason",
+      "label": "Selection Reason",
+      "fileName": "selection-reason.json",
+      "absolutePath": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace/.agents/runtime/selection-reason.json",
+      "status": "loaded",
+      "detail": null
+    },
+    {
+      "key": "installedRoleSkills",
+      "label": "Installed Role Skills",
+      "fileName": "installed-role-skills.json",
+      "absolutePath": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace/.agents/runtime/installed-role-skills.json",
+      "status": "loaded",
+      "detail": null
+    },
+    {
+      "key": "generatedWorkspaceSummary",
+      "label": "Generated Workspace Summary",
+      "fileName": "generated-workspace-summary.json",
+      "absolutePath": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace/.agents/runtime/generated-workspace-summary.json",
+      "status": "loaded",
+      "detail": null
+    }
+  ],
+  "summary": {
+    "repo": "agents-vxapp",
+    "role": "cto",
+    "profile": "standby",
+    "taskClass": null,
+    "contextMode": null,
+    "closeoutAuthority": null,
+    "generatedAt": "2026-06-08T11:40:06Z",
+    "selectedPacks": [],
+    "installedSkills": [
+      "control-plane-recovery",
+      "executive-artifacts",
+      "executive-cleanup-safety",
+      "executive-docs-search-usage",
+      "executive-git-usage",
+      "executive-github-usage",
+      "executive-operate-usage",
+      "executive-orchestration-request",
+      "executive-plan-review",
+      "executive-postflight",
+      "executive-preflight",
+      "executive-program-usage",
+      "executive-release-readiness",
+      "executive-runtime-audits",
+      "executive-runtime-tools",
+      "executive-session-bootstrap",
+      "executive-session-refresh",
+      "executive-todo-usage",
+      "executive-validation-usage",
+      "executive-yacht-watch",
+      "git-tool-domain",
+      "github-workflow-boundaries",
+      "operate-loop",
+      "plan-tool-domain",
+      "program-lifecycle",
+      "release-readiness",
+      "runtime-tools",
+      "session-runtime",
+      "submodule-and-generated-contracts",
+      "todo-purpose",
+      "tool-surface-discipline",
+      "validation-tool-domain",
+      "vortex-app-command-surfaces",
+      "worker-runtime-boundary",
+      "worktree-tool-domain"
+    ],
+    "packCount": 0,
+    "skillCount": 35
+  },
+  "workerDetails": null,
+  "roleDetails": {
+    "selectionReason": "default"
+  }
+}

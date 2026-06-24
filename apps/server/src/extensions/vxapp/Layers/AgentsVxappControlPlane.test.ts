@@ -219,6 +219,94 @@ describe("AgentsVxappControlPlaneLive", () => {
     expect(mockedProgramsTodos).toHaveBeenCalledTimes(1);
   });
 
+  it("decodes missing nested TODO arrays in raw Program/TODO owner snapshots", async () => {
+    mockedProgramsTodos.mockResolvedValueOnce({
+      ...emptySnapshot,
+      todos: [
+        {
+          todoId: "todo-owner",
+          agent: "jasper",
+          programId: null,
+          title: "Repair crash",
+          summary: null,
+          nextAction: null,
+          status: "ready",
+          priority: "normal",
+          filePath: null,
+          owner: null,
+          createdAt: "2026-06-23T00:00:00.000Z",
+          updatedAt: "2026-06-23T00:00:00.000Z",
+        },
+      ],
+    } as unknown as typeof emptySnapshot);
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const controlPlane = yield* AgentsVxappControlPlane;
+        return yield* controlPlane.getProgramsTodosSnapshot({});
+      }).pipe(Effect.provide(AgentsVxappControlPlaneLive)),
+    );
+
+    expect(result.todos[0]).toMatchObject({
+      planLinks: [],
+      notes: [],
+    });
+  });
+
+  it("decodes null nested TODO arrays in raw Program/TODO owner snapshots", async () => {
+    mockedProgramsTodos.mockResolvedValueOnce({
+      ...emptySnapshot,
+      todos: [
+        {
+          todoId: "todo-owner",
+          agent: "jasper",
+          programId: null,
+          title: "Repair crash",
+          summary: null,
+          nextAction: null,
+          status: "ready",
+          priority: "normal",
+          filePath: null,
+          owner: null,
+          planLinks: null,
+          notes: null,
+          createdAt: "2026-06-23T00:00:00.000Z",
+          updatedAt: "2026-06-23T00:00:00.000Z",
+        },
+      ],
+    } as unknown as typeof emptySnapshot);
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const controlPlane = yield* AgentsVxappControlPlane;
+        return yield* controlPlane.getProgramsTodosSnapshot({});
+      }).pipe(Effect.provide(AgentsVxappControlPlaneLive)),
+    );
+
+    expect(result.todos[0]).toMatchObject({
+      planLinks: [],
+      notes: [],
+    });
+  });
+
+  it("fails Program/TODO owner snapshots at the boundary when contract decode fails", async () => {
+    mockedProgramsTodos.mockResolvedValueOnce({
+      ...emptySnapshot,
+      todos: "not-an-array",
+    } as unknown as typeof emptySnapshot);
+
+    await expect(
+      Effect.gen(function* () {
+        const controlPlane = yield* AgentsVxappControlPlane;
+        return yield* controlPlane.getProgramsTodosSnapshot({});
+      }).pipe(Effect.provide(AgentsVxappControlPlaneLive), Effect.runPromise),
+    ).rejects.toMatchObject({
+      operation: "ownerControlPlane.programsTodos.decode",
+      ownerCommand: "t3code-programs-todos-snapshot",
+      authoritySurface: "programs_todos_snapshot",
+    });
+  });
+
   it("routes Program mutations through owner-client calls", async () => {
     mockedProgramMutation.mockResolvedValueOnce({ ok: true, action: "create" });
 

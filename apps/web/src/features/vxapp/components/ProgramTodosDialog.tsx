@@ -15,6 +15,7 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { CircleDotIcon, ListTodoIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { readTodoNotes, readTodoPlanLinks } from "./programTodoSnapshot";
 
 const NEUTRAL_BADGE_CLASSNAME = "h-5 border border-border/70 bg-background/70 px-1.5 text-[10px]";
 const EMPTY_TODOS: ServerGetAgentsVxappSidebarAuthoritySnapshotResult["todos"] = [];
@@ -80,6 +81,8 @@ export function ProgramTodosDialog(props: {
             <div className="space-y-3">
               {todos.map((todo) => {
                 const isCurrent = resolvedCurrentTodoId === todo.todoId;
+                const planLinks = readTodoPlanLinks(todo);
+                const notes = readTodoNotes(todo);
 
                 return (
                   <section
@@ -127,12 +130,12 @@ export function ProgramTodosDialog(props: {
                       <span>Created {new Date(todo.createdAt).toLocaleString()}</span>
                     </div>
 
-                    {todo.planLinks.length > 0 ? (
+                    {planLinks.length > 0 ? (
                       <div className="mt-3 space-y-2 rounded-xl border border-border/60 bg-background/70 p-3">
                         <div className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
                           Linked plans
                         </div>
-                        {todo.planLinks.map((link) => (
+                        {planLinks.map((link) => (
                           <div
                             key={`${todo.todoId}:${link.repo}:${link.planKey}:${link.phase ?? ""}:${link.step ?? ""}`}
                             className="flex flex-wrap items-center gap-2 text-xs"
@@ -152,12 +155,12 @@ export function ProgramTodosDialog(props: {
                       </div>
                     ) : null}
 
-                    {todo.notes.length > 0 ? (
+                    {notes.length > 0 ? (
                       <div className="mt-3 space-y-2 rounded-xl border border-border/60 bg-background/70 p-3">
                         <div className="text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
                           Notes
                         </div>
-                        {todo.notes.map((note) => (
+                        {notes.map((note) => (
                           <div
                             key={`${todo.todoId}:note:${typeof note === "string" ? note : JSON.stringify(note)}`}
                             className="flex gap-2 text-xs text-foreground/90"

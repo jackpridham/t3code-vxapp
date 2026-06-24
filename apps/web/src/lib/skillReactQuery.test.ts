@@ -7,7 +7,7 @@ describe("skillReactQuery", () => {
     expect(isMissingSkillDirectoryError(new Error("ENOENT: no such file or directory"))).toBe(true);
     expect(
       isMissingSkillDirectoryError({
-        message: "The system cannot find the path specified: C:\\repo\\.claude\\skills",
+        message: "The system cannot find the path specified: C:\\repo\\.agents\\skills",
       }),
     ).toBe(true);
   });

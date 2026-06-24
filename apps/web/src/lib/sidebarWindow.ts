@@ -8,12 +8,7 @@ export function isSidebarWindowPath(pathname: string): boolean {
 }
 
 export function resolveThreadRouteTarget(pathname: string, threadId: ThreadId) {
-  if (isSidebarWindowPath(pathname)) {
-    return {
-      to: SIDEBAR_WINDOW_THREAD_ROUTE,
-      params: { threadId },
-    } as const;
-  }
+  void pathname;
 
   return {
     to: "/$threadId",

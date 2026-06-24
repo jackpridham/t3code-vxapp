@@ -112,6 +112,8 @@ type OwnerThreadTurnStartProviderRequest = {
   readonly requestId: string;
   readonly threadId: ThreadId;
   readonly message: string;
+  readonly messageId?: string;
+  readonly attachments?: ReadonlyArray<unknown>;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
 };
@@ -136,6 +138,23 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function decodeOwnerMessagePayload(value: unknown): {
+  messageId: string | null;
+  text: string | null;
+  attachments: ReadonlyArray<unknown>;
+} {
+  const record = asRecord(value);
+  if (!record) {
+    return { messageId: null, text: null, attachments: [] };
+  }
+  const attachments = Array.isArray(record.attachments) ? record.attachments : [];
+  return {
+    messageId: asNonEmptyString(record.messageId),
+    text: asNonEmptyString(record.text),
+    attachments,
+  };
 }
 
 function ownerProviderRequestPayload(value: unknown): OwnerProviderRequestPayload | null {
@@ -187,7 +206,8 @@ function decodeOwnerThreadTurnStartProviderRequest(
   }
   const requestId = asNonEmptyString(record.requestId);
   const threadId = asNonEmptyString(record.threadId);
-  const message = asNonEmptyString(record.message);
+  const nestedMessage = decodeOwnerMessagePayload(record.message);
+  const message = nestedMessage.text ?? asNonEmptyString(record.message);
   if (!requestId || !threadId || !message) {
     return null;
   }
@@ -196,6 +216,8 @@ function decodeOwnerThreadTurnStartProviderRequest(
     requestId,
     threadId: ThreadId.makeUnsafe(threadId),
     message,
+    ...(nestedMessage.messageId ? { messageId: nestedMessage.messageId } : {}),
+    ...(nestedMessage.attachments.length > 0 ? { attachments: nestedMessage.attachments } : {}),
     ...(Schema.is(RuntimeMode)(record.runtimeMode) ? { runtimeMode: record.runtimeMode } : {}),
     ...(Schema.is(ProviderInteractionMode)(record.interactionMode)
       ? { interactionMode: record.interactionMode }

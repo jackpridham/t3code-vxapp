@@ -1863,7 +1863,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       resolveRpc: (body) => {
         if (
           body._tag === WS_METHODS.projectsSearchEntries &&
-          body.cwd === "/repo/project/.claude/skills"
+          body.cwd === "/repo/project/.agents/skills"
         ) {
           return {
             entries: [{ path: "find-skills", kind: "directory" }],
@@ -1917,7 +1917,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
               type: "thread.turn.start",
               threadId: THREAD_ID,
               message: {
-                text: expect.stringContaining("@/repo/project/.claude/skills/find-skills/SKILL.md"),
+                text: expect.stringContaining("@/repo/project/.agents/skills/find-skills/SKILL.md"),
               },
             },
           });
@@ -1948,7 +1948,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         [
           createUserMessage({
             id: targetMessageId,
-            text: "Use @/repo/project/.claude/skills/find-skills/SKILL.md before continuing",
+            text: "Use @/repo/project/.agents/skills/find-skills/SKILL.md before continuing",
             offsetSeconds: 0,
           }),
         ],
@@ -1967,7 +1967,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(messageRow.textContent).toContain("find-skills");
-          expect(messageRow.textContent).not.toContain(".claude/skills/find-skills/SKILL.md");
+          expect(messageRow.textContent).not.toContain(".agents/skills/find-skills/SKILL.md");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -1981,7 +1981,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         () => {
           expect(writeText).toHaveBeenCalledWith(
-            "Use @/repo/project/.claude/skills/find-skills/SKILL.md before continuing",
+            "Use @/repo/project/.agents/skills/find-skills/SKILL.md before continuing",
           );
         },
         { timeout: 8_000, interval: 16 },

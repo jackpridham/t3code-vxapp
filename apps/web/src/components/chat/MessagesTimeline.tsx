@@ -25,7 +25,6 @@ import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImage
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { MessageMeta } from "./MessageMeta";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { computeMessageDurationStart } from "./MessagesTimeline.logic";
 import { SkillReferenceChip } from "./SkillReferenceChip";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { WorkLogGroup } from "./WorkLogGroup";
@@ -42,6 +41,11 @@ import {
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
 import { cn } from "~/lib/utils";
+import {
+  deriveTimelineRows,
+  type TimelineRow,
+  type TimelineThinking,
+} from "./MessagesTimeline.rows";
 
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
@@ -56,7 +60,7 @@ interface MessagesTimelineProps {
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionDuration: string | null;
-  nowIso: string;
+  nowIso?: string;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -88,6 +92,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
+  const previousRowsRef = useRef<ReadonlyArray<TimelineRow>>([]);
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -114,89 +119,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [hasMessages, isWorking]);
 
-  const rows = useMemo<TimelineRow[]>(() => {
-    const nextRows: TimelineRow[] = [];
-    const durationStartByMessageId = computeMessageDurationStart(
-      timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+  const rows = useMemo(() => {
+    const nextRows = deriveTimelineRows(
+      {
+        timelineEntries,
+        completionDividerBeforeEntryId,
+        isWorking,
+        activeTurnStartedAt,
+        revertTurnCountByUserMessageId,
+      },
+      previousRowsRef.current,
     );
-
-    for (let index = 0; index < timelineEntries.length; index += 1) {
-      const timelineEntry = timelineEntries[index];
-      if (!timelineEntry) {
-        continue;
-      }
-
-      if (timelineEntry.kind === "work" && timelineEntry.entry.presentation === "thinking-bubble") {
-        nextRows.push({
-          kind: "thinking",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          thinking: {
-            id: timelineEntry.entry.id,
-            createdAt: timelineEntry.entry.createdAt,
-            label: timelineEntry.entry.label,
-            detail: timelineEntry.entry.detail ?? "",
-            thoughts: timelineEntry.entry.thoughts ?? [],
-            tone: "thinking",
-            presentation: "thinking-bubble",
-          },
-        });
-        continue;
-      }
-
-      if (timelineEntry.kind === "work") {
-        const groupedEntries = [timelineEntry.entry];
-        let cursor = index + 1;
-        while (cursor < timelineEntries.length) {
-          const nextEntry = timelineEntries[cursor];
-          if (!nextEntry || nextEntry.kind !== "work") break;
-          if (nextEntry.entry.presentation === "thinking-bubble") break;
-          groupedEntries.push(nextEntry.entry);
-          cursor += 1;
-        }
-        nextRows.push({
-          kind: "work",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          groupedEntries,
-        });
-        index = cursor - 1;
-        continue;
-      }
-
-      if (timelineEntry.kind === "proposed-plan") {
-        nextRows.push({
-          kind: "proposed-plan",
-          id: timelineEntry.id,
-          createdAt: timelineEntry.createdAt,
-          proposedPlan: timelineEntry.proposedPlan,
-        });
-        continue;
-      }
-
-      nextRows.push({
-        kind: "message",
-        id: timelineEntry.id,
-        createdAt: timelineEntry.createdAt,
-        message: timelineEntry.message,
-        durationStart:
-          durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
-        showCompletionDivider:
-          timelineEntry.message.role === "assistant" &&
-          completionDividerBeforeEntryId === timelineEntry.id,
-      });
-    }
-
-    if (isWorking) {
-      nextRows.push({
-        kind: "working",
-        id: "working-indicator-row",
-        createdAt: activeTurnStartedAt,
-      });
-    }
-
+    previousRowsRef.current = nextRows;
     return nextRows;
-  }, [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt]);
+  }, [
+    activeTurnStartedAt,
+    completionDividerBeforeEntryId,
+    isWorking,
+    revertTurnCountByUserMessageId,
+    timelineEntries,
+  ]);
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
     const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
@@ -321,191 +263,24 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
 
   const renderRowContent = (row: TimelineRow) => (
-    <div
-      className="min-w-0 pb-4"
-      data-timeline-row-kind={row.kind}
-      data-message-id={row.kind === "message" ? row.message.id : undefined}
-      data-message-role={row.kind === "message" ? row.message.role : undefined}
-    >
-      {row.kind === "work" &&
-        (() => {
-          return <WorkLogGroup groupedEntries={row.groupedEntries} />;
-        })()}
-
-      {row.kind === "thinking" && (
-        <ThinkingBubble
-          thinking={row.thinking}
-          isExpanded={resolveThinkingExpansionState(
-            row,
-            expandedThinkingById,
-            activeTurnInProgress,
-            activeTurnStartedAt,
-          )}
-          onToggle={() => onToggleThinking(row.id)}
-        />
-      )}
-
-      {row.kind === "message" &&
-        row.message.role === "user" &&
-        (() => {
-          const userImages = row.message.attachments ?? [];
-          const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
-          const terminalContexts = displayedUserMessage.contexts;
-          const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
-          return (
-            <div className="flex min-w-0 justify-end">
-              <div
-                className={cn(
-                  "group relative min-w-0 rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3",
-                  layoutMode === "drawer" ? "max-w-[92%]" : "max-w-[80%]",
-                )}
-              >
-                {userImages.length > 0 && (
-                  <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                    {userImages.map(
-                      (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-                        <div
-                          key={image.id}
-                          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                        >
-                          {image.previewUrl ? (
-                            <button
-                              type="button"
-                              className="h-full w-full cursor-zoom-in"
-                              aria-label={`Preview ${image.name}`}
-                              onClick={() => {
-                                const preview = buildExpandedImagePreview(userImages, image.id);
-                                if (!preview) return;
-                                onImageExpand(preview);
-                              }}
-                            >
-                              <img
-                                src={image.previewUrl}
-                                alt={image.name}
-                                className="h-full max-h-[220px] w-full object-cover"
-                                onLoad={onTimelineImageLoad}
-                                onError={onTimelineImageLoad}
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                              {image.name}
-                            </div>
-                          )}
-                        </div>
-                      ),
-                    )}
-                  </div>
-                )}
-                {(displayedUserMessage.visibleText.trim().length > 0 ||
-                  terminalContexts.length > 0) && (
-                  <UserMessageBody
-                    text={displayedUserMessage.visibleText}
-                    terminalContexts={terminalContexts}
-                  />
-                )}
-                <div className="mt-1.5 flex items-center justify-end gap-2">
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    {displayedUserMessage.copyText && (
-                      <MessageCopyButton text={displayedUserMessage.copyText} />
-                    )}
-                    {canRevertAgentWork && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        disabled={isRevertingCheckpoint || isWorking}
-                        onClick={() => onRevertUserMessage(row.message.id)}
-                        title="Revert to this message"
-                      >
-                        <Undo2Icon className="size-3" />
-                      </Button>
-                    )}
-                  </div>
-                  <MessageMeta
-                    createdAt={row.message.createdAt}
-                    timestampFormat={timestampFormat}
-                    align="right"
-                  />
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-      {row.kind === "message" &&
-        row.message.role === "assistant" &&
-        (() => {
-          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-          return (
-            <>
-              {row.showCompletionDivider && (
-                <div className="my-3 flex items-center gap-3">
-                  <span className="h-px flex-1 bg-border" />
-                  <span className="rounded-full border border-border bg-background px-3 py-1.5 text-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
-                    <span className="block text-[11px] tracking-[0.08em] text-foreground/85">
-                      {formatDividerTimestamp(
-                        row.message.completedAt ?? row.message.createdAt,
-                        timestampFormat,
-                      )}
-                    </span>
-                    <span className="block">
-                      {completionDuration ? `Worked for ${completionDuration}` : "Worked"}
-                    </span>
-                  </span>
-                  <span className="h-px flex-1 bg-border" />
-                </div>
-              )}
-              <div className="w-full min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                />
-                {!row.showCompletionDivider && (
-                  <MessageMeta
-                    createdAt={row.message.createdAt}
-                    duration={
-                      row.message.streaming
-                        ? formatElapsed(row.durationStart, nowIso)
-                        : formatElapsed(row.durationStart, row.message.completedAt)
-                    }
-                    timestampFormat={timestampFormat}
-                    className="mt-1.5"
-                  />
-                )}
-              </div>
-            </>
-          );
-        })()}
-
-      {row.kind === "proposed-plan" && (
-        <div className="min-w-0 px-1 py-0.5">
-          <ProposedPlanCard
-            planMarkdown={row.proposedPlan.planMarkdown}
-            cwd={markdownCwd}
-            workspaceRoot={workspaceRoot}
-          />
-        </div>
-      )}
-
-      {row.kind === "working" && (
-        <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-            </span>
-            <span>
-              {row.createdAt
-                ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : "Working..."}
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
+    <TimelineRowContent
+      row={row}
+      layoutMode={layoutMode}
+      activeTurnInProgress={activeTurnInProgress}
+      activeTurnStartedAt={activeTurnStartedAt}
+      expandedThinkingById={expandedThinkingById}
+      onToggleThinking={onToggleThinking}
+      isRevertingCheckpoint={isRevertingCheckpoint}
+      isWorking={isWorking}
+      onRevertUserMessage={onRevertUserMessage}
+      onImageExpand={onImageExpand}
+      onTimelineImageLoad={onTimelineImageLoad}
+      timestampFormat={timestampFormat}
+      markdownCwd={markdownCwd}
+      workspaceRoot={workspaceRoot}
+      completionDuration={completionDuration}
+      nowIso={nowIso}
+    />
   );
 
   if (!hasMessages && !isWorking) {
@@ -560,43 +335,275 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
-type TimelineThinking = {
-  id: string;
+
+const TimelineRowContent = memo(function TimelineRowContent(props: {
+  row: TimelineRow;
+  layoutMode: "default" | "drawer";
+  activeTurnInProgress: boolean;
+  activeTurnStartedAt: string | null;
+  expandedThinkingById: Record<string, boolean>;
+  onToggleThinking: (thinkingId: string) => void;
+  isRevertingCheckpoint: boolean;
+  isWorking: boolean;
+  onRevertUserMessage: (messageId: MessageId) => void;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onTimelineImageLoad: () => void;
+  timestampFormat: TimestampFormat;
+  markdownCwd: string | undefined;
+  workspaceRoot: string | undefined;
+  completionDuration: string | null;
+  nowIso: string | undefined;
+}) {
+  const { row } = props;
+
+  return (
+    <div
+      className="min-w-0 pb-4"
+      data-timeline-row-kind={row.kind}
+      data-message-id={row.kind === "message" ? row.message.id : undefined}
+      data-message-role={row.kind === "message" ? row.message.role : undefined}
+    >
+      {row.kind === "work" ? <WorkLogGroup groupedEntries={row.groupedEntries} /> : null}
+
+      {row.kind === "thinking" ? (
+        <ThinkingBubble
+          thinking={row.thinking}
+          isExpanded={resolveThinkingExpansionState(
+            row,
+            props.expandedThinkingById,
+            props.activeTurnInProgress,
+            props.activeTurnStartedAt,
+          )}
+          onToggle={() => props.onToggleThinking(row.id)}
+        />
+      ) : null}
+
+      {row.kind === "message" && row.message.role === "user" ? (
+        <UserMessageRow
+          row={row}
+          layoutMode={props.layoutMode}
+          isRevertingCheckpoint={props.isRevertingCheckpoint}
+          isWorking={props.isWorking}
+          onRevertUserMessage={props.onRevertUserMessage}
+          onImageExpand={props.onImageExpand}
+          onTimelineImageLoad={props.onTimelineImageLoad}
+          timestampFormat={props.timestampFormat}
+        />
+      ) : null}
+
+      {row.kind === "message" && row.message.role === "assistant" ? (
+        <AssistantMessageRow
+          row={row}
+          completionDuration={props.completionDuration}
+          timestampFormat={props.timestampFormat}
+          markdownCwd={props.markdownCwd}
+          nowIso={props.nowIso}
+        />
+      ) : null}
+
+      {row.kind === "proposed-plan" ? (
+        <div className="min-w-0 px-1 py-0.5">
+          <ProposedPlanCard
+            planMarkdown={row.proposedPlan.planMarkdown}
+            cwd={props.markdownCwd}
+            workspaceRoot={props.workspaceRoot}
+          />
+        </div>
+      ) : null}
+
+      {row.kind === "working" ? <WorkingIndicatorRow row={row} nowIso={props.nowIso} /> : null}
+    </div>
+  );
+});
+
+const UserMessageRow = memo(function UserMessageRow(props: {
+  row: Extract<TimelineRow, { kind: "message" }>;
+  layoutMode: "default" | "drawer";
+  isRevertingCheckpoint: boolean;
+  isWorking: boolean;
+  onRevertUserMessage: (messageId: MessageId) => void;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onTimelineImageLoad: () => void;
+  timestampFormat: TimestampFormat;
+}) {
+  const userImages = props.row.message.attachments ?? [];
+  const displayedUserMessage = deriveDisplayedUserMessageState(props.row.message.text);
+  const terminalContexts = displayedUserMessage.contexts;
+
+  return (
+    <div className="flex min-w-0 justify-end">
+      <div
+        className={cn(
+          "group relative min-w-0 rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3",
+          props.layoutMode === "drawer" ? "max-w-[92%]" : "max-w-[80%]",
+        )}
+      >
+        {userImages.length > 0 && (
+          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+            {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+              <div
+                key={image.id}
+                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+              >
+                {image.previewUrl ? (
+                  <button
+                    type="button"
+                    className="h-full w-full cursor-zoom-in"
+                    aria-label={`Preview ${image.name}`}
+                    onClick={() => {
+                      const preview = buildExpandedImagePreview(userImages, image.id);
+                      if (!preview) return;
+                      props.onImageExpand(preview);
+                    }}
+                  >
+                    <img
+                      src={image.previewUrl}
+                      alt={image.name}
+                      className="h-full max-h-[220px] w-full object-cover"
+                      onLoad={props.onTimelineImageLoad}
+                      onError={props.onTimelineImageLoad}
+                    />
+                  </button>
+                ) : (
+                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                    {image.name}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {(displayedUserMessage.visibleText.trim().length > 0 || terminalContexts.length > 0) && (
+          <UserMessageBody
+            text={displayedUserMessage.visibleText}
+            terminalContexts={terminalContexts}
+          />
+        )}
+        <div className="mt-1.5 flex items-center justify-end gap-2">
+          <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+            {displayedUserMessage.copyText ? (
+              <MessageCopyButton text={displayedUserMessage.copyText} />
+            ) : null}
+            {props.row.canRevertAgentWork ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={props.isRevertingCheckpoint || props.isWorking}
+                onClick={() => props.onRevertUserMessage(props.row.message.id)}
+                title="Revert to this message"
+              >
+                <Undo2Icon className="size-3" />
+              </Button>
+            ) : null}
+          </div>
+          <MessageMeta
+            createdAt={props.row.message.createdAt}
+            timestampFormat={props.timestampFormat}
+            align="right"
+          />
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const AssistantMessageRow = memo(function AssistantMessageRow(props: {
+  row: Extract<TimelineRow, { kind: "message" }>;
+  completionDuration: string | null;
+  timestampFormat: TimestampFormat;
+  markdownCwd: string | undefined;
+  nowIso: string | undefined;
+}) {
+  const messageText =
+    props.row.message.text || (props.row.message.streaming ? "" : "(empty response)");
+
+  return (
+    <>
+      {props.row.showCompletionDivider ? (
+        <div className="my-3 flex items-center gap-3">
+          <span className="h-px flex-1 bg-border" />
+          <span className="rounded-full border border-border bg-background px-3 py-1.5 text-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+            <span className="block text-[11px] tracking-[0.08em] text-foreground/85">
+              {formatDividerTimestamp(
+                props.row.message.completedAt ?? props.row.message.createdAt,
+                props.timestampFormat,
+              )}
+            </span>
+            <span className="block">
+              {props.completionDuration ? `Worked for ${props.completionDuration}` : "Worked"}
+            </span>
+          </span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      ) : null}
+      <div className="w-full min-w-0 px-1 py-0.5">
+        <ChatMarkdown
+          text={messageText}
+          cwd={props.markdownCwd}
+          isStreaming={Boolean(props.row.message.streaming)}
+        />
+        {!props.row.showCompletionDivider ? (
+          <AssistantMessageMeta
+            createdAt={props.row.message.createdAt}
+            durationStart={props.row.durationStart}
+            completedAt={props.row.message.completedAt}
+            isStreaming={Boolean(props.row.message.streaming)}
+            timestampFormat={props.timestampFormat}
+            nowIso={props.nowIso}
+          />
+        ) : null}
+      </div>
+    </>
+  );
+});
+
+const AssistantMessageMeta = memo(function AssistantMessageMeta(props: {
   createdAt: string;
-  label: string;
-  detail: string;
-  thoughts: ReadonlyArray<string>;
-  tone: "thinking";
-  presentation: "thinking-bubble";
-};
-type TimelineRow =
-  | {
-      kind: "work";
-      id: string;
-      createdAt: string;
-      groupedEntries: Extract<TimelineEntry, { kind: "work" }>["entry"][];
-    }
-  | {
-      kind: "thinking";
-      id: string;
-      createdAt: string;
-      thinking: TimelineThinking;
-    }
-  | {
-      kind: "message";
-      id: string;
-      createdAt: string;
-      message: TimelineMessage;
-      durationStart: string;
-      showCompletionDivider: boolean;
-    }
-  | {
-      kind: "proposed-plan";
-      id: string;
-      createdAt: string;
-      proposedPlan: TimelineProposedPlan;
-    }
-  | { kind: "working"; id: string; createdAt: string | null };
+  durationStart: string;
+  completedAt: string | undefined;
+  isStreaming: boolean;
+  timestampFormat: TimestampFormat;
+  nowIso: string | undefined;
+}) {
+  const resolvedNowIso = useResolvedNowIso(props.isStreaming, props.nowIso);
+  return (
+    <MessageMeta
+      createdAt={props.createdAt}
+      duration={
+        props.isStreaming
+          ? formatElapsed(props.durationStart, resolvedNowIso)
+          : formatElapsed(props.durationStart, props.completedAt)
+      }
+      timestampFormat={props.timestampFormat}
+      className="mt-1.5"
+    />
+  );
+});
+
+const WorkingIndicatorRow = memo(function WorkingIndicatorRow(props: {
+  row: Extract<TimelineRow, { kind: "working" }>;
+  nowIso: string | undefined;
+}) {
+  const resolvedNowIso = useResolvedNowIso(Boolean(props.row.createdAt), props.nowIso);
+
+  return (
+    <div className="py-0.5 pl-1.5">
+      <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
+        <span className="inline-flex items-center gap-[3px]">
+          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
+          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
+          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
+        </span>
+        <span>
+          {props.row.createdAt
+            ? `Working for ${formatWorkingTimer(props.row.createdAt, resolvedNowIso) ?? "0s"}`
+            : "Working..."}
+        </span>
+      </div>
+    </div>
+  );
+});
 
 function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan): number {
   const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
@@ -624,6 +631,24 @@ function estimateTimelineThinkingHeight(
     ),
   );
   return 108 + Math.min(totalLines * 22 + thinking.thoughts.length * 10, 960);
+}
+
+function useResolvedNowIso(isLive: boolean, fixedNowIso: string | undefined): string {
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (fixedNowIso !== undefined || !isLive) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [fixedNowIso, isLive]);
+
+  return fixedNowIso ?? new Date(nowTick).toISOString();
 }
 
 function formatWorkingTimer(startIso: string, endIso: string): string | null {

@@ -1,0 +1,829 @@
+{
+  "cwd": "/home/gizmo/t3code-vxapp",
+  "keybindingsConfigPath": "/home/gizmo/t3code-vxapp/.vx/live-probes/t3code-app-server-live/t3-home/userdata/keybindings.json",
+  "keybindings": [
+    {
+      "command": "terminal.toggle",
+      "shortcut": {
+        "key": "j",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "terminal.split",
+      "shortcut": {
+        "key": "d",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "terminalFocus"
+      }
+    },
+    {
+      "command": "terminal.new",
+      "shortcut": {
+        "key": "n",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "terminalFocus"
+      }
+    },
+    {
+      "command": "terminal.close",
+      "shortcut": {
+        "key": "w",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "terminalFocus"
+      }
+    },
+    {
+      "command": "diff.toggle",
+      "shortcut": {
+        "key": "d",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "not",
+        "node": {
+          "type": "identifier",
+          "name": "terminalFocus"
+        }
+      }
+    },
+    {
+      "command": "chat.new",
+      "shortcut": {
+        "key": "n",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "not",
+        "node": {
+          "type": "identifier",
+          "name": "terminalFocus"
+        }
+      }
+    },
+    {
+      "command": "chat.new",
+      "shortcut": {
+        "key": "o",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "and",
+        "left": {
+          "type": "not",
+          "node": {
+            "type": "identifier",
+            "name": "terminalFocus"
+          }
+        },
+        "right": {
+          "type": "not",
+          "node": {
+            "type": "identifier",
+            "name": "ideMode"
+          }
+        }
+      }
+    },
+    {
+      "command": "chat.newLocal",
+      "shortcut": {
+        "key": "n",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "not",
+        "node": {
+          "type": "identifier",
+          "name": "terminalFocus"
+        }
+      }
+    },
+    {
+      "command": "ide.changes.focus",
+      "shortcut": {
+        "key": "c",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.explorer.toggle",
+      "shortcut": {
+        "key": "e",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.threads.focus",
+      "shortcut": {
+        "key": "t",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.manager.toggle",
+      "shortcut": {
+        "key": "m",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": false,
+        "altKey": true,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.chat.toggle",
+      "shortcut": {
+        "key": "b",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": false,
+        "altKey": true,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.markdownPreview.toggle",
+      "shortcut": {
+        "key": "v",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.diff.toggle",
+      "shortcut": {
+        "key": "d",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.chat.executive",
+      "shortcut": {
+        "key": "e",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": false,
+        "altKey": true,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "ide.chat.orchestrator",
+      "shortcut": {
+        "key": "o",
+        "metaKey": false,
+        "ctrlKey": true,
+        "shiftKey": false,
+        "altKey": true,
+        "modKey": false
+      },
+      "whenAst": {
+        "type": "identifier",
+        "name": "ideMode"
+      }
+    },
+    {
+      "command": "editor.openFavorite",
+      "shortcut": {
+        "key": "o",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      },
+      "whenAst": {
+        "type": "not",
+        "node": {
+          "type": "identifier",
+          "name": "ideMode"
+        }
+      }
+    },
+    {
+      "command": "thread.previous",
+      "shortcut": {
+        "key": "[",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.next",
+      "shortcut": {
+        "key": "]",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": true,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.1",
+      "shortcut": {
+        "key": "1",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.2",
+      "shortcut": {
+        "key": "2",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.3",
+      "shortcut": {
+        "key": "3",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.4",
+      "shortcut": {
+        "key": "4",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.5",
+      "shortcut": {
+        "key": "5",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.6",
+      "shortcut": {
+        "key": "6",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.7",
+      "shortcut": {
+        "key": "7",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.8",
+      "shortcut": {
+        "key": "8",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    },
+    {
+      "command": "thread.jump.9",
+      "shortcut": {
+        "key": "9",
+        "metaKey": false,
+        "ctrlKey": false,
+        "shiftKey": false,
+        "altKey": false,
+        "modKey": true
+      }
+    }
+  ],
+  "issues": [],
+  "providers": [
+    {
+      "provider": "codex",
+      "enabled": true,
+      "installed": true,
+      "version": "99.0.0",
+      "status": "ready",
+      "auth": {
+        "status": "authenticated"
+      },
+      "checkedAt": "2026-06-09T02:59:29.876Z",
+      "models": [
+        {
+          "slug": "gpt-5.4",
+          "name": "GPT-5.4",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "low",
+                "label": "Low"
+              }
+            ],
+            "supportsFastMode": true,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          }
+        },
+        {
+          "slug": "gpt-5.4-mini",
+          "name": "GPT-5.4 Mini",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "low",
+                "label": "Low"
+              }
+            ],
+            "supportsFastMode": true,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          }
+        },
+        {
+          "slug": "gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "low",
+                "label": "Low"
+              }
+            ],
+            "supportsFastMode": true,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          }
+        },
+        {
+          "slug": "gpt-5.3-codex-spark",
+          "name": "GPT-5.3 Codex Spark",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "low",
+                "label": "Low"
+              }
+            ],
+            "supportsFastMode": true,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          }
+        },
+        {
+          "slug": "gpt-5.2-codex",
+          "name": "GPT-5.2 Codex",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "low",
+                "label": "Low"
+              }
+            ],
+            "supportsFastMode": true,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          }
+        },
+        {
+          "slug": "gpt-5.2",
+          "name": "GPT-5.2",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "xhigh",
+                "label": "Extra High"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "low",
+                "label": "Low"
+              }
+            ],
+            "supportsFastMode": true,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          }
+        }
+      ]
+    },
+    {
+      "provider": "claudeAgent",
+      "enabled": true,
+      "installed": true,
+      "version": "2.1.119",
+      "status": "ready",
+      "auth": {
+        "status": "authenticated",
+        "type": "pro",
+        "label": "Claude Pro Subscription"
+      },
+      "checkedAt": "2026-06-09T02:59:29.297Z",
+      "models": [
+        {
+          "slug": "claude-opus-4-6",
+          "name": "Claude Opus 4.6",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "low",
+                "label": "Low"
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "max",
+                "label": "Max"
+              },
+              {
+                "value": "ultrathink",
+                "label": "Ultrathink"
+              }
+            ],
+            "supportsFastMode": true,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [
+              {
+                "value": "200k",
+                "label": "200k",
+                "isDefault": true
+              },
+              {
+                "value": "1m",
+                "label": "1M"
+              }
+            ],
+            "promptInjectedEffortLevels": ["ultrathink"]
+          }
+        },
+        {
+          "slug": "claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [
+              {
+                "value": "low",
+                "label": "Low"
+              },
+              {
+                "value": "medium",
+                "label": "Medium"
+              },
+              {
+                "value": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "value": "max",
+                "label": "Max"
+              },
+              {
+                "value": "ultrathink",
+                "label": "Ultrathink"
+              }
+            ],
+            "supportsFastMode": false,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [
+              {
+                "value": "200k",
+                "label": "200k",
+                "isDefault": true
+              },
+              {
+                "value": "1m",
+                "label": "1M"
+              }
+            ],
+            "promptInjectedEffortLevels": ["ultrathink"]
+          }
+        },
+        {
+          "slug": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [],
+            "supportsFastMode": false,
+            "supportsThinkingToggle": true,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          }
+        }
+      ]
+    },
+    {
+      "provider": "ollamaLocal",
+      "enabled": true,
+      "installed": true,
+      "version": null,
+      "status": "ready",
+      "auth": {
+        "status": "unknown",
+        "type": "local",
+        "label": "Local Ollama"
+      },
+      "checkedAt": "2026-06-09T02:59:29.273Z",
+      "message": "Connected to http://192.168.10.12:11435/api with qwen3:8b.",
+      "models": [
+        {
+          "slug": "qwen3:8b",
+          "name": "Qwen3 8B",
+          "isCustom": false,
+          "capabilities": {
+            "reasoningEffortLevels": [],
+            "supportsFastMode": false,
+            "supportsThinkingToggle": false,
+            "contextWindowOptions": [],
+            "promptInjectedEffortLevels": []
+          },
+          "agentSupport": {
+            "status": "verified",
+            "message": "Verified for Codex tool-enabled Ollama sessions in T3 on 2026-06-07."
+          }
+        },
+        {
+          "slug": "deepseek-coder-v2:16b",
+          "name": "deepseek-coder-v2:16b",
+          "isCustom": true,
+          "capabilities": null,
+          "agentSupport": {
+            "status": "unsupported",
+            "message": "The live Ollama runtime reported that this model does not support tools on 2026-06-07. Use qwen3:8b instead."
+          }
+        },
+        {
+          "slug": "qwen2.5-coder:14b",
+          "name": "qwen2.5-coder:14b",
+          "isCustom": true,
+          "capabilities": null,
+          "agentSupport": {
+            "status": "unsupported",
+            "message": "Failed live Codex tool-call verification on 2026-06-07. Use qwen3:8b instead."
+          }
+        },
+        {
+          "slug": "qwen2.5-coder:7b",
+          "name": "qwen2.5-coder:7b",
+          "isCustom": true,
+          "capabilities": null,
+          "agentSupport": {
+            "status": "unsupported",
+            "message": "Failed live Codex tool-call verification on 2026-06-07. Use qwen3:8b instead."
+          }
+        }
+      ]
+    }
+  ],
+  "availableEditors": ["file-manager"],
+  "settings": {
+    "enableAssistantStreaming": false,
+    "notifyActiveOrchestratorOnRejectedWorkerWake": false,
+    "startupThreadTarget": "executive",
+    "defaultThreadEnvMode": "local",
+    "textGenerationModelSelection": {
+      "provider": "codex",
+      "model": "gpt-5.4-mini"
+    },
+    "providers": {
+      "codex": {
+        "enabled": true,
+        "binaryPath": "/home/gizmo/t3code-vxapp/.vx/live-probes/t3code-app-server-live/bin/codex",
+        "homePath": "",
+        "profileName": "t3-openai",
+        "customModels": []
+      },
+      "claudeAgent": {
+        "enabled": true,
+        "binaryPath": "claude",
+        "customModels": []
+      },
+      "ollamaLocal": {
+        "enabled": true,
+        "protocol": "http",
+        "host": "192.168.10.12",
+        "port": 11435,
+        "apiPath": "/api",
+        "responsesApiPath": "/v1",
+        "codexBinaryPath": "codex",
+        "codexHomePath": "~/.codex-ollama",
+        "codexProfileName": "t3-ollama-gpu",
+        "defaultModel": "qwen3:8b",
+        "customModels": []
+      }
+    }
+  }
+}

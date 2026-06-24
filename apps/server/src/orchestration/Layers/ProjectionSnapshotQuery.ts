@@ -58,6 +58,7 @@ import {
   type AgentsVxappExternalRoleAuthoritySnapshot,
 } from "../../extensions/vxapp/Services/AgentsVxappExternalRoleAuthority.ts";
 import { isAgentsVxappWorkspaceRoot } from "../../extensions/vxapp/agentsVxappAuthorityPaths.ts";
+import { filterOwnerProgramsWithExecutiveIds } from "../../extensions/vxapp/Layers/ownerProgramAuthority.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { selectSnapshotCtoAttentionItems } from "../projectionCtoAttention.ts";
 import { resolveLocalThreadErrorPresentation } from "../localThreadErrorPresentation.ts";
@@ -1435,7 +1436,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   ),
                 controlPlaneOption.value
                   .getProgramsAuthoritySnapshot()
-                  .pipe(Effect.map((snapshot) => snapshot.programs.map(mapOwnerProgram))),
+                  .pipe(
+                    Effect.map((snapshot) =>
+                      filterOwnerProgramsWithExecutiveIds(snapshot.programs).map(mapOwnerProgram),
+                    ),
+                  ),
               ])
             : [[], [], []];
 

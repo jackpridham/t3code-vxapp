@@ -227,7 +227,7 @@ describe("bootstrapOrchestrationState", () => {
     const rootThreadId = ThreadId.makeUnsafe("thread-root");
     const bootstrapSummary = makeReadModel(4, rootThreadId);
     const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
-    const getCurrentState = vi.fn();
+    const getCurrentState = vi.fn().mockResolvedValue(bootstrapSummary);
     const getSnapshot = vi.fn();
     const threadDetailApi = makeThreadDetailApi();
     const api = {
@@ -252,7 +252,7 @@ describe("bootstrapOrchestrationState", () => {
     });
 
     expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
-    expect(getCurrentState).not.toHaveBeenCalled();
+    expect(getCurrentState).toHaveBeenCalledTimes(1);
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: rootThreadId,
@@ -264,8 +264,9 @@ describe("bootstrapOrchestrationState", () => {
       payloadMode: "compact",
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(1, bootstrapSummary);
+    expect(syncServerReadModel).toHaveBeenNthCalledWith(2, bootstrapSummary);
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.objectContaining({
         snapshotSequence: 6,
         threads: [
@@ -276,7 +277,7 @@ describe("bootstrapOrchestrationState", () => {
         ],
       }),
     );
-    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(2);
+    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(3);
     expect(recoverFromSequenceGap).toHaveBeenCalledTimes(1);
   });
 
@@ -302,7 +303,7 @@ describe("bootstrapOrchestrationState", () => {
       threads: [],
     };
     const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
-    const getCurrentState = vi.fn();
+    const getCurrentState = vi.fn().mockResolvedValue(bootstrapSummary);
     const getSnapshot = vi.fn();
     const api = {
       orchestration: {
@@ -326,10 +327,10 @@ describe("bootstrapOrchestrationState", () => {
     });
 
     expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
-    expect(getCurrentState).not.toHaveBeenCalled();
-    expect(syncServerReadModel).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).toHaveBeenCalledTimes(1);
+    expect(syncServerReadModel).toHaveBeenCalledTimes(2);
     expect(syncServerReadModel).toHaveBeenCalledWith(bootstrapSummary);
-    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(1);
+    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(2);
   });
 
   it("uses bounded current state when the bootstrap summary fails", async () => {
@@ -375,7 +376,7 @@ describe("bootstrapOrchestrationState", () => {
 
     const bootstrapSummary = makeReadModel(4, ThreadId.makeUnsafe("thread-root"));
     const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
-    const getCurrentState = vi.fn();
+    const getCurrentState = vi.fn().mockResolvedValue(bootstrapSummary);
     const getSnapshot = vi.fn();
     const threadDetailApi = makeThreadDetailApi({
       listThreadMessages: vi.fn().mockRejectedValue(new Error("detail unavailable")),
@@ -402,15 +403,15 @@ describe("bootstrapOrchestrationState", () => {
     });
 
     expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
-    expect(getCurrentState).not.toHaveBeenCalled();
+    expect(getCurrentState).toHaveBeenCalledTimes(1);
     expect(getSnapshot).not.toHaveBeenCalled();
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: ThreadId.makeUnsafe("thread-root"),
       limit: 100,
     });
-    expect(syncServerReadModel).toHaveBeenCalledTimes(1);
+    expect(syncServerReadModel).toHaveBeenCalledTimes(2);
     expect(syncServerReadModel).toHaveBeenCalledWith(bootstrapSummary);
-    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(1);
+    expect(reconcileSnapshotDerivedState).toHaveBeenCalledTimes(2);
   });
 
   it("hydrates the routed thread instead of the welcome session root", async () => {
@@ -421,7 +422,7 @@ describe("bootstrapOrchestrationState", () => {
     const bootstrapSummary = makeReadModel(4, rootThreadId);
     const routedThread = makeReadModel(6, routeThreadId).threads[0];
     const getBootstrapSummary = vi.fn().mockResolvedValue(bootstrapSummary);
-    const getCurrentState = vi.fn();
+    const getCurrentState = vi.fn().mockResolvedValue(bootstrapSummary);
     const getSnapshot = vi.fn();
     const threadDetailApi = makeThreadDetailApi({
       listSessionThreads: vi.fn().mockResolvedValue([routedThread]),
@@ -448,13 +449,16 @@ describe("bootstrapOrchestrationState", () => {
       getCurrentThreadId: () => routeThreadId,
     });
 
-    expect(getCurrentState).not.toHaveBeenCalled();
+    expect(getBootstrapSummary).toHaveBeenCalledTimes(1);
+    expect(getCurrentState).toHaveBeenCalledTimes(1);
     expect(getSnapshot).not.toHaveBeenCalled();
+    expect(threadDetailApi.listSessionThreads).toHaveBeenCalledTimes(3);
     expect(threadDetailApi.listSessionThreads).toHaveBeenCalledWith({
       rootThreadId: routeThreadId,
       includeArchived: true,
       includeDeleted: false,
     });
+    expect(threadDetailApi.listThreadMessages).toHaveBeenCalledTimes(3);
     expect(threadDetailApi.listThreadMessages).toHaveBeenCalledWith({
       threadId: routeThreadId,
       limit: 100,
@@ -464,13 +468,10 @@ describe("bootstrapOrchestrationState", () => {
       limit: 100,
     });
     expect(syncServerReadModel).toHaveBeenNthCalledWith(
-      2,
+      1,
       expect.objectContaining({
         snapshotSequence: 6,
         threads: expect.arrayContaining([
-          expect.objectContaining({
-            id: rootThreadId,
-          }),
           expect.objectContaining({
             id: routeThreadId,
             messages: [expect.objectContaining({ text: "detail" })],
@@ -478,6 +479,18 @@ describe("bootstrapOrchestrationState", () => {
               messageCount: 1,
               activityCount: 0,
             }),
+          }),
+        ]),
+      }),
+    );
+    expect(syncServerReadModel).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        snapshotSequence: 6,
+        threads: expect.arrayContaining([
+          expect.objectContaining({
+            id: routeThreadId,
+            messages: [expect.objectContaining({ text: "detail" })],
           }),
         ]),
       }),
@@ -490,8 +503,13 @@ describe("resolveRouteThreadId", () => {
     expect(resolveRouteThreadId("/thread-1")).toBe(ThreadId.makeUnsafe("thread-1"));
   });
 
+  it("resolves nested _chat thread routes", () => {
+    expect(resolveRouteThreadId("/_chat/thread-1")).toBe(ThreadId.makeUnsafe("thread-1"));
+  });
+
   it("ignores non-chat root routes", () => {
     expect(resolveRouteThreadId("/settings")).toBeNull();
+    expect(resolveRouteThreadId("/_chat")).toBeNull();
     expect(resolveRouteThreadId("/changes/thread-1")).toBeNull();
     expect(resolveRouteThreadId("/sidebar/thread-1")).toBeNull();
     expect(resolveRouteThreadId("/artifact")).toBeNull();

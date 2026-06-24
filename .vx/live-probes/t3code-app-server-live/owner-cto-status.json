@@ -1,0 +1,408 @@
+{
+  "command": "t3code-cto-status",
+  "contract_family": "agents-vxapp-t3code-authority",
+  "contract_version": "v1",
+  "meta": {},
+  "ok": true,
+  "result": {
+    "authoritySource": "t3code_owner_command",
+    "authorityStore": "vx_agents_sqlite",
+    "contractFamily": "agents-vxapp-t3code-authority",
+    "contractVersion": "v1",
+    "display": {},
+    "legacyFallbackUsed": false,
+    "options": {},
+    "payload": {
+      "activeProgram": {
+        "baseStatus": "active",
+        "closeout": {
+          "closeout": {
+            "lastGateSummary": [],
+            "lastMissing": {
+              "reposFailedLocalSuites": {},
+              "reposMissingLocalSuites": {},
+              "reposMissingPr": [],
+              "targetsFailedDevelopmentDeploy": [],
+              "targetsFailedExternalE2E": [],
+              "targetsMissingDevelopmentDeploy": [],
+              "targetsMissingExternalE2E": [],
+              "undeclaredTouchedRepos": []
+            },
+            "lastVerdict": "pass"
+          },
+          "createdAt": "2026-06-07T13:48:33.221368Z",
+          "currentOrchestratorThreadId": "thread-be41f9805865",
+          "evidence": {
+            "appValidationsByTargetKindSuite": {},
+            "localValidationsByRepoSuite": {
+              "api-vxapp::o365_closeout_validate": {
+                "branch": "task/o365-oauth-security-api-fresh-20260420",
+                "managed": true,
+                "recordedAt": "2026-06-07T15:41:26.454183Z",
+                "repo": "api-vxapp",
+                "status": "passed",
+                "suite": "o365_closeout_validate",
+                "workspace": "/home/gizmo/worktrees/jasper-o365-api-closeout",
+                "workspaceKind": "linked_worktree",
+                "workspaceSyncBlocked": false
+              },
+              "vue-vxapp::o365_focused_vitest": {
+                "branch": "feat/o365-integration",
+                "managed": true,
+                "recordedAt": "2026-06-07T15:41:28.372231Z",
+                "repo": "vue-vxapp",
+                "status": "passed",
+                "suite": "o365_focused_vitest",
+                "workspace": "/home/gizmo/worktrees/jasper-o365-vue-closeout",
+                "workspaceKind": "linked_worktree",
+                "workspaceSyncBlocked": false
+              }
+            },
+            "observedRepos": {
+              "api-vxapp": {
+                "branch": "task/o365-oauth-security-api-fresh-20260420",
+                "dependencies": [],
+                "managed": true,
+                "recordedAt": "2026-06-07T15:38:43.166747Z",
+                "repo": "api-vxapp",
+                "repoRootClean": true,
+                "residualWorktrees": [],
+                "workspaceKind": "linked_worktree",
+                "workspaceRoot": "/home/gizmo/worktrees/jasper-o365-api-closeout"
+              },
+              "vue-vxapp": {
+                "branch": "feat/o365-integration",
+                "dependencies": [],
+                "managed": true,
+                "recordedAt": "2026-06-07T15:38:42.970648Z",
+                "repo": "vue-vxapp",
+                "repoRootClean": true,
+                "residualWorktrees": [],
+                "workspaceKind": "linked_worktree",
+                "workspaceRoot": "/home/gizmo/worktrees/jasper-o365-vue-closeout"
+              }
+            },
+            "postFlight": {},
+            "prsByRepo": {
+              "api-vxapp": {
+                "baseBranch": "development",
+                "draft": false,
+                "headBranch": "task/o365-oauth-security-api-fresh-20260420",
+                "recordedAt": "2026-06-08T04:14:37.632848Z",
+                "repo": "api-vxapp",
+                "status": "merged",
+                "url": "https://github.com/jackpridham/api-vxapp/pull/45"
+              },
+              "vue-vxapp": {
+                "baseBranch": "development",
+                "draft": false,
+                "headBranch": "feat/o365-integration",
+                "recordedAt": "2026-06-08T04:14:37.671382Z",
+                "repo": "vue-vxapp",
+                "status": "merged",
+                "url": "https://github.com/jackpridham/vue-vxapp/pull/161"
+              }
+            },
+            "repoActivityIndex": {
+              "api-vxapp": {
+                "branches": ["task/o365-oauth-security-api-fresh-20260420"],
+                "managed": true,
+                "sources": ["local_validation", "observed_repo", "pr"],
+                "workspaceKind": "linked_worktree",
+                "worktrees": ["/home/gizmo/worktrees/jasper-o365-api-closeout"]
+              },
+              "vue-vxapp": {
+                "branches": ["feat/o365-integration"],
+                "managed": true,
+                "sources": ["local_validation", "observed_repo", "pr"],
+                "workspaceKind": "linked_worktree",
+                "worktrees": ["/home/gizmo/worktrees/jasper-o365-vue-closeout"]
+              }
+            }
+          },
+          "lifecycle": {
+            "cancelReason": null,
+            "cancelledAt": null,
+            "completedAt": null,
+            "founderReviewReadyAt": null,
+            "previousStatus": "active",
+            "status": "closeout_in_progress",
+            "supersededByProgramId": null
+          },
+          "programId": "c34b07db-5716-4d8f-a830-dd4f47037646",
+          "scope": {
+            "appTargets": ["vue"],
+            "declaredRepos": ["api-vxapp", "vue-vxapp"],
+            "laneContractFingerprint": "9654946f3fd4aed56753cf106f1ce4bda4fc620ba953c536f8407b0092e463a0",
+            "repoLaneContracts": [
+              {
+                "allowedHeadBranchPatterns": [
+                  "feature/*",
+                  "feat/*",
+                  "fix/*",
+                  "repair/*",
+                  "enhance/*",
+                  "implement/*",
+                  "task/*",
+                  "closeout/*",
+                  "integration/*",
+                  "codex/*",
+                  "chore/*",
+                  "refactor/*"
+                ],
+                "allowedWorktreePatterns": ["/home/gizmo/worktrees/*"],
+                "baseBranch": "development",
+                "repo": "api-vxapp",
+                "requireManagedWorktree": true,
+                "worktreeMode": "write"
+              },
+              {
+                "allowedHeadBranchPatterns": [
+                  "feature/*",
+                  "feat/*",
+                  "fix/*",
+                  "repair/*",
+                  "enhance/*",
+                  "implement/*",
+                  "task/*",
+                  "closeout/*",
+                  "integration/*",
+                  "codex/*",
+                  "chore/*",
+                  "refactor/*"
+                ],
+                "allowedWorktreePatterns": ["/home/gizmo/worktrees/*"],
+                "baseBranch": "development",
+                "repo": "vue-vxapp",
+                "requireManagedWorktree": true,
+                "worktreeMode": "write"
+              }
+            ],
+            "requireCleanPostFlight": false,
+            "requireDevelopmentDeploy": false,
+            "requireExternalE2E": false,
+            "requirePrPerRepo": true,
+            "requiredExternalE2ESuites": [],
+            "requiredLocalSuites": []
+          },
+          "updatedAt": "2026-06-09T02:57:44.743880Z"
+        },
+        "completedAt": null,
+        "createdAt": "2026-06-07T13:48:33.221349Z",
+        "currentOrchestratorThreadId": "thread-be41f9805865",
+        "currentStatus": "active",
+        "deletedAt": null,
+        "executiveProjectId": "a91c6588-6f86-4c23-90cf-57cd82645eb7",
+        "executiveThreadId": "thread-3323f8d5fb2e",
+        "id": "c34b07db-5716-4d8f-a830-dd4f47037646",
+        "metadata": null,
+        "objective": "Audit and finish the previously semi-integrated Microsoft O365 rollout across api-vxapp and vue-vxapp. Use the existing API plan, Vue O365 integration evidence, and current source state to reconcile what already shipped, what is still blocked on deploy, config, manual smoke, and what code, validation, and release work remain for a coherent end-to-end rollout. Expand the Vue scope so affected vue-vxapp layout and design align with the current src/views/Previews/Messages/MessagesCard.vue visual language: flat outer card shell, divider-separated sections, compact header and action toolbar, tonal status chip treatment, attachment chip row, structured sender and recipient block, and clear edit versus view content modes. Treat MessagesCard.vue as the design reference surface for the O365-related Vue work and any adjacent admin message or workflow UI that must be harmonized to ship a coherent founder-visible result.",
+        "status": "active",
+        "title": "Complete Microsoft O365 rollout and align Vue-VXAPP message UX to MessagesCard design",
+        "updatedAt": "2026-06-09T02:57:44.743880Z"
+      },
+      "cto": {
+        "authoritySource": "session_binding_current_thread",
+        "authorityStatus": "resolved",
+        "bindingKey": "binding:cto:/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace",
+        "currentThread": {
+          "activeError": null,
+          "archivedAt": null,
+          "createdAt": "1970-01-01T00:00:00Z",
+          "deletedAt": null,
+          "errorPresentationSource": "none",
+          "executiveProjectId": "a91c6588-6f86-4c23-90cf-57cd82645eb7",
+          "executiveThreadId": "thread-3323f8d5fb2e",
+          "hasActiveError": false,
+          "historicalError": null,
+          "id": "thread-3323f8d5fb2e",
+          "labels": ["cto-autonomous"],
+          "latestTurn": {
+            "completedAt": "2026-06-09T02:34:15.810Z",
+            "id": "019eaa37-313c-7e02-b914-f4c6dcb8a291",
+            "requestedAt": "2026-06-09T02:30:03.275Z",
+            "startedAt": "2026-06-09T02:30:03.275Z",
+            "status": "completed"
+          },
+          "legacyFallbackUsed": false,
+          "operationalStatus": "completed",
+          "operationalStatusSource": "runtime_status",
+          "orchestratorThreadId": null,
+          "parentThreadId": null,
+          "programId": null,
+          "projectId": "a91c6588-6f86-4c23-90cf-57cd82645eb7",
+          "projectionState": "active",
+          "runtimeBinding": {
+            "authoritative": true,
+            "code": null,
+            "message": null,
+            "source": "local_thread_link",
+            "status": "authoritative",
+            "valid": true
+          },
+          "runtimeStatus": "completed",
+          "session": {
+            "activeTurnId": null,
+            "lastError": null,
+            "providerName": "codex",
+            "providerSessionId": null,
+            "providerThreadId": null,
+            "status": "ready",
+            "updatedAt": "2026-06-09T02:34:15.810Z"
+          },
+          "spawnRole": "supervisor",
+          "spawnedBy": "founder",
+          "statusAuthoritySource": "t3_projection_status",
+          "title": "Review Jasper blocker and yacht watch",
+          "updatedAt": "2026-06-09T02:34:15.810Z",
+          "vxStatus": "completed",
+          "workflowId": null,
+          "workspaceRoot": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace",
+          "worktreePath": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace"
+        },
+        "currentThreadId": "thread-3323f8d5fb2e",
+        "failureCode": null,
+        "failureMessage": null,
+        "legacyFallbackUsed": false,
+        "role": "cto",
+        "workspaceRoot": "/home/gizmo/.agents-vxapp-runtime/role-sessions/cto/cto-3e1380dcbb774798a97a77fcf6f54bc1/workspace"
+      },
+      "currentTodo": {
+        "createdAt": "2026-06-07T13:48:53Z",
+        "entity_family": "todo",
+        "filePath": null,
+        "nextAction": "Expand the current O365 audit to include vue-vxapp layout and design harmonization against src/views/Previews/Messages/MessagesCard.vue. Identify the affected O365 and adjacent message or workflow surfaces, extract the reusable layout and interaction primitives from the reference component, then continue with the next bounded implementation or validation step needed to bring those surfaces into alignment while preserving rollout correctness.",
+        "notes": [],
+        "owner": {
+          "agent": "jasper"
+        },
+        "planLinks": [],
+        "priority": "normal",
+        "programId": "c34b07db-5716-4d8f-a830-dd4f47037646",
+        "schema_version": "1.0",
+        "status": "active",
+        "summary": "Resume the expanded O365 rollout program with Vue design alignment to MessagesCard.vue.",
+        "title": "Complete Microsoft O365 rollout and align Vue-VXAPP message UX to MessagesCard design",
+        "todoId": "resume-c34b07db-5716-4d8f-a830-dd4f47037646",
+        "updatedAt": "2026-06-09T02:32:39Z"
+      },
+      "currentTodoMetadata": {
+        "agent": "jasper",
+        "ambiguity": null,
+        "created_at": "2026-06-07T17:41:45Z",
+        "metadata": {
+          "authoritativeProgramId": "c34b07db-5716-4d8f-a830-dd4f47037646",
+          "authoritativeThreadId": "thread-be41f9805865",
+          "continuitySource": null,
+          "contractFamily": "t3-current-lane",
+          "contractVersion": "v1",
+          "focusLaneAuthority": "focus_lane_authoritative",
+          "projectionMode": "authoritative_current",
+          "repairSource": "state_doctor"
+        },
+        "program_id": "c34b07db-5716-4d8f-a830-dd4f47037646",
+        "todo_id": "resume-c34b07db-5716-4d8f-a830-dd4f47037646",
+        "updated_at": "2026-06-09T02:57:44Z"
+      },
+      "diagnostics": [],
+      "identity": {
+        "executiveProjectId": "a91c6588-6f86-4c23-90cf-57cd82645eb7",
+        "executiveThreadId": "thread-3323f8d5fb2e",
+        "orchestratorProjectId": "84da8c7f-4db2-4e05-9d5a-cc945f4d24a5",
+        "orchestratorThreadId": "thread-be41f9805865",
+        "programId": "c34b07db-5716-4d8f-a830-dd4f47037646",
+        "todoId": "resume-c34b07db-5716-4d8f-a830-dd4f47037646"
+      },
+      "jasper": {
+        "authoritySource": "session_binding_current_thread",
+        "authorityStatus": "resolved",
+        "bindingKey": "binding:jasper:/home/gizmo/.agents-vxapp-runtime/role-sessions/jasper/jasper-9e789a5592254c1db2e4590e50639619/workspace",
+        "currentThread": {
+          "activeError": null,
+          "archivedAt": null,
+          "createdAt": "1970-01-01T00:00:00Z",
+          "deletedAt": null,
+          "errorPresentationSource": "none",
+          "executiveProjectId": null,
+          "executiveThreadId": "thread-3323f8d5fb2e",
+          "hasActiveError": false,
+          "historicalError": null,
+          "id": "thread-be41f9805865",
+          "labels": [],
+          "latestTurn": {
+            "completedAt": "2026-06-09T02:57:46.103Z",
+            "id": "019eaa50-8d9a-7e10-8a4c-5cdb1e5214bf",
+            "requestedAt": "1970-01-01T00:00:00Z",
+            "startedAt": "1970-01-01T00:00:00Z",
+            "status": "running"
+          },
+          "legacyFallbackUsed": false,
+          "operationalStatus": "completed",
+          "operationalStatusSource": "runtime_status",
+          "orchestratorThreadId": null,
+          "parentThreadId": null,
+          "programId": "c34b07db-5716-4d8f-a830-dd4f47037646",
+          "projectId": "84da8c7f-4db2-4e05-9d5a-cc945f4d24a5",
+          "projectionState": "active",
+          "runtimeBinding": {
+            "authoritative": true,
+            "code": null,
+            "message": null,
+            "source": "local_thread_link",
+            "status": "authoritative",
+            "valid": true
+          },
+          "runtimeStatus": "completed",
+          "session": {
+            "activeTurnId": "019eaa50-8d9a-7e10-8a4c-5cdb1e5214bf",
+            "interactionMode": "default",
+            "lastError": null,
+            "providerName": "codex",
+            "providerSessionId": null,
+            "providerThreadId": null,
+            "runtimeMode": "full-access",
+            "status": "running",
+            "updatedAt": "2026-06-09T02:57:46.793Z"
+          },
+          "spawnRole": "orchestrator",
+          "spawnedBy": "cto",
+          "statusAuthoritySource": "t3_projection_status",
+          "title": "Complete Microsoft O365 rollout and align Vue-VXAPP message UX to MessagesCard design",
+          "updatedAt": "2026-06-09T02:57:46.103Z",
+          "vxStatus": "completed",
+          "workflowId": null,
+          "workspaceRoot": "/home/gizmo/.agents-vxapp-runtime/role-sessions/jasper/jasper-9e789a5592254c1db2e4590e50639619/workspace",
+          "worktreePath": "/home/gizmo/.agents-vxapp-runtime/role-sessions/jasper/jasper-9e789a5592254c1db2e4590e50639619/workspace"
+        },
+        "currentThreadId": "thread-be41f9805865",
+        "failureCode": null,
+        "failureMessage": null,
+        "legacyFallbackUsed": false,
+        "role": "jasper",
+        "workspaceRoot": "/home/gizmo/.agents-vxapp-runtime/role-sessions/jasper/jasper-9e789a5592254c1db2e4590e50639619/workspace"
+      },
+      "legacyFallbackUsed": false,
+      "surface": "cto_status",
+      "watchState": {
+        "classification": "healthy_running",
+        "enabled": false,
+        "lastEvaluatedAt": "2026-06-09T02:57:46.793Z",
+        "lastRecoveryRationale": null,
+        "lastSignature": "6ad248303a68dca8b28536f2a4ad7d7c14268b0214a5c86b8631446da34e601a",
+        "metadata": {
+          "bindingRepairRequired": false,
+          "force": false,
+          "localAuthoritySource": "local_owner_truth",
+          "wakeIfStale": false
+        },
+        "reason": "observe_running_work",
+        "reconciled": true,
+        "reconciledAuthority": "cron",
+        "suppression": null,
+        "updatedAt": "2026-06-09T02:57:46.793Z"
+      },
+      "watchedPrograms": []
+    },
+    "surface": "cto"
+  }
+}

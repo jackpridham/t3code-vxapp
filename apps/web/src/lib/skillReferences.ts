@@ -1,6 +1,6 @@
 import type { ProjectEntry } from "@t3tools/contracts";
 
-const SKILL_REFERENCE_PATH_PATTERN = /(?:^|\/)\.claude\/skills\/([^/]+)\/SKILL\.md$/i;
+const SKILL_REFERENCE_PATH_PATTERN = /(?:^|\/)\.(?:agents|claude)\/skills\/([^/]+)\/SKILL\.md$/i;
 const SKILL_REFERENCE_PREFIX_BOUNDARY_PATTERN = /[\s([{'"]/;
 const SKILL_REFERENCE_TRAILING_PUNCTUATION_PATTERN = /[),.!?;:\]}'"]/;
 
@@ -35,7 +35,7 @@ export function joinFilePath(base: string, next: string): string {
 }
 
 export function buildSkillsRootPath(projectCwd: string): string {
-  return joinFilePath(projectCwd, ".claude/skills");
+  return joinFilePath(projectCwd, ".agents/skills");
 }
 
 export function buildSkillMarkdownPath(skillsRootPath: string, relativeDirectory: string): string {

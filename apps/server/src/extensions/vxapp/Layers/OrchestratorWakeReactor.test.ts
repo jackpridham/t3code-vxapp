@@ -115,6 +115,8 @@ describe("OrchestratorWakeReactor authority boundary", () => {
     expect(source).not.toContain("notifyActiveOrchestratorOnRejectedWorkerWake");
     expect(source).not.toContain("diagnostic_worker_wake_rejected");
     expect(source).not.toContain("program-link-sync");
+    expect(source).toContain("nestedMessage.text");
+    expect(source).toContain("nestedMessage.messageId");
   });
 
   it("does not reconcile wake consumption for ordinary local turns", () => {

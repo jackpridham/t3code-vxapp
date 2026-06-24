@@ -140,6 +140,21 @@ describe("localized T3 dev surface", () => {
     expect(config.env.VX_AGENTS_REPO_ROOT).toBe(siblingRoot);
   });
 
+  it("does not advertise a web url for dev:server mode", async () => {
+    const { repoRoot } = createRepoFixture();
+    const config = await resolveRunConfig({
+      workspaceRoot: repoRoot,
+      baseEnv: {},
+      mode: "dev:server",
+      bindHost: "0.0.0.0",
+      publicHost: "127.0.0.1",
+      t3Home: "/tmp/t3-home",
+    });
+
+    expect(config.serverUrl).toMatch(/^ws:\/\/127\.0\.0\.1:/);
+    expect(config.webUrl).toBeNull();
+  });
+
   it("skips web ports already occupied on IPv6 loopback", async () => {
     const { repoRoot } = createRepoFixture();
     const occupied = await occupyIpv6LoopbackPortAtOrAbove(6500);

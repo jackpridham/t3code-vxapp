@@ -415,7 +415,8 @@ async function startCommand(options: CliOptions): Promise<void> {
     serverUrl: resolved.serverUrl,
     serverHealthUrl: resolved.serverHealthUrl,
     webUrl: resolved.webUrl,
-    primaryUrl: resolved.mode === "dev:server" ? resolved.serverUrl : resolved.webUrl,
+    primaryUrl:
+      resolved.mode === "dev:server" ? resolved.serverUrl : (resolved.webUrl ?? resolved.serverUrl),
     log: logPath,
     branch: currentBranch(projectRoot),
     owner: process.env.VX_T3_DEV_OWNER ?? "manual",

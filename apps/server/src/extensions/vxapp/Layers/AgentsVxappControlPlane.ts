@@ -2,8 +2,9 @@ import { Effect, Layer, Schema } from "effect";
 import {
   ProgramId,
   ProjectId,
+  ServerGetAgentsVxappControlPlaneSnapshotResult,
+  type ServerGetAgentsVxappControlPlaneSnapshotResult as ServerGetAgentsVxappControlPlaneSnapshotResultType,
   ThreadId,
-  type ServerGetAgentsVxappControlPlaneSnapshotResult,
 } from "@t3tools/contracts";
 
 import {
@@ -53,21 +54,26 @@ function asRecordArray(value: unknown): ReadonlyArray<JsonRecord> {
   });
 }
 
-function sanitizeProgramsTodosSnapshot(
-  snapshot: ServerGetAgentsVxappControlPlaneSnapshotResult,
-): ServerGetAgentsVxappControlPlaneSnapshotResult {
-  return {
-    fetchedAt: snapshot.fetchedAt,
-    dbPath: snapshot.dbPath,
-    todoRootPath: snapshot.todoRootPath,
-    agents: snapshot.agents,
-    programs: snapshot.programs,
-    todos: snapshot.todos,
-    currentTodos: snapshot.currentTodos,
-    ...(snapshot.error !== undefined ? { error: snapshot.error } : {}),
-    hints: snapshot.hints ?? [],
-    pagination: snapshot.pagination ?? null,
-  };
+const decodeProgramsTodosSnapshot = Schema.decodeUnknownSync(
+  ServerGetAgentsVxappControlPlaneSnapshotResult as never,
+) as (input: unknown) => ServerGetAgentsVxappControlPlaneSnapshotResultType;
+
+function parseProgramsTodosSnapshot(
+  snapshot: unknown,
+): ServerGetAgentsVxappControlPlaneSnapshotResultType {
+  try {
+    return decodeProgramsTodosSnapshot(snapshot);
+  } catch (cause) {
+    const reason =
+      cause instanceof Error ? cause.message : "Unknown owner Program/TODO decode failure.";
+    throw new AgentsVxappControlPlaneError({
+      operation: "ownerControlPlane.programsTodos.decode",
+      detail: `Owner Program/TODO snapshot failed contract decode: ${reason}`,
+      cause,
+      ownerCommand: "t3code-programs-todos-snapshot",
+      authoritySurface: "programs_todos_snapshot",
+    });
+  }
 }
 
 function hasOwnerString(record: JsonRecord, ...fields: ReadonlyArray<string>): boolean {
@@ -386,7 +392,7 @@ const makeAgentsVxappControlPlane = Effect.succeed({
     ),
   getProgramsTodosSnapshot: (input) =>
     ownerPromise("ownerControlPlane.programsTodos.getProgramsTodosSnapshot", () =>
-      fetchAgentsVxappProgramsTodosSnapshot(input).then(sanitizeProgramsTodosSnapshot),
+      fetchAgentsVxappProgramsTodosSnapshot(input).then(parseProgramsTodosSnapshot),
     ),
   createProgram: (input) =>
     ownerPromise("ownerControlPlane.program.create", () =>

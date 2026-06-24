@@ -2,13 +2,23 @@
 
 T3 Code runs as a **Node.js WebSocket server** that wraps `codex app-server` (JSON-RPC over stdio) and serves a React web app.
 
+Deployment contract:
+
+- Deployed browser authority is the systemd-managed `t3code.service` on `7421`.
+- Local dev commonly uses server `3773` and web `5733`; those are local
+  workflows, not deployment proof.
+- The live service depends on `T3_AGENTS_VXAPP_REPO_ROOT` supplied by the
+  surviving `30-agents-vxapp-repo-root.conf` drop-in.
+- `20-jasper-autoresume.conf` and `t3code-autoresume.service` are retired and
+  should not be expected in deployment or recovery docs.
+
 ```
 ┌─────────────────────────────────┐
 │  Browser (React + Vite)         │
 │  wsTransport (state machine)    │
 │  Typed push decode at boundary  │
 └──────────┬──────────────────────┘
-           │ ws://localhost:3773
+           │ ws://127.0.0.1:7421 (deployed)
 ┌──────────▼──────────────────────┐
 │  apps/server (Node.js)          │
 │  WebSocket + HTTP static server │
@@ -65,6 +75,9 @@ sequenceDiagram
 3. [`ServerReadiness`][4] waits until the key startup barriers are complete.
 4. Once the server is ready, [`wsServer`][3] sends `server.welcome` from the contracts in [`ws.ts`][6] through [`ServerPushBus`][5].
 5. The browser receives that ordered push through [`WsTransport`][1], and [`wsNativeApi`][2] uses it to seed local client state.
+
+For deployed validation, include a real browser or HTML fetch against `7421`;
+do not treat local-dev ports or process-only checks as equivalent proof.
 
 ### User turn flow
 

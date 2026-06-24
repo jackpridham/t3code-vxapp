@@ -23,6 +23,34 @@ Important current reality:
 - production coding-agent behavior is Codex-backed, with Ollama used as the model provider behind Codex
 - direct Ollama HTTP still matters for provider health/model discovery and non-agent text-generation paths
 - `codex app-server` does not support `--profile`; managed app-server launches must use `CODEX_HOME` isolation plus `-c` config overrides
+- for standalone Codex-backed threads, Codex itself loads project instruction and skill surfaces from the runtime `cwd`; T3 does not need to inline those files into every `turn/start`
+- T3 currently fingerprints `AGENTS.md` and `CLAUDE.md` to decide when a provider session must restart, but the actual project-instruction payload still comes from Codex's own runtime layering
+- native standalone Codex skill discovery is repo `.agents/skills` plus user/system skill locations, and T3's browser-side catalog now prefers that same root while still parsing legacy `.claude/skills` references
+
+## Standalone Codex Boundary
+
+When the task is about what a live `ollamaLocal` agent thread actually saw, separate these layers explicitly:
+
+- T3-managed provider launch state
+- Codex-managed project instructions and native skills
+- browser-only T3 composer skill UX
+
+Current confirmed behavior in this repo:
+
+- T3 injects collaboration-mode `developer_instructions` into `turn/start`
+- T3 records instruction-surface changes from `AGENTS.md` and `CLAUDE.md` as a restart boundary
+- Codex persists the effective runtime context in its rollout JSONL under the provider-specific `CODEX_HOME`
+- persisted rollouts are the best proof source for whether `AGENTS.md` was actually loaded
+- `skills/list` from `codex app-server` is the best proof source for native standalone skill availability
+
+If a user says a standalone thread "did not get AGENTS" or "had no skills", do not infer from the model's self-report alone. Inspect:
+
+- the managed `CODEX_HOME/config.toml` trust entry for the target repo
+- the rollout JSONL for a synthetic `# AGENTS.md instructions for <cwd>` message
+- `config/read` output from the same managed `codex app-server` launch
+- `skills/list` output for the target `cwd`
+
+Do not assume legacy `.claude/skills` paths are available to standalone Codex turns just because old messages or older repos may still reference them.
 
 ## Primary Files
 

@@ -56,6 +56,10 @@ function repoLinksConfigPath(): string {
   return path.join(T3CODE_REPO_ROOT, REPO_LINKS_CONFIG);
 }
 
+function siblingRepoRoot(): string {
+  return path.resolve(T3CODE_REPO_ROOT, "../agents-vxapp");
+}
+
 function resolveAgentsVxappRepoRoot(): string {
   const repoLinksPath = repoLinksConfigPath();
   if (!fs.existsSync(repoLinksPath)) {
@@ -64,11 +68,14 @@ function resolveAgentsVxappRepoRoot(): string {
 
   const envRoots = configuredEnvRoots();
   if (envRoots.length === 0) {
-    const siblingHint = path.resolve(T3CODE_REPO_ROOT, "../agents-vxapp");
+    const siblingHint = siblingRepoRoot();
+    if (hasOwnerEntrypoints(siblingHint)) {
+      return siblingHint;
+    }
     throw new Error(
       `Unable to resolve agents-vxapp checkout from repo-link config. Set one of ${ENV_REPO_ROOT_ALIASES.join(
         ", ",
-      )}; sibling checkout ${siblingHint} is only a repair hint.`,
+      )}; sibling checkout ${siblingHint} does not provide the required owner entrypoints.`,
     );
   }
 
