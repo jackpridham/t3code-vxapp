@@ -50,6 +50,12 @@ import { ThreadStatusLabel, type SidebarThreadStatus } from "~/components/sideba
 import { Badge } from "~/components/ui/badge";
 import { DialogCloseButton } from "~/components/ui/dialog-close-button";
 import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "~/components/ui/empty";
+import {
   Popover,
   PopoverClose,
   PopoverDescription,
@@ -80,6 +86,7 @@ import { ProgramInfoDialog } from "./ProgramInfoDialog";
 import { ProgramTodosDialog } from "./ProgramTodosDialog";
 import { AgentRuntimeDetailsPanel } from "./AgentRuntimeDetailsPanel";
 import { deriveAgentRuntimeDialogState } from "./agentRuntimeDialogState";
+import { deriveOrchestrationSidebarEmptyState } from "./orchestrationSidebarStatus";
 import { useOrchestrationSidebarData } from "./orchestrationSidebarData";
 import { deriveWorkerRuntimeDialogState } from "./workerRuntimeDialogState";
 import { WorkerRuntimeDetailsPanel } from "./WorkerRuntimeDetailsPanel";
@@ -778,6 +785,10 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     () => authoritySnapshot?.programs.map((card) => card.program) ?? [],
     [authoritySnapshot],
   );
+  const authorityEmptyState = useMemo(
+    () => deriveOrchestrationSidebarEmptyState({ authoritySnapshot }),
+    [authoritySnapshot],
+  );
   const programsPagination = authoritySnapshot?.pagination ?? null;
   const projects = sidebarData.projects;
   const threads = sidebarData.threads;
@@ -1429,6 +1440,14 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
                 </div>
               </div>
             </div>
+          ) : null}
+          {authorityStatus !== "error" && authorityEmptyState ? (
+            <Empty className="mb-2 items-start gap-2 rounded-lg border border-dashed border-border/70 bg-secondary/10 px-3 py-4 text-left md:p-4">
+              <EmptyHeader className="max-w-none items-start text-left">
+                <EmptyTitle className="text-sm">{authorityEmptyState.title}</EmptyTitle>
+                <EmptyDescription>{authorityEmptyState.description}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : null}
           <SidebarMenu>
             {model.executives.map((executive) => {
