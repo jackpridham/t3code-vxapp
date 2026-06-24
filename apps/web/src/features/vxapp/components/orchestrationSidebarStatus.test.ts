@@ -5,6 +5,7 @@ describe("deriveOrchestrationSidebarEmptyState", () => {
   it("explains contract-valid empty snapshots that carry owner diagnostics", () => {
     expect(
       deriveOrchestrationSidebarEmptyState({
+        authorityStatus: "ready",
         authoritySnapshot: {
           currentTodos: [],
           hints: [],
@@ -29,6 +30,7 @@ describe("deriveOrchestrationSidebarEmptyState", () => {
   it("returns null when the owner published at least one program card", () => {
     expect(
       deriveOrchestrationSidebarEmptyState({
+        authorityStatus: "ready",
         authoritySnapshot: {
           currentTodos: [],
           hints: [],
@@ -70,5 +72,24 @@ describe("deriveOrchestrationSidebarEmptyState", () => {
         },
       }),
     ).toBeNull();
+  });
+
+  it("falls back to the zero-programs copy when no owner diagnostic is available", () => {
+    expect(
+      deriveOrchestrationSidebarEmptyState({
+        authorityStatus: "ready",
+        authoritySnapshot: {
+          currentTodos: [],
+          hints: [],
+          ownerDiagnostics: [],
+          pagination: null,
+          programs: [],
+          todos: [],
+        },
+      }),
+    ).toEqual({
+      title: "No active programs published",
+      description: "The sidebar owner returned zero visible programs for this authority snapshot.",
+    });
   });
 });

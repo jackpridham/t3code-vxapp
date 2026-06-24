@@ -786,8 +786,8 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
     [authoritySnapshot],
   );
   const authorityEmptyState = useMemo(
-    () => deriveOrchestrationSidebarEmptyState({ authoritySnapshot }),
-    [authoritySnapshot],
+    () => deriveOrchestrationSidebarEmptyState({ authoritySnapshot, authorityStatus }),
+    [authoritySnapshot, authorityStatus],
   );
   const programsPagination = authoritySnapshot?.pagination ?? null;
   const projects = sidebarData.projects;
@@ -1441,7 +1441,7 @@ export default function VxOrchestrationSidebar({ mode = "app" }: { mode?: "app" 
               </div>
             </div>
           ) : null}
-          {authorityStatus !== "error" && authorityEmptyState ? (
+          {authorityEmptyState ? (
             <Empty className="mb-2 items-start gap-2 rounded-lg border border-dashed border-border/70 bg-secondary/10 px-3 py-4 text-left md:p-4">
               <EmptyHeader className="max-w-none items-start text-left">
                 <EmptyTitle className="text-sm">{authorityEmptyState.title}</EmptyTitle>

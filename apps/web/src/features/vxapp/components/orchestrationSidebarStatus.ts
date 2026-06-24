@@ -1,10 +1,14 @@
-import type { ServerGetAgentsVxappSidebarAuthoritySnapshotResult } from "@t3tools/contracts";
+import type {
+  AgentsVxappOwnerLoadStatus,
+  ServerGetAgentsVxappSidebarAuthoritySnapshotResult,
+} from "@t3tools/contracts";
 
 export function deriveOrchestrationSidebarEmptyState(input: {
+  authorityStatus: AgentsVxappOwnerLoadStatus;
   authoritySnapshot: ServerGetAgentsVxappSidebarAuthoritySnapshotResult | null;
 }): { title: string; description: string } | null {
   const snapshot = input.authoritySnapshot;
-  if (!snapshot || snapshot.programs.length > 0) {
+  if (input.authorityStatus === "error" || !snapshot || snapshot.programs.length > 0) {
     return null;
   }
   const message = snapshot.ownerDiagnostics[0]?.message ?? null;
