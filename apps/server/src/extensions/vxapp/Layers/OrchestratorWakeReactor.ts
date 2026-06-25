@@ -714,6 +714,15 @@ const make = Effect.gen(function* () {
       if (deliveryPlanStatus !== "ready") {
         return;
       }
+      const wakeId = Array.isArray(deliveryPlan.wakeIds)
+        ? asNonEmptyString(deliveryPlan.wakeIds[0])
+        : null;
+      if (!wakeId) {
+        yield* Effect.logWarning("owner wake delivery plan missing wake id", {
+          orchestratorThreadId,
+        });
+        return;
+      }
 
       yield* Effect.tryPromise({
         try: () => requestAgentsVxappWakeDrainReady({ orchestratorThreadId }),
@@ -721,7 +730,7 @@ const make = Effect.gen(function* () {
       });
 
       const providerPayload = yield* Effect.tryPromise({
-        try: () => requestAgentsVxappWakeProviderRequest({ orchestratorThreadId }),
+        try: () => requestAgentsVxappWakeProviderRequest({ orchestratorThreadId, wakeId }),
         catch: (error) => new OwnerCommandFailure({ detail: ownerErrorDetail(error) }),
       });
       if (providerPayload.providerRequestStatus === "blocked") {

@@ -106,6 +106,10 @@ describe("OrchestratorWakeReactor authority boundary", () => {
     expect(source).toContain("requestAgentsVxappWakeDeliveryPlan");
     expect(source).toContain("requestAgentsVxappWakeDrainReady");
     expect(source).toContain("requestAgentsVxappWakeProviderRequest");
+    expect(source).toContain(
+      "requestAgentsVxappWakeProviderRequest({ orchestratorThreadId, wakeId })",
+    );
+    expect(source).not.toContain("requestAgentsVxappWakeProviderRequest({ orchestratorThreadId })");
     expect(source).toContain("requestAgentsVxappWakeReconcileStartup");
     expect(source).not.toContain("readModel.orchestratorWakeItems");
     expect(source).not.toContain("buildOrchestratorWakePrompt");

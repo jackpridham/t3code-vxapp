@@ -579,6 +579,7 @@ describe("agentsVxappOwnerClient", () => {
     await requestAgentsVxappWakeReconcileStartup({ orchestratorThreadId: "thread-orchestrator" });
     const payload = await requestAgentsVxappWakeProviderRequest({
       orchestratorThreadId: "thread-orchestrator",
+      wakeId: "wake-worker-1",
     });
 
     expect(payload.legacyFallbackUsed).toBe(false);
@@ -592,6 +593,17 @@ describe("agentsVxappOwnerClient", () => {
         "--json",
         "--payload-json",
         expect.stringContaining('"workerThreadId":"thread-worker"'),
+      ],
+      expect.objectContaining({}),
+    );
+    expect(mockedRunProcess).toHaveBeenNthCalledWith(
+      5,
+      expect.stringMatching(/t3-control-plane-owner$/),
+      [
+        "t3code-wake-provider-request",
+        "--json",
+        "--payload-json",
+        expect.stringContaining('"wakeId":"wake-worker-1"'),
       ],
       expect.objectContaining({}),
     );
