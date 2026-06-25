@@ -568,7 +568,12 @@ describe("agentsVxappOwnerClient", () => {
               requestId: "owner-wake-request",
               threadId: "thread-orchestrator",
               messageId: "message-owner-wake",
-              message: "Review worker result",
+              message: {
+                messageId: "message-owner-wake",
+                role: "user",
+                text: "Review worker result",
+                attachments: [],
+              },
             },
           }),
         ),

@@ -747,9 +747,16 @@ function validateWakeProviderRequestPayload(input: {
         ownerCommand: input.ownerCommand,
       });
     }
-    const missingFields = ["requestId", "threadId", "messageId", "message"].filter(
-      (field) => !asString(providerRequest[field]),
-    );
+    const messagePayload = asRecord(providerRequest.message);
+    const messageText = asString(providerRequest.message) ?? asString(messagePayload?.text);
+    const missingFields = [
+      ["requestId", asString(providerRequest.requestId)],
+      ["threadId", asString(providerRequest.threadId)],
+      ["messageId", asString(providerRequest.messageId) ?? asString(messagePayload?.messageId)],
+      ["message", messageText],
+    ]
+      .filter(([, value]) => !value)
+      .map(([field]) => field);
     if (missingFields.length > 0) {
       fail({
         authorityPayload: payload,
