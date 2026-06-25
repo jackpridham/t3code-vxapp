@@ -675,6 +675,40 @@ describe("agentsVxappOwnerClient", () => {
     });
   });
 
+  it("accepts owner wake provider payloads with nested-only message ids", async () => {
+    mockedRunProcess
+      .mockResolvedValueOnce(
+        processResult(envelope("t3code-contract-manifest", "contract_manifest", manifestPayload())),
+      )
+      .mockResolvedValueOnce(
+        processResult(
+          envelope("t3code-wake-provider-request", "wakes", {
+            legacyFallbackUsed: false,
+            providerRequestStatus: "ready",
+            providerRequest: {
+              kind: "thread.turn.start",
+              requestId: "owner-wake-request",
+              threadId: "thread-orchestrator",
+              message: {
+                messageId: "message-owner-wake",
+                role: "user",
+                text: "Review worker result",
+                attachments: [],
+              },
+            },
+          }),
+        ),
+      );
+
+    const payload = await requestAgentsVxappWakeProviderRequest({
+      orchestratorThreadId: "thread-orchestrator",
+      wakeId: "wake-worker-1",
+    });
+
+    expect(payload.providerRequestStatus).toBe("ready");
+    expect(payload.providerRequest?.requestId).toBe("owner-wake-request");
+  });
+
   it("validates owner-issued thread lifecycle provider requests for every Phase 08 kind", async () => {
     const lifecycleCases = [
       {
