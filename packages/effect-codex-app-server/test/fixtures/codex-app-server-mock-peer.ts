@@ -26,6 +26,32 @@ const sendRequest = (method: string, params: unknown) => {
   return id;
 };
 
+const makeThreadResponse = (threadId: string) => ({
+  approvalPolicy: "never",
+  approvalsReviewer: "auto_review",
+  cwd: process.cwd(),
+  model: "gpt-5.3-codex",
+  modelProvider: "openai",
+  sandbox: {
+    type: "dangerFullAccess",
+  },
+  thread: {
+    cliVersion: "mock",
+    createdAt: 1_797_984_000,
+    cwd: process.cwd(),
+    ephemeral: false,
+    id: threadId,
+    modelProvider: "openai",
+    preview: "Legacy approval reviewer thread",
+    source: "appServer",
+    status: {
+      type: "idle",
+    },
+    turns: [],
+    updatedAt: 1_797_984_000,
+  },
+});
+
 const handleMethod = (message: Record<string, unknown>) => {
   const method = message.method;
   if (typeof method !== "string") {
@@ -63,6 +89,10 @@ const handleMethod = (message: Record<string, unknown>) => {
         },
         requiresOpenaiAuth: false,
       });
+      return;
+    }
+    case "thread/resume": {
+      respond(message.id as number | string, makeThreadResponse("legacy-thread"));
       return;
     }
     case "skills/list": {

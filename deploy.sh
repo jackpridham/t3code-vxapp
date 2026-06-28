@@ -83,6 +83,7 @@ LOG_FILE="${DEPLOY_LOG_FILE:-$(yaml_top_value "$DEPLOY_CONFIG" logFile)}"
 PID_FILE="${DEPLOY_PID_FILE:-$(yaml_top_value "$DEPLOY_CONFIG" pidFile)}"
 READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-$(yaml_top_value "$DEPLOY_CONFIG" readyTimeoutSeconds)}"
 WS_READY_TIMEOUT_SECONDS="${WS_READY_TIMEOUT_SECONDS:-$(yaml_top_value "$DEPLOY_CONFIG" wsReadyTimeoutSeconds)}"
+FALLBACK_DIRECT_NODE_ALLOWED="${FALLBACK_DIRECT_NODE_ALLOWED:-$(yaml_nested_value "$DEPLOY_CONFIG" fallbackDirectNode allowedWhenSystemdUnavailable)}"
 NO_WAKE_MARKER="${T3CODE_SUPPRESS_STARTUP_ORCHESTRATOR_WAKE_MARKER:-$(yaml_top_value "$DEPLOY_CONFIG" noWakeMarker)}"
 NO_WAKE=0
 AGENTS_VXAPP_REPO_ROOT=""
@@ -116,9 +117,9 @@ Options:
   --no-wake       Skip the post-deploy CTO wake after restart.
 
 Fallback behavior:
-  - Uses systemd restart when available.
-  - Falls back to a direct background Node process only if the systemd
-    service is not active.
+  - Uses the configured systemd unit whenever it exists.
+  - Falls back to a direct background Node process only when systemd is
+    unavailable or the service unit is not installed.
 EOF
 }
 
@@ -201,18 +202,46 @@ resolve_agents_vxapp_repo_root() {
 }
 
 service_is_active() {
-    if ! command -v systemctl >/dev/null 2>&1; then
+    if ! systemd_is_available; then
         return 1
     fi
     systemctl is-active --quiet "$SERVICE_NAME"
 }
 
+systemd_is_available() {
+    command -v systemctl >/dev/null 2>&1
+}
+
+systemd_service_load_state() {
+    if ! systemd_is_available; then
+        return 1
+    fi
+
+    systemctl show "$SERVICE_NAME" --property=LoadState --value 2>/dev/null || true
+}
+
+systemd_service_is_defined() {
+    local load_state
+    load_state="$(systemd_service_load_state)"
+    [[ -n "$load_state" && "$load_state" != "not-found" ]]
+}
+
 can_use_sudo_systemctl() {
-    command -v systemctl >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+    systemd_is_available && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
 }
 
 can_manage_systemd_service() {
-    command -v systemctl >/dev/null 2>&1 && ([[ "${EUID:-$(id -u)}" -eq 0 ]] || can_use_sudo_systemctl)
+    systemd_service_is_defined && ([[ "${EUID:-$(id -u)}" -eq 0 ]] || can_use_sudo_systemctl)
+}
+
+can_use_direct_process_fallback() {
+    [[ "${FALLBACK_DIRECT_NODE_ALLOWED,,}" == "true" ]] || return 1
+
+    if systemd_service_is_defined; then
+        return 1
+    fi
+
+    return 0
 }
 
 run_system_service_cmd() {
@@ -251,7 +280,7 @@ wait_for_http() {
 }
 
 verify_systemd_service() {
-    if ! command -v systemctl >/dev/null 2>&1; then
+    if ! systemd_is_available; then
         return 0
     fi
 
@@ -415,13 +444,33 @@ start_direct_process() {
     wake_cto_after_deploy
 }
 
+deploy_with_runtime_restart() {
+    if systemd_service_is_defined; then
+        if ! restart_via_systemd; then
+            printf 'systemd manages %s on this host. Fix the unit or sudo access instead of starting a parallel direct process.\n' "$SERVICE_NAME" >&2
+            exit 1
+        fi
+        return 0
+    fi
+
+    if can_use_direct_process_fallback; then
+        start_direct_process
+        return 0
+    fi
+
+    printf 'No usable runtime owner found for %s. Install the systemd unit or explicitly allow the direct-process fallback.\n' "$SERVICE_NAME" >&2
+    exit 1
+}
+
 show_status() {
     step "Status"
 
     if service_is_active; then
         log "Service: ${SERVICE_NAME} active"
+    elif systemd_service_is_defined; then
+        log "Service: ${SERVICE_NAME} installed but inactive"
     else
-        log "Service: ${SERVICE_NAME} inactive"
+        log "Service: ${SERVICE_NAME} not installed"
     fi
 
     if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health/ready" >/dev/null 2>&1; then
@@ -473,26 +522,12 @@ main() {
             show_status
             ;;
         --restart-only)
-            if service_is_active; then
-                if ! restart_via_systemd; then
-                    printf 'systemd restart is unavailable, but %s is active. No safe fallback exists.\n' "$SERVICE_NAME" >&2
-                    exit 1
-                fi
-            else
-                start_direct_process
-            fi
+            deploy_with_runtime_restart
             ;;
         --full)
             run_install
             run_build
-            if service_is_active; then
-                if ! restart_via_systemd; then
-                    printf 'systemd restart is unavailable while %s is active. Cannot complete deploy.\n' "$SERVICE_NAME" >&2
-                    exit 1
-                fi
-            else
-                start_direct_process
-            fi
+            deploy_with_runtime_restart
             show_status
             ;;
         *)

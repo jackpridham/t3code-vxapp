@@ -489,7 +489,7 @@ describe("buildOrchestrationSidebarModel", () => {
       baseStatus: null,
       currentStatus: "blocked",
     });
-    expect(model.executives[0]?.programs[0]?.currentLane?.workers).toEqual([]);
+    expect(model.executives[0]?.programs[0]?.currentLane).toBeNull();
   });
 
   it("does not mark stale sqlite fallback lineage active when owner authority is present", () => {

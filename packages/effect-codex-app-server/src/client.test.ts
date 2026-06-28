@@ -22,6 +22,45 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       return yield* spawner.spawn(command);
     });
 
+  it("normalizes legacy auto_review approval reviewer fields", () => {
+    const payload = {
+      approvalsReviewer: "auto_review",
+      approvals_reviewer: "auto_review",
+      message: "auto_review",
+      nested: {
+        approvalsReviewer: "user",
+        children: [
+          {
+            approvalsReviewer: "auto_review",
+          },
+        ],
+      },
+    };
+
+    assert.deepEqual(CodexClient.normalizeLegacyApprovalsReviewerPayload(payload), {
+      approvalsReviewer: "guardian_subagent",
+      approvals_reviewer: "guardian_subagent",
+      message: "auto_review",
+      nested: {
+        approvalsReviewer: "user",
+        children: [
+          {
+            approvalsReviewer: "guardian_subagent",
+          },
+        ],
+      },
+    });
+  });
+
+  it("does not clone payloads that do not need legacy approval reviewer normalization", () => {
+    const payload = {
+      approvalsReviewer: "guardian_subagent",
+      nested: [{ message: "auto_review" }],
+    };
+
+    assert.equal(CodexClient.normalizeLegacyApprovalsReviewerPayload(payload), payload);
+  });
+
   it.effect("initializes, handles typed server requests, and reads account and skills data", () =>
     Effect.gen(function* () {
       const userInputRequests = yield* Ref.make<Array<unknown>>([]);
@@ -114,6 +153,25 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
           turnId: "turn-1",
         },
       ]);
+    }),
+  );
+
+  it.effect("normalizes legacy auto_review approval reviewer in thread resume responses", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle();
+      const scope = yield* Scope.make();
+      const clientLayer = CodexClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(clientLayer, scope);
+
+      const resumed = yield* Effect.gen(function* () {
+        const client = yield* CodexClient.CodexAppServerClient;
+        return yield* client.request("thread/resume", {
+          threadId: "legacy-thread",
+        });
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      assert.equal(resumed.approvalsReviewer, "guardian_subagent");
+      assert.equal(resumed.thread.id, "legacy-thread");
     }),
   );
 

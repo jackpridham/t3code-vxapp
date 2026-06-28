@@ -77,6 +77,43 @@ type ServerNotificationHandler = (
   payload: unknown,
 ) => Effect.Effect<void, CodexError.CodexAppServerError>;
 
+const LEGACY_APPROVALS_REVIEWER = "auto_review";
+const NORMALIZED_APPROVALS_REVIEWER = "guardian_subagent";
+const APPROVALS_REVIEWER_KEYS = new Set(["approvalsReviewer", "approvals_reviewer"]);
+
+export const normalizeLegacyApprovalsReviewerPayload = (payload: unknown): unknown => {
+  if (Array.isArray(payload)) {
+    let changed = false;
+    const normalized = payload.map((item) => {
+      const next = normalizeLegacyApprovalsReviewerPayload(item);
+      changed ||= next !== item;
+      return next;
+    });
+    return changed ? normalized : payload;
+  }
+
+  if (typeof payload !== "object" || payload === null) {
+    return payload;
+  }
+
+  let changed = false;
+  const normalized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(payload)) {
+    const next =
+      APPROVALS_REVIEWER_KEYS.has(key) && value === LEGACY_APPROVALS_REVIEWER
+        ? NORMALIZED_APPROVALS_REVIEWER
+        : normalizeLegacyApprovalsReviewerPayload(value);
+    normalized[key] = next;
+    changed ||= next !== value;
+  }
+
+  return changed ? normalized : payload;
+};
+
+const normalizeLegacyApprovalsReviewerTyped = <A>(payload: A): A =>
+  normalizeLegacyApprovalsReviewerPayload(payload) as A;
+
 export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make")(function* (
   stdio: Stdio.Stdio,
   options: CodexAppServerClientOptions = {},
@@ -142,7 +179,11 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     const handlers = notificationHandlers.get(notification.method) ?? [];
 
     if (schema) {
-      return decodeNotificationPayload(notification.method, schema, notification.params).pipe(
+      return decodeNotificationPayload(
+        notification.method,
+        schema,
+        normalizeLegacyApprovalsReviewerPayload(notification.params),
+      ).pipe(
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
         ),
@@ -166,9 +207,19 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       const responseSchema = getServerRequestResponseSchema(method);
       const handler = requestHandlers.get(method);
 
-      return decodeOptionalPayload(method, payloadSchema, request.params).pipe(
+      return decodeOptionalPayload(
+        method,
+        payloadSchema,
+        normalizeLegacyApprovalsReviewerPayload(request.params),
+      ).pipe(
         Effect.flatMap((decoded) => runHandler(handler, decoded, method)),
-        Effect.flatMap((result) => encodeOptionalPayload(method, responseSchema, result)),
+        Effect.flatMap((result) =>
+          encodeOptionalPayload(
+            method,
+            responseSchema,
+            normalizeLegacyApprovalsReviewerTyped(result),
+          ),
+        ),
       );
     }
 
@@ -191,7 +242,11 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ): Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError> =>
-    encodeOptionalPayload(method, getClientRequestParamSchema(method), payload).pipe(
+    encodeOptionalPayload(
+      method,
+      getClientRequestParamSchema(method),
+      normalizeLegacyApprovalsReviewerTyped(payload),
+    ).pipe(
       Effect.flatMap((encoded) => transport.request(method, encoded)),
       Effect.flatMap(
         (
@@ -199,7 +254,12 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         ): Effect.Effect<
           CodexRpc.ClientRequestResponsesByMethod[M],
           CodexError.CodexAppServerError
-        > => decodeOptionalPayload(method, getClientRequestResponseSchema(method), raw),
+        > =>
+          decodeOptionalPayload(
+            method,
+            getClientRequestResponseSchema(method),
+            normalizeLegacyApprovalsReviewerPayload(raw),
+          ),
       ),
     );
 
@@ -207,9 +267,11 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     method: M,
     payload: CodexRpc.ClientNotificationParamsByMethod[M],
   ) =>
-    encodeOptionalPayload(method, getClientNotificationParamSchema(method), payload).pipe(
-      Effect.flatMap((encoded) => transport.notify(method, encoded)),
-    );
+    encodeOptionalPayload(
+      method,
+      getClientNotificationParamSchema(method),
+      normalizeLegacyApprovalsReviewerTyped(payload),
+    ).pipe(Effect.flatMap((encoded) => transport.notify(method, encoded)));
 
   return CodexAppServerClient.of({
     raw: {

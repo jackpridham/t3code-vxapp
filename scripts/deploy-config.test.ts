@@ -58,4 +58,17 @@ describe("Phase 05 deploy config", () => {
     expect(deployScript).toContain("t3code-autoresume.service");
     expect(deployScript).toContain("daemon-reload");
   });
+
+  it("treats an installed systemd unit as the single runtime owner", () => {
+    const deployScript = read("deploy.sh");
+
+    expect(deployScript).toContain(
+      'FALLBACK_DIRECT_NODE_ALLOWED="${FALLBACK_DIRECT_NODE_ALLOWED:-$(yaml_nested_value "$DEPLOY_CONFIG" fallbackDirectNode allowedWhenSystemdUnavailable)}"',
+    );
+    expect(deployScript).toContain("systemd_service_is_defined()");
+    expect(deployScript).toContain("deploy_with_runtime_restart()");
+    expect(deployScript).toContain(
+      "Fix the unit or sudo access instead of starting a parallel direct process.",
+    );
+  });
 });

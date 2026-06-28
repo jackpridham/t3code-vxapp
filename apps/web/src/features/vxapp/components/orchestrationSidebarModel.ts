@@ -963,6 +963,15 @@ function classifyRuntimeTarget(input: {
   };
 }
 
+function navigableAuthorityThreadId(
+  runtimeTarget: AgentsVxappSidebarAuthorityRuntimeTarget | null,
+): ThreadId | null {
+  if (runtimeTarget?.availability !== AgentsVxappRuntimeAvailabilityValue.Inspectable) {
+    return null;
+  }
+  return runtimeTarget.threadId ?? null;
+}
+
 function classifyWorkerRuntime(input: {
   authoritativeOwnerRequired?: boolean;
   fallbackThreadLink: ServerAgentsVxappSidebarThreadLink | null;
@@ -1321,9 +1330,10 @@ export function buildOrchestrationSidebarModel(input: {
       threadLinkById,
     });
     const resolvedExecutiveThreadId = resolvedExecutiveAuthority.threadId;
+    const authorityExecutiveThreadId = navigableAuthorityThreadId(authorityExecutiveTarget);
     const effectiveExecutiveThreadId =
       authoritySnapshot !== null
-        ? (authorityExecutiveTarget?.threadId ?? resolvedExecutiveThreadId)
+        ? authorityExecutiveThreadId
         : (resolvedExecutiveThreadId ?? executiveThreadId);
     const executiveKey =
       executiveProjectId !== null && effectiveExecutiveThreadId !== null
@@ -1337,8 +1347,8 @@ export function buildOrchestrationSidebarModel(input: {
 
     let executive = executivesById.get(executiveKey);
     if (!executive) {
-      const executiveThread = resolvedExecutiveThreadId
-        ? (liveThreadById.get(resolvedExecutiveThreadId) ?? null)
+      const executiveThread = effectiveExecutiveThreadId
+        ? (liveThreadById.get(effectiveExecutiveThreadId) ?? null)
         : null;
       const executiveFallbackThreadLink = resolvedExecutiveAuthority.fallbackThreadLink;
       const runtime = classifyRoleRuntime({
@@ -1358,18 +1368,18 @@ export function buildOrchestrationSidebarModel(input: {
         programs: [],
         runtimeState: runtime.runtimeState,
         runtimeStateMessage: runtime.runtimeStateMessage,
-        threadId: resolvedExecutiveThreadId,
+        threadId: effectiveExecutiveThreadId,
         thread: executiveThread,
         notifications: [],
         worktreePathHint: runtime.worktreePathHint,
       };
       executivesById.set(executiveKey, executive);
     } else if (
-      resolvedExecutiveThreadId !== null &&
-      executive.threadId !== resolvedExecutiveThreadId
+      effectiveExecutiveThreadId !== null &&
+      executive.threadId !== effectiveExecutiveThreadId
     ) {
-      executive.threadId = resolvedExecutiveThreadId;
-      executive.thread = liveThreadById.get(resolvedExecutiveThreadId) ?? null;
+      executive.threadId = effectiveExecutiveThreadId;
+      executive.thread = liveThreadById.get(effectiveExecutiveThreadId) ?? null;
       executive.fallbackThreadLink = resolvedExecutiveAuthority.fallbackThreadLink;
       const runtime = classifyRoleRuntime({
         authoritativeOwnerRequired: authoritySnapshot !== null,
@@ -1384,7 +1394,9 @@ export function buildOrchestrationSidebarModel(input: {
     }
 
     const currentRootThreadId =
-      authorityCard?.orchestrator?.threadId ?? program.currentOrchestratorThreadId ?? null;
+      authoritySnapshot !== null
+        ? navigableAuthorityThreadId(authorityCard?.orchestrator ?? null)
+        : (program.currentOrchestratorThreadId ?? null);
     const currentRootThread = currentRootThreadId
       ? (liveThreadById.get(currentRootThreadId) ?? null)
       : null;
@@ -1402,7 +1414,7 @@ export function buildOrchestrationSidebarModel(input: {
       )
       .map((thread) => thread.id);
     const authorityWorkerIds = (authorityCard?.workers ?? [])
-      .map((worker) => worker.threadId)
+      .map((worker) => navigableAuthorityThreadId(worker))
       .filter(
         (threadId): threadId is ThreadId => typeof threadId === "string" && threadId.length > 0,
       );

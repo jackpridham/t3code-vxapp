@@ -12,8 +12,8 @@ import { describe, expect, it } from "vitest";
 import { buildLegacyClientSettingsMigrationPatch } from "./useSettings";
 
 describe("DEFAULT_CLIENT_SETTINGS", () => {
-  it("defaults the sidebar variant to the standard project sidebar", () => {
-    expect(DEFAULT_CLIENT_SETTINGS.sidebarVariant).toBe("project");
+  it("defaults the sidebar variant to the orchestration sidebar", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarVariant).toBe("orchestration");
   });
 
   it("defaults sidebar orchestration data mode to live", () => {

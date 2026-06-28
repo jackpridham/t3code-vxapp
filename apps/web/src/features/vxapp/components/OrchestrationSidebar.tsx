@@ -49,12 +49,7 @@ import { SidebarBrandHeader } from "~/components/sidebar/SidebarBrandHeader";
 import { ThreadStatusLabel, type SidebarThreadStatus } from "~/components/sidebar/SidebarThreadRow";
 import { Badge } from "~/components/ui/badge";
 import { DialogCloseButton } from "~/components/ui/dialog-close-button";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "~/components/ui/empty";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import {
   Popover,
   PopoverClose,
