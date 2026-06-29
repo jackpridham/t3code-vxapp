@@ -427,6 +427,28 @@ function isSettledSessionStatus(status: string): boolean {
   }
 }
 
+function isTerminalTurnState(state: string | null | undefined): boolean {
+  switch (state) {
+    case "completed":
+    case "failed":
+    case "interrupted":
+    case "cancelled":
+    case "error":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function hasTerminalLatestTurn(thread: OrchestrationThread, turnId: TurnId | null): boolean {
+  return (
+    turnId !== null &&
+    thread.latestTurn !== null &&
+    sameId(thread.latestTurn.turnId, turnId) &&
+    (thread.latestTurn.completedAt !== null || isTerminalTurnState(thread.latestTurn.state))
+  );
+}
+
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
 ): "command" | "file-read" | "file-change" | undefined {
@@ -1330,26 +1352,36 @@ const make = Effect.fn("make")(function* () {
     const bindingOption = yield* providerSessionDirectory.getBinding(thread.id);
     const runtimeBinding = Option.getOrUndefined(bindingOption);
     const runtimeBindingActiveTurnId = readRuntimePayloadTurnId(runtimeBinding?.runtimePayload);
-    const activeTurnId = thread.session?.activeTurnId ?? runtimeBindingActiveTurnId ?? null;
+    const observedActiveTurnId = thread.session?.activeTurnId ?? runtimeBindingActiveTurnId ?? null;
+    const observedActiveTurnIsTerminal = hasTerminalLatestTurn(thread, observedActiveTurnId);
+    const activeTurnId = observedActiveTurnIsTerminal ? null : observedActiveTurnId;
     const lifecycleEventTurnId =
       event.type === "turn.completed" && eventTurnId === undefined
-        ? (activeTurnId ?? undefined)
+        ? (observedActiveTurnId ?? activeTurnId ?? undefined)
         : eventTurnId;
     const currentSessionUpdatedAt = thread.session?.updatedAt ?? null;
     const olderThanCurrentSession =
       currentSessionUpdatedAt !== null && currentSessionUpdatedAt.localeCompare(now) > 0;
-    const settledSessionWouldRegress =
-      olderThanCurrentSession &&
-      thread.session !== null &&
-      thread.session.activeTurnId === null &&
-      isSettledSessionStatus(thread.session.status) &&
-      (event.type === "session.started" ||
-        event.type === "thread.started" ||
-        event.type === "turn.started" ||
+    const lifecycleWouldReopenTerminalTurn =
+      observedActiveTurnIsTerminal &&
+      ((event.type === "turn.started" && sameId(lifecycleEventTurnId, observedActiveTurnId)) ||
         (event.type === "session.state.changed" &&
           (event.payload.state === "starting" ||
             event.payload.state === "running" ||
             event.payload.state === "waiting")));
+    const settledSessionWouldRegress =
+      (olderThanCurrentSession &&
+        thread.session !== null &&
+        thread.session.activeTurnId === null &&
+        isSettledSessionStatus(thread.session.status) &&
+        (event.type === "session.started" ||
+          event.type === "thread.started" ||
+          event.type === "turn.started" ||
+          (event.type === "session.state.changed" &&
+            (event.payload.state === "starting" ||
+              event.payload.state === "running" ||
+              event.payload.state === "waiting")))) ||
+      lifecycleWouldReopenTerminalTurn;
 
     const conflictsWithActiveTurn =
       activeTurnId !== null &&
