@@ -50,3 +50,12 @@ describe("live proof scripts avoid stale production authority fixtures", () => {
     }
   });
 });
+
+describe("live real-provider probe model default", () => {
+  it("defaults to a ChatGPT Codex supported model while preserving override support", () => {
+    const source = read("scripts/live-real-provider-probe.mjs");
+
+    expect(source).toContain('process.env.T3CODE_REAL_PROVIDER_MODEL ?? "gpt-5.4"');
+    expect(source).not.toContain('process.env.T3CODE_REAL_PROVIDER_MODEL ?? "gpt-5.3-codex"');
+  });
+});

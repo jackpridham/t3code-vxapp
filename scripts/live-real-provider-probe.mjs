@@ -42,7 +42,7 @@ const t3Home = resolve(outDir, "t3-home");
 const t3UserData = resolve(t3Home, "userdata");
 const proofKind = "real-provider";
 const provider = "codex";
-const model = process.env.T3CODE_REAL_PROVIDER_MODEL ?? "gpt-5.3-codex";
+const model = process.env.T3CODE_REAL_PROVIDER_MODEL ?? "gpt-5.4";
 const promptText =
   process.env.T3CODE_REAL_PROVIDER_PROMPT ??
   "Reply with one short sentence confirming the live T3Code real-provider probe completed. Do not edit files or run tools.";
